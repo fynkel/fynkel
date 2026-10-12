@@ -34,6 +34,11 @@ extension type const CollisionFlags._(int value) {
 /// doesn't move it: the game does, through [move], or [simpleMove] does it
 /// for it.
 ///
+/// It rides what it stands on ([ground]): when that moves or turns, by a
+/// tween, a kinematic rigidbody or the game's code, the controller goes
+/// with it at the end of the frame, after the tweens, so a moving platform
+/// carries it without lag ([moveWithGround]).
+///
 /// It's a [Collider], a capsule [height] tall and [radius] round around
 /// [center], standing up in its object's space; rigidbodies bump into it,
 /// and it meets triggers as a kinematic rigidbody does. Mix
@@ -122,6 +127,25 @@ final class CharacterController extends Collider {
   Vec3 get velocity => _velocity;
   var _velocity = Vec3.zero;
 
+  /// What it stood on after the last [move], or null when it wasn't
+  /// grounded.
+  Collider? get ground => _ground;
+  Collider? _ground;
+
+  /// Whether it goes with its [ground] when that moves or turns (true
+  /// unless set): at the end of each frame, after the late updates'
+  /// tweens, it moves by as much as the ground took the point it stands
+  /// on, as far as what's in its way lets it.
+  bool moveWithGround = true;
+
+  /// How fast its [ground] carried it in the last frame.
+  Vec3 get groundVelocity => _groundVelocity;
+  var _groundVelocity = Vec3.zero;
+
+  // Where the ground's object was when it was last looked at.
+  var _groundAt = Vec3.zero;
+  var _groundTurn = Quat.identity;
+
   // How fast [simpleMove] has it falling.
   var _fall = 0.0;
 
@@ -134,6 +158,27 @@ final class CharacterController extends Collider {
     physics._follow();
     final time = world.time;
     final seconds = time.delta > 0 ? time.delta : time.fixedDelta;
+    final moved = _moveBy(physics, motion, seconds);
+    final words = physics._characterWordsOut;
+    _flags = CollisionFlags._(words[3]);
+    _velocity = moved / seconds;
+    final key = physics._characterMove.ref.ground_key;
+    final ground = key != 0 && key < physics._byKey.length ? physics._byKey[key] : null;
+    if (!identical(ground, _ground)) {
+      _ground = ground;
+      if (ground != null) {
+        _groundAt = ground.gameObject.position;
+        _groundTurn = ground.gameObject.rotation;
+      }
+    }
+    final hits = words[4];
+    final object = gameObject;
+    if (hits > 0 && _listening(object)) physics._tellHits(this, hits, motion);
+    return _flags;
+  }
+
+  /// Asks the native world how far [motion] goes, and moves the object so.
+  Vec3 _moveBy(Physics physics, Vec3 motion, double seconds) {
     final floats = physics._characterFloats;
     floats[0] = math.min(_slopeLimit.inDegrees, 180);
     floats[1] = _stepOffset;
@@ -148,14 +193,35 @@ final class CharacterController extends Collider {
     );
     final out = physics._characterFloatsOut;
     final moved = Vec3(out[0], out[1], out[2]);
-    final words = physics._characterWordsOut;
-    _flags = CollisionFlags._(words[3]);
-    _velocity = moved / seconds;
-    final object = gameObject;
-    object.position += moved;
-    final hits = words[4];
-    if (hits > 0 && _listening(object)) physics._tellHits(this, hits, motion);
-    return _flags;
+    gameObject.position += moved;
+    return moved;
+  }
+
+  /// Goes with the ground, after the frame's tweens and late updates.
+  @override
+  void onLateUpdate() {
+    super.onLateUpdate();
+    _groundVelocity = Vec3.zero;
+    final ground = _ground;
+    if (ground == null) return;
+    if (ground._physics == null || ground._id == 0) {
+      _ground = null;
+      return;
+    }
+    final object = ground.gameObject;
+    final (at, turn) = (object.position, object.rotation);
+    if (at == _groundAt && turn == _groundTurn) return;
+    final (wasAt, wasTurn) = (_groundAt, _groundTurn);
+    _groundAt = at;
+    _groundTurn = turn;
+    if (!moveWithGround || _id == 0) return;
+    final mine = gameObject.position;
+    final carried = at + (turn * wasTurn.inverse).rotate(mine - wasAt) - mine;
+    final physics = _physics!;
+    physics._follow();
+    final time = world.time;
+    final seconds = time.delta > 0 ? time.delta : time.fixedDelta;
+    _groundVelocity = _moveBy(physics, carried, seconds) / seconds;
   }
 
   /// Moves it at [speed] metres a second over the frame, along the ground

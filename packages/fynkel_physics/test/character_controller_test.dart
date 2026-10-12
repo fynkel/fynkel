@@ -242,6 +242,58 @@ void main() {
     final controller = CharacterController();
     expect(() => controller.move(const Vec3(1, 0, 0)), throwsStateError);
   });
+
+  group('riding', () {
+    void frames(World world, int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    test('it says what it stands on, and a tweened platform carries it in the same frame', () {
+      final world = newWorld();
+      final platform = block(world, const Vec3(4, 0.5, 4), const Vec3(10, 1.25, 0), name: 'platform');
+      final rider = player(world, x: 10)..position = const Vec3(10, 2.58, 0);
+      final controller = rider.get<CharacterController>()!;
+      frames(world, 20);
+      expect(controller.ground?.gameObject, same(platform));
+      final offset = rider.position - platform.position;
+
+      platform.moveTo(const Vec3(14, 1.25, 3), seconds: 1, ease: Ease.linear);
+      for (var i = 0; i < 60; i++) {
+        frames(world, 1);
+        final now = rider.position - platform.position;
+        expect((now - offset).length, lessThan(0.02), reason: 'frame $i: it rode along, without lag');
+      }
+      expect(controller.groundVelocity.length, closeTo(5, 0.1), reason: 'the platform goes 5 m/s');
+      frames(world, 2);
+      expect(controller.groundVelocity, Vec3.zero, reason: 'stopped');
+    });
+
+    test('a turning platform turns it round its middle; with moveWithGround off it stays', () {
+      final world = newWorld();
+      final platform = block(world, const Vec3(6, 0.5, 6), const Vec3(0, 1.25, 0), name: 'platform');
+      final rider = player(world, x: 2)..position = const Vec3(2, 2.58, 0);
+      frames(world, 20);
+      platform.rotateTo(Quat.axisAngle(Vec3.up, math.pi / 2), seconds: 0.5, ease: Ease.linear);
+      frames(world, 40);
+      expect(rider.position.x, closeTo(0, 0.05));
+      expect(rider.position.z, closeTo(-2, 0.05), reason: 'a quarter turn about Y takes +X to -Z');
+
+      rider.get<CharacterController>()!.moveWithGround = false;
+      final at = rider.position;
+      platform.moveTo(const Vec3(1, 1.25, 0), seconds: 0.2);
+      frames(world, 20);
+      expect((rider.position - at).length, lessThan(0.02));
+    });
+
+    test('in the air it stands on nothing', () {
+      final world = newWorld();
+      final rider = player(world)..position = const Vec3(0, 5, 0);
+      frames(world, 1);
+      expect(rider.get<CharacterController>()!.ground, isNull);
+    });
+  });
 }
 
 class Hitting extends GameObject with ControllerHits {

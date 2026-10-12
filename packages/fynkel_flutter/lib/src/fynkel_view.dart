@@ -106,10 +106,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// restart it. The world is [FynkelViewState.world] too, for code outside
 /// the game.
 ///
-/// `FynkelView(world:)` shows a world made and driven by hand instead,
-/// for tests and tools: [onFrame] is called each frame with the seconds
-/// since the last one, before the world's loop, and the world is the
-/// caller's to dispose.
+/// `FynkelView.world(world)` shows a world made and driven by hand
+/// instead, for tests and tools; the world is the caller's to dispose.
+/// [onFrame] is called each frame with the seconds since the last one,
+/// before the world's loop.
 ///
 /// It gives the world's [World.input] Flutter's events as they come. It
 /// reads pointers with a `Listener`, which takes part in no gesture
@@ -136,11 +136,12 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 ///
 /// macOS, iOS and Android.
 class FynkelView extends StatefulWidget {
+  /// Shows [root] in a world of the view's own, loading assets from
+  /// [source].
   const FynkelView({
     super.key,
-    this.root,
+    required GameObject this.root,
     this.source,
-    this.world,
     this.onFrame,
     this.resolutionScale = 1.0,
     this.onStats,
@@ -148,8 +149,23 @@ class FynkelView extends StatefulWidget {
     this.focusNode,
     this.autofocus = true,
     this.showErrors = kDebugMode,
-  }) : assert(resolutionScale > 0 && resolutionScale <= 4),
-       assert((root == null) != (world == null), 'give FynkelView a root or a world, not both');
+  }) : world = null,
+       assert(resolutionScale > 0 && resolutionScale <= 4);
+
+  /// Shows [world], made and driven by hand: the caller disposes of it.
+  const FynkelView.world(
+    World this.world, {
+    super.key,
+    this.onFrame,
+    this.resolutionScale = 1.0,
+    this.onStats,
+    this.onViewStats,
+    this.focusNode,
+    this.autofocus = true,
+    this.showErrors = kDebugMode,
+  }) : root = null,
+       source = null,
+       assert(resolutionScale > 0 && resolutionScale <= 4);
 
   /// The game: added to the view's own world when the view is first
   /// built.
@@ -159,7 +175,8 @@ class FynkelView extends StatefulWidget {
   /// ([bundleSource]) when null.
   final AssetSource? source;
 
-  /// A world made by hand, shown in place of a [root]'s own.
+  /// A world made by hand ([FynkelView.world]), shown in place of a
+  /// [root]'s own.
   final World? world;
 
   /// Called once per display frame, before the world's [World.update],

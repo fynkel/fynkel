@@ -49,14 +49,14 @@ void main() {
   GameObject camera({Camera? lens}) => world.add(GameObject(components: [lens ?? Camera()]));
 
   group('the lens', () {
-    test('orthographic and size are written to the engine and read back', () {
-      final o = camera(lens: Camera(orthographic: true, size: 3));
+    test('orthographic and orthographicSize are written to the engine and read back', () {
+      final o = camera(lens: Camera(orthographic: true, orthographicSize: 3));
       expect(o.get<Camera>()!.orthographic, isTrue);
-      o.get<Camera>()!.size = 2;
-      expect(o.get<Camera>()!.size, 2);
-      expect(() => o.get<Camera>()!.size = 0, throwsA(isA<FynkelException>()));
-      expect(o.get<Camera>()!.size, 2, reason: 'refused, so undone');
-      expect(o.get<Camera>().toString(), contains('orthographic, size: 2'));
+      o.get<Camera>()!.orthographicSize = 2;
+      expect(o.get<Camera>()!.orthographicSize, 2);
+      expect(() => o.get<Camera>()!.orthographicSize = 0, throwsA(isA<FynkelException>()));
+      expect(o.get<Camera>()!.orthographicSize, 2, reason: 'refused, so undone');
+      expect(o.get<Camera>().toString(), contains('orthographic, orthographicSize: 2'));
     });
 
     test('an orthographic camera renders to the same golden image as the Rust test', () {
@@ -67,7 +67,7 @@ void main() {
         ..get<Camera>()!.clearColor = Color.black;
       view.get<Camera>()!
         ..orthographic = true
-        ..size = 2;
+        ..orthographicSize = 2;
       for (final (x, z) in [(-2.5, 0.0), (0.0, -5.0), (2.5, -20.0)]) {
         world.add(
           GameObject(
@@ -95,7 +95,7 @@ void main() {
       final o = world.add(
         GameObject(
           transform: Transform(position: const Vec3(1, 2, 3)),
-          components: [Camera(orthographic: true, size: 2, near: 0.5)],
+          components: [Camera(orthographic: true, orthographicSize: 2, near: 0.5)],
         ),
       );
       // A 200 × 100 view shows 8 m by 4 m.
@@ -174,7 +174,7 @@ void main() {
 
     test('Plane', () {
       final p = Plane(const Vec3(0, 2, 0), const Vec3(5, 3, 1));
-      expect((p.normal, p.distance), (Vec3.up, 3.0));
+      expect((p.normal, p.distance), (Vec3.up, -3.0), reason: "the origin is 3 below it, as Unity's");
       expect(p.distanceTo(const Vec3(0, 5, 0)), 2);
       expect(p.raycast(Ray(const Vec3(0, 5, 0), Vec3.down)), 2);
       expect(p.raycast(Ray(const Vec3(0, 5, 0), Vec3.up)), isNull);
@@ -224,12 +224,12 @@ void main() {
 
     test('its lens: the field of view, or the size of an orthographic camera', () {
       final view = camera();
-      at(Vec3.zero, fovY: 30.deg).get<VirtualCamera>()!.size = 3;
+      at(Vec3.zero, fovY: 30.deg).get<VirtualCamera>()!.orthographicSize = 3;
       frames(1);
       expect(view.get<Camera>()!.fovY, 30.deg);
       view.get<Camera>()!.orthographic = true;
       frames(1);
-      expect(view.get<Camera>()!.size, 3);
+      expect(view.get<Camera>()!.orthographicSize, 3);
     });
 
     test('going to another blends over the seconds with the ease, position, turn and lens together', () {
@@ -390,6 +390,30 @@ void main() {
       frames(1);
       expect(rig.position, const Vec3(3, 2, 5));
       expect(rig.rotation, Quat.axisAngle(Vec3.up, 0.5));
+    });
+
+    test("Follow in the target's space turns with it; in its heading, stays level", () {
+      Vec3 at(FollowSpace space) {
+        final rig = world.add(
+          GameObject(
+            components: [Follow(target, offset: const Vec3(0, 2, 5), space: space)],
+          ),
+        );
+        frames(1);
+        final p = rig.position;
+        rig.destroy();
+        return p;
+      }
+
+      void near(Vec3 a, Vec3 b, {String? reason}) =>
+          expect((a - b).length, lessThan(1e-6), reason: reason ?? '$a is not $b');
+      target.rotation = Quat.axisAngle(Vec3.up, math.pi / 2);
+      near(at(FollowSpace.world), const Vec3(1, 2, 5));
+      near(at(FollowSpace.target), const Vec3(6, 2, 0), reason: 'behind it, which faces -X now');
+      near(at(FollowSpace.targetYaw), const Vec3(6, 2, 0));
+      target.rotation = Quat.axisAngle(Vec3.up, math.pi / 2) * Quat.axisAngle(const Vec3(1, 0, 0), -0.5);
+      near(at(FollowSpace.targetYaw), const Vec3(6, 2, 0), reason: 'tipped forward, the heading is the same');
+      expect(at(FollowSpace.target).y, isNot(closeTo(2, 0.1)), reason: 'all the way: it tips too');
     });
 
     test('Follow with damping closes 99 % of the gap in its seconds', () {

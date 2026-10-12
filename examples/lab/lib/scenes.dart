@@ -6,6 +6,7 @@ import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
 import 'scenes/character_basics.dart';
 import 'scenes/character_course.dart';
+import 'scenes/colour_basics.dart';
 import 'scenes/components.dart';
 import 'scenes/contacts_basics.dart';
 import 'scenes/controls_basics.dart';
@@ -26,6 +27,7 @@ import 'scenes/moving_basics.dart';
 import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/pooling_basics.dart';
+import 'scenes/riding_basics.dart';
 import 'scenes/rigidbody_basics.dart';
 import 'scenes/rigidbody_stack.dart';
 import 'scenes/rigidbody_walls.dart';
@@ -51,6 +53,7 @@ final List<LabScene Function()> scenes = [
   MovingBasicsScene.new,
   ShapesBasicsScene.new,
   PoolingBasicsScene.new,
+  ColourBasicsScene.new,
   CameraBasicsScene.new,
   CameraRigsScene.new,
   LayersBasicsScene.new,
@@ -64,6 +67,7 @@ final List<LabScene Function()> scenes = [
   MeshCollidersBasicsScene.new,
   CharacterBasicsScene.new,
   CharacterCourseScene.new,
+  RidingBasicsScene.new,
   JointsBasicsScene.new,
   JointsBridgeScene.new,
   JointsChainScene.new,

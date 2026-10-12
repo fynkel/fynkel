@@ -285,7 +285,7 @@ void main() {
         ..fingerMove(2, 70, 50);
       step();
       expect(pinches.single.scale, closeTo(2, 1e-9));
-      expect(pinches.single.centre, const ViewPoint(50, 50, width: 200, height: 100));
+      expect(pinches.single.center, const ViewPoint(50, 50, width: 200, height: 100));
       expect(pinches.single.fingers, 2);
       expect(twists, isEmpty);
 
@@ -345,7 +345,7 @@ void main() {
       step();
       expect(pinches.single.scale, 3);
       expect(pinches.single.fingers, 0);
-      expect(pinches.single.centre.x, 120);
+      expect(pinches.single.center.x, 120);
       expect(twists.single, same(pinches.single), reason: 'one frame, one Pinch');
       expect(twists.single.twist, 0.75);
       step();
@@ -456,8 +456,8 @@ void main() {
         ..scrollBy(0, 10)
         ..scrollBy(2, 5);
       step();
-      expect(input.scroll, Vec2(2, 15));
-      expect(heard, ['scroll 2.0,15.0']);
+      expect(input.scroll, Vec2(2, -15), reason: 'towards you, as Unity says it');
+      expect(heard, ['scroll 2.0,-15.0']);
       step();
       expect(input.scroll, Vec2.zero);
       expect(heard, hasLength(1));

@@ -133,21 +133,21 @@ fn a_mesh_renderer_must_point_at_existing_resources() {
     let ghost_mesh = MeshId::from_raw(99).unwrap();
     let ghost_material = MaterialId::from_raw(99).unwrap();
     assert_eq!(
-        world.insert(id, MeshRenderer { mesh: Some(ghost_mesh), material: Some(material) }),
+        world.insert(id, MeshRenderer { mesh: Some(ghost_mesh), material: Some(material), ..Default::default() }),
         Err(WorldError::NoMesh(ghost_mesh))
     );
     assert_eq!(
-        world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(ghost_material) }),
+        world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(ghost_material), ..Default::default() }),
         Err(WorldError::NoMaterial(ghost_material))
     );
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
     world.insert(id, MeshRenderer::default()).unwrap(); // empty is allowed: it draws nothing
 }
 
 #[test]
 fn for_each2_visits_exactly_the_objects_with_both() {
     let (mut world, mesh, material) = world_with_cube();
-    let renderer = MeshRenderer { mesh: Some(mesh), material: Some(material) };
+    let renderer = MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() };
     let both = world.spawn();
     world.insert(both, Transform::default()).unwrap();
     world.insert(both, renderer).unwrap();
@@ -174,7 +174,7 @@ fn for_each2_visits_exactly_the_objects_with_both() {
 fn meshes_cannot_be_removed_while_in_use() {
     let (mut world, mesh, material) = world_with_cube();
     let id = world.spawn();
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
 
     assert_eq!(world.remove_mesh(mesh), Err(WorldError::MeshInUse { mesh, object: id }));
     assert_eq!(world.mesh(mesh).map(|m| m.indices().len()), Ok(36));
@@ -189,10 +189,10 @@ fn meshes_cannot_be_removed_while_in_use() {
 fn materials_cannot_be_removed_while_in_use() {
     let (mut world, mesh, material) = world_with_cube();
     let id = world.spawn();
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
 
     assert_eq!(world.remove_material(material), Err(WorldError::MaterialInUse { material, object: id }));
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: None }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: None, ..Default::default() }).unwrap();
     world.remove_material(material).unwrap();
     assert_eq!(world.material(material), Err(WorldError::NoMaterial(material)));
 }

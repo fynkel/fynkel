@@ -104,7 +104,7 @@ pub fn stage1(world: &World) -> u64 {
         let cube = world.spawn();
         let turned = Transform { rotation: Quat::from_rotation_y(30f32.to_radians()), ..Transform::default() };
         ok(fy_transform_set(w, cube, &transform(turned)));
-        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { mesh, material }));
+        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { mesh, material, ..Default::default() }));
         cube
     }
 }

@@ -315,10 +315,13 @@ class Beacon extends GameObject {
 - **Materials** are physically based: `color`, `metallic`, `roughness`,
   `emissive` and `emissiveIntensity` (lit from within), and textures.
   One material can be shared by many objects; change it and all of them
-  change.
+  change. To change one object alone, give its renderer a `color` of its
+  own (Unity's `MaterialPropertyBlock`): it replaces the material's color
+  for that object, and `null` gives it back. `material.copy()` makes a
+  material of its own to change every value.
 - **Lights**: `Light.sun` (from the object's forward) and `Light.ambient`.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
-  `orthographic` with a `size`, and a `cullingMask` (§13). The view draws
+  `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`).
 
 You never free a mesh, material or texture: the engine's copy goes when
@@ -431,7 +434,7 @@ class Door extends GameObject {
 
   void wobble() {
     punchScale(Vec3.one * 0.2, seconds: 0.3);
-    sequence([colorTo(Color.white, seconds: 0.05), colorTo(Color(0xFF806040), seconds: 0.3)]);
+    sequence([colorTo(Color.white, seconds: 0.05), colorTo(Color(0xFF806040), seconds: 0.3)]); // this door alone
   }
 
   void hover() => moveBy(Vec3(0, 0.2, 0), seconds: 1, ease: Ease.inOutSine, loops: -1, yoyo: true);
@@ -445,7 +448,9 @@ class Door extends GameObject {
   `speed:`. `moveTo`, `moveBy` and `rotateTo` are in the world, as
   `position`; `localMoveTo` and `localRotateTo` relative to the parent;
   `scaleTo` sets `localScale`, and `rotateBy` turns about the object's own
-  axis.
+  axis. `colorTo` changes the renderer's own `color` (§5), so other
+  objects sharing its material don't flash too; give it `material:` to
+  change a material.
 - **`tween(from, to, …, onUpdate:)`** for any value: `double`, `Vec2`,
   `Vec3`, `Quat`, `Color`, or anything with a `lerp:` you give.
 - **Options**: `ease:` (`Ease.outQuad` by default; any `double
@@ -696,8 +701,8 @@ class Tree extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    final model = add(await assets.model('props/tree_oak.glb'));
-    model.find('leaves')?.get<MeshRenderer>()?.material?.color = Color.rgb(0.8, 0.5, 0.2);
+    final model = add(await assets.instantiate('props/tree_oak.glb'));
+    model.find('leaves')?.get<MeshRenderer>()?.color = Color.rgb(0.8, 0.5, 0.2); // this tree's alone
     final bark = await assets.texture('bark.png');
     add(
       GameObject(
@@ -709,7 +714,7 @@ class Tree extends GameObject {
 }
 ```
 
-- `assets.model(name)` gives a new copy of the model, a tree of objects
+- `assets.instantiate(name)` gives a new copy of the model, a tree of objects
   sharing its meshes and textures with every other copy. Find its parts by
   name.
 - Each file is loaded once, off the UI thread, and shared. It's freed when
@@ -750,11 +755,15 @@ class CameraRig extends GameObject {
 }
 ```
 
-- **Rigs** are behaviours: `Follow(target, offset:, damping:,
+- **Rigs** are behaviours: `Follow(target, offset:, space:, damping:,
   lookAhead:)`, `LookAt(target)`, and `Orbit(target)`, which the player
   turns with a drag and zooms with a pinch or the wheel. A rig works on a
-  plain camera too, without a `VirtualCamera`.
-- `world.cameras.shake(strength)`, `setBlend(blend, from:, to:)`, `live`.
+  plain camera too, without a `VirtualCamera`. `Follow`'s `offset` is in
+  the world unless `space:` says otherwise, as Cinemachine's binding
+  modes: `FollowSpace.target` turns it with the target, so the camera
+  stays behind a car, and `FollowSpace.targetYaw` turns it only as the
+  target turns left and right.
+- `world.cameras.shake(strength, frequency:)`, `setBlend(blend, from:, to:)`, `live`.
 - **Between the screen and the world**: on a `Camera`, such as
   `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
   Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
@@ -829,7 +838,7 @@ class Rock extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    MeshCollider.addToParts(add(await assets.model('rock.glb')));
+    MeshCollider.addToParts(add(await assets.instantiate('rock.glb')));
   }
 }
 ```
@@ -889,7 +898,10 @@ last two steps, so it moves smoothly at 120 fps on 50 steps a second;
 pass through a thin one between steps: Rapier sweeps every fast body
 against static colliders, and `CollisionDetectionMode.continuous` sweeps
 it against bodies too. `physics.gravity`, `defaultSolverIterations` and
-`sleepThreshold` are the world's settings.
+`sleepThreshold` are the world's settings; a new `gravity` wakes every
+body, so sleeping ones fall the new way. `sleep()` and `wakeUp()` do
+nothing for a body not in the world yet, and what can't be done there
+says why (no object yet, not enabled, not shown, destroyed).
 
 **The step runs between frames**, on the physics' own thread: it starts
 when a frame is done, and its results are written at the start of the
@@ -1016,7 +1028,10 @@ ground), `.sides`, `.above`; `isGrounded` and `velocity` say how the last
 move went. It pushes the rigidbodies it walks into, as if it weighed
 `mass` (70 kg; 0 pushes nothing), and meets triggers as a kinematic
 rigidbody does. `with ControllerHits` hears each collider a move hits, in
-`onControllerColliderHit`:
+`onControllerColliderHit`. It rides what it stands on: `ground` is that
+collider, and when it moves or turns (a platform moved by a tween, say)
+the controller goes along in the same frame, unless `moveWithGround` is
+off; `groundVelocity` says how fast the ground goes, for a jump off it:
 
 ```dart
 // lib/player.dart
@@ -1314,6 +1329,14 @@ multibody joints).
 | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicMaterial` | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicsMaterial` |
 | `Rigidbody.velocity` | `linearVelocity` (as Unity 6's) |
 | A small ball rolling fast at 50 steps a second | physics turns a body at most a quarter turn a step: take more steps (`time.fixedDelta = 1 / 100`) |
+| `MaterialPropertyBlock` for one object's colour | `renderer.color` |
+| `new Material(material)` | `material.copy()` |
+| `Camera.orthographicSize` | `orthographicSize`, on `Camera` and `VirtualCamera` |
+| Cinemachine's binding modes (world space, lock to target, lock to target on assign/with world up) | `Follow(space: FollowSpace.world / target / targetYaw)` |
+| `Input.mouseScrollDelta` | `input.scroll`: +y with the wheel turned away, as Unity's |
+| `Plane`, `Plane.distance`, `GetDistanceToPoint` | `Plane`, `distance`, `distanceTo` |
+| `Instantiate(prefab)` of a model | `await assets.instantiate('model.glb')` |
+| A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
@@ -1333,6 +1356,28 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - `colorTo` changes the renderer's own `color`, not its material, so
+    objects sharing the material no longer change with it; give
+    `material:` for the old way. `MeshRenderer.color` and
+    `Material.copy()` are new.
+  - `input.scroll`'s y is Unity's way up: + with the wheel turned away
+    from you, the other way from Flutter's `scrollDelta` (as it was).
+    `input.simulate.scrollBy` still takes Flutter's.
+  - `Plane.distance` is Unity's: the plane y = 3 facing up has -3, not
+    3. `distanceTo` is unchanged.
+  - `Transform.forward` is gone: it was relative to the parent. Use the
+    object's `forward`, or `rotation.rotate(Vec3.forward)`.
+  - `Camera.size` and `VirtualCamera.size` are `orthographicSize`.
+  - `assets.model(name)` is `assets.instantiate(name)`.
+  - `cameras.shake` and the `shake` tween take `frequency:`, not
+    `vibrato:` (`punchScale`'s `vibrato` is a count and stays).
+  - `Pinch.centre` is `center`.
+  - `physics.ignoreLayerCollision` and `ignoreCollision` take
+    `ignore:` by name: `ignoreLayerCollision(8, 0, ignore: false)`.
+  - The build hook's `HookError` is `HookException`.
+  - `FynkelView(world: w)` is `FynkelView.world(w)`; `FynkelView(root:)`
+    is as it was. `FynkelGame.of<T>(context)` is new, and `maybeOf<T>`
+    gives the game as a `T`.
   - What the view calls to feed input (`keyDown`, `fingerDown`,
     `resize`, …) moved to `input.simulate`: `world.input.simulate
     .keyDown(KeyCode.d)` in a test. `keyDown` and `keyUp` return whether

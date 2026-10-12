@@ -197,9 +197,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final dts = <double>[];
     final stats = <FynkelViewStats>[];
-    await tester.pumpWidget(
-      sized(FynkelView(world: world, resolutionScale: 0.5, onFrame: dts.add, onStats: stats.add)),
-    );
+    await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5, onFrame: dts.add, onStats: stats.add)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, hasLength(1));
     expect(find.byType(Texture), findsOneWidget);
@@ -215,7 +213,7 @@ void main() {
     expect(stats.last.view.posted, stats.last.ticks, reason: 'one engine frame per tick');
     expect(stats.last.tickFps, closeTo(125, 1));
 
-    await tester.pumpWidget(sized(FynkelView(world: world, onStats: stats.add), width: 60, height: 30));
+    await tester.pumpWidget(sized(FynkelView.world(world, onStats: stats.add), width: 60, height: 30));
     for (var i = 0; i < 300; i++) {
       await tester.pump(const Duration(milliseconds: 8));
     }
@@ -229,7 +227,7 @@ void main() {
     final seen = <ViewStats>[];
     final ticks = <int>[];
     await tester.pumpWidget(
-      sized(FynkelView(world: world, onFrame: (_) => ticks.add(seen.length), onViewStats: seen.add)),
+      sized(FynkelView.world(world, onFrame: (_) => ticks.add(seen.length), onViewStats: seen.add)),
     );
     for (var i = 0; i < 20; i++) {
       await tester.pump(const Duration(milliseconds: 8));
@@ -259,7 +257,7 @@ void main() {
   });
 
   testWidgets('the plugin lets go of the view before it is freed', (tester) async {
-    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pumpWidget(sized(FynkelView.world(world)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(find.byType(Texture), findsOneWidget);
     await tester.pumpWidget(sized(const SizedBox()));
@@ -269,7 +267,7 @@ void main() {
 
   testWidgets('removed while its texture is being registered, the view is let go once that finishes', (tester) async {
     final held = hold = Completer<void>();
-    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pumpWidget(sized(FynkelView.world(world)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, ['register']);
     await tester.pumpWidget(sized(const SizedBox()));
@@ -281,11 +279,11 @@ void main() {
   });
 
   testWidgets('a new world gets a new view', (tester) async {
-    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pumpWidget(sized(FynkelView.world(world)));
     await tester.pump(const Duration(milliseconds: 8));
     final other = World();
     addTearDown(other.dispose);
-    await tester.pumpWidget(sized(FynkelView(world: other)));
+    await tester.pumpWidget(sized(FynkelView.world(other)));
     await tester.pump(const Duration(milliseconds: 8));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, ['register', 'unregister 7', 'register']);
@@ -297,12 +295,12 @@ void main() {
   // view of each isolate has the plugin free what an earlier one left.
   testWidgets('the plugin is reset once per isolate, before its first view registers', (tester) async {
     forgetReset();
-    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pumpWidget(sized(FynkelView.world(world)));
     await tester.pump(const Duration(milliseconds: 8));
     await tester.pumpWidget(sized(const SizedBox()));
     final other = World();
     addTearDown(other.dispose);
-    await tester.pumpWidget(sized(FynkelView(world: other)));
+    await tester.pumpWidget(sized(FynkelView.world(other)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, ['register', 'unregister 7', 'register']);
     expect(resets, [0]);
@@ -312,12 +310,12 @@ void main() {
   // On Android a view laid out before its window has a size would get a
   // surface of its own (Flutter makes it 1 × 1), only to swap it at once.
   testWidgets('an empty layout makes no view until there is a size', (tester) async {
-    await tester.pumpWidget(sized(FynkelView(world: world), width: 0));
+    await tester.pumpWidget(sized(FynkelView.world(world), width: 0));
     await tester.pump(const Duration(milliseconds: 8));
-    await tester.pumpWidget(sized(FynkelView(world: world), height: 0));
+    await tester.pumpWidget(sized(FynkelView.world(world), height: 0));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, isEmpty);
-    await tester.pumpWidget(sized(FynkelView(world: world)));
+    await tester.pumpWidget(sized(FynkelView.world(world)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, ['register']);
   });
@@ -329,9 +327,9 @@ void main() {
     // There a new size is a new surface, which only the plugin can make.
     testWidgets('registers with a size and sends each new size, once, after the texture is there', (tester) async {
       final held = hold = Completer<void>();
-      await tester.pumpWidget(sized(FynkelView(world: world)));
+      await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
-      await tester.pumpWidget(sized(FynkelView(world: world), width: 60, height: 40));
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
       await tester.pump(const Duration(milliseconds: 8));
       expect(calls, ['register 300x150'], reason: 'nothing to resize before the texture (3 pixels per point)');
       held.complete();
@@ -342,7 +340,7 @@ void main() {
       for (var i = 0; i < 10; i++) {
         await tester.pump(const Duration(milliseconds: 8));
       }
-      await tester.pumpWidget(sized(FynkelView(world: world), width: 50, height: 100));
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 50, height: 100));
       await tester.pump(const Duration(milliseconds: 8));
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump();
@@ -354,9 +352,9 @@ void main() {
         if (call.method == 'resize') throw PlatformException(code: 'attach', message: 'no RGBA8 format');
         return call.method == 'register' ? 7 : null;
       });
-      await tester.pumpWidget(sized(FynkelView(world: world)));
+      await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
-      await tester.pumpWidget(sized(FynkelView(world: world), width: 60, height: 40));
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
       await tester.pump(const Duration(milliseconds: 8));
       await tester.pump();
       expect(tester.takeException().toString(), contains('no RGBA8 format'));
@@ -404,7 +402,7 @@ void main() {
       await tester.pumpWidget(sized(FynkelView(key: key, root: Tiny(), source: source)));
       expect(key.currentState!.world, same(own));
 
-      await tester.pumpWidget(sized(FynkelView(key: key, world: world)));
+      await tester.pumpWidget(sized(FynkelView.world(world, key: key)));
       expect(key.currentState!.world, same(world));
       expect(own.isDisposed, isTrue);
       expect(world.isDisposed, isFalse);
@@ -448,7 +446,7 @@ void main() {
 
     testWidgets('errors while it runs show too, the latest first, with how many came before', (tester) async {
       final game = ThrowsInUpdate();
-      await tester.pumpWidget(sized(FynkelView(world: world), width: 800, height: 600));
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 800, height: 600));
       world.add(game);
       await tester.pump(const Duration(milliseconds: 16));
       expect(tester.takeException(), isStateError);
@@ -464,7 +462,7 @@ void main() {
     testWidgets('with showErrors off, errors are the game\'s alone: nothing over it, nothing reported', (tester) async {
       final key = GlobalKey<FynkelViewState>();
       final errors = <ObjectError>[];
-      await tester.pumpWidget(sized(FynkelView(key: key, world: world, showErrors: false)));
+      await tester.pumpWidget(sized(FynkelView.world(world, key: key, showErrors: false)));
       world.errors.listen(errors.add);
       final game = world.add(ThrowsInUpdate());
       await tester.pump(const Duration(milliseconds: 16));
@@ -574,6 +572,42 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
     });
 
+    testWidgets('FynkelGame.of gives the game typed, and says why when it cannot', (tester) async {
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      late BuildContext inside, outside;
+      await tester.pumpWidget(
+        sized(
+          Builder(
+            builder: (context) {
+              outside = context;
+              return FynkelGame(
+                make: Tiny.new,
+                builder: (context, game) {
+                  inside = context;
+                  return FynkelView(root: game, source: source);
+                },
+              );
+            },
+          ),
+        ),
+      );
+      final Tiny game = FynkelGame.of<Tiny>(inside).game;
+      expect(FynkelGame.maybeOf(inside)!.game, same(game));
+      expect(FynkelGame.maybeOf(outside), isNull);
+      expect(
+        () => FynkelGame.of(outside),
+        throwsA(isA<FlutterError>().having((e) => e.message, 'message', contains('no FynkelGame'))),
+      );
+      expect(FynkelGame.maybeOf<LooksAtAPoint>(inside), isNull, reason: 'its game is a Tiny');
+      expect(
+        () => FynkelGame.of<LooksAtAPoint>(inside),
+        throwsA(isA<FlutterError>().having((e) => e.message, 'message', contains('not a LooksAtAPoint'))),
+      );
+      await finish(tester, game.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
     testWidgets('with restartOnReload a hot reload starts it over; without, it keeps the game', (tester) async {
       final made = <Tiny>[];
       final source = bundleSource(Bundle({'assets/grid.png': png}));
@@ -598,7 +632,7 @@ void main() {
     });
 
     testWidgets('a view with no FynkelGame around it gives F5 to the game', (tester) async {
-      await tester.pumpWidget(sized(FynkelView(world: world)));
+      await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump();
       await tester.sendKeyDownEvent(LogicalKeyboardKey.f5);
       world.update(1 / 60);
@@ -611,8 +645,8 @@ void main() {
     var frames = 0;
     await tester.pumpWidget(
       sized(
-        FynkelView(
-          world: world,
+        FynkelView.world(
+          world,
           onFrame: (_) {
             if (++frames >= 3) throw StateError('broken onFrame');
           },
@@ -633,7 +667,7 @@ void main() {
 
   testWidgets('a lost GPU device brings a new view, up to three times a minute, then the error', (tester) async {
     final dts = <double>[];
-    await tester.pumpWidget(sized(FynkelView(world: world, onFrame: dts.add)));
+    await tester.pumpWidget(sized(FynkelView.world(world, onFrame: dts.add)));
     for (var i = 0; i < 5; i++) {
       await tester.pump(const Duration(milliseconds: 8));
     }
@@ -675,7 +709,7 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     forgetReset();
     final dts = <double>[];
-    await tester.pumpWidget(sized(FynkelView(world: world, onFrame: dts.add)));
+    await tester.pumpWidget(sized(FynkelView.world(world, onFrame: dts.add)));
     await tester.pump(const Duration(milliseconds: 10));
     // The registration fails in real time.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
@@ -692,7 +726,7 @@ void main() {
     await tester.pumpWidget(
       Directionality(
         textDirection: TextDirection.ltr,
-        child: ListView(children: [FynkelView(world: world)]),
+        child: ListView(children: [FynkelView.world(world)]),
       ),
     );
     expect(tester.takeException().toString(), contains('FynkelView needs a bounded size'));

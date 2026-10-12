@@ -32,16 +32,16 @@ Future<void> buildRustCrate(
     // 64-bit devices only, and on a 32-bit one the game stops at once
     // with an error that says so (package:fynkel's lib/src/native.dart).
     if (os == OS.android && (arch == Architecture.arm || arch == Architecture.ia32)) return;
-    throw HookError('Fynkel does not build for ${os.name}/${arch.name}.');
+    throw HookException('Fynkel does not build for ${os.name}/${arch.name}.');
   }
 
   final workspace = input.packageRoot.resolve('../../');
   if (!File.fromUri(workspace.resolve('crates/$crate/Cargo.toml')).existsSync()) {
-    throw HookError('expected the Fynkel Cargo workspace, with crates/$crate, at ${workspace.toFilePath()}.');
+    throw HookException('expected the Fynkel Cargo workspace, with crates/$crate, at ${workspace.toFilePath()}.');
   }
   final cargo = _findCargo();
   if (cargo == null) {
-    throw HookError('`cargo` was not found on PATH or in ~/.cargo/bin. Install Rust: https://rustup.rs');
+    throw HookException('`cargo` was not found on PATH or in ~/.cargo/bin. Install Rust: https://rustup.rs');
   }
 
   final args = ['build', '--release', '--package', crate, '--target', triple];
@@ -58,12 +58,12 @@ Future<void> buildRustCrate(
     // A missing standard library for the target is the usual first-time
     // failure (Flutter builds every architecture it ships).
     final hint = '${result.stderr}'.contains('E0463') ? '\nInstall the target: rustup target add $triple' : '';
-    throw HookError('cargo ${args.join(' ')} failed (exit ${result.exitCode}):\n${result.stderr}$hint');
+    throw HookException('cargo ${args.join(' ')} failed (exit ${result.exitCode}):\n${result.stderr}$hint');
   }
 
   final fileName = os.dylibFileName(crate);
   final built = workspace.resolve('target/$triple/release/$fileName');
-  if (!File.fromUri(built).existsSync()) throw HookError('cargo succeeded but ${built.toFilePath()} is missing.');
+  if (!File.fromUri(built).existsSync()) throw HookException('cargo succeeded but ${built.toFilePath()} is missing.');
   final dest = input.outputDirectory.resolve(fileName);
   await File.fromUri(built).copy(dest.toFilePath());
 
@@ -112,7 +112,7 @@ Map<String, String>? _androidLinker(OS os, Architecture arch, String triple) {
     final dir = Directory('$sdk/ndk');
     final versions = dir.existsSync() ? (dir.listSync().map((e) => e.path).toList()..sort()) : <String>[];
     if (versions.isEmpty) {
-      throw HookError(
+      throw HookException(
         'Android builds need the Android NDK, and there is none in $sdk/ndk. '
         "Install it with Android Studio's SDK Manager (SDK Tools → NDK), or set ANDROID_NDK_HOME.",
       );
@@ -122,7 +122,7 @@ Map<String, String>? _androidLinker(OS os, Architecture arch, String triple) {
   // The NDK's prebuilt tools for macOS are universal binaries in
   // darwin-x86_64, Apple silicon included.
   final clang = '$ndk/toolchains/llvm/prebuilt/darwin-x86_64/bin/${triple}30-clang';
-  if (!File(clang).existsSync()) throw HookError('the NDK at $ndk has no $clang.');
+  if (!File(clang).existsSync()) throw HookException('the NDK at $ndk has no $clang.');
   return {'CARGO_TARGET_${triple.toUpperCase().replaceAll('-', '_')}_LINKER': clang};
 }
 
@@ -135,8 +135,8 @@ String? _findCargo() {
 }
 
 /// What a build hook throws when it can't build.
-class HookError implements Exception {
-  HookError(this.message);
+class HookException implements Exception {
+  HookException(this.message);
   final String message;
   @override
   String toString() => 'fynkel build hook: $message';

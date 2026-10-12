@@ -131,7 +131,7 @@ sealed class Collider extends Behaviour {
 
   Physics _inWorld(String what) {
     if (_physics case final physics? when _id != 0) return physics;
-    throw StateError('$runtimeType.$what: it isn\'t in the world (not enabled, or its object isn\'t shown)');
+    throw _notInWorld(this, what);
   }
 
   @override

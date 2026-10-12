@@ -96,11 +96,21 @@ impl Component for Transform {}
 
 /// Draws a mesh with a material at the object's transform. An object needs
 /// both this and a [`Transform`] to be drawn. If either id is `None`, it
-/// draws nothing.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+/// draws nothing. With `own_color`, `color` replaces the material's base
+/// colour for this object alone, as a Unity `MaterialPropertyBlock` does:
+/// a hit flash on one enemy leaves the others, which share its material.
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshRenderer {
     pub mesh: Option<MeshId>,
     pub material: Option<MaterialId>,
+    pub own_color: bool,
+    pub color: Color,
+}
+
+impl Default for MeshRenderer {
+    fn default() -> Self {
+        Self { mesh: None, material: None, own_color: false, color: Color::WHITE }
+    }
 }
 
 impl Describe for MeshRenderer {
@@ -110,6 +120,8 @@ impl Describe for MeshRenderer {
         const FIELDS: &[Field] = &[
             Field::new("mesh", FieldKind::Mesh, Value::Mesh(None)),
             Field::new("material", FieldKind::Material, Value::Material(None)),
+            Field::new("own_color", FieldKind::Bool, Value::Bool(false)),
+            Field::new("color", FieldKind::Color, Value::Color(Color::WHITE)),
         ];
         FIELDS
     }
@@ -118,6 +130,8 @@ impl Describe for MeshRenderer {
         Some(match index {
             0 => Value::Mesh(self.mesh),
             1 => Value::Material(self.material),
+            2 => Value::Bool(self.own_color),
+            3 => Value::Color(self.color),
             _ => return None,
         })
     }
@@ -126,6 +140,8 @@ impl Describe for MeshRenderer {
         match (index, value) {
             (0, Value::Mesh(m)) => self.mesh = m,
             (1, Value::Material(m)) => self.material = m,
+            (2, Value::Bool(b)) => self.own_color = b,
+            (3, Value::Color(c)) => self.color = c,
             _ => unreachable!("validated by Describe::set"),
         }
     }

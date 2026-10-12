@@ -12,6 +12,7 @@ import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/character_basics.dart';
 import 'package:lab/scenes/character_course.dart';
+import 'package:lab/scenes/colour_basics.dart';
 import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/joints_basics.dart';
@@ -28,6 +29,7 @@ import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 import 'package:lab/scenes/controls_basics.dart';
 import 'package:lab/scenes/pooling_basics.dart';
+import 'package:lab/scenes/riding_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
 
@@ -650,5 +652,60 @@ void main() {
     }
     final (freed, _) = swing('swing them sideways', limit: 180);
     expect(freed, greaterThan(60), reason: 'its limits at 180°, it swings as the free one');
+  });
+
+  test('Colour: the basics: a click flashes one cube alone, and the shared colour reaches the others', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ColourBasicsScene());
+    await scene.loaded;
+    world.input.simulate.resize(400, 300);
+    world.update(1 / 60);
+    final [first, second, middle, _, last] = scene.cubes;
+    final on = world.camera!.get<Camera>()!.worldToScreenPoint(first.position)!;
+    world.input.simulate
+      ..fingerDown(1, on.x, on.y)
+      ..fingerUp(1, on.x, on.y);
+    world.update(1 / 60);
+    expect(first.renderer.color, isNotNull, reason: 'flashing');
+    expect(second.renderer.color, isNull);
+    expect(scene.shared.color, const Color(0xFF4CA6E0), reason: 'the material is untouched');
+    for (var i = 0; i < 30; i++) {
+      world.update(1 / 60);
+    }
+    expect(first.renderer.color, isNull, reason: 'the material\'s again');
+
+    final [tint as Toggle, change as Button, own as Toggle] = scene.controls;
+    tint.onChanged(true);
+    own.onChanged(true);
+    change.onPressed();
+    expect(middle.renderer.color, const Color(0xFFE05A5A), reason: 'its own colour holds');
+    expect(last.renderer.material, isNot(same(scene.shared)));
+    expect(last.renderer.material!.color, const Color(0xFFFFD040), reason: 'its own material is its own');
+    expect(scene.shared.color, isNot(const Color(0xFF4CA6E0)));
+  });
+
+  test('Riding a platform: the player rides the sliding platform, and stays put with moveWithGround off', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(RidingBasicsScene());
+    await scene.loaded;
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(30);
+    expect(scene.player.controller.ground?.gameObject, same(scene.slider));
+    final offset = scene.player.position - scene.slider.position;
+    frames(60);
+    expect((scene.player.position - scene.slider.position - offset).length, lessThan(0.05), reason: 'rode along');
+    expect(scene.slider.position.z, lessThan(-1), reason: 'and it did move');
+
+    (scene.controls.first as Toggle).onChanged(false);
+    final at = scene.player.position;
+    frames(30);
+    expect(Vec3(at.x, 0, at.z).closeTo(Vec3(scene.player.position.x, 0, scene.player.position.z), 0.02), isTrue);
   });
 }

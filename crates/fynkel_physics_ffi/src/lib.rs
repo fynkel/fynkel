@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 9;
+pub const FP_ABI_VERSION: u32 = 10;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -368,6 +368,9 @@ pub struct FpCharacterMove {
     pub translation: FpVec3,
     pub flags: u32,
     pub hit_count: u32,
+    /// The key of the collider it stands on after the move: 0 when it isn't
+    /// grounded, or what holds it up wasn't found.
+    pub ground_key: u64,
 }
 
 /// A collider a character's move hit: where, and its surface's normal
@@ -2089,7 +2092,12 @@ pub unsafe extern "C" fn fp_character_move(
             write(
                 out,
                 "out",
-                FpCharacterMove { translation: fp_vec3(moved.translation), flags: moved.flags, hit_count },
+                FpCharacterMove {
+                    translation: fp_vec3(moved.translation),
+                    flags: moved.flags,
+                    hit_count,
+                    ground_key: moved.ground_key,
+                },
             )
         })
     }

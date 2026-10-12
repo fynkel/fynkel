@@ -63,7 +63,7 @@ void main() {
   test('Transform is a position, a rotation and a scale', () {
     const t = Transform(position: Vec3(1, 2, 3), scale: Vec3(2, 2, 2));
     expect(t.rotation, Quat.identity);
-    expect(Transform(rotation: Quat.lookRotation(Vec3.back)).forward.closeTo(Vec3.back, 1e-12), isTrue);
+    expect(Quat.lookRotation(Vec3.back).rotate(Vec3.forward).closeTo(Vec3.back, 1e-12), isTrue);
     expect(Transform().rotated(Vec3.up, 0).rotation, Quat.identity);
   });
 }

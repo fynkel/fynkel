@@ -91,7 +91,7 @@ class Rock extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    final model = add(await assets.model('rock.glb'));
+    final model = add(await assets.instantiate('rock.glb'));
     colliders = MeshCollider.addToParts(model, convex: _convex);
   }
 }

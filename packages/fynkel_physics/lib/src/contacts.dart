@@ -30,7 +30,11 @@ mixin Triggers {
   /// [other] began to overlap.
   void onTriggerEnter(Collider other) {}
 
-  /// [other] still overlaps, at the end of a step.
+  /// [other] still overlaps, at the end of a step. Not while both sides'
+  /// rigidbodies sleep, as Unity's: a kinematic body the game moves by
+  /// setting its position wakes, but one left still falls asleep after a
+  /// moment, and its stays stop until it moves or [Rigidbody.wakeUp]. To
+  /// know what's inside, keep a set from enter and exit instead.
   void onTriggerStay(Collider other) {}
 
   /// [other] stopped overlapping, or one of the two left.
@@ -50,7 +54,8 @@ mixin Collisions {
   /// A collider began to touch.
   void onCollisionEnter(Collision collision) {}
 
-  /// A collider still touches, at the end of a step.
+  /// A collider still touches, at the end of a step. Not while both sides'
+  /// rigidbodies sleep, as Unity's (see [Triggers.onTriggerStay]).
   void onCollisionStay(Collision collision) {}
 
   /// A collider stopped touching, or one of the two left: the collision
@@ -150,7 +155,7 @@ extension PhysicsLayers on Physics {
   /// contact, no trigger, no callback. Every layer meets every other
   /// unless set. Queries don't read it: their layer mask says what they
   /// hit.
-  void ignoreLayerCollision(int layer1, int layer2, [bool ignore = true]) {
+  void ignoreLayerCollision(int layer1, int layer2, {bool ignore = true}) {
     _checkLayer(layer1, 'layer1');
     _checkLayer(layer2, 'layer2');
     checkPhysics(fp_layer_collision_set(_world, layer1, layer2, ignore ? 0 : 1));
@@ -169,7 +174,7 @@ extension PhysicsLayers on Physics {
   /// either leaves the world (is disabled, removed or hidden), as in
   /// Unity. Throws a [StateError] if either isn't in the world, and an
   /// [ArgumentError] if they're the same collider.
-  void ignoreCollision(Collider collider1, Collider collider2, [bool ignore = true]) {
+  void ignoreCollision(Collider collider1, Collider collider2, {bool ignore = true}) {
     final (a, b) = (collider1._inWorld('ignoreCollision'), collider2._inWorld('ignoreCollision'));
     if (!identical(a, this) || !identical(b, this)) throw StateError('the colliders are in another world');
     if (identical(collider1, collider2)) throw ArgumentError.value(collider1, 'collider2', 'is collider1');

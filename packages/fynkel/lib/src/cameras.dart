@@ -45,7 +45,7 @@ final class _Pose {
 /// close.get<VirtualCamera>()!.priority = 20; // the view blends to it
 /// ```
 final class VirtualCamera extends Behaviour {
-  VirtualCamera({this._priority = 0, this.fovY = 60 * (math.pi / 180), this.size = 5});
+  VirtualCamera({this._priority = 0, this.fovY = 60 * (math.pi / 180), this.orthographicSize = 5});
 
   int _priority;
   int _order = 0;
@@ -63,8 +63,8 @@ final class VirtualCamera extends Behaviour {
   double fovY;
 
   /// Half the view's height, while this is live and the camera is
-  /// orthographic ([Camera.size]).
-  double size;
+  /// orthographic ([Camera.orthographicSize]).
+  double orthographicSize;
 
   /// Whether the view's camera follows this one now (or is blending to it).
   bool get isLive => _enabledNow && world.cameras.live == this;
@@ -72,7 +72,7 @@ final class VirtualCamera extends Behaviour {
   _Pose get _pose {
     final object = gameObject;
     final t = object.parent == null ? object.transform : object.worldTransform;
-    return _Pose(t.position, t.rotation, fovY, size);
+    return _Pose(t.position, t.rotation, fovY, orthographicSize);
   }
 
   @override
@@ -123,16 +123,48 @@ bool _present(GameObject o) => o._world != null && !o._gone;
 /// none; with some, 99 % of the way after [damping] seconds (Cinemachine's).
 double _damp(double damping, double dt) => damping > 0 ? 1 - math.pow(0.01, dt / damping).toDouble() : 1;
 
-/// Keeps its object at [offset] from [target], in the world's directions:
-/// `Follow(player, offset: Vec3(0, 6, 8))` stays above and behind it. It
-/// moves the object, and doesn't turn it: add a [LookAt], or turn it once.
+/// Whose directions a [Follow]'s offset is in (Cinemachine's binding
+/// modes).
+enum FollowSpace {
+  /// The world's: the offset stays put however the target turns.
+  world,
+
+  /// The target's own: the offset turns with it, all the way (Lock To
+  /// Target).
+  target,
+
+  /// The target's heading only, about the world's up: behind a player
+  /// that turns, and level however it tips (Lock To Target With World Up).
+  targetYaw,
+}
+
+/// Keeps its object at [offset] from [target], in the world's directions
+/// unless [space] says otherwise: `Follow(player, offset: Vec3(0, 6, 8))`
+/// stays above it and towards +Z; with `space: FollowSpace.targetYaw` it
+/// stays behind the player however it turns. It moves the object, and
+/// doesn't turn it: add a [LookAt], or turn it once.
 final class Follow extends _Rig {
-  Follow(this.target, {this.offset = const Vec3(0, 3, 6), this.damping = 0, this.lookAhead = 0});
+  Follow(
+    this.target, {
+    this.offset = const Vec3(0, 3, 6),
+    this.space = FollowSpace.world,
+    this.damping = 0,
+    this.lookAhead = 0,
+  });
 
   GameObject target;
 
-  /// From [target] to where the object is kept, in the world.
+  /// From [target] to where the object is kept, in [space]'s directions.
+  /// An object faces -Z, so (0, 3, 6) in the target's space is above and
+  /// behind it.
   Vec3 offset;
+
+  /// Whose directions [offset] is in: the world's unless set.
+  FollowSpace space;
+
+  // The heading for targetYaw, kept while the target looks straight up or
+  // down and has none.
+  var _yaw = Quat.identity;
 
   /// Seconds it takes to close 99 % of the gap when [target] moves; 0
   /// keeps it right there.
@@ -151,7 +183,13 @@ final class Follow extends _Rig {
   void _move(double dt) {
     if (!_present(target)) return;
     final p = target.position;
-    var goal = p + offset;
+    var goal =
+        p +
+        switch (space) {
+          FollowSpace.world => offset,
+          FollowSpace.target => target.rotation.rotate(offset),
+          FollowSpace.targetYaw => _heading().rotate(offset),
+        };
     final was = _targetWas;
     _targetWas = p;
     if (lookAhead != 0 && was != null && dt > 0) goal += (p - was) * (lookAhead / dt);
@@ -159,6 +197,13 @@ final class Follow extends _Rig {
     final next = at == null ? goal : Vec3.lerp(at, goal, _damp(damping, dt));
     _at = next;
     gameObject._setPosition(next);
+  }
+
+  Quat _heading() {
+    final forward = target.rotation.rotate(const Vec3(0, 0, -1));
+    final flat = Vec3(forward.x, 0, forward.z);
+    if (flat.length > 1e-6) _yaw = Quat.lookRotation(flat);
+    return _yaw;
   }
 
   @override
@@ -268,7 +313,7 @@ final class Orbit extends _Rig {
       if (controls && _enabledNow && pinch.scale > 0) distance /= pinch.scale;
     });
     on(input.onScroll, (scroll) {
-      if (controls && _enabledNow) distance *= math.exp(scroll.y * scrollSpeed);
+      if (controls && _enabledNow) distance *= math.exp(-scroll.y * scrollSpeed);
     });
   }
 
@@ -349,19 +394,19 @@ final class Cameras {
   Vec3 _base = Vec3.zero;
 
   /// Shakes the view's camera by up to [strength] metres, across the view,
-  /// fading out over [seconds]; [vibrato] is about how many times a second
+  /// fading out over [seconds]; [frequency] is about how many times a second
   /// it goes to and fro. On top of wherever it is: a virtual camera, a
   /// rig, a tween or the game's own code moving it, and it ends there.
   /// Shakes at once add up. [unscaled] keeps it going while the game is
   /// paused; [seed] makes it the same each time.
-  void shake(double strength, {double seconds = 0.4, double vibrato = 20, bool unscaled = false, int? seed}) {
+  void shake(double strength, {double seconds = 0.4, double frequency = 20, bool unscaled = false, int? seed}) {
     if (!(seconds > 0)) return;
     final random = math.Random(seed);
     _shakes.add(
       _Shake(
         strength,
         seconds,
-        vibrato,
+        frequency,
         unscaled,
         random.nextDouble() * 2 * math.pi,
         random.nextDouble() * 2 * math.pi,
@@ -474,7 +519,7 @@ final class Cameras {
     final lens = camera.get<Camera>();
     if (lens == null) return;
     if (lens.orthographic) {
-      if (lens.size != pose.size) lens.size = pose.size;
+      if (lens.orthographicSize != pose.size) lens.orthographicSize = pose.size;
     } else if (lens.fovY != pose.fovY) {
       lens.fovY = pose.fovY;
     }
@@ -507,7 +552,7 @@ final class Cameras {
       }
       // Two waves across the view, together within the strength.
       final fade = s.strength * (1 - p) * (1 - p) * math.sqrt1_2;
-      final turns = 2 * math.pi * s.vibrato * s.time;
+      final turns = 2 * math.pi * s.frequency * s.time;
       x += math.sin(turns + s.phaseX) * fade;
       y += math.sin(turns * 1.13 + s.phaseY) * fade;
     }
@@ -524,9 +569,9 @@ final class Cameras {
 }
 
 final class _Shake {
-  _Shake(this.strength, this.seconds, this.vibrato, this.unscaled, this.phaseX, this.phaseY);
+  _Shake(this.strength, this.seconds, this.frequency, this.unscaled, this.phaseX, this.phaseY);
 
-  final double strength, seconds, vibrato, phaseX, phaseY;
+  final double strength, seconds, frequency, phaseX, phaseY;
   final bool unscaled;
   double time = 0;
 }

@@ -1082,9 +1082,12 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Takes [material]'s colour (by default, the one its [MeshRenderer]
-  /// draws with) to [color] over [seconds]: see [moveTo]. Throws a
-  /// [StateError] when there's no material to change.
+  /// Takes the object's colour to [color] over [seconds]: see [moveTo].
+  /// That's its [MeshRenderer]'s own [MeshRenderer.color], from the
+  /// material's if it has none, so the other objects that share the
+  /// material keep theirs. Give [material] to change that material
+  /// instead, for everything that uses it. Throws a [StateError] when
+  /// there's no renderer with a material.
   Motion colorTo(
     Color color, {
     required double seconds,
@@ -1096,16 +1099,31 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) {
-    final m =
-        material ??
-        _self.get<MeshRenderer>()?.material ??
-        (throw StateError('$_self has no MeshRenderer with a material to colour'));
+    if (material != null) {
+      return _value<Color>(
+        () => material.color,
+        (_) => color,
+        Color.lerp,
+        null,
+        (c) => material.color = c,
+        seconds: seconds,
+        speed: null,
+        ease: ease,
+        delay: delay,
+        loops: loops,
+        yoyo: yoyo,
+        unscaled: unscaled,
+        onComplete: onComplete,
+      );
+    }
+    final renderer = _self.get<MeshRenderer>();
+    final shared = renderer?.material ?? (throw StateError('$_self has no MeshRenderer with a material to colour'));
     return _value<Color>(
-      () => m.color,
+      () => renderer!.color ?? shared.color,
       (_) => color,
       Color.lerp,
       null,
-      (c) => m.color = c,
+      (c) => renderer!.color = c,
       seconds: seconds,
       speed: null,
       ease: ease,
@@ -1151,12 +1169,12 @@ mixin _Moving {
   }
 
   /// Shakes the object about where it is, up to [strength] along each
-  /// axis, [vibrato] times a second, fading over [seconds] and ending
+  /// axis, [frequency] times a second, fading over [seconds] and ending
   /// where it began. [seed] makes the same shake each time.
   Motion shake(
     double strength, {
     required double seconds,
-    double vibrato = 20,
+    double frequency = 20,
     int? seed,
     double delay = 0,
     int loops = 1,
@@ -1166,7 +1184,7 @@ mixin _Moving {
     final random = math.Random(seed);
     final phase = Vec3(random.nextDouble(), random.nextDouble(), random.nextDouble()) * (2 * math.pi);
     var base = Vec3.zero;
-    final turns = 2 * math.pi * vibrato * seconds;
+    final turns = 2 * math.pi * frequency * seconds;
     return _value<double>(
       () {
         base = _self.transform.position;

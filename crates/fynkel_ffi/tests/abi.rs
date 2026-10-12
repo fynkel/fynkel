@@ -63,7 +63,7 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
         ok(fy_material_add(w, &matte, &mut material));
         let ball = world.spawn();
         ok(fy_transform_set(w, ball, &transform(Transform::default())));
-        ok(fy_mesh_renderer_set(w, ball, &FyMeshRenderer { mesh, material }));
+        ok(fy_mesh_renderer_set(w, ball, &FyMeshRenderer { mesh, material, ..Default::default() }));
     }
     let view = View::headless(&world, 128, 128);
     assert_golden("sphere_left", &view.read(view.frame(), 128, 128));
@@ -292,8 +292,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_17() {
-    assert_eq!(fy_abi_version(), 17);
+fn the_abi_version_is_18() {
+    assert_eq!(fy_abi_version(), 18);
 }
 
 #[cfg(not(target_os = "android"))]
@@ -410,7 +410,7 @@ fn hidden_rig(world: &World) -> u64 {
         let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);
         ok(fy_material_add(w, &FyMaterial::default(), &mut material));
         ok(fy_transform_set(w, cube, &transform(Transform::from_position(Vec3::new(0.0, 1.5, 3.0)))));
-        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { mesh, material }));
+        ok(fy_mesh_renderer_set(w, cube, &FyMeshRenderer { mesh, material, ..Default::default() }));
         ok(fy_active_set(w, rig, false));
     }
     rig
@@ -716,7 +716,11 @@ fn custom_meshes_render_with_computed_normals() {
             let id = world.spawn();
             let placed = Transform::from_position(Vec3::new(x, 0.0, 0.0));
             ok(fy_transform_set(w, id, &transform(placed.looking_at(Vec3::new(x + 1.0, 0.0, 1.0)))));
-            ok(fy_mesh_renderer_set(w, id, &FyMeshRenderer { mesh, material: renderer.material }));
+            ok(fy_mesh_renderer_set(
+                w,
+                id,
+                &FyMeshRenderer { mesh, material: renderer.material, ..Default::default() },
+            ));
         }
     }
     let view = View::headless(&world, 256, 160);
@@ -889,7 +893,7 @@ fn a_textured_scene_made_through_the_c_interface_matches_its_golden() {
             ..Default::default()
         };
         ok(fy_transform_set(w, floor, &transform(placed)));
-        ok(fy_mesh_renderer_set(w, floor, &FyMeshRenderer { mesh: plane, material: ground }));
+        ok(fy_mesh_renderer_set(w, floor, &FyMeshRenderer { mesh: plane, material: ground, ..Default::default() }));
     }
     let view = View::headless(&world, 256, 160);
     assert_golden("textured_scene", &view.read(view.frame(), 256, 160));
@@ -986,7 +990,7 @@ fn stage1_behind_a_wall(world: &World) -> (u64, u64, u64) {
         ));
         let wide = Transform { scale: Vec3::new(1.5, 1.5, 0.2), ..Transform::from_position(Vec3::new(0.0, 0.5, 2.0)) };
         ok(fy_transform_set(world.0, wall, &transform(wide)));
-        ok(fy_mesh_renderer_set(world.0, wall, &FyMeshRenderer { mesh, material }));
+        ok(fy_mesh_renderer_set(world.0, wall, &FyMeshRenderer { mesh, material, ..Default::default() }));
         ok(fy_layer_set(world.0, wall, 3));
         ok(fy_camera_active(world.0, &mut camera));
     }

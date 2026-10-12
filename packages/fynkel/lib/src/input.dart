@@ -221,8 +221,9 @@ final class Input {
   }
 
   /// Mouse wheel and two-finger trackpad scrolling this frame, in logical
-  /// pixels, positive the way Flutter's `scrollDelta` is (wheel down or
-  /// fingers up: +y).
+  /// pixels. Y is positive with the wheel turned away from you, as Unity's
+  /// `mouseScrollDelta` (the other way from Flutter's `scrollDelta`); X is
+  /// positive to the right.
   Vec2 get scroll => _scroll;
 
   // --- Axes and actions ---
@@ -603,7 +604,7 @@ final class Input {
     _pinch();
 
     if (_scrollX != 0 || _scrollY != 0) {
-      _scroll = Vec2(_scrollX, _scrollY);
+      _scroll = Vec2(_scrollX, -_scrollY);
       _scrollX = 0;
       _scrollY = 0;
       _emit(onScroll, _scroll);
@@ -958,7 +959,7 @@ enum SwipeSide { left, right, up, down }
 
 /// A frame's pinch and twist: [Input.onPinch], [Input.onTwist].
 final class Pinch {
-  Pinch._(this.scale, this.twist, this.centre, this.fingers);
+  Pinch._(this.scale, this.twist, this.center, this.fingers);
 
   /// How much further apart the fingers are than last frame: above 1
   /// spreading, below 1 pinching in. Zoom by it.
@@ -969,13 +970,13 @@ final class Pinch {
   final double twist;
 
   /// Between the fingers, or where the mouse is for a trackpad.
-  final ViewPoint centre;
+  final ViewPoint center;
 
   /// How many fingers; 0 for a trackpad.
   final int fingers;
 
   @override
-  String toString() => 'Pinch(scale $scale, twist $twist, at (${centre.x}, ${centre.y}))';
+  String toString() => 'Pinch(scale $scale, twist $twist, at (${center.x}, ${center.y}))';
 }
 
 /// A key going down or up, with the modifier keys held then.
@@ -1141,7 +1142,9 @@ final class InputSimulation {
   /// The mouse (or a pen) [id] left the view.
   void leave(int id) => _input._queue.add(_Raw(_RawKind.leave, id, 0, 0));
 
-  /// A mouse wheel or a trackpad scrolled by ([dx], [dy]).
+  /// A mouse wheel or a trackpad scrolled by ([dx], [dy]), as Flutter's
+  /// `scrollDelta` (+y for the wheel turned towards you): [Input.scroll]
+  /// says it the other way up, as Unity's.
   void scrollBy(double dx, double dy) => _input._queue.add(_Raw(_RawKind.scroll, 0, dx, dy));
 
   /// A trackpad pinched by [scale] (2 is twice as far apart) and turned by

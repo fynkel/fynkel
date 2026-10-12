@@ -48,7 +48,7 @@ class InputScene extends LabScene {
     });
     on(input.onPinch, (p) => _size = (_size * p.scale).clamp(0.3, 3.0));
     on(input.onTwist, (p) => _turn += p.twist);
-    on(input.onScroll, (s) => _size = (_size * math.exp(-s.y * 0.003)).clamp(0.3, 3.0));
+    on(input.onScroll, (s) => _size = (_size * math.exp(s.y * 0.003)).clamp(0.3, 3.0));
   }
 
   @override

@@ -756,7 +756,7 @@ class GameObject with _Moving {
           far: scratch.camera.ref.far_clip,
           clearColor: scratch.camera.ref.clear_color.read(),
           orthographic: scratch.camera.ref.orthographic,
-          size: scratch.camera.ref.size,
+          orthographicSize: scratch.camera.ref.size,
           cullingMask: LayerMask._(scratch.camera.ref.culling_mask),
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
@@ -876,7 +876,7 @@ class GameObject with _Moving {
     c.far_clip = value.far;
     c.clear_color.write(value.clearColor);
     c.orthographic = value.orthographic;
-    c.size = value.size;
+    c.size = value.orthographicSize;
     c.culling_mask = value.cullingMask.value;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
@@ -898,9 +898,11 @@ class GameObject with _Moving {
     final w = world;
     final mesh = value.mesh == null ? 0 : w._meshId(value.mesh!);
     final material = value.material == null ? 0 : w._materialId(value.material!);
-    scratch.meshRenderer.ref
+    final r = scratch.meshRenderer.ref
       ..mesh = mesh
-      ..material = material;
+      ..material = material
+      ..own_color = value.color != null;
+    r.color.write(value.color ?? Color.white);
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
   }
 
@@ -921,7 +923,7 @@ final class _Description {
   /// For a model's copy ([Model.instantiate]): the engine makes its objects.
   Model? model;
 
-  /// For a model's copy from [Assets.model]: the use it holds of the
+  /// For a model's copy from [Assets.instantiate]: the use it holds of the
   /// model, until it's destroyed.
   _Asset? asset;
 }

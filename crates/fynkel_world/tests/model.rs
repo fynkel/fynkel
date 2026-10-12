@@ -103,7 +103,10 @@ fn a_model_spawns_as_a_tree_of_named_objects_under_one_root() {
     assert_eq!(world.name(floor).unwrap(), Some("Floor 3"));
     // Brick: floors take the three materials in turn.
     let renderer = world.get::<MeshRenderer>(block).unwrap();
-    assert_eq!(renderer, MeshRenderer { mesh: Some(ids.meshes[0]), material: Some(ids.materials[0]) });
+    assert_eq!(
+        renderer,
+        MeshRenderer { mesh: Some(ids.meshes[0]), material: Some(ids.materials[0]), ..Default::default() }
+    );
     assert_eq!(
         world.get::<MeshRenderer>(world.find(root, "Block 4.0").unwrap().unwrap()).unwrap().material,
         Some(ids.materials[1])

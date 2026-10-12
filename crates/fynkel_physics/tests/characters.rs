@@ -240,3 +240,21 @@ fn bad_moves_are_refused() {
     assert_eq!(physics.move_character(999, Vector::X, DT, s, &mut hits), Err(PhysicsError::NoCollider(999)));
     character.go(&mut physics, Vector::X * 0.1);
 }
+
+#[test]
+fn a_move_says_what_it_stands_on() {
+    let mut physics = Physics::new();
+    let floor = block(&mut physics, 100, Vector::new(100.0, 1.0, 100.0), Vector::new(0.0, -0.5, 0.0), 0.0);
+    let crate_ = block(&mut physics, 7, Vector::new(4.0, 1.0, 4.0), Vector::new(10.0, 0.5, 0.0), 0.0);
+    let mut character = Character::new(&mut physics, 0.0, 0.0);
+    assert_eq!(character.walk(&mut physics, Vector::ZERO, 0.2).ground, Some(floor));
+
+    character.object.position = Vector::new(10.0, 2.0 + character.settings.skin_width, 0.0);
+    physics.follow(&[character.id], &[character.object]).unwrap();
+    assert_eq!(character.walk(&mut physics, Vector::ZERO, 0.2).ground, Some(crate_));
+    assert_eq!(character.go(&mut physics, Vector::ZERO).ground, Some(crate_), "standing still too");
+
+    character.object.position = Vector::new(30.0, 5.0, 0.0);
+    physics.follow(&[character.id], &[character.object]).unwrap();
+    assert_eq!(character.go(&mut physics, Vector::new(0.0, -0.01, 0.0)).ground, None, "in the air");
+}

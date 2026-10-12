@@ -92,6 +92,28 @@ void main() {
     expect((g2 - g).abs(), lessThan(8), reason: 'the green channel is the same in both');
   });
 
+  test("a renderer's own colour draws in place of its material's, and null goes back to it", () {
+    final scene = stage1();
+    final view = HeadlessView(scene.world, width: 64, height: 64);
+    addTearDown(view.dispose);
+    addTearDown(scene.world.dispose);
+
+    List<int> centre() {
+      final rgba = view.read(view.frame()).rgba;
+      final i = (32 * 64 + 32) * 4;
+      return rgba.sublist(i, i + 3);
+    }
+
+    final orange = centre();
+    final renderer = scene.cube.get<MeshRenderer>()!;
+    renderer.color = Color(0xFF3A61E0);
+    final [r, _, b] = centre();
+    expect(b, greaterThan(r), reason: 'blue, its own');
+    expect(scene.orange.color, Color(0xFFE0613A), reason: 'the material stays');
+    renderer.color = null;
+    expect(centre(), orange);
+  });
+
   test('a despawned object disappears from the picture', () {
     final scene = stage1();
     final view = HeadlessView(scene.world, width: 64, height: 64);

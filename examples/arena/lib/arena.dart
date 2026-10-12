@@ -213,7 +213,6 @@ class Player extends GameObject {
   Player()
     : super(
         name: 'player',
-        // Its own material, as Flash changes its colour.
         components: [
           MeshRenderer(Mesh.sphere(), Material(color: blue)),
           Health(hearts, guard: 1),
@@ -303,13 +302,16 @@ class Enemy extends GameObject {
       super(
         transform: Transform(position: at + Vec3(0, 0.5, 0), scale: Vec3.zero),
         components: [
-          MeshRenderer(Mesh.cube(), Material(color: hits > 1 ? purple : red)),
+          // Shared: Flash changes the renderer's own colour, not these.
+          MeshRenderer(Mesh.cube(), hits > 1 ? _purple : _red),
           Health(hits, guard: 0.3),
           Flash(hits > 1 ? purple : red),
         ],
       );
 
   static const red = Color(0xFFE0613A);
+  static final _red = Material(color: red);
+  static final _purple = Material(color: purple);
   static const purple = Color(0xFF9A5AE0);
 
   final Player player;
@@ -433,7 +435,7 @@ class ArenaCamera extends GameObject {
     addComponent(_follow);
     addComponent(_look);
     on(input.onPinch, (pinch) => _zoomBy(1 / pinch.scale));
-    on(input.onScroll, (scroll) => _zoomBy(1 + scroll.y * 0.002));
+    on(input.onScroll, (scroll) => _zoomBy(1 - scroll.y * 0.002));
   }
 
   void _zoomBy(double factor) => _zoom = (_zoom * factor).clamp(0.5, 1.6);

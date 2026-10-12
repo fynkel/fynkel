@@ -597,18 +597,31 @@ void main() {
       expectVec(thing.forward, Vec3.right, 1e-6);
     });
 
-    test("colorTo changes its renderer's material, or the one given", () {
+    test("colorTo changes its renderer's own colour, from the material's; or the material given", () {
       final paint = Material(color: Color.black);
       thing.addComponent(MeshRenderer(Mesh.cube(), paint));
+      final twin = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), paint)]));
       thing.colorTo(Color.white, seconds: 1, ease: Ease.linear);
       frames(2);
-      expect(paint.color, const Color.rgb(0.5, 0.5, 0.5));
+      expect(thing.get<MeshRenderer>()!.color, const Color.rgb(0.5, 0.5, 0.5));
+      expect(paint.color, Color.black, reason: 'the shared material stays');
+      expect(twin.get<MeshRenderer>()!.color, isNull);
       final bare = world.add(GameObject());
       expect(() => bare.colorTo(Color.white, seconds: 1), throwsStateError);
       final other = Material();
       bare.colorTo(Color.black, seconds: 0.25, material: other);
       frame();
       expect(other.color, Color.black);
+    });
+
+    test('a copied material has the same values, and changes alone', () {
+      final paint = Material(name: 'paint', color: Color.black, roughness: 0.2, doubleSided: true);
+      final copy = paint.copy();
+      expect(copy.toString(), paint.toString());
+      expect((copy.roughness, copy.doubleSided, copy.name), (0.2, true, 'paint'));
+      copy.color = Color.white;
+      expect(paint.color, Color.black);
+      expect(paint.copy(name: 'other').name, 'other');
     });
 
     test('punchScale swells by up to the punch and ends where it began', () {

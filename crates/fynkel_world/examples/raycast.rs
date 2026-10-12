@@ -68,7 +68,9 @@ fn grid(deep: bool) -> World {
                 _ => position,
             };
             world.insert(id, Transform::from_position(local)).unwrap();
-            world.insert(id, MeshRenderer { mesh: Some(cube), material: Some(material) }).unwrap();
+            world
+                .insert(id, MeshRenderer { mesh: Some(cube), material: Some(material), ..Default::default() })
+                .unwrap();
             if deep && j > 0 {
                 world.set_parent(id, parent.map(|(p, _)| p)).unwrap();
             }
@@ -84,7 +86,7 @@ fn sphere(segments: u32, rings: u32) -> World {
     let material = material(&mut world);
     let id = world.spawn();
     world.insert(id, Transform::default()).unwrap();
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
     world
 }
 

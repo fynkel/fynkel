@@ -269,6 +269,23 @@ fn stay_stops_while_the_bodies_sleep_and_the_pair_still_touches() {
 }
 
 #[test]
+fn new_gravity_wakes_every_sleeping_body() {
+    let mut physics = Physics::new();
+    let floor = ColliderSpec { shape: ColliderShape::Box { size: Vector::new(20.0, 1.0, 20.0) }, ..spec(false, 0) };
+    physics.add_object_collider(1, floor, at(Vector::new(0.0, -0.5, 0.0)), None).unwrap();
+    let body = physics.add_rigidbody(2, BodySpec::default(), Pose::from_translation(Vector::Y * 0.5)).unwrap();
+    physics.add_object_collider(2, spec(false, 0), at(Vector::Y * 0.5), Some(body)).unwrap();
+    for _ in 0..500 {
+        physics.step(STEP).unwrap();
+    }
+    assert!(physics.is_sleeping(body).unwrap(), "the cube never slept");
+    physics.set_gravity(physics.gravity()).unwrap();
+    assert!(physics.is_sleeping(body).unwrap(), "the same gravity leaves it asleep");
+    physics.set_gravity(Vector::new(0.0, 9.81, 0.0)).unwrap();
+    assert!(!physics.is_sleeping(body).unwrap(), "it would hang in the air");
+}
+
+#[test]
 fn layers_that_dont_meet_pass_through_each_other_and_queries_still_see_both() {
     let mut physics = Physics::new();
     let floor =
