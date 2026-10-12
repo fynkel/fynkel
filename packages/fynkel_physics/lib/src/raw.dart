@@ -8,6 +8,7 @@ import 'package:ffi/ffi.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'bindings.g.dart';
+import 'owned_memory.dart';
 
 /// Why a call into the physics failed. The same codes, in the same order,
 /// as `FpStatus` in crates/fynkel_physics_ffi/include/fynkel_physics.h.
@@ -108,15 +109,18 @@ final class RawPhysics implements Finalizable {
 
   late Pointer<FpWorld> _world;
 
+  // Native memory, freed when this is collected or the isolate ends.
+  late final _memory = OwnedMemory(this);
+
   // Scratch for the calls, and the buffer of moved bodies, which grows
   // to the most a step has moved.
-  final _id = malloc<Uint64>();
-  final _count = malloc<Uint32>();
-  final _pose = malloc<FpPose>();
-  final _shape = malloc<FpShape>();
-  final _vec = malloc<FpVec3>();
-  final _ray = malloc<FpRay>();
-  final _hit = malloc<FpHit>();
+  late final _id = _memory<Uint64>();
+  late final _count = _memory<Uint32>();
+  late final _pose = _memory<FpPose>();
+  late final _shape = _memory<FpShape>();
+  late final _vec = _memory<FpVec3>();
+  late final _ray = _memory<FpRay>();
+  late final _hit = _memory<FpHit>();
   Pointer<FpMoved> _moved = nullptr;
   var _movedCapacity = 0;
   var _movedCount = 0;
@@ -132,10 +136,8 @@ final class RawPhysics implements Finalizable {
     _finalizer.detach(this);
     fp_world_free(_world);
     _world = nullptr;
-    for (final p in [_id, _count, _pose, _shape, _vec, _ray, _hit, _moved]) {
-      if (p != nullptr) malloc.free(p);
-    }
-    _moved = nullptr;
+    // The scratch stays until this is collected (OwnedMemory), so a call
+    // made after this throws before it can harm anything.
   }
 
   set gravity(Vec3 value) {
@@ -251,9 +253,9 @@ final class RawPhysics implements Finalizable {
     final world = _live;
     final count = _count.value;
     if (count > _movedCapacity) {
-      if (_moved != nullptr) malloc.free(_moved);
+      if (_moved != nullptr) _memory.free(_moved);
       _movedCapacity = count * 2;
-      _moved = malloc<FpMoved>(_movedCapacity);
+      _moved = _memory<FpMoved>(_movedCapacity);
     }
     _check(fp_moved_read(world, _moved, count));
     return _movedCount = count;

@@ -233,7 +233,7 @@ extension _Loop on World {
           }
         }
         _runRoutines(fixed: true);
-        if (isDisposed) return;
+        if (_disposeAsked) return;
       }
     } finally {
       time._inFixed = false;

@@ -50,6 +50,13 @@ abstract class WorldSystem {
   void componentAdded(GameObject object, Component component) {}
 
   /// Called once when the world is disposed: free what the system holds.
+  ///
+  /// A game may keep the system past this (`final physics =
+  /// world.physics;` in a HUD), so every public call made afterwards must
+  /// throw a [StateError] before it touches native memory, and scratch it
+  /// writes into first must still be there: free it with a
+  /// `NativeFinalizer` (when the system is collected, or the isolate ends
+  /// on a hot restart), not here.
   @mustCallSuper
   void dispose() {}
 }

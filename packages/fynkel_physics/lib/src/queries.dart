@@ -117,9 +117,9 @@ extension _Queries on Physics {
     final count = _count.value;
     if (count == 0) return const [];
     if (count > _foundCapacity) {
-      if (_found != nullptr) malloc.free(_found);
+      if (_found != nullptr) _memory.free(_found);
       _foundCapacity = count * 2;
-      _found = malloc<FpFound>(_foundCapacity);
+      _found = _memory<FpFound>(_foundCapacity);
     }
     checkPhysics(fp_found_read(_world, _found, count));
     // An FpFound is two 64-bit ids: the collider's, then its key.
@@ -150,9 +150,9 @@ extension _Queries on Physics {
     final count = _count.value;
     if (count == 0) return const [];
     if (count > _hitsCapacity) {
-      if (_hits != nullptr) malloc.free(_hits);
+      if (_hits != nullptr) _memory.free(_hits);
       _hitsCapacity = count * 2;
-      _hits = malloc<FpHit>(_hitsCapacity);
+      _hits = _memory<FpHit>(_hitsCapacity);
     }
     checkPhysics(fp_hits_read(_world, _hits, count));
     final (floats, ids) = (_hits.cast<Float>(), _hits.cast<Uint64>());

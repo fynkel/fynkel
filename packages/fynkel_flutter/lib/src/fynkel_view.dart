@@ -112,6 +112,12 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// over the game, with the object and the line it came from, as well as
 /// in the console: [World.errors], which it listens to.
 ///
+/// The frames never stop: what throws in one (the view's own [onFrame],
+/// say) is reported to Flutter and the next frame comes. Without the
+/// plugin, as in a widget test of the game, the world runs and nothing is
+/// drawn; if the view itself fails, its error shows in its place and the
+/// world runs on.
+///
 /// The frames are drawn at the widget's size in physical pixels times
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
 /// speed; the view never lowers it by itself.
@@ -205,6 +211,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   int _sentWidth = 0, _sentHeight = 0;
   Object? _error;
 
+  /// Whether the frames go on without a picture: there is no plugin (a
+  /// widget test), or the view failed ([_error]). The world still runs.
+  bool _noPicture = false;
+
+  // When the view's own frame last reported an error, so one that comes
+  // every frame is reported once a second.
+  int? _reportedMicros;
+
   // What the game's code threw, shown over it (showErrors).
   StreamSubscription<ObjectError>? _errorsHeard;
   final _gameErrors = <ObjectError>[];
@@ -286,8 +300,28 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.dispose();
   }
 
+  /// Runs a frame. Whatever throws is reported and the next frame comes
+  /// all the same: a ticker whose callback throws would stop for good.
   void _tick(Duration elapsed) {
     final micros = elapsed.inMicroseconds;
+    try {
+      _frame(micros);
+    } catch (error, stack) {
+      final reported = _reportedMicros;
+      if (reported != null && micros - reported < 1000000) return;
+      _reportedMicros = micros;
+      FlutterError.reportError(
+        FlutterErrorDetails(
+          exception: error,
+          stack: stack,
+          library: 'fynkel_flutter',
+          context: ErrorDescription("in FynkelView's frame (the next frame comes all the same)"),
+        ),
+      );
+    }
+  }
+
+  void _frame(int micros) {
     final last = _lastMicros;
     _lastMicros = micros;
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
@@ -296,7 +330,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     if (!world.isDisposed) world.update(dt);
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
-    if (_width == 0 || _height == 0) return;
+    if (_noPicture || _width == 0 || _height == 0) return;
 
     final view = _view ?? _open();
     if (view == null) return;
@@ -371,6 +405,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       final texture = await channel.invokeMethod<int>('register', arguments);
       if (mounted && _view == view) setState(() => _texture = texture);
       return texture;
+    } on MissingPluginException {
+      // No plugin: a widget test, most likely. The game runs on unseen.
+      if (mounted && _view == view) _withoutPicture();
+      return null;
     } catch (error, stack) {
       if (mounted && _view == view) _fail(error, stack);
       return null;
@@ -393,6 +431,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     );
   }
 
+  /// The view can't show the game: the error shows in its place, and the
+  /// world runs on, so a HUD over it still works.
   void _fail(Object error, StackTrace stack) {
     FlutterError.reportError(
       FlutterErrorDetails(
@@ -402,8 +442,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         context: ErrorDescription('in FynkelView'),
       ),
     );
-    _ticker.stop();
+    _withoutPicture();
     setState(() => _error = error);
+  }
+
+  /// Lets go of the engine view; the world's frames go on without it.
+  void _withoutPicture() {
+    _noPicture = true;
+    _release();
   }
 
   /// Lets go of the engine view: the plugin stops using it first, then it

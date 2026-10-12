@@ -319,6 +319,33 @@ void main() {
     expect(log, ['update a', 'update b', 'update moved', 'update below']);
   });
 
+  test('a dispose from inside an update waits for it: the phases left are skipped, then the world is freed', () {
+    final world = World();
+    final quitter = world.add(_Quits());
+    final after = world.add(_Counts());
+    world.update(1 / 60);
+    expect(world.isDisposed, isFalse);
+    quitter.quit = true;
+    world.update(1 / 60); // must not throw
+    expect(world.isDisposed, isTrue);
+    expect(after.updates, 2, reason: 'the update phase ends, then stops');
+    expect(after.lates, 1, reason: 'no late update after the dispose');
+  });
+
+  test('an update from inside an update is refused, and the frame goes on', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final errors = <Object>[];
+    world.errors.listen((e) => errors.add(e.error));
+    final nested = world.add(_UpdatesAgain());
+    world.update(1 / 60);
+    world.update(1 / 60);
+    await pumpEventQueue();
+    expect(nested.updates, 2);
+    expect(errors, everyElement(isA<StateError>()));
+    expect(errors, hasLength(2));
+  });
+
   test('every object reads the same input', () {
     final reader = world.add(_ReadsInput());
     world.input.keyDown(KeyCode.w);
@@ -380,5 +407,42 @@ class _ReadsInput extends GameObject {
     super.onUpdate();
     seen = input;
     wasDown = input.isDown(KeyCode.w);
+  }
+}
+
+class _Quits extends GameObject {
+  var quit = false;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (quit) world.dispose();
+  }
+}
+
+class _UpdatesAgain extends GameObject {
+  var updates = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    updates++;
+    world.update(1 / 60);
+  }
+}
+
+class _Counts extends GameObject {
+  var updates = 0, lates = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    updates++;
+  }
+
+  @override
+  void onLateUpdate() {
+    super.onLateUpdate();
+    lates++;
   }
 }

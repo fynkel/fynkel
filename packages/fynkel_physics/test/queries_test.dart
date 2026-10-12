@@ -324,6 +324,19 @@ void main() {
     three(world);
     world.dispose();
   });
+
+  test('a Physics kept past its world throws when used, writing into nothing freed', () {
+    final world = World();
+    three(world);
+    final physics = world.physics; // as a HUD's State might keep it
+    world.dispose();
+    final disposed = throwsA(isA<StateError>().having((e) => e.message, 'message', contains('disposed World')));
+    expect(() => physics.gravity = const Vec3(0, -1, 0), disposed);
+    expect(() => physics.defaultSolverIterations = 8, disposed);
+    expect(() => physics.raycast(Ray(Vec3.zero, Vec3.forward)), disposed);
+    expect(() => physics.overlapSphere(Vec3.zero, 1), disposed);
+    expect(physics.gravity, const Vec3(0, -9.81, 0), reason: 'the failed set changed nothing');
+  });
 }
 
 /// Counts the debug lines at the end of each frame's late update.
