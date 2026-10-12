@@ -266,19 +266,19 @@ extension _Loop on World {
       _live.removeWhere((o) => o._destroyed);
       _liveDirty = false;
     }
-    if (_moved.isEmpty) return;
+    if (_reparented.isEmpty) return;
     // Each moved object and what's below it go last, in the order they
     // moved (one moved later, inside another's subtree, goes after it),
     // keeping their order among themselves: one pass over the live list.
     final last = <GameObject, int>{};
-    for (var i = 0; i < _moved.length; i++) {
-      final moved = _moved[i];
+    for (var i = 0; i < _reparented.length; i++) {
+      final moved = _reparented[i];
       if (moved._destroyed) continue;
       for (final o in _subtree(moved)) {
         last[o] = i;
       }
     }
-    _moved.clear();
+    _reparented.clear();
     if (last.isEmpty) return;
     final tails = <int, List<GameObject>>{};
     _live.removeWhere((o) {

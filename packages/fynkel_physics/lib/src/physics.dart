@@ -33,9 +33,13 @@ part 'rigidbody.dart';
 /// `physics`, and the world as `world.physics`; it's made the first time
 /// it's asked for, so a game never sets it up.
 final class Physics extends WorldSystem implements Finalizable {
-  Physics._(super.world) {
+  Physics._(super.world) : _moved = world.movedReader() {
     _pointer = _raw.pointer;
   }
+
+  // The objects whose transform, parent or layer was set since physics
+  // last followed them.
+  final MovedReader _moved;
 
   final _raw = RawPhysics();
   late final Pointer<FpWorld> _pointer;
@@ -126,8 +130,11 @@ final class Physics extends WorldSystem implements Finalizable {
   Pointer<Float> _transforms = nullptr;
   Pointer<FpTransform> _transformsAsStructs = nullptr;
   var _capacity = 0;
-  var _listChanged = false;
-  var _seenVersion = -1;
+  var _following = 0;
+  // Following the moved log: the objects still to look at, and the
+  // colliders found below them.
+  final _below = <GameObject>[];
+  final _toFollow = <Collider>[];
 
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
@@ -206,9 +213,9 @@ final class Physics extends WorldSystem implements Finalizable {
   // 4 how many colliders it hit.
   late final _character = _memory<FpCharacter>();
   late final _characterFloats = _character.cast<Float>();
-  late final _moved = _memory<FpCharacterMove>();
-  late final _movedFloats = _moved.cast<Float>();
-  late final _movedWords = _moved.cast<Uint32>();
+  late final _characterMove = _memory<FpCharacterMove>();
+  late final _characterFloatsOut = _characterMove.cast<Float>();
+  late final _characterWordsOut = _characterMove.cast<Uint32>();
   Pointer<FpCharacterHit> _characterHits = nullptr;
   var _characterHitCapacity = 0;
   // The joints: by key, enabled, and waiting for their rigidbodies; the
@@ -322,6 +329,7 @@ final class Physics extends WorldSystem implements Finalizable {
     _bodies.clear();
     _interpolated.clear();
     _raw.dispose();
+    _moved.close();
     // The scratch stays until this is collected (OwnedMemory), so a call
     // made after this throws before it can harm anything.
   }
@@ -357,7 +365,6 @@ final class Physics extends WorldSystem implements Finalizable {
       .._key = key
       .._index = _colliders.length;
     _colliders.add(collider);
-    _listChanged = true;
   }
 
   /// Adds [collider] to the native world with [key], on [body] if any,
@@ -398,7 +405,6 @@ final class Physics extends WorldSystem implements Finalizable {
       _colliders[collider._index] = last;
       last._index = collider._index;
     }
-    _listChanged = true;
     checkPhysics(fp_collider_remove(_world, id));
     collider._released();
   }
@@ -411,7 +417,6 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._body?._colliders.remove(collider);
     collider._body = null;
     _addNative(collider, collider._key, body);
-    _listChanged = true;
   }
 
   void _respec(Collider collider) {
@@ -463,57 +468,113 @@ final class Physics extends WorldSystem implements Finalizable {
   /// rigidbodies whose objects the game moved are put there (teleported),
   /// colliders whose objects moved follow them, and each is on its object's
   /// layer and on the nearest rigidbody; then joints waiting for their
-  /// rigidbodies join them. Before each step and each query; nothing to do
-  /// while no transform, parent or layer was set since, and no joint
-  /// waits.
+  /// rigidbodies join them. Before each step and each query; it looks only
+  /// at the objects in the world's moved log, and what's below them, so
+  /// nothing to do while no transform, parent or layer was set since, and
+  /// no joint waits.
   void _follow() {
     if (_stepping) _collect();
-    if (_listChanged || world.transformVersion != _seenVersion) _followMoved();
+    if (_moved.length > 0) _followMoved();
     if (_waiting.isNotEmpty) _joinWaiting();
   }
 
   void _followMoved() {
-    _listChanged = false;
-    final bodies = _bodies;
-    for (var i = 0; i < bodies.length; i++) {
-      final body = bodies[i];
-      if (body._place.moved(world)) _teleport(body);
-    }
+    final moved = _moved;
+    final count = moved.length;
     final colliders = _colliders;
-    final count = colliders.length;
-    if (count > _capacity) {
-      for (final p in [_objectIds, _colliderIds, _transforms]) {
-        if (p != nullptr) _memory.free(p);
+    if (count >= colliders.length + _bodies.length) {
+      // As many moves as there are bodies and colliders: look at each of
+      // them instead.
+      moved.markRead();
+      final bodies = _bodies;
+      for (var i = 0; i < bodies.length; i++) {
+        final body = bodies[i];
+        if (body._place.moved(world)) _teleport(body);
       }
-      _capacity = count * 2;
-      _objectIds = _memory<Uint64>(_capacity);
-      _colliderIds = _memory<Uint64>(_capacity);
-      _transforms = _memory<Float>(_capacity * 10);
-      _transformsAsStructs = _transforms.cast();
+      _startFollowing(colliders.length);
+      for (var i = 0; i < colliders.length; i++) {
+        _followCollider(colliders[i]);
+      }
+      _endFollowing();
+      return;
     }
-    var moved = 0;
-    for (var i = 0; i < colliders.length; i++) {
-      final c = colliders[i];
-      final layer = c.gameObject.layer;
-      if (layer != c._layer) {
-        c._layer = layer;
-        _respec(c);
+    // The bodies first, then the colliders, which may be on them. A
+    // collider is found once each time it's below a moved object, and
+    // followed once.
+    final found = _toFollow..clear();
+    _below.clear();
+    for (var i = 0; i < count; i++) {
+      final object = moved[i];
+      if (object.isDestroyed) continue;
+      // Read by index, then cleared: taking each off the end would give
+      // back the list's storage, to be grown again the next frame.
+      final below = _below..add(object);
+      for (var j = 0; j < below.length; j++) {
+        final o = below[j];
+        for (var k = 0; k < o.childCount; k++) {
+          below.add(o.childAt(k));
+        }
+        for (var k = 0; k < o.componentCount; k++) {
+          final c = o.componentAt(k);
+          if (c is Collider) {
+            if (c._id != 0) found.add(c);
+          } else if (c is Rigidbody && c._id != 0 && c._place.moved(world)) {
+            _teleport(c);
+          }
+        }
       }
-      final place = c._place;
-      if (!place.moved(world)) continue;
-      if (place.body != c._body) {
-        _reattach(c, place.body);
-        continue;
-      }
-      place.seen();
-      _objectIds[moved] = c.gameObject.id;
-      _colliderIds[moved] = c._id;
-      moved++;
+      below.clear();
     }
-    _seenVersion = world.transformVersion;
-    if (moved == 0) return;
-    world.readWorldTransforms(_objectIds, moved, _transforms);
-    checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, moved));
+    moved.markRead();
+    _startFollowing(found.length);
+    for (var i = 0; i < found.length; i++) {
+      _followCollider(found[i]);
+    }
+    found.clear();
+    _endFollowing();
+  }
+
+  /// Makes room to follow [count] colliders.
+  void _startFollowing(int count) {
+    _following = 0;
+    if (count <= _capacity) return;
+    for (final p in [_objectIds, _colliderIds, _transforms]) {
+      if (p != nullptr) _memory.free(p);
+    }
+    _capacity = count * 2;
+    _objectIds = _memory<Uint64>(_capacity);
+    _colliderIds = _memory<Uint64>(_capacity);
+    _transforms = _memory<Float>(_capacity * 10);
+    _transformsAsStructs = _transforms.cast();
+  }
+
+  /// Puts [c] on its object's layer, and on the nearest rigidbody, and
+  /// notes it to follow its object if that moved.
+  void _followCollider(Collider c) {
+    if (c._id == 0) return;
+    final layer = c.gameObject.layer;
+    if (layer != c._layer) {
+      c._layer = layer;
+      _respec(c);
+    }
+    final place = c._place;
+    if (!place.moved(world)) return;
+    if (place.body != c._body) {
+      _reattach(c, place.body);
+      return;
+    }
+    place.seen();
+    _objectIds[_following] = c.gameObject.id;
+    _colliderIds[_following] = c._id;
+    _following++;
+  }
+
+  /// Moves the colliders noted to follow their objects, in one call.
+  void _endFollowing() {
+    final count = _following;
+    if (count == 0) return;
+    world.readWorldTransforms(_objectIds, count, _transforms);
+    checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
   }
 
   // --- Rigidbodies -----------------------------------------------------------

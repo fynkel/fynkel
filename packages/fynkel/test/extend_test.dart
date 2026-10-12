@@ -1,6 +1,6 @@
 // What package:fynkel/extend.dart gives a system that follows objects
-// (docs/stage-5.md §3.1, step 3): the transform version and the batched
-// world transforms.
+// (docs/stage-5.md §3.1, step 3): the transform version, the moved log
+// and the batched world transforms.
 
 import 'dart:ffi';
 
@@ -59,6 +59,46 @@ void main() {
     b.parent = a;
     expect(b.transformStamp, world.transformVersion);
     expect(world.hierarchyVersion, isNot(shape));
+  });
+
+  test('a moved reader reads each object set since it last read, once while it waits, until it closes', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final (a, b, c) = (world.add(GameObject()), world.add(GameObject()), world.add(GameObject()));
+    a.position = Vec3(1, 0, 0);
+    final moved = world.movedReader();
+    final other = world.movedReader();
+    List<GameObject> read(MovedReader reader) {
+      final objects = [for (var i = 0; i < reader.length; i++) reader[i]];
+      reader.markRead();
+      return objects;
+    }
+
+    expect(read(moved), isEmpty, reason: 'it starts reading where it was made');
+
+    a.position = Vec3(2, 0, 0);
+    a.position = Vec3(3, 0, 0);
+    b.parent = a;
+    c.layer = 4;
+    a.name = 'a';
+    a.active = false;
+    world.update(1 / 60);
+    expect(read(moved), [a, b, c], reason: 'a transform, a parent and a layer; a once, however often it moved');
+
+    b.position = Vec3(0, 1, 0);
+    a.position = Vec3(4, 0, 0);
+    expect(read(moved), [b, a], reason: 'moved again after the reader read it');
+    expect(read(other), [a, b, c, b, a], reason: 'the other reader hadn\'t read: it sees them all, some twice');
+
+    expect(() => moved[0], throwsRangeError, reason: 'nothing moved since');
+    other.close();
+    expect(other.length, 0);
+    b.position = Vec3.zero;
+    expect(read(moved), [b]);
+    expect(other.length, 0, reason: 'closed');
+    moved.close();
+    world.dispose();
+    expect(world.movedReader, throwsStateError);
   });
 
   test('many world transforms are read in one call, after the moves are sent', () {

@@ -41,7 +41,8 @@ extension _Objects on World {
     _unlink(child);
     _link(child, parent);
     child._transformStamp = ++_transformVersion;
-    _moved.add(child);
+    _logMoved(child);
+    _reparented.add(child);
     _shape++;
     _refresh(child);
   }

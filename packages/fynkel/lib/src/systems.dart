@@ -76,6 +76,13 @@ extension GameObjectSystems on GameObject {
   /// Its component at [index], below [componentCount]; it may be
   /// [Component.isRemoved].
   Component componentAt(int index) => _components![index];
+
+  /// How many children it has: read them with [childAt], which, unlike
+  /// [GameObject.children], makes no list.
+  int get childCount => _children?.length ?? 0;
+
+  /// Its child at [index], below [childCount].
+  GameObject childAt(int index) => _children![index];
 }
 
 /// Finding and making a world's systems.
@@ -104,6 +111,17 @@ extension WorldSystems on World {
   /// has changed, so a system that follows objects has nothing to read.
   int get transformVersion => _transformVersion;
 
+  /// A new reader of the world's moved log, which starts reading here:
+  /// every object whose transform, parent or layer is set from now on is
+  /// in it, at least once, until the reader reads past it. [MovedReader.close]
+  /// it when done.
+  MovedReader movedReader() {
+    if (isDisposed) throw StateError('this World was disposed');
+    final reader = MovedReader._(this);
+    _movedReaders.add(reader);
+    return reader;
+  }
+
   /// A number that goes up whenever an object is added, destroyed, shown,
   /// hidden or given a new parent: while it stays the same, every object's
   /// parent is what it was.
@@ -123,5 +141,79 @@ extension WorldSystems on World {
     // one each call allocates.
     if (out.address != _manyOut.address) _manyOut = out.cast();
     check(fy_world_transform_get_many(pointer, ids, count, _manyOut));
+  }
+}
+
+/// A system's place in its world's moved log ([WorldSystems.movedReader]):
+/// the objects whose transform, parent or layer was set since it last
+/// read, in the order they were first set. Each is in it at least once:
+/// an object set many times is in it again only once a reader has read
+/// past it. Their world transforms changed, and so did those of every
+/// object below them; they may since have been destroyed.
+///
+/// Read the objects by index, which makes no list, then [markRead]:
+///
+/// ```dart
+/// for (var i = 0; i < moved.length; i++) {
+///   final object = moved[i];
+///   if (!object.isDestroyed) follow(object);
+/// }
+/// moved.markRead();
+/// ```
+///
+/// The log keeps an entry until every reader has read it, so each reader
+/// should read now and then; an object waits in it once however often it
+/// moves meanwhile.
+final class MovedReader {
+  MovedReader._(this._world) : _cursor = _world._movedBase + _world._movedLog.length;
+
+  final World _world;
+  int _cursor;
+  var _closed = false;
+
+  /// How many objects moved since the last [markRead].
+  int get length => _closed ? 0 : _world._movedBase + _world._movedLog.length - _cursor;
+
+  /// The object at [index], below [length].
+  GameObject operator [](int index) {
+    RangeError.checkValidIndex(index, this, 'index', length);
+    return _world._movedLog[_cursor - _world._movedBase + index];
+  }
+
+  /// Marks every object up to now read: [length] is 0 until another moves.
+  void markRead() {
+    if (_closed) return;
+    final world = _world;
+    _cursor = world._movedBase + world._movedLog.length;
+    if (_cursor > world._movedReadTo) world._movedReadTo = _cursor;
+    world._trimMoved();
+  }
+
+  /// Stops reading: the log no longer keeps entries for this reader.
+  void close() {
+    if (_closed) return;
+    _closed = true;
+    _world._movedReaders.remove(this);
+    _world._trimMoved();
+  }
+}
+
+extension _MovedLog on World {
+  /// Puts [object] in the moved log, unless no reader reads it, or it's
+  /// already there for every reader.
+  void _logMoved(GameObject object) {
+    if (_movedReaders.isEmpty || object._loggedAt >= _movedReadTo) return;
+    object._loggedAt = _movedBase + _movedLog.length;
+    _movedLog.add(object);
+  }
+
+  /// Lets go of the entries every reader has read: all of them, or none.
+  void _trimMoved() {
+    final end = _movedBase + _movedLog.length;
+    for (var i = 0; i < _movedReaders.length; i++) {
+      if (_movedReaders[i]._cursor != end) return;
+    }
+    _movedBase = end;
+    _movedLog.clear();
   }
 }

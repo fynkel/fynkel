@@ -144,7 +144,7 @@ final class World implements Finalizable {
     _microtasks.clear();
     _laterMicrotasks.clear();
     _motions.clear();
-    _moved.clear();
+    _reparented.clear();
     _unsent.clear();
     _assets.clear();
     _free(owned, null);
@@ -207,7 +207,9 @@ final class World implements Finalizable {
   // put last at the start of the next update.
   final _live = <GameObject>[];
   var _liveDirty = false;
-  final _moved = <GameObject>[];
+  // The objects given a new parent this frame: they and what's below them
+  // go last in [_live] at the start of the next update.
+  final _reparented = <GameObject>[];
 
   // Live objects and behaviours that haven't had onStart yet, in the same
   // order, each object before its behaviours.
@@ -230,6 +232,15 @@ final class World implements Finalizable {
   // Goes up whenever an object's transform, parent or layer is set: for
   // systems that follow objects (systems.dart).
   var _transformVersion = 0;
+
+  // The moved log (systems.dart): the objects whose transform, parent or
+  // layer was set, kept only while a [MovedReader] reads it. [_movedBase]
+  // is the place of its first entry, counted since the world was made;
+  // [_movedReadTo] the furthest any reader has read.
+  final _movedLog = <GameObject>[];
+  var _movedBase = 0;
+  var _movedReadTo = 0;
+  final _movedReaders = <MovedReader>[];
   // readWorldTransforms' last buffer, as the engine's type.
   Pointer<FyTransform> _manyOut = nullptr;
 

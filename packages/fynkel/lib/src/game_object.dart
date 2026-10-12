@@ -99,6 +99,8 @@ class GameObject with _Moving {
   // The world's transform version when this object's transform or parent
   // was last set (systems.dart).
   int _transformStamp = 0;
+  // Its last entry's place in [World._movedLog], or -1.
+  int _loggedAt = -1;
 
   // Its world transform, worked out in Dart from its parents', as of
   // [World._transformVersion] [_worldAt]: good until anything moves.
@@ -517,7 +519,10 @@ class GameObject with _Moving {
     _checkLayer(value);
     if (_described == null) check(fy_layer_set(_engine('its layer can\'t be set'), id, value));
     _layer = value;
-    _world?._transformVersion++;
+    if (_world case final world?) {
+      world._transformVersion++;
+      world._logMoved(this);
+    }
   }
 
   /// Whether this object is shown: it and every object above it [active],
@@ -801,6 +806,7 @@ class GameObject with _Moving {
   void _setTransform(Transform value) {
     _transform = value;
     _transformStamp = ++world._transformVersion;
+    world._logMoved(this);
     if (_unsent) return;
     _unsent = true;
     world._unsent.add(this);
@@ -813,18 +819,36 @@ class GameObject with _Moving {
     // In the engine's order: each field's finiteness as 32-bit floats,
     // and the rotation's length after its finiteness.
     final Transform(position: p, rotation: r, scale: s) = value;
-    if (!(_fits(p.x) && _fits(p.y) && _fits(p.z))) _refuse('position: NaN or infinity');
-    if (!(_fits(r.x) && _fits(r.y) && _fits(r.z) && _fits(r.w))) _refuse('rotation: NaN or infinity');
+    if (!_fits(p)) _refuse('position: NaN or infinity');
+    if (!_fits4(r)) _refuse('rotation: NaN or infinity');
     if ((math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w) - 1).abs() > 1e-3) {
       _refuse('rotation: rotation is not a unit quaternion');
     }
-    if (!(_fits(s.x) && _fits(s.y) && _fits(s.z))) _refuse('scale: NaN or infinity');
+    if (!_fits(s)) _refuse('scale: NaN or infinity');
   }
 
-  static final _f32 = Float32List(1);
+  static final _f32 = Float32List(4);
 
-  /// Whether [x] is finite as a 32-bit float: the fast test first.
-  static bool _fits(double x) => x.abs() < 3.4e38 || (_f32..[0] = x)[0].isFinite;
+  // Whether each of a vector's parts is finite as a 32-bit float: the fast
+  // test first. They take the vector, not each double, since a double
+  // passed to a call the JIT doesn't inline is boxed.
+  static bool _fits(Vec3 v) =>
+      (v.x.abs() < 3.4e38 && v.y.abs() < 3.4e38 && v.z.abs() < 3.4e38) ||
+      ((_f32
+            ..[0] = v.x
+            ..[1] = v.y
+            ..[2] = v.z
+            ..[3] = 0)
+          .every((x) => x.isFinite));
+
+  static bool _fits4(Quat q) =>
+      (q.x.abs() < 3.4e38 && q.y.abs() < 3.4e38 && q.z.abs() < 3.4e38 && q.w.abs() < 3.4e38) ||
+      ((_f32
+            ..[0] = q.x
+            ..[1] = q.y
+            ..[2] = q.z
+            ..[3] = q.w)
+          .every((x) => x.isFinite));
 
   static Never _refuse(String what) => throw FynkelException(FynkelStatus.invalidValue, 'Transform.$what');
 
