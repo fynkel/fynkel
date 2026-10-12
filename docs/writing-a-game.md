@@ -1097,6 +1097,19 @@ What keeps a game fast:
   object's `onUpdate` (`Swarm`): one call a frame, not 300.
 - **Share materials and meshes.** `Mesh.cube()` is always the same mesh;
   give many objects one `Material`.
+- **Let bodies sleep.** A body at rest costs nothing a step; one woken
+  every step (a force each `onFixedUpdate`) costs as one moving.
+- **Listen only where you need to.** Contacts are worked out only for
+  colliders whose object or rigidbody is `with Triggers` or `with
+  Collisions`.
+- **Query from the updates.** The step runs between frames, so a query in
+  `onUpdate` never waits for it; one from a Flutter handler between frames
+  may.
+- **More steps for fast spins and chains.** Physics turns a body at most
+  a quarter turn a step, and a chain of joints pulls apart more the
+  longer a step is: `time.fixedDelta = 1 / 100` (or 1 / 120) where a
+  game needs it. Keep a joint's two bodies within 10 times each other's
+  mass, as Unity advises.
 - **Measure** on the slowest phone you support. Each example has a
   `lib/measured.dart` for package:fynkel_measure's tool, which gives the
   frame rate and memory: `dart run fynkel_measure:measure rate`.
@@ -1104,7 +1117,9 @@ What keeps a game fast:
 ## 19. What isn't there yet
 
 Audio, animation of models, point and spot lights and shadows, saving,
-gamepads, scene files and an editor.
+gamepads, scene files and an editor. In physics: 2D physics,
+`ConfigurableJoint`, and chains of joints that don't stretch (Rapier's
+multibody joints).
 
 ## 20. From Unity
 
