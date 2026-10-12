@@ -36,6 +36,11 @@ abstract final class MeasureSettings {
   /// engine's view would be, so the same checks show what Flutter alone
   /// does.
   static final baseline = _setting('FYNKEL_BASELINE', const String.fromEnvironment('FYNKEL_BASELINE')) == '1';
+
+  /// The view's `resolutionScale` (`--define FYNKEL_RESOLUTION=0.5`), to
+  /// see what drawing fewer pixels gives.
+  static final resolution =
+      double.tryParse(_setting('FYNKEL_RESOLUTION', const String.fromEnvironment('FYNKEL_RESOLUTION'))) ?? 1.0;
 }
 
 /// The app's side of a measurement: the stats line, once a second, and

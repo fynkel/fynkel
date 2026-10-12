@@ -208,6 +208,7 @@ class _MeasuredState extends State<_Measured> {
                       onFrame: _onFrame,
                       onStats: _measurement.onStats,
                       onViewStats: onScreen.onViewStats,
+                      resolutionScale: MeasureSettings.resolution,
                     ),
             ),
           ),
