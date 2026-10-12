@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 16
+#define FY_ABI_VERSION 17
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -26,6 +26,15 @@
 
 // `fy_mesh_new_shape`'s shape: a 1×1 plane facing +Y.
 #define FY_MESH_PLANE 2
+
+// `fy_mesh_new_shape`'s shape: a capsule along Y, 2 high, of radius 0.5.
+#define FY_MESH_CAPSULE 3
+
+// `fy_mesh_new_shape`'s shape: a cylinder along Y, 2 high, of radius 0.5.
+#define FY_MESH_CYLINDER 4
+
+// `fy_mesh_new_shape`'s shape: a 1×1 quad in XY facing +Z.
+#define FY_MESH_QUAD 5
 
 // `fy_apple_acquire`: a surface was written to `out_surface`.
 #define FY_APPLE_SHOWN 1
@@ -593,8 +602,9 @@ FyStatus fy_light_get(const struct FyWorld *world, uint64_t id, struct FyLight *
 // `world` is null or live.
 FyStatus fy_light_remove(const struct FyWorld *world, uint64_t id);
 
-// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
-// `FY_MESH_PLANE`) and writes it to `out`.
+// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE`,
+// `FY_MESH_PLANE`, `FY_MESH_CAPSULE`, `FY_MESH_CYLINDER` or
+// `FY_MESH_QUAD`) and writes it to `out`.
 //
 // # Safety
 //

@@ -873,6 +873,7 @@ class GameObject with _Moving {
     l.color.write(value.color);
     l.intensity = value.intensity;
     check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
+    if (value.kind == LightKind.sun) world._noteSun(this);
   }
 
   void _writeMeshRenderer(MeshRenderer value) {

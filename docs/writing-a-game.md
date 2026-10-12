@@ -235,8 +235,11 @@ class Beacon extends GameObject {
 }
 ```
 
-- **Meshes**: `Mesh.cube()`, `Mesh.sphere()`, `Mesh.plane()`, or your own
-  with `Mesh.custom(positions:, indices:, …)`. Models come from files (§12).
+- **Meshes**: `Mesh.cube()`, `Mesh.sphere()`, `Mesh.capsule()`,
+  `Mesh.cylinder()`, `Mesh.plane()` and `Mesh.quad()`, Unity's shapes and
+  sizes (the capsule and cylinder are 2 high, the quad stands facing +Z),
+  or your own with `Mesh.custom(positions:, indices:, …)`. Models come
+  from files (§12).
 - **Materials** are physically based: `color`, `metallic`, `roughness`,
   `emissive` and `emissiveIntensity` (lit from within), and textures.
   One material can be shared by many objects; change it and all of them
@@ -689,7 +692,7 @@ pubspec, next to `fynkel`, and a game without it ships none of it:
 direction:)`, each with `center` and `isTrigger`. Their sizes are in the
 object's own space, and they follow its world position, rotation and
 scale (a sphere takes the largest axis). Their defaults fit
-`Mesh.cube()` and `Mesh.sphere()`. A collider counts while it's enabled
+`Mesh.cube()`, `Mesh.sphere()` and `Mesh.capsule()`. A collider counts while it's enabled
 and its object shown. Each has a `material`: `PhysicsMaterial(
 dynamicFriction:, bounciness:, frictionCombine:, bounceCombine:)`, Unity's
 0.6 and 0 by default. A collider with no `Rigidbody` is static; a game
@@ -930,7 +933,7 @@ class Walk extends Behaviour with ControllerHits {
 GameObject player() => GameObject(
   name: 'player',
   transform: Transform(position: Vec3(0, 1.1, 0)),
-  components: [MeshRenderer(Mesh.sphere(), Material()), CharacterController(), Walk()],
+  components: [MeshRenderer(Mesh.capsule(), Material()), CharacterController(), Walk()],
 );
 ```
 
@@ -1120,6 +1123,9 @@ What keeps a game fast:
   120 fps.
 - **Many alike things, one manager.** coins moves its 300 motes from one
   object's `onUpdate` (`Swarm`): one call a frame, not 300.
+- **What the camera can't see costs the GPU nothing.** An object wholly
+  out of view isn't drawn; it still costs its update and its copy to the
+  renderer, so hide or destroy what's far away for good.
 - **Share materials and meshes.** `Mesh.cube()` is always the same mesh;
   give many objects one `Material`.
 - **Let bodies sleep.** A body at rest costs nothing a step; one woken
@@ -1203,6 +1209,9 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - `Mesh.sphere()` has 720 triangles, as Unity's, not 2,208: a little
+    less round up close. A world with two `Light.sun`s says so once:
+    only one lights the scene.
   - Angles are radians everywhere: `Camera.fovY`, `VirtualCamera.fovY`,
     the joints' limits, motors, springs, `angle` and `velocity`, and
     `CharacterController.slopeLimit` were degrees. Write `60.deg`.

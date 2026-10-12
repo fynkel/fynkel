@@ -23,7 +23,7 @@
 //!   parents' (stage 2 plan §3.1). The camera and the sun take only the
 //!   position and rotation from it; a parent's scale doesn't stretch them.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
@@ -31,8 +31,8 @@ use fynkel_render::{
     CameraView, ColorSpace, Draw, Line, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey,
 };
 use fynkel_world::{
-    Camera, Color, ImageData, Light, LightKind, Material, MeshData, MeshId, MeshRenderer, ObjectId, Quat, TextureId,
-    Transform, World, WorldMatrices,
+    Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
+    TextureId, Transform, World, WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -55,6 +55,9 @@ pub(crate) struct Extract {
     uploaded: HashSet<MeshId>,
     uploaded_textures: HashSet<(TextureId, ColorSpace)>,
     matrices: WorldMatrices,
+    /// Each material as the renderer takes it, worked out once a frame:
+    /// objects are many, materials few.
+    materials: HashMap<MaterialId, PbrMaterial>,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -106,8 +109,10 @@ impl Extract {
             kept
         });
         // Materials are few next to objects, so looking at each one's
-        // slots every frame costs little.
-        for (_, material) in world.materials() {
+        // slots, and resolving it, every frame costs little.
+        self.materials.clear();
+        for (id, material) in world.materials() {
+            self.materials.insert(id, pbr(material));
             for (key, space) in texture_keys(material).slots() {
                 let Some(key) = key else { continue };
                 let id = TextureId::from_raw(key.0).expect("made from a TextureId");
@@ -165,33 +170,46 @@ impl Extract {
             }
         });
 
+        let materials = &self.materials;
+        // Objects next to each other often share a material: the last one
+        // found is kept.
+        let mut last: Option<(MaterialId, PbrMaterial)> = None;
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
             if !world.in_mask(id, mask) {
                 return;
             }
             let Some(model) = matrices.world(world, id, t) else { return };
-            // The world refuses a renderer pointing at a missing material,
-            // so this always succeeds.
-            let Ok(m) = world.material(material) else { return };
-            scene.draws.push(Draw {
-                mesh: mesh_key(mesh),
-                model,
-                material: PbrMaterial {
-                    base_color: m.base_color.to_linear(),
-                    metallic: m.metallic,
-                    roughness: m.roughness,
-                    emissive: (Vec3::from(rgb(m.emissive)) * m.emissive_intensity).into(),
-                    uv_scale: m.uv_scale.into(),
-                    uv_offset: m.uv_offset.into(),
-                    alpha_cutoff: m.alpha_cutoff,
-                    double_sided: m.double_sided,
-                    textures: texture_keys(&m),
-                },
-            });
+            let material = match last {
+                Some((at, m)) if at == material => m,
+                _ => {
+                    // The world refuses a renderer pointing at a missing
+                    // material, so this always succeeds.
+                    let Some(&m) = materials.get(&material) else { return };
+                    last = Some((material, m));
+                    m
+                }
+            };
+            scene.draws.push(Draw { mesh: mesh_key(mesh), model, material });
         });
 
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));
+    }
+}
+
+/// A material as the renderer takes it: linear colours, emission times its
+/// intensity.
+fn pbr(m: &Material) -> PbrMaterial {
+    PbrMaterial {
+        base_color: m.base_color.to_linear(),
+        metallic: m.metallic,
+        roughness: m.roughness,
+        emissive: (Vec3::from(rgb(m.emissive)) * m.emissive_intensity).into(),
+        uv_scale: m.uv_scale.into(),
+        uv_offset: m.uv_offset.into(),
+        alpha_cutoff: m.alpha_cutoff,
+        double_sided: m.double_sided,
+        textures: texture_keys(m),
     }
 }
 

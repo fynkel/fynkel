@@ -159,7 +159,7 @@ fn values_are_validated_with_a_message_that_names_the_field() {
         assert_eq!(last_error(), "Light.kind 7 doesn't exist (0 = directional, 1 = ambient)");
 
         let mut shape = ptr::null_mut();
-        assert_eq!(fy_mesh_new_shape(3, &mut shape), FyStatus::InvalidValue);
+        assert_eq!(fy_mesh_new_shape(6, &mut shape), FyStatus::InvalidValue);
         assert!(shape.is_null(), "nothing written on failure");
         let mut mesh = 0;
 
@@ -292,8 +292,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_16() {
-    assert_eq!(fy_abi_version(), 16);
+fn the_abi_version_is_17() {
+    assert_eq!(fy_abi_version(), 17);
 }
 
 #[cfg(not(target_os = "android"))]

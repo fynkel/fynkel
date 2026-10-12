@@ -28,6 +28,7 @@ import 'scenes/rigidbody_basics.dart';
 import 'scenes/rigidbody_stack.dart';
 import 'scenes/rigidbody_walls.dart';
 import 'scenes/routines.dart';
+import 'scenes/shapes_basics.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/time.dart';
@@ -45,6 +46,7 @@ final List<LabScene Function()> scenes = [
   EasesScene.new,
   MotionScene.new,
   MovingBasicsScene.new,
+  ShapesBasicsScene.new,
   CameraBasicsScene.new,
   CameraRigsScene.new,
   LayersBasicsScene.new,

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 16;
+pub const FY_ABI_VERSION: u32 = 17;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -156,6 +156,12 @@ pub const FY_MESH_CUBE: u32 = 0;
 pub const FY_MESH_SPHERE: u32 = 1;
 /// `fy_mesh_new_shape`'s shape: a 1×1 plane facing +Y.
 pub const FY_MESH_PLANE: u32 = 2;
+/// `fy_mesh_new_shape`'s shape: a capsule along Y, 2 high, of radius 0.5.
+pub const FY_MESH_CAPSULE: u32 = 3;
+/// `fy_mesh_new_shape`'s shape: a cylinder along Y, 2 high, of radius 0.5.
+pub const FY_MESH_CYLINDER: u32 = 4;
+/// `fy_mesh_new_shape`'s shape: a 1×1 quad in XY facing +Z.
+pub const FY_MESH_QUAD: u32 = 5;
 
 /// A mesh made from code, for `fy_mesh_new`. Each array holds
 /// `vertex_count` items of packed floats: 3 per position and normal, 4 per
@@ -1244,8 +1250,9 @@ unsafe fn new_mesh(data: MeshData, out: *mut *mut FyMesh) -> Result<(), Error> {
     Ok(())
 }
 
-/// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE` or
-/// `FY_MESH_PLANE`) and writes it to `out`.
+/// Makes a built-in shape (`FY_MESH_CUBE`, `FY_MESH_SPHERE`,
+/// `FY_MESH_PLANE`, `FY_MESH_CAPSULE`, `FY_MESH_CYLINDER` or
+/// `FY_MESH_QUAD`) and writes it to `out`.
 ///
 /// # Safety
 ///
@@ -1255,13 +1262,20 @@ pub unsafe extern "C" fn fy_mesh_new_shape(shape: u32, out: *mut *mut FyMesh) ->
     guard(|| {
         let data = match shape {
             FY_MESH_CUBE => MeshData::cube(),
-            // 48 × 24 matches the golden images.
-            FY_MESH_SPHERE => MeshData::sphere(48, 24),
+            // 720 triangles, as light as Unity's sphere (768): 2,208 (48 ×
+            // 24) held the Note10+ at 23 fps with 1,000 of them.
+            FY_MESH_SPHERE => MeshData::sphere(24, 16),
             FY_MESH_PLANE => MeshData::plane(),
+            FY_MESH_CAPSULE => MeshData::capsule(24, 6),
+            FY_MESH_CYLINDER => MeshData::cylinder(24),
+            FY_MESH_QUAD => MeshData::quad(),
             other => {
                 return Err(Error::new(
                     FyStatus::InvalidValue,
-                    format!("mesh shape {other} doesn't exist (0 = cube, 1 = sphere, 2 = plane)"),
+                    format!(
+                        "mesh shape {other} doesn't exist (0 = cube, 1 = sphere, 2 = plane, 3 = capsule, 4 = \
+                         cylinder, 5 = quad)"
+                    ),
                 ));
             }
         };

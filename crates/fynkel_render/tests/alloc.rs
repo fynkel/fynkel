@@ -57,6 +57,8 @@ fn count<T>(f: impl FnOnce() -> T) -> (T, u64) {
 /// 1,000 cubes moving every frame.
 fn busy_scene(t: f32) -> RenderScene {
     let mut scene = stage1_scene();
+    // High above the 40 × 25 grid, so every cube is seen.
+    scene.camera = Some(CameraView::looking_at(Vec3::new(20.0, 60.0, 30.0), Vec3::new(20.0, 0.0, 12.0)));
     let material = scene.draws[0].material;
     scene.draws = (0..1000)
         .map(|i| Draw {

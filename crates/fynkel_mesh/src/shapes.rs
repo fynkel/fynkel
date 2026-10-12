@@ -73,6 +73,121 @@ impl MeshData {
         s.build()
     }
 
+    /// A capsule along Y centred on the origin, 2 high from end to end and
+    /// of radius 0.5, as Unity's (and a default `CapsuleCollider`): a
+    /// cylinder 1 high with a half-sphere on each end. `segments` slices
+    /// around, `rings` bands in each half-sphere. The texture wraps around
+    /// once from +Z, its top at the top end; each part takes the share of
+    /// its height that its length is of the outline.
+    pub fn capsule(segments: u32, rings: u32) -> Self {
+        assert!(segments >= 3 && rings >= 1, "a capsule needs at least 3 segments and 1 ring");
+        let (radius, half) = (0.5f32, 0.5f32);
+        // From the top pole down: each row's angle from +Y on its
+        // half-sphere and its centre's height, the top half-sphere's
+        // equator and the bottom's both present, so the side is one band.
+        let quarter = std::f32::consts::FRAC_PI_2;
+        let mut rows: Vec<(f32, f32)> = Vec::new();
+        for ring in 0..=rings {
+            rows.push((quarter * ring as f32 / rings as f32, half));
+        }
+        for ring in 0..=rings {
+            rows.push((quarter + quarter * ring as f32 / rings as f32, -half));
+        }
+        // V by length along the outline: the arcs are a quarter turn each.
+        let arc = quarter * radius;
+        let total = 2.0 * arc + 2.0 * half;
+        let mut s = Shape::default();
+        for (i, &(theta, centre)) in rows.iter().enumerate() {
+            let along =
+                if i <= rings as usize { theta * radius } else { arc + 2.0 * half + (theta - quarter) * radius };
+            let v = along / total;
+            for segment in 0..=segments {
+                let u = segment as f32 / segments as f32;
+                let phi = std::f32::consts::TAU * u;
+                let n = Vec3::new(theta.sin() * phi.sin(), theta.cos(), theta.sin() * phi.cos());
+                let tangent = Vec3::new(phi.cos(), 0.0, -phi.sin());
+                s.push(n * radius + Vec3::Y * centre, n, tangent, [u, v]);
+            }
+        }
+        let row = segments + 1;
+        let bands = rows.len() as u32 - 1;
+        for band in 0..bands {
+            for segment in 0..segments {
+                let a = band * row + segment;
+                let b = a + row;
+                if band != 0 {
+                    s.indices.extend([a, b, a + 1]);
+                }
+                if band != bands - 1 {
+                    s.indices.extend([a + 1, b, b + 1]);
+                }
+            }
+        }
+        s.build()
+    }
+
+    /// A cylinder along Y centred on the origin, 2 high and of radius 0.5,
+    /// as Unity's, with `segments` slices around. The side's texture wraps
+    /// around once from +Z, its top at the top; each cap shows the texture
+    /// as the plane does from outside, with its own flat normal.
+    pub fn cylinder(segments: u32) -> Self {
+        assert!(segments >= 3, "a cylinder needs at least 3 segments");
+        let (radius, half) = (0.5f32, 1.0f32);
+        let mut s = Shape::default();
+        for (y, v) in [(half, 0.0), (-half, 1.0)] {
+            for segment in 0..=segments {
+                let u = segment as f32 / segments as f32;
+                let phi = std::f32::consts::TAU * u;
+                let n = Vec3::new(phi.sin(), 0.0, phi.cos());
+                let tangent = Vec3::new(phi.cos(), 0.0, -phi.sin());
+                s.push(n * radius + Vec3::Y * y, n, tangent, [u, v]);
+            }
+        }
+        let row = segments + 1;
+        for segment in 0..segments {
+            let (a, b) = (segment, segment + row);
+            s.indices.extend([a, b, a + 1, a + 1, b, b + 1]);
+        }
+        // The caps: a centre and a ring each. Seen from outside, image-right
+        // is +X on both; image-up is -Z on the top, +Z on the bottom, as the
+        // cube's.
+        for (normal, up) in [(Vec3::Y, Vec3::NEG_Z), (Vec3::NEG_Y, Vec3::Z)] {
+            let base = s.positions.len() as u32;
+            let uv = |p: Vec3| [0.5 + p.dot(Vec3::X) / (2.0 * radius), 0.5 - p.dot(up) / (2.0 * radius)];
+            s.push(normal * half, normal, Vec3::X, [0.5, 0.5]);
+            for segment in 0..segments {
+                let phi = std::f32::consts::TAU * segment as f32 / segments as f32;
+                let p = Vec3::new(phi.sin(), 0.0, phi.cos()) * radius;
+                s.push(p + normal * half, normal, Vec3::X, uv(p));
+            }
+            for segment in 0..segments {
+                let (a, b) = (base + 1 + segment, base + 1 + (segment + 1) % segments);
+                // Counter-clockwise seen from outside: from +Z towards +X
+                // is counter-clockwise seen from +Y, and clockwise from -Y.
+                if normal == Vec3::Y {
+                    s.indices.extend([base, a, b]);
+                } else {
+                    s.indices.extend([base, b, a]);
+                }
+            }
+        }
+        s.build()
+    }
+
+    /// A 1×1 quad in XY centred on the origin, facing +Z: towards a camera
+    /// that looks along its forward (-Z) at it, as Unity's quad faces its
+    /// camera. Image-right is +X and image-up +Y.
+    pub fn quad() -> Self {
+        let mut s = Shape::default();
+        for (position, uv) in
+            [([-0.5, -0.5], [0.0, 1.0]), ([0.5, -0.5], [1.0, 1.0]), ([0.5, 0.5], [1.0, 0.0]), ([-0.5, 0.5], [0.0, 0.0])]
+        {
+            s.push(Vec3::new(position[0], position[1], 0.0), Vec3::Z, Vec3::X, uv);
+        }
+        s.indices.extend([0, 1, 2, 0, 2, 3]);
+        s.build()
+    }
+
     /// A 1×1 plane in XZ centred on the origin, facing +Y. Seen from
     /// above, image-right is +X and image-up is -Z.
     pub fn plane() -> Self {

@@ -13,7 +13,7 @@ fn the_stage_1_cube_matches_its_golden() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
-    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, lines: 0 });
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, culled: 0, lines: 0 });
     assert_golden("cube", &image);
 }
 
@@ -180,7 +180,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         Draw { mesh: CUBE, model: at(2.0, 0.0), material: material(0xFFB03AE0, 0.0) },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 160);
-    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 2, missing_meshes: 0, lines: 0 });
+    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 2, missing_meshes: 0, culled: 0, lines: 0 });
     assert_golden("instanced", &image);
 }
 
@@ -228,6 +228,44 @@ fn a_plain_format_view_is_refused() {
     let _ = Renderer::new(&gpu, wgpu::TextureFormat::Rgba8Unorm);
 }
 
+/// A draw wholly outside the view isn't drawn; one partly in it is, and
+/// a stretched one is judged by its stretched size.
+#[test]
+fn draws_outside_the_view_are_culled() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
+    camera.clear_color = [0.0; 3];
+    let cube = |model: Mat4| Draw { mesh: CUBE, model, material: PbrMaterial::DEFAULT };
+    let at = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
+    // At 5 away the view is 2.89 either side of the middle (60°, square).
+    let draws = vec![
+        cube(Mat4::IDENTITY),
+        cube(at(0.0, 0.0, 10.0)),    // behind the camera
+        cube(at(-100.0, 0.0, 0.0)),  // far to the left
+        cube(at(0.0, 0.0, -2000.0)), // beyond the far plane
+        cube(at(-4.2, 0.0, 0.0)),    // just outside the left edge
+        cube(at(0.0, 4.2, 0.0) * Mat4::from_scale(Vec3::new(1.0, 4.0, 1.0))), // stretched into the top
+        cube(at(-3.2, 0.0, 0.0)),    // its corner over the left edge
+    ];
+    let scene = RenderScene { camera: Some(camera), ambient: Vec3::ONE, draws, ..Default::default() };
+    let (image, stats) = render(&gpu, &mut r, &scene, 64, 64);
+    assert_eq!(stats, FrameStats { draws: 3, draw_calls: 1, missing_meshes: 0, culled: 4, lines: 0 });
+    let lit = |x: u32, y: u32| image.pixel(x, y) != [0, 0, 0, 255];
+    assert!(lit(32, 32) && lit(32, 0) && lit(0, 32), "the middle, the top and the left edge are drawn");
+
+    // An orthographic camera's box, 1 either side.
+    camera.orthographic = Some(1.0);
+    let scene = RenderScene {
+        camera: Some(camera),
+        ambient: Vec3::ONE,
+        draws: vec![cube(at(3.0, 0.0, 0.0)), cube(at(1.2, 0.0, 0.0)), cube(at(0.0, -1.2, 0.0))],
+        ..Default::default()
+    };
+    let (_, stats) = render(&gpu, &mut r, &scene, 64, 64);
+    assert_eq!((stats.draws, stats.culled), (2, 1));
+}
+
 #[test]
 fn a_missing_mesh_is_skipped_and_counted() {
     let gpu = gpu();
@@ -237,12 +275,12 @@ fn a_missing_mesh_is_skipped_and_counted() {
     ghost.mesh = MeshKey(404);
     scene.draws.push(ghost);
     let (_, stats) = render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 1, lines: 0 });
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 1, culled: 0, lines: 0 });
 
     assert!(r.remove_mesh(CUBE));
     assert!(!r.remove_mesh(CUBE));
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 32, 32);
-    assert_eq!(stats, FrameStats { draws: 0, draw_calls: 0, missing_meshes: 1, lines: 0 });
+    assert_eq!(stats, FrameStats { draws: 0, draw_calls: 0, missing_meshes: 1, culled: 0, lines: 0 });
     let clear = image.pixel(16, 16);
     assert_eq!(clear, image.pixel(0, 0), "with the cube gone, the centre shows the clear colour");
 }
@@ -374,7 +412,7 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
         Line { a: Vec3::new(0.0, -2.0, -3.0), b: Vec3::new(0.0, 2.0, -3.0), color: green },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
-    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, lines: 2 });
+    assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, culled: 0, lines: 2 });
     assert_golden("lines", &image);
 
     // The lines alone, no draws: still drawn.
