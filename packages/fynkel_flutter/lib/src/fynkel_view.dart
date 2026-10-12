@@ -215,7 +215,7 @@ class FynkelView extends StatefulWidget {
 
 /// A [FynkelView]'s state: its [world], for code outside the game, such
 /// as a HUD (`GlobalKey<FynkelViewState>().currentState!.world`).
-class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin {
+class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   World? _own;
 
   /// The world shown: the view's own, which its root was added to, or the
@@ -265,8 +265,26 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   void initState() {
     super.initState();
     _ticker; // Starts it.
+    WidgetsBinding.instance.addObserver(this);
     _own = _makeOwn();
     if (widget.world case final world?) _listen(world);
+  }
+
+  /// Tells the world when the app goes away and comes back
+  /// ([World.applicationPaused]).
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    final world = widget.world ?? _own;
+    if (world == null || world.isDisposed) return;
+    switch (state) {
+      case AppLifecycleState.hidden || AppLifecycleState.paused:
+        world.applicationPaused = true;
+      case AppLifecycleState.resumed:
+        world.applicationPaused = false;
+      case AppLifecycleState.inactive || AppLifecycleState.detached:
+        // On the way, or gone: what it was stays.
+        break;
+    }
   }
 
   /// A world with the widget's root in it, if it has one. It's heard
@@ -324,6 +342,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _errorsHeard?.cancel();
     _ticker.dispose();
     _ownFocus?.dispose();

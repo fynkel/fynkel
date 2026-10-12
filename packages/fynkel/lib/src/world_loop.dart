@@ -159,27 +159,54 @@ extension _Loop on World {
     }
   }
 
-  /// Runs one of the systems' hooks on each system, in the order they were
-  /// made; what one throws goes to [errors].
+  /// Runs one of the systems' hooks on each system on, in their order;
+  /// what one throws goes to [errors].
   void _runSystems(_SystemHook hook) {
     final systems = _systems;
     for (var i = 0; i < systems.length; i++) {
       final system = systems[i];
+      if (system._off) continue;
       try {
         switch (hook) {
           case _SystemHook.beforeFrame:
             system.beforeFrame();
           case _SystemHook.beforeUpdate:
             system.beforeUpdate();
+          case _SystemHook.afterUpdate:
+            system.afterUpdate();
           case _SystemHook.afterLateUpdate:
             system.afterLateUpdate();
           case _SystemHook.afterFrame:
             system.afterFrame();
         }
       } catch (error, stack) {
-        _report(null, error, stack);
+        _systemThrew(system, error, stack);
       }
     }
+  }
+
+  /// Reports what [system]'s hook threw, and turns the system off when its
+  /// hooks have thrown in [WorldSystem.turnOffAfter] frames in a row.
+  void _systemThrew(WorldSystem system, Object error, StackTrace stack) {
+    if (system._off) return;
+    final frame = time._frame;
+    if (system._threwIn != frame) {
+      system._throwingFrames = system._threwIn == frame - 1 ? system._throwingFrames + 1 : 1;
+      system._threwIn = frame;
+    }
+    if (system._throwingFrames < WorldSystem.turnOffAfter) {
+      _report(null, error, stack);
+      return;
+    }
+    system._off = true;
+    _report(
+      null,
+      StateError(
+        '${system.runtimeType} threw in ${WorldSystem.turnOffAfter} frames in a row, so it was turned off: '
+        'its hooks no longer run. The last error: $error',
+      ),
+      stack,
+    );
   }
 
   /// Runs the fixed steps this frame's time holds: in each, the systems'
@@ -238,19 +265,21 @@ extension _Loop on World {
         time._inFixed = true;
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
+          if (system._off) continue;
           try {
             system.beforeFixedUpdate();
           } catch (error, stack) {
-            _report(null, error, stack);
+            _systemThrew(system, error, stack);
           }
         }
         _callEach(_Call.fixedUpdate, _live.length);
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
+          if (system._off) continue;
           try {
             system.afterFixedUpdate();
           } catch (error, stack) {
-            _report(null, error, stack);
+            _systemThrew(system, error, stack);
           }
         }
         _runRoutines(fixed: true);
@@ -362,7 +391,7 @@ extension _Loop on World {
 }
 
 /// The [WorldSystem] hooks run once a frame.
-enum _SystemHook { beforeFrame, beforeUpdate, afterLateUpdate, afterFrame }
+enum _SystemHook { beforeFrame, beforeUpdate, afterUpdate, afterLateUpdate, afterFrame }
 
 /// Which of the per-frame calls [_Loop._callEach] makes.
 enum _Call { update, lateUpdate, fixedUpdate }

@@ -20,6 +20,10 @@ sealed class Component {
   // [GameObject.get] no longer finds it.
   bool _takenOff = false;
 
+  // Whether the systems were told it came ([WorldSystem.componentAdded]),
+  // so they're told when it goes: not a model part's, read from the engine.
+  bool _announced = false;
+
   /// The object it's on. Throws a [StateError] before it's given to one.
   GameObject get gameObject => _owner ?? (throw StateError('$runtimeType is on no object yet'));
 
@@ -533,6 +537,13 @@ abstract class Behaviour extends Component with _Moving {
   @mustCallSuper
   @protected
   void onDestroy() {}
+
+  /// Called when the app goes away (true) and comes back (false), while
+  /// it's enabled, right after its object's
+  /// [GameObject.onApplicationPause].
+  @mustCallSuper
+  @protected
+  void onApplicationPause(bool paused) {}
 
   // Pointers: each is its object's (GameObject.onPointerDown and the
   // rest), right after the object's own; one that takes a down or a drag

@@ -177,6 +177,7 @@ extension _Objects on World {
       if (component._removed) continue;
       _register(component);
       if (component is Behaviour) _starting.add(component);
+      _announce(object, component);
     }
     _shape++;
     for (final child in described.children) {
@@ -227,19 +228,42 @@ extension _Objects on World {
     _appearIfDone(object);
   }
 
+  /// Tells the systems [component] came to [object] in the world.
+  void _announce(GameObject object, Component component) {
+    component._announced = true;
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      if (system._off) continue;
+      try {
+        system.componentAdded(object, component);
+      } catch (error, stack) {
+        _systemThrew(system, error, stack);
+      }
+    }
+  }
+
+  /// Tells the systems [component], now removed, left [object].
+  void _componentRemoved(GameObject object, Component component) {
+    if (!component._announced) return;
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      if (system._off) continue;
+      try {
+        system.componentRemoved(object, component);
+      } catch (error, stack) {
+        _systemThrew(system, error, stack);
+      }
+    }
+  }
+
   /// Puts [component] on [object], which is live: the engine's are written
   /// by the caller; a behaviour loads, with the object if it's still
   /// loading, else by itself (a failed load removes only the behaviour).
   void _componentAdded(GameObject object, Component component) {
     _register(component);
-    final systems = _systems;
-    for (var i = 0; i < systems.length; i++) {
-      try {
-        systems[i].componentAdded(object, component);
-      } catch (error, stack) {
-        _report(null, error, stack);
-      }
-    }
+    _announce(object, component);
     if (component is! Behaviour) return;
     _enterLoop(object);
     _starting.add(component);
@@ -391,6 +415,15 @@ extension _Objects on World {
         }
       }
     } finally {
+      if (_systems.isNotEmpty) {
+        for (final object in objects.reversed) {
+          for (final c in object._components ?? const <Component>[]) {
+            if (c._removed) continue;
+            c._removed = true;
+            _componentRemoved(object, c);
+          }
+        }
+      }
       check(fy_despawn(pointer, root._id));
       _unlink(root);
       for (final object in objects) {
@@ -402,7 +435,7 @@ extension _Objects on World {
         _objects.remove(object._id);
         _unregister(object);
         for (final c in object._components ?? const <Component>[]) {
-          if (c._removed) continue;
+          if (c._takenOff) continue;
           c._removed = true;
           _unregister(c);
         }

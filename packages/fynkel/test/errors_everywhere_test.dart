@@ -1,6 +1,7 @@
 // Stage 6's stability check (docs/stage-6.md, step 5): errors thrown from
 // every place a game's code runs, every frame, for many frames; the game
-// goes on and each error is reported.
+// goes on and each error is reported; a system throwing every frame is
+// turned off.
 
 import 'dart:async';
 
@@ -217,7 +218,8 @@ void main() {
     var count = 0;
     world.errors.listen((e) {
       count++;
-      errors.add(e.error is StateError ? (e.error as StateError).message : '${e.error}');
+      final message = e.error is StateError ? (e.error as StateError).message : '${e.error}';
+      errors.add(message.startsWith('ThrowingSystem threw in') ? 'system turned off' : message);
     });
     world.system(ThrowingSystem.new);
     world.add(GameObject(components: [Camera()]));
@@ -279,7 +281,9 @@ void main() {
       'system beforeUpdate',
       'system afterLateUpdate',
       'system afterFrame',
+      'system turned off',
     });
+    expect(world.maybeSystem<ThrowingSystem>()!.isTurnedOff, isTrue, reason: 'after five frames of errors');
     // ignore: avoid_print
     print('$count errors reported over 600 frames');
     thrower.destroy();

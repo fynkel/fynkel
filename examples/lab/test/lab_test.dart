@@ -12,6 +12,7 @@ import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/character_basics.dart';
 import 'package:lab/scenes/character_course.dart';
+import 'package:lab/scenes/addons_basics.dart';
 import 'package:lab/scenes/colour_basics.dart';
 import 'package:lab/scenes/contacts_basics.dart';
 import 'package:lab/scenes/input.dart';
@@ -707,5 +708,35 @@ void main() {
     final at = scene.player.position;
     frames(30);
     expect(Vec3(at.x, 0, at.z).closeTo(Vec3(scene.player.position.x, 0, scene.player.position.z), 0.02), isTrue);
+  });
+
+  test('Add-ons: the basics: the add-on counts components, and the invisible button takes clicks', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(AddonsBasicsScene());
+    await scene.loaded;
+    world.input.simulate.resize(400, 300);
+    world.update(1 / 60);
+    final [add as Button, remove as Button, _, taps as Toggle] = scene.controls;
+    final (added, removed) = (scene.counter.added, scene.counter.removed);
+    add.onPressed();
+    add.onPressed();
+    remove.onPressed();
+    expect(scene.counter.added - added, 4, reason: 'two cubes, a renderer and a collider each');
+    expect(scene.counter.removed - removed, 2);
+
+    void click() {
+      final on = world.camera!.get<Camera>()!.worldToScreenPoint(scene.button.position)!;
+      world.input.simulate
+        ..fingerDown(1, on.x, on.y)
+        ..fingerUp(1, on.x, on.y);
+      world.update(1 / 60);
+    }
+
+    click();
+    expect(scene.button.clicks, 1, reason: 'a collider with nothing drawn');
+    taps.onChanged(false);
+    click();
+    expect(scene.button.clicks, 1, reason: 'colliders take no taps now');
   });
 }

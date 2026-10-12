@@ -2,6 +2,7 @@
 // docs/stage-5.md's steps. Each step adds its own.
 
 import 'lab.dart';
+import 'scenes/addons_basics.dart';
 import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
 import 'scenes/character_basics.dart';
@@ -72,4 +73,5 @@ final List<LabScene Function()> scenes = [
   JointsBridgeScene.new,
   JointsChainScene.new,
   JointsCharacterScene.new,
+  AddonsBasicsScene.new,
 ];

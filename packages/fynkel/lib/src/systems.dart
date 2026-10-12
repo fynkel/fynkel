@@ -6,12 +6,34 @@ part of 'world.dart';
 
 /// Work a package adds to a world's frame, one of each type per world:
 /// [World.system] makes it the first time it's asked for. Its hooks run in
-/// [World.update], systems in the order they were made; what they throw
-/// goes to [World.errors] with no object, and the frame goes on.
+/// [World.update], systems by their [order], then in the order they were
+/// made; they run while the world is [World.paused] too. What a hook
+/// throws goes to [World.errors] with no object, and the frame goes on; a
+/// system whose hooks throw in [turnOffAfter] frames in a row is turned
+/// off ([isTurnedOff]), and that's reported once.
 abstract class WorldSystem {
   WorldSystem(this.world);
 
   final World world;
+
+  /// After how many frames in a row with a hook throwing a system is
+  /// turned off.
+  static const turnOffAfter = 5;
+
+  /// Where its hooks run among the world's systems: a lower order first,
+  /// and systems with the same order in the order they were made. Read
+  /// once, when it's made. 0 unless overridden.
+  int get order => 0;
+
+  /// Whether its hooks threw in [turnOffAfter] frames in a row: none of
+  /// them runs again, but for [dispose].
+  bool get isTurnedOff => _off;
+  var _off = false;
+
+  // The last frame ([Time.frame]) a hook threw in, and how many frames in
+  // a row up to it one did.
+  var _threwIn = -1;
+  var _throwingFrames = 0;
 
   /// Called at the start of each frame, after the time moves on and
   /// before the input and the starts: physics collects the step it ran
@@ -35,6 +57,12 @@ abstract class WorldSystem {
   @mustCallSuper
   void beforeUpdate() {}
 
+  /// Called every frame after every [GameObject.onUpdate], the motions and
+  /// the routines, before any [GameObject.onLateUpdate]: where an animator
+  /// poses what the updates moved, as Unity's does.
+  @mustCallSuper
+  void afterUpdate() {}
+
   /// Called every frame after the late updates, before the cameras move.
   @mustCallSuper
   void afterLateUpdate() {}
@@ -44,10 +72,31 @@ abstract class WorldSystem {
   @mustCallSuper
   void afterFrame() {}
 
-  /// Called when [component] is put on [object] while it's in the world,
-  /// after the engine has it and before a behaviour loads.
+  /// Called when [component] comes into the world on [object]: put on it
+  /// while it's in the world, or with it when it's added (each of an added
+  /// tree's components, parents first). After the engine has it, before a
+  /// behaviour loads. Not for a model's parts, read from the model.
   @mustCallSuper
   void componentAdded(GameObject object, Component component) {}
+
+  /// Called when [component] leaves the world, for each [componentAdded]
+  /// had: it's removed from [object], or [object] is destroyed (then
+  /// [GameObject.isDestroyed] is true, and it's called for each of its
+  /// components, after every `onDestroy`). The component is
+  /// [Component.isRemoved] by then.
+  @mustCallSuper
+  void componentRemoved(GameObject object, Component component) {}
+
+  /// What [ray], cast from the camera through a finger, hits of what the
+  /// system holds within [layers], or null: the input takes the nearest
+  /// of the world's [World.raycast] and every system's, so a package can
+  /// make what has no mesh tappable (physics: its colliders).
+  RayHit? pointerHit(Ray ray, LayerMask layers) => null;
+
+  /// Called when [World.applicationPaused] changes, before the objects'
+  /// [GameObject.onApplicationPause]: audio stops while the app is away.
+  @mustCallSuper
+  void applicationPause(bool paused) {}
 
   /// Called once when the world is disposed: free what the system holds.
   ///
@@ -94,8 +143,31 @@ extension WorldSystems on World {
     if (_systemsByType[T] case final T system) return system;
     final system = make(this);
     _systemsByType[T] = system;
-    _systems.add(system);
+    // A new list, so a hook running over the old one, which made this
+    // system, runs no system twice.
+    final order = system.order;
+    var at = _systems.length;
+    while (at > 0 && _systems[at - 1].order > order) {
+      at--;
+    }
+    _systems = [..._systems]..insert(at, system);
     return system;
+  }
+
+  /// Lets [Assets.preload] load files ending in [kind]'s
+  /// [AssetKind.extensions]; [Assets.load] needs no adding. Throws an
+  /// [ArgumentError] if another kind has one of them.
+  void addAssetKind(AssetKind<Object> kind) {
+    if (isDisposed) throw StateError('this World was disposed');
+    for (final known in _assetKinds) {
+      if (identical(known, kind)) return;
+      for (final extension in kind.extensions) {
+        if (known.extensions.contains(extension.toLowerCase())) {
+          throw ArgumentError.value(kind, 'kind', 'loads $extension, which ${known.name}s already do');
+        }
+      }
+    }
+    _assetKinds.add(kind);
   }
 
   /// The world's system of type [T], or null if it has none yet.
@@ -141,6 +213,27 @@ extension WorldSystems on World {
     // one each call allocates.
     if (out.address != _manyOut.address) _manyOut = out.cast();
     check(fy_world_transform_get_many(pointer, ids, count, _manyOut));
+  }
+
+  /// Sets the transforms of [count] objects, by their [GameObject.id]s at
+  /// [ids], from [transforms]: ten 32-bit floats each, as
+  /// [readWorldTransforms] writes them, but each relative to its object's
+  /// parent, as [GameObject.transform] is. For a package that works out
+  /// many poses natively (an animator, particles): one call however many
+  /// there are, each sent with the frame's other moves. Throws a
+  /// [FynkelException] if an id isn't a live object or a transform isn't
+  /// valid; those before it are set.
+  void writeTransforms(Pointer<Uint64> ids, int count, Pointer<Float> transforms) {
+    pointer;
+    for (var i = 0; i < count; i++) {
+      final id = ids[i];
+      final object = _objects[id];
+      if (object == null || object._destroyed) {
+        throw FynkelException(FynkelStatus.noObject, 'object#$id is not a live object of this world');
+      }
+      final f = transforms + i * 10;
+      object.transform = Transform._(Vec3(f[0], f[1], f[2]), Quat(f[3], f[4], f[5], f[6]), Vec3(f[7], f[8], f[9]));
+    }
   }
 }
 

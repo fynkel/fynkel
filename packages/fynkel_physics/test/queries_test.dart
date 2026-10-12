@@ -388,6 +388,33 @@ void main() {
     expect(() => physics.overlapSphere(Vec3.zero, 1), disposed);
     expect(physics.gravity, const Vec3(0, -9.81, 0), reason: 'the failed set changed nothing');
   });
+
+  group('taps', () {
+    test('a collider with nothing drawn takes a tap; a trigger doesn\'t, nor any when turned off', () {
+      final world = newWorld();
+      world.input.simulate.resize(100, 100);
+      // A camera at the origin looking down -Z.
+      world.add(GameObject(components: [Camera()]));
+      final clicks = <String>[];
+      final zone = at(world, const Vec3(0, 0, -3), BoxCollider(size: const Vec3(2, 2, 2), isTrigger: true));
+      final button = world.add(_Clicks(clicks, transform: Transform(position: Vec3(0, 0, -6))));
+      button.addComponent(SphereCollider(radius: 1));
+      void tap() {
+        world.input.simulate
+          ..fingerDown(1, 50, 50)
+          ..fingerUp(1, 50, 50);
+        world.update(1 / 60);
+      }
+
+      world.update(1 / 60);
+      tap();
+      expect(clicks, ['click'], reason: 'through the trigger in front of it');
+      world.physics.pointerHitsColliders = false;
+      tap();
+      expect(clicks, ['click'], reason: 'turned off');
+      expect(zone.isDestroyed, isFalse);
+    });
+  });
 }
 
 /// Counts the debug lines at the end of each frame's late update.
@@ -400,5 +427,17 @@ class _Lines extends WorldSystem {
   void afterLateUpdate() {
     super.afterLateUpdate();
     seen = world.debug.count;
+  }
+}
+
+class _Clicks extends GameObject {
+  _Clicks(this.clicks, {super.transform});
+
+  final List<String> clicks;
+
+  @override
+  bool onClick(Finger finger) {
+    clicks.add('click');
+    return true;
   }
 }

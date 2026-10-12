@@ -126,6 +126,12 @@ final class Physics extends WorldSystem implements Finalizable {
   /// `Physics.queriesHitTriggers`). True unless set.
   bool queriesHitTriggers = true;
 
+  /// Whether a finger can tap colliders as well as meshes: an object with
+  /// a collider and nothing drawn gets its `onClick` and the rest, as with
+  /// Unity's `PhysicsRaycaster`. Triggers don't take taps, so a zone around
+  /// something doesn't hide it. True unless set.
+  bool pointerHitsColliders = true;
+
   /// Whether every collider is drawn, with [World.debug]'s lines, each
   /// frame: green for solid ones, yellow for triggers.
   bool drawColliders = false;
@@ -302,6 +308,13 @@ final class Physics extends WorldSystem implements Finalizable {
   void beforeUpdate() {
     super.beforeUpdate();
     if (_interpolated.isNotEmpty) _interpolate();
+  }
+
+  @override
+  RayHit? pointerHit(Ray ray, LayerMask layers) {
+    if (!pointerHitsColliders || _disposed) return null;
+    final hit = raycast(ray, layers: layers, triggers: QueryTriggers.ignore);
+    return hit == null ? null : RayHit(hit.gameObject, hit.point, hit.normal, hit.distance);
   }
 
   @override

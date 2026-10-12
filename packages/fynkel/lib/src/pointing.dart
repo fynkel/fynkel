@@ -23,10 +23,22 @@ final class _Pointing implements _Targets {
     final lens = world._object(camera).get<Camera>()!;
     // What the camera doesn't draw can't be touched through it.
     final drawn = lens.cullingMask;
-    return world.raycast(
-      lens.screenPointToRay(ViewPoint(x, y, width: input._width, height: input._height)),
-      layers: drawn & input.layers,
-    );
+    final ray = lens.screenPointToRay(ViewPoint(x, y, width: input._width, height: input._height));
+    final layers = drawn & input.layers;
+    var nearest = world.raycast(ray, layers: layers);
+    // What the systems hold that has no mesh: the nearest hit wins.
+    final systems = world._systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      if (system._off) continue;
+      try {
+        final hit = system.pointerHit(ray, layers);
+        if (hit != null && (nearest == null || hit.distance < nearest.distance)) nearest = hit;
+      } catch (error, stack) {
+        world._systemThrew(system, error, stack);
+      }
+    }
+    return nearest;
   }
 
   @override
