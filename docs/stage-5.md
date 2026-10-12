@@ -668,8 +668,8 @@ in view, above. Every game runs as well as before.
 **Step 10: the stage 5 check.** A report, as before, and a physics part in
 [the guide](writing-a-game.md), checked by `tools/check_guide.py`. *Done
 when* both are committed and you have read them.
-✅ written: [the report](stage-5-report.md), and the guide's physics part
-(§14, with physics in §18 Speed and §19); your reading is what's left.
+✅ [the report](stage-5-report.md), and the guide's physics part (§14,
+with physics in §18 Speed and §19), read 2026-10-12. **Stage 5 is done.**
 
 ## 5. Decisions (2026-10-10)
 

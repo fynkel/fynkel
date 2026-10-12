@@ -160,6 +160,9 @@ scenes:
 - [x] Galaxy Note10+
 
 Step 10 is done when you have read this and [the guide's physics
-part](writing-a-game.md#14-physics-colliders-rigidbodies-queries-and-callbacks):
+part](writing-a-game.md#14-physics-colliders-rigidbodies-queries-and-callbacks).
+Closed on 2026-10-12 ("ok merge #63 and continue step 10"):
 
-- [ ] Read
+- [x] Read
+
+**Stage 5 is done.**
