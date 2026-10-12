@@ -146,3 +146,79 @@ hurt (**blocker**, **confusing**, **minor**), and a first idea for the fix.
     world). (toy) **Minor.**
 28. **Moving a kinematic trigger body by hand**: `position =` or
     `movePosition`? (shooter) **Minor.** Fix: a line in §14.
+
+## G. Step 4: the bigger game
+
+A fifth fresh agent wrote **Outpost** (2026-10-12), a tower-defense game
+on the same rules as step 1's: two levels from text maps, four enemy kinds
+(a splitter among them), three towers with upgrades and selling, waves
+from data, pooled enemies and shots, and a Flutter title screen, build
+menu, tower panel, HUD, pause and win/lose pop-ups with saved best
+results. **41 files and 2,204 lines in `lib/`; 41 tests in 801 lines** (39
+pass, 2 skipped as the repro of finding 29), headless and widget tests,
+one of them a bot that wins both levels. It builds and analyzes clean; its log
+is in `/tmp/s6/outpost/LOG.md`. I built it in release and it starts on the
+Mac, the iPhone and the Note10+ (Android needed finding 35 first).
+
+**How it grew**: one root object, `OutpostGame`, makes everything in its
+constructor (so the HUD can bind before the game loads) and hands each
+manager (`Board`, `Enemies`, `Projectiles`, `Towers`, `WaveManager`) the
+others it needs. Objects find each other through references passed in:
+the game never calls `world.only` or `world.all`, and it never felt like
+globals (finding 11's worry). Subclasses are what things are (enemy,
+tower, shot, tile, the managers); behaviours what they do (`Health`,
+`Slow`, `PathWalker` for walkers and flyers alike, `Shooter`,
+`Economy`); kinds are const data with no engine import. The guide's rule
+"a subclass is, a behaviour does" helped. What got harder with the file
+count: constructors with many references (`Towers` takes 7; next time it
+would pass one context object), and import cycles between `core/` and the
+feature folders (Dart allows them, so nothing warned).
+
+29. **Awaiting a routine that ends at once hangs in a headless test.**
+    `await start(() async {})` (or `all([...])` of such routines) never
+    resumes when the outer routine was started outside the frame's routine
+    step (from `onStart`, a signal or the test) and the frames are driven
+    by a plain loop of `world.update`: the inner routine's end is handed
+    to Dart's own microtask queue, which a synchronous test never drains.
+    In a running app the queue drains between frames, so a game doesn't
+    hang, but the guide's tests are synchronous loops, and the agent lost
+    25 minutes to it. Confirmed (with `await Future.delayed(Duration.zero)`
+    between frames it passes). **Confusing**, and silent. Fix: a routine's
+    microtasks always go to the world's own queue, drained in the frame.
+30. **Pooling, again** (finding 8): the agent wrote a pool, a reset step
+    (not `onEnable`: it takes no arguments, and a new object isn't loaded
+    when taken), "subscribe once" on first use, its own "in play" list
+    because `world.all` counts hidden objects, and a generation number,
+    after a dying splitter came back from the pool as its own child and a
+    shot nearly hit the new enemy. **Confusing.** Fix: the pool of B
+    (finding 8) gives versioned handles, or the guide says how.
+31. **No word on wiring a bigger game**: a root that holds managers,
+    references passed in, a context object, data-driven variants (a
+    "prefab is a subclass" doesn't fit a runner and a tank of one class).
+    **Minor** (the agent found a good way alone). Fix: a guide section
+    from Outpost's shape.
+32. **`on(...)` takes only `Signal`s**, so game code reacting to a
+    `ValueNotifier` the HUD also reads uses a raw `addListener` nothing
+    removes (finding 5, the other way round). **Minor.** Fix: `on` takes a
+    `Listenable` too, and `Signal` gains a `Listenable` side.
+33. **Health bars over enemies** are 3D cubes that don't face the camera:
+    no billboard, and no widget placed at a world point. **Minor.** Stage 7
+    (a widget at a world point).
+34. **Reaching the game from a widget test of the real view** takes
+    `tester.state<FynkelViewState>(...).world.all<OutpostGame>()`. **Minor.**
+    Fix: `FynkelGame.of(context).game`, or a finder (with finding 24).
+35. **An Android build needs Android 11 (`minSdk = 30`)**, and the guide
+    doesn't say so: a new app's first `flutter build apk` fails in the
+    manifest merge (`minSdkVersion 24 cannot be smaller than version 30
+    declared in library [:fynkel_flutter]`). Found when I built Outpost
+    for the Note10+; the agent built only for the Mac. **Minor**, but a
+    first-run wall. Fix: one line in §1.
+
+Seen again, already listed: `onDestroy` not run when the page goes (7),
+`fovY` in degrees while the guide says radians (A1), the `Color` clash
+(handled by keeping game and widget files apart, as the guide says), and
+pause by `time.scale` with taps blocked only because the pause overlay is
+opaque (2). And what it liked best: whole systems tested headless in about
+a second, `FynkelGame` and `FynkelView` inside its own `MaterialApp` with
+`restart()` for retry, and taps reaching objects with no physics, passed
+up to the root, through a layer mask.

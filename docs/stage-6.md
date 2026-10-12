@@ -88,7 +88,8 @@ do.
    when* the findings are written down, each with a fix or a reason to
    leave it. Done: [stage-6-architecture.md](stage-6-architecture.md).
 4. **The bigger game** (20+ files). *Done when* it runs on the three
-   devices and its log is in the list.
+   devices and its log is in the list. Done: Outpost, findings
+   29–35 (section G of the findings).
 5. **Scale and stability.** *Done when* each check above has its numbers.
 6. **The fixes**, in order of how much they hurt, a PR each, with the
    guide changed to match. Breaking changes are allowed (nothing is
