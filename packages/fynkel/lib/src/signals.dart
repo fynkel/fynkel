@@ -26,8 +26,18 @@ final class Signal<T> {
   var _emitting = 0;
   var _cancelledWhileEmitting = false;
 
-  /// Whether anything listens.
-  bool get hasListeners => _subscriptions.any((s) => !s._cancelled);
+  // [stream]'s, once asked for.
+  StreamController<T>? _controller;
+
+  /// Whether anything listens, with [listen], `on` or [stream].
+  bool get hasListeners => _subscriptions.any((s) => !s._cancelled) || (_controller?.hasListener ?? false);
+
+  /// The values emitted from now on, as a broadcast [Stream], for code
+  /// outside the game such as a Flutter widget: `StreamBuilder(stream:
+  /// game.over.stream, ...)`, or `game.over.stream.listen(...)` to show a
+  /// dialog. Unlike [listen]'s handlers, which hear a value in [emit], a
+  /// stream's listeners hear it a moment later, as Dart's streams do.
+  Stream<T> get stream => (_controller ??= StreamController<T>.broadcast()).stream;
 
   /// Calls [handler] with each value emitted from now on, until the
   /// subscription is cancelled. In an object or behaviour, use its `on`
@@ -66,6 +76,7 @@ final class Signal<T> {
         _subscriptions.removeWhere((s) => s._cancelled);
       }
     }
+    if (_controller case final controller? when controller.hasListener) controller.add(value);
     if (error != null) Error.throwWithStackTrace(error, stack!);
   }
 

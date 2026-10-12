@@ -230,11 +230,11 @@ void main() {
       // Every 10 frames a tap or (every other time) a drag of the thrower,
       // over two frames; between them it's turned off and on again, and one that
       // fails to load is added.
-      world.input.resize(100, 100);
-      if (frame % 10 == 0) world.input.fingerDown(finger, 50, 50);
+      world.input.simulate.resize(100, 100);
+      if (frame % 10 == 0) world.input.simulate.fingerDown(finger, 50, 50);
       if (frame % 10 == 1) {
         final to = frame % 20 == 1 ? 50.0 : 80.0;
-        world.input
+        world.input.simulate
           ..fingerMove(finger, to, 50)
           ..fingerUp(finger, to, 50);
         finger++;

@@ -18,7 +18,7 @@ void step([double dt = frame]) => input.update(dt);
 void main() {
   setUp(() {
     heard.clear();
-    input = Input()..resize(200, 100);
+    input = Input()..simulate.resize(200, 100);
     void log<T>(Signal<T> signal, String Function(T value) say) => signal.listen((v) => heard.add(say(v)));
     log(input.onFingerDown, (f) => 'down ${f.id}');
     log(input.onFingerUp, (f) => 'up ${f.id}${f.wasCancelled ? ' cancelled' : ''}');
@@ -37,7 +37,7 @@ void main() {
 
   group('taps', () {
     test('down and up again in place is a tap, with the finger gone after', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
       expect(heard, ['down 1']);
       final finger = input.fingers.single;
@@ -46,7 +46,7 @@ void main() {
       expect(finger.position, const ViewPoint(50, 50, width: 200, height: 100));
 
       heard.clear();
-      input.fingerUp(1, 52, 51);
+      input.simulate.fingerUp(1, 52, 51);
       step();
       expect(heard, ['move 1 2.0,1.0', 'tap 1 x1', 'up 1'], reason: 'within the slop');
       expect(input.fingers, isEmpty);
@@ -56,7 +56,7 @@ void main() {
     });
 
     test('a tap in one frame, down and up together, still taps', () {
-      input
+      input.simulate
         ..fingerDown(1, 50, 50)
         ..fingerUp(1, 50, 50);
       step();
@@ -65,7 +65,7 @@ void main() {
 
     test('taps soon after each other, near each other, count up', () {
       void tapAt(int id, double x) {
-        input
+        input.simulate
           ..fingerDown(id, x, 50)
           ..fingerUp(id, x, 50);
         step(0.1);
@@ -87,29 +87,29 @@ void main() {
 
     test('a finger held too long, or moved too far, doesn\'t tap', () {
       input.settings.longPressTime = 10;
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       // An event's time is its step's.
       step();
       step(0.6);
-      input.fingerUp(1, 50, 50);
+      input.simulate.fingerUp(1, 50, 50);
       step();
       expect(heard, ['down 1', 'up 1'], reason: 'past the tap time');
 
       heard.clear();
-      input.fingerDown(2, 50, 50);
+      input.simulate.fingerDown(2, 50, 50);
       step();
-      input.fingerMove(2, 69, 50);
+      input.simulate.fingerMove(2, 69, 50);
       step();
-      input.fingerUp(2, 50, 50);
+      input.simulate.fingerUp(2, 50, 50);
       step();
       expect(heard, isNot(contains(startsWith('tap'))), reason: 'it moved 19 pixels, past the 18 of the slop');
     });
 
     test('the settings change the slop', () {
       input.settings.tapSlop = 30;
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 75, 50)
         ..fingerUp(1, 75, 50);
       step();
@@ -117,7 +117,7 @@ void main() {
     });
 
     test('a long press comes once, at its time, and then the finger won\'t tap', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       // Times a double holds exactly.
       step(0.25);
       step(0.25);
@@ -127,15 +127,15 @@ void main() {
       expect(heard, ['down 1', 'long 1'], reason: '0.5 s down');
       expect(input.fingers.single.isLongPress, isTrue);
       step(0.5);
-      input.fingerUp(1, 50, 50);
+      input.simulate.fingerUp(1, 50, 50);
       step();
       expect(heard, ['down 1', 'long 1', 'up 1']);
     });
 
     test('a finger that moves past the slop before its time never long presses', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step(0.25);
-      input.fingerMove(1, 90, 50);
+      input.simulate.fingerMove(1, 90, 50);
       step(0.25);
       step(0.5);
       expect(input.fingers.single.age, 0.75, reason: 'well past the long press time');
@@ -143,9 +143,9 @@ void main() {
     });
 
     test('a cancelled finger goes without tapping', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
-      input.fingerCancel(1);
+      input.simulate.fingerCancel(1);
       step();
       expect(heard, ['down 1', 'up 1 cancelled']);
       expect(input.fingers, isEmpty);
@@ -154,9 +154,9 @@ void main() {
 
   group('drags', () {
     test('past the slop a drag starts; its deltas add up to the whole move', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 60, 50)
         ..fingerMove(1, 70, 52);
       step();
@@ -166,7 +166,7 @@ void main() {
       expect(finger.isTap, isFalse);
 
       heard.clear();
-      input.fingerMove(1, 100, 40);
+      input.simulate.fingerMove(1, 100, 40);
       step();
       expect(heard, ['move 1 30.0,-12.0', 'drag 1 30.0,-12.0']);
       expect(finger.totalDelta, Vec2(50, -10));
@@ -177,15 +177,15 @@ void main() {
       expect(heard, isEmpty, reason: 'still: no move, no drag');
       expect(finger.delta, Vec2.zero);
 
-      input.fingerUp(1, 100, 40);
+      input.simulate.fingerUp(1, 100, 40);
       step();
       expect(heard, ['drag end 1', 'up 1'], reason: 'held still before letting go: no swipe');
     });
 
     test('a finger that moves and goes up in one frame tells its move first', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 80, 50)
         ..fingerUp(1, 80, 50);
       step();
@@ -201,10 +201,10 @@ void main() {
     });
 
     test('its velocity is over the last tenth of a second', () {
-      input.fingerDown(1, 0, 50);
+      input.simulate.fingerDown(1, 0, 50);
       step();
       for (var i = 1; i <= 12; i++) {
-        input.fingerMove(1, i * 10.0, 50);
+        input.simulate.fingerMove(1, i * 10.0, 50);
         step();
       }
       final v = input.fingers.single.velocity;
@@ -213,15 +213,15 @@ void main() {
     });
 
     test('a fast drag let go swipes, after its drag end; a slow one doesn\'t', () {
-      input.fingerDown(1, 20, 50);
+      input.simulate.fingerDown(1, 20, 50);
       step();
       for (var i = 1; i <= 4; i++) {
-        input.fingerMove(1, 20 + i * 20.0, 50);
+        input.simulate.fingerMove(1, 20 + i * 20.0, 50);
         step();
       }
       final swipes = <Swipe>[];
       input.onSwipe.listen(swipes.add);
-      input.fingerUp(1, 100, 50);
+      input.simulate.fingerUp(1, 100, 50);
       step();
       expect(heard.sublist(heard.length - 3), ['drag end 1', 'swipe right', 'up 1']);
       // 80 pixels over the last five frames: the one it let go in didn't
@@ -232,34 +232,34 @@ void main() {
       expect(swipes.single.finger.id, 1);
 
       heard.clear();
-      input.fingerDown(2, 100, 80);
+      input.simulate.fingerDown(2, 100, 80);
       step();
       for (var i = 1; i <= 10; i++) {
-        input.fingerMove(2, 100, 80 - i * 5.0);
+        input.simulate.fingerMove(2, 100, 80 - i * 5.0);
         step();
       }
-      input.fingerUp(2, 100, 30);
+      input.simulate.fingerUp(2, 100, 30);
       step();
       expect(heard, isNot(contains(startsWith('swipe'))), reason: '300 pixels a second, under 800');
 
       input.settings.swipeSpeed = 200;
-      input.fingerDown(3, 100, 80);
+      input.simulate.fingerDown(3, 100, 80);
       step();
       for (var i = 1; i <= 10; i++) {
-        input.fingerMove(3, 100, 80 - i * 5.0);
+        input.simulate.fingerMove(3, 100, 80 - i * 5.0);
         step();
       }
-      input.fingerUp(3, 100, 30);
+      input.simulate.fingerUp(3, 100, 30);
       step();
       expect(heard, contains('swipe up'));
     });
 
     test('a cancelled drag ends without a swipe', () {
-      input.fingerDown(1, 20, 50);
+      input.simulate.fingerDown(1, 20, 50);
       step();
-      input.fingerMove(1, 80, 50);
+      input.simulate.fingerMove(1, 80, 50);
       step();
-      input.fingerCancel(1);
+      input.simulate.fingerCancel(1);
       step();
       expect(heard.sublist(heard.length - 2), ['drag end 1', 'up 1 cancelled']);
     });
@@ -275,12 +275,12 @@ void main() {
     });
 
     test('two fingers moving apart pinch out, about the point between them', () {
-      input
+      input.simulate
         ..fingerDown(1, 40, 50)
         ..fingerDown(2, 60, 50);
       step();
       expect(pinches, isEmpty, reason: 'they only just went down');
-      input
+      input.simulate
         ..fingerMove(1, 30, 50)
         ..fingerMove(2, 70, 50);
       step();
@@ -289,7 +289,7 @@ void main() {
       expect(pinches.single.fingers, 2);
       expect(twists, isEmpty);
 
-      input
+      input.simulate
         ..fingerMove(1, 40, 50)
         ..fingerMove(2, 60, 50);
       step();
@@ -297,11 +297,11 @@ void main() {
     });
 
     test('two fingers turning twist, clockwise on the view being positive', () {
-      input
+      input.simulate
         ..fingerDown(1, 40, 50)
         ..fingerDown(2, 60, 50);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 50, 40)
         ..fingerMove(2, 50, 60);
       step();
@@ -310,12 +310,12 @@ void main() {
     });
 
     test('three fingers pinch too; one alone, or the mouse, doesn\'t', () {
-      input
+      input.simulate
         ..fingerDown(1, 40, 40)
         ..fingerDown(2, 60, 40)
         ..fingerDown(3, 50, 60);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 30, 30)
         ..fingerMove(2, 70, 30)
         ..fingerMove(3, 50, 70);
@@ -324,12 +324,12 @@ void main() {
       expect(pinches.single.scale, greaterThan(1));
 
       pinches.clear();
-      input
+      input.simulate
         ..fingerUp(2, 70, 30)
         ..fingerUp(3, 50, 70)
         ..fingerDown(9, 100, 50, kind: FingerKind.mouse);
       step();
-      input
+      input.simulate
         ..fingerMove(1, 10, 10)
         ..fingerMove(9, 150, 50);
       step();
@@ -337,7 +337,7 @@ void main() {
     });
 
     test("a trackpad's pinch and twist add up over the frame, about the mouse", () {
-      input
+      input.simulate
         ..hover(-1, 120, 30)
         ..trackpad(scale: 1.5)
         ..trackpad(scale: 2, twist: 0.25)
@@ -355,7 +355,7 @@ void main() {
 
   group('the mouse', () {
     test('is a finger while it hovers, and stays one through presses', () {
-      input.hover(-1, 10, 20);
+      input.simulate.hover(-1, 10, 20);
       step();
       final mouse = input.fingers.single;
       expect(mouse.kind, FingerKind.mouse);
@@ -363,77 +363,77 @@ void main() {
       expect(input.mousePosition, const ViewPoint(10, 20, width: 200, height: 100));
       expect(heard, isEmpty, reason: 'appearing is no move');
 
-      input.hover(-1, 15, 20);
+      input.simulate.hover(-1, 15, 20);
       step();
       expect(heard, ['hover -1']);
 
       heard.clear();
-      input.fingerDown(-1, 15, 20, kind: FingerKind.mouse);
+      input.simulate.fingerDown(-1, 15, 20, kind: FingerKind.mouse);
       step();
       expect(input.fingers.single, same(mouse));
       expect(mouse.isPressed, isTrue);
       expect(input.isPressed(MouseButton.left), isTrue);
       expect(input.wasPressed(MouseButton.left), isTrue);
 
-      input.fingerUp(-1, 15, 20);
+      input.simulate.fingerUp(-1, 15, 20);
       step();
       expect(heard, ['down -1', 'tap -1 x1', 'up -1']);
       expect(input.fingers.single, same(mouse), reason: 'still over the view');
       expect(input.wasReleased(MouseButton.left), isTrue);
       expect(input.isPressed(MouseButton.left), isFalse);
 
-      input.leave(-1);
+      input.simulate.leave(-1);
       step();
       expect(input.fingers, isEmpty);
       expect(input.mousePosition, isNull);
     });
 
     test('its buttons: which pressed, others pressed meanwhile, and their taps', () {
-      input.fingerDown(-1, 50, 50, kind: FingerKind.mouse, buttons: 2);
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse, buttons: 2);
       step();
       final mouse = input.fingers.single;
       expect(mouse.button, MouseButton.right);
       expect(input.wasPressed(MouseButton.right), isTrue);
       expect(input.isPressed(MouseButton.left), isFalse);
 
-      input.fingerMove(-1, 50, 50, buttons: 2 | 4);
+      input.simulate.fingerMove(-1, 50, 50, buttons: 2 | 4);
       step();
       expect(input.wasPressed(MouseButton.middle), isTrue);
       expect(input.wasPressed(MouseButton.right), isFalse, reason: 'already down');
       expect(mouse.button, MouseButton.right, reason: 'the one that pressed it');
 
-      input.fingerMove(-1, 50, 50, buttons: 2);
+      input.simulate.fingerMove(-1, 50, 50, buttons: 2);
       step();
       expect(input.wasReleased(MouseButton.middle), isTrue);
       expect(input.isPressed(MouseButton.right), isTrue);
 
       final taps = <Finger>[];
       input.onTap.listen(taps.add);
-      input.fingerUp(-1, 50, 50);
+      input.simulate.fingerUp(-1, 50, 50);
       step();
       expect(taps.single.button, MouseButton.right, reason: 'every button taps');
       expect(input.wasReleased(MouseButton.right), isTrue);
     });
 
     test('its slop is a pixel', () {
-      input.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
       step();
-      input.fingerMove(-1, 52, 50);
+      input.simulate.fingerMove(-1, 52, 50);
       step();
       expect(heard, contains('drag start -1'));
     });
 
     test('a touch holds the left button, until the last touch goes up', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       step();
       expect(input.wasPressed(MouseButton.left), isTrue);
-      input.fingerDown(2, 60, 50);
+      input.simulate.fingerDown(2, 60, 50);
       step();
       expect(input.wasPressed(MouseButton.left), isFalse);
-      input.fingerUp(1, 50, 50);
+      input.simulate.fingerUp(1, 50, 50);
       step();
       expect(input.isPressed(MouseButton.left), isTrue);
-      input.fingerUp(2, 60, 50);
+      input.simulate.fingerUp(2, 60, 50);
       step();
       expect(input.wasReleased(MouseButton.left), isTrue);
       expect(input.isPressed(MouseButton.left), isFalse);
@@ -441,18 +441,18 @@ void main() {
 
     test('mousePosition is the mouse, or else the first finger down', () {
       expect(input.mousePosition, isNull);
-      input
+      input.simulate
         ..fingerDown(1, 10, 10)
         ..fingerDown(2, 20, 20);
       step();
       expect(input.mousePosition!.x, 10);
-      input.hover(-1, 99, 99);
+      input.simulate.hover(-1, 99, 99);
       step();
       expect(input.mousePosition!.x, 99);
     });
 
     test('scrolling adds up over the frame, and is told once', () {
-      input
+      input.simulate
         ..scrollBy(0, 10)
         ..scrollBy(2, 5);
       step();
@@ -466,19 +466,19 @@ void main() {
 
   group('keys', () {
     test('down, held and up; repeats are no new presses', () {
-      input.keyDown(KeyCode.w);
+      input.simulate.keyDown(KeyCode.w);
       step();
       expect(heard, ['key down KeyPress(w)']);
       expect(input.isPressed(KeyCode.w), isTrue);
       expect(input.wasPressed(KeyCode.w), isTrue);
 
-      input.keyDown(KeyCode.w);
+      input.simulate.keyDown(KeyCode.w);
       step();
       expect(input.wasPressed(KeyCode.w), isFalse);
       expect(input.isPressed(KeyCode.w), isTrue);
       expect(heard, hasLength(1));
 
-      input.keyUp(KeyCode.w);
+      input.simulate.keyUp(KeyCode.w);
       step();
       expect(input.wasReleased(KeyCode.w), isTrue);
       expect(input.isPressed(KeyCode.w), isFalse);
@@ -486,7 +486,7 @@ void main() {
     });
 
     test('down and up in one frame counts as both', () {
-      input
+      input.simulate
         ..keyDown(KeyCode.space)
         ..keyUp(KeyCode.space);
       step();
@@ -498,7 +498,7 @@ void main() {
     test('carry the modifiers held', () {
       final presses = <KeyPress>[];
       input.onKeyDown.listen(presses.add);
-      input
+      input.simulate
         ..keyDown(KeyCode.shiftLeft)
         ..keyDown(KeyCode.metaRight)
         ..keyDown(KeyCode.s);
@@ -511,12 +511,12 @@ void main() {
     });
 
     test('losing focus lets every held key go up', () {
-      input
+      input.simulate
         ..keyDown(KeyCode.a)
         ..keyDown(KeyCode.d);
       step();
       heard.clear();
-      input.releaseKeys();
+      input.simulate.releaseKeys();
       step();
       expect(heard, ['key up KeyPress(a)', 'key up KeyPress(d)']);
       expect(input.wasReleased(KeyCode.a), isTrue);
@@ -526,19 +526,19 @@ void main() {
   group('axes and actions', () {
     test("'move' reads WASD and the arrows, no faster on a diagonal", () {
       expect(input.axis2('move'), Vec2.zero);
-      input.keyDown(KeyCode.w);
+      input.simulate.keyDown(KeyCode.w);
       step();
       expect(input.axis2('move'), Vec2(0, 1));
-      input.keyDown(KeyCode.arrowRight);
+      input.simulate.keyDown(KeyCode.arrowRight);
       step();
       expect(input.axis2('move').x, closeTo(math.sqrt1_2, 1e-12));
       expect(input.axis2('move').length, closeTo(1, 1e-12));
-      input
+      input.simulate
         ..keyUp(KeyCode.w)
         ..keyDown(KeyCode.a);
       step();
       expect(input.axis2('move'), Vec2.zero, reason: 'left and right cancel out');
-      input.keyDown(KeyCode.s);
+      input.simulate.keyDown(KeyCode.s);
       step();
       expect(input.axis2('move'), Vec2(0, -1));
     });
@@ -551,7 +551,7 @@ void main() {
         left: const [MouseButton.left],
         right: const [KeyCode.l],
       );
-      input.fingerDown(1, 5, 5);
+      input.simulate.fingerDown(1, 5, 5);
       step();
       expect(input.axis2('look'), Vec2(-1, 0));
       expect(() => input.axis2('nothing'), throwsArgumentError);
@@ -559,36 +559,105 @@ void main() {
 
     test("'jump' is the space bar, and actions hold while any of their buttons does", () {
       final jump = input.action('jump');
-      input.keyDown(KeyCode.space);
+      input.simulate.keyDown(KeyCode.space);
       step();
       expect(jump.wasPressed, isTrue);
       expect(jump.isPressed, isTrue);
 
       final fire = input.bindAction('fire', const [KeyCode.f, MouseButton.left]);
       expect(input.action('fire'), same(fire));
-      input.keyDown(KeyCode.f);
+      input.simulate.keyDown(KeyCode.f);
       step();
       expect(fire.wasPressed, isTrue);
-      input.fingerDown(-1, 5, 5, kind: FingerKind.mouse);
+      input.simulate.fingerDown(-1, 5, 5, kind: FingerKind.mouse);
       step();
       expect(fire.wasPressed, isFalse, reason: 'f was already held');
-      input.keyUp(KeyCode.f);
+      input.simulate.keyUp(KeyCode.f);
       step();
       expect(fire.wasReleased, isFalse, reason: 'the mouse still holds it');
       expect(fire.isPressed, isTrue);
-      input.fingerUp(-1, 5, 5);
+      input.simulate.fingerUp(-1, 5, 5);
       step();
       expect(fire.wasReleased, isTrue);
       expect(() => input.action('dash'), throwsArgumentError);
     });
   });
 
+  group('Flutter controls', () {
+    test('an action pressed and released from outside holds in between, as a key would', () {
+      final jump = input.action('jump');
+      jump.press();
+      expect(jump.isPressed, isFalse, reason: 'it waits for the step, as events do');
+      step();
+      expect(jump.wasPressed, isTrue);
+      expect(jump.isPressed, isTrue);
+      step();
+      expect(jump.wasPressed, isFalse);
+      expect(jump.isPressed, isTrue);
+      input.simulate.keyDown(KeyCode.space);
+      step();
+      expect(jump.wasPressed, isFalse, reason: 'the button already held it');
+      jump.release();
+      step();
+      expect(jump.wasReleased, isFalse, reason: 'the space bar still holds it');
+      input.simulate.keyUp(KeyCode.space);
+      step();
+      expect(jump.wasReleased, isTrue);
+      expect(jump.isPressed, isFalse);
+    });
+
+    test('pressed and released in one frame is a press and a release', () {
+      final jump = input.action('jump');
+      jump
+        ..press()
+        ..release();
+      step();
+      expect(jump.wasPressed, isTrue);
+      expect(jump.wasReleased, isTrue);
+      expect(jump.isPressed, isFalse);
+    });
+
+    test('a stick sets an axis at once, clamped to 1, and adds to its keys', () {
+      input.setAxis2('move', Vec2(0, 0.5));
+      expect(input.axis2('move'), Vec2(0, 0.5));
+      input.setAxis2('move', Vec2(3, 4));
+      expect(input.axis2('move').x, closeTo(0.6, 1e-12));
+      expect(input.axis2('move').y, closeTo(0.8, 1e-12));
+      input.simulate.keyDown(KeyCode.w);
+      step();
+      expect(input.axis2('move').length, closeTo(1, 1e-12), reason: 'keys and stick together, no faster');
+      input.setAxis2('move', Vec2.zero);
+      expect(input.axis2('move'), Vec2(0, 1));
+      input.setAxis2('steer', Vec2(-1, 0));
+      expect(input.axis2('steer'), Vec2(-1, 0), reason: 'a new axis, with no keys');
+    });
+
+    test('the game uses the keys it binds or asks about; the view claims only those', () {
+      expect(input.usesKey(KeyCode.w), isTrue, reason: "'move' binds it");
+      expect(input.usesKey(KeyCode.space), isTrue, reason: "'jump' binds it");
+      expect(input.usesKey(KeyCode.escape), isFalse);
+      expect(input.simulate.keyDown(KeyCode.escape), isFalse);
+      expect(input.simulate.keyDown(KeyCode.w), isTrue);
+      input.isPressed(KeyCode.escape);
+      expect(input.usesKey(KeyCode.escape), isTrue, reason: 'asked about once, claimed from then on');
+      expect(input.simulate.keyUp(KeyCode.escape), isTrue);
+      input.bindAction('fire', const [KeyCode.f]);
+      expect(input.simulate.claims(KeyCode.f), isTrue);
+      step();
+      expect(heard, [
+        'key down KeyPress(escape)',
+        'key down KeyPress(w)',
+        'key up KeyPress(escape)',
+      ], reason: 'the game hears every key');
+    });
+  });
+
   group('the step', () {
     test('events wait for the next step; one a listener feeds waits for the one after', () {
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       expect(heard, isEmpty);
       input.onFingerDown.listen((f) {
-        if (f.id == 1) input.fingerDown(2, 60, 60);
+        if (f.id == 1) input.simulate.fingerDown(2, 60, 60);
       });
       step();
       expect(heard, ['down 1']);
@@ -599,7 +668,7 @@ void main() {
     test('each held finger is told each frame, after its move', () {
       final held = <String>[];
       input.onFingerHeld.listen((f) => held.add('${f.id}'));
-      input
+      input.simulate
         ..fingerDown(1, 50, 50)
         ..fingerDown(2, 60, 60);
       step();
@@ -609,7 +678,7 @@ void main() {
 
     test('a listener that throws stops the step of an input of its own', () {
       input.onFingerDown.listen((_) => throw StateError('boom'));
-      input.fingerDown(1, 50, 50);
+      input.simulate.fingerDown(1, 50, 50);
       expect(step, throwsStateError);
     });
 

@@ -260,6 +260,27 @@ final class World implements Finalizable {
   /// [GameObject.input].
   late final Input input = Input().._targets = _Pointing(this);
 
+  /// Whether the game is paused, as for a pause menu: the game's time
+  /// stands still ([Time.delta] is 0, no fixed steps run, motions and
+  /// waits hold), and [input] takes nothing: what's held is let go when
+  /// the pause starts, and taps and keys meanwhile are dropped. Objects
+  /// still get their updates, and [Time.unscaledDelta] still runs, for
+  /// what moves while paused. [Time.scale] is left as it was, and the first
+  /// frame after the pause counts no time, however long it was.
+  ///
+  /// Unlike `time.scale = 0`, which stops only the time.
+  bool get paused => _paused;
+  set paused(bool value) {
+    if (value == _paused) return;
+    _paused = value;
+    input._paused = value;
+    input._pausing = value;
+    time._paused = value;
+    if (!value) time._skip = true;
+  }
+
+  var _paused = false;
+
   /// The virtual cameras, their blends, and shaking the view's camera
   /// (docs/stage-4.md §3.8).
   late final Cameras cameras = Cameras._(this);

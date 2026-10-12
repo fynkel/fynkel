@@ -74,7 +74,7 @@ void main() {
       world = World();
       addTearDown(world.dispose);
       game = world.add(BowlingGame());
-      world.input.resize(400, 800);
+      world.input.simulate.resize(400, 800);
       seconds(1);
     });
 
@@ -104,13 +104,13 @@ void main() {
     /// A finger down at ([x], [y]), moved [steps] frames by ([dx], [dy])
     /// each, and lifted.
     void drag(double x, double y, double dx, double dy, {int steps = 6}) {
-      world.input.fingerDown(1, x, y);
+      world.input.simulate.fingerDown(1, x, y);
       world.update(1 / 60);
       for (var i = 1; i <= steps; i++) {
-        world.input.fingerMove(1, x + dx * i, y + dy * i);
+        world.input.simulate.fingerMove(1, x + dx * i, y + dy * i);
         world.update(1 / 60);
       }
-      world.input.fingerUp(1, x + dx * steps, y + dy * steps);
+      world.input.simulate.fingerUp(1, x + dx * steps, y + dy * steps);
       world.update(1 / 60);
     }
 
@@ -137,15 +137,15 @@ void main() {
     test('while a finger flicks up, a line shows where the ball would go', () {
       final aim = game.find('aim')!;
       expect(aim.active, isFalse);
-      world.input.fingerDown(1, 200, 700);
+      world.input.simulate.fingerDown(1, 200, 700);
       world.update(1 / 60);
       for (var i = 1; i <= 3; i++) {
-        world.input.fingerMove(1, 200 + i * 10, 700 - i * 40);
+        world.input.simulate.fingerMove(1, 200 + i * 10, 700 - i * 40);
         world.update(1 / 60);
       }
       expect(aim.active, isTrue);
       expect(aim.rotation.rotate(Vec3.forward).x, greaterThan(0), reason: 'leaning right, as the finger');
-      world.input.fingerUp(1, 230, 580);
+      world.input.simulate.fingerUp(1, 230, 580);
       world.update(1 / 60);
       expect(aim.active, isFalse);
     });

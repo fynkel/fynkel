@@ -8,7 +8,7 @@ var _nextFinger = 1;
 /// Its view is [at]'s size.
 void tap(World world, ViewPoint at) {
   final id = _nextFinger++;
-  world.input
+  world.input.simulate
     ..resize(at.width, at.height)
     ..fingerDown(id, at.x, at.y)
     ..fingerUp(id, at.x, at.y);

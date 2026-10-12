@@ -28,6 +28,7 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
     this.darkTheme,
     this.themeMode = ThemeMode.system,
     this.navigatorKey,
+    this.shortcuts,
   });
 
   /// Makes the game's root, as `Garden.new` does: when the app starts,
@@ -57,6 +58,12 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
   /// such as from the game's code.
   final GlobalKey<NavigatorState>? navigatorKey;
 
+  /// Keys for the app rather than the game, given its root, as
+  /// [CallbackShortcuts]' bindings: `(game) => {const
+  /// SingleActivator(LogicalKeyboardKey.escape): game.togglePause}`. A key
+  /// the game uses goes to the game instead, unless the world is paused.
+  final Map<ShortcutActivator, VoidCallback> Function(T game)? shortcuts;
+
   @override
   Widget build(BuildContext context) => MaterialApp(
     title: title,
@@ -72,17 +79,20 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
       builder: (context, game) {
         final view = FynkelView(root: game, source: source);
         final over = overlay;
-        if (over == null) return view;
-        return Stack(
-          fit: StackFit.expand,
-          children: [
-            view,
-            Material(
-              type: MaterialType.transparency,
-              child: Builder(builder: (context) => over(context, game)),
-            ),
-          ],
-        );
+        final page = over == null
+            ? view
+            : Stack(
+                fit: StackFit.expand,
+                children: [
+                  view,
+                  Material(
+                    type: MaterialType.transparency,
+                    child: Builder(builder: (context) => over(context, game)),
+                  ),
+                ],
+              );
+        final keys = shortcuts;
+        return keys == null ? page : CallbackShortcuts(bindings: keys(game), child: page);
       },
     ),
   );

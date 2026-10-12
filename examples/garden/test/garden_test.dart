@@ -13,7 +13,7 @@ var _finger = 0;
 /// frame.
 void tap(World world, double x, double y) {
   final id = ++_finger;
-  world.input
+  world.input.simulate
     ..resize(width.toDouble(), height.toDouble())
     ..fingerDown(id, x, y)
     ..fingerUp(id, x, y);
@@ -95,18 +95,18 @@ void main() {
     final camera = world.first<OrbitCamera>()!;
     world.update(0);
     final start = camera.transform.position;
-    world.input
+    world.input.simulate
       ..resize(320, 200)
       ..fingerDown(99, 100, 100);
     world.update(0);
-    world.input.fingerMove(99, 200, 100);
+    world.input.simulate.fingerMove(99, 200, 100);
     world.update(0);
-    world.input.fingerUp(99, 200, 100);
+    world.input.simulate.fingerUp(99, 200, 100);
     final around = camera.transform.position;
     expect((around - start).length, greaterThan(1));
     expect(around.y, closeTo(start.y, 1e-9), reason: 'sideways, at the same height');
 
-    world.input.scrollBy(0, -200);
+    world.input.simulate.scrollBy(0, -200);
     world.update(0);
     const target = OrbitCamera.target;
     expect((camera.transform.position - target).length, lessThan((around - target).length));

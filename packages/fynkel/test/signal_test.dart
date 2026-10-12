@@ -488,4 +488,23 @@ void main() {
       );
     });
   });
+
+  test('a stream hears each value a moment later, for code outside the game', () async {
+    final score = Signal<int>();
+    expect(score.hasListeners, isFalse);
+    final got = <int>[];
+    final sub = score.stream.listen(got.add);
+    expect(score.hasListeners, isTrue);
+    score
+      ..emit(1)
+      ..emit(2);
+    expect(got, isEmpty, reason: 'a stream delivers later, as Dart\'s do');
+    await Future<void>.delayed(Duration.zero);
+    expect(got, [1, 2]);
+    await sub.cancel();
+    expect(score.hasListeners, isFalse);
+    score.emit(3);
+    await Future<void>.delayed(Duration.zero);
+    expect(got, [1, 2]);
+  });
 }

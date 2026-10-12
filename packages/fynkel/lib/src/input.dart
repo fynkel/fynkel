@@ -16,13 +16,17 @@ part of 'world.dart';
 /// [fingers], [mousePosition], [scroll], [axis2] and [action], in any
 /// update.
 ///
-/// **Feeding it**: package:fynkel_flutter gives it Flutter's events; a
-/// test gives its own with [fingerDown], [fingerMove], [fingerUp],
-/// [keyDown] and the rest. They're queued, and the next frame's input
-/// step handles them in order. Positions are in the view's logical
-/// pixels from its top-left corner ([resize] gives its size); times are
-/// the world's unscaled frame times, so a test's `world.update(0.6)` holds
-/// a finger down for 0.6 seconds.
+/// **Flutter controls**: a button or a stick drawn by Flutter drives the
+/// same actions and axes as keys do: [InputAction.press] and
+/// [InputAction.release], and [setAxis2].
+///
+/// **Feeding it**: package:fynkel_flutter gives it Flutter's events, and a
+/// test its own, through [simulate]. They're queued, and the next frame's
+/// input step handles them in order.
+///
+/// While the world is paused ([World.paused]) it takes nothing: what was
+/// held is let go when the pause starts, and what comes meanwhile is
+/// dropped.
 final class Input {
   /// An input of its own, with no world: for tests of input alone, driven
   /// by [update]. A world makes its own.
@@ -81,6 +85,18 @@ final class Input {
 
   final _actions = <String, InputAction>{};
   final _axes = <String, _Axis2>{};
+
+  // The keys the game uses: bound, or asked about. The view claims these
+  // from Flutter and lets it have the rest too.
+  final _used = List<bool>.filled(KeyCode.values.length, false);
+
+  // Set by the world: whether it's paused, and whether the pause has yet
+  // to let go of what's held.
+  bool _paused = false;
+  bool _pausing = false;
+
+  /// What feeds this input: the view's events, or a test's.
+  late final InputSimulation simulate = InputSimulation._(this);
 
   // --- Signals ---
 
@@ -155,22 +171,45 @@ final class Input {
 
   /// Whether a key or mouse button is held now. A touch or a pen down
   /// holds [MouseButton.left], as in Unity.
+  ///
+  /// Asking about a key claims it from Flutter: see [usesKey].
   bool isPressed(InputButton button) => switch (button) {
-    final KeyCode key => _keys.contains(key),
+    final KeyCode key => _use(key) && _keys.contains(key),
     final MouseButton m => _buttons & m.bit != 0,
   };
 
   /// Whether a key or mouse button went down this frame.
   bool wasPressed(InputButton button) => switch (button) {
-    final KeyCode key => _pressedKeys.contains(key),
+    final KeyCode key => _use(key) && _pressedKeys.contains(key),
     final MouseButton m => _pressedButtons & m.bit != 0,
   };
 
   /// Whether a key or mouse button went up this frame.
   bool wasReleased(InputButton button) => switch (button) {
-    final KeyCode key => _releasedKeys.contains(key),
+    final KeyCode key => _use(key) && _releasedKeys.contains(key),
     final MouseButton m => _releasedButtons & m.bit != 0,
   };
+
+  /// Whether the game uses [key]: it's bound to an axis or an action, or
+  /// the game asked about it ([isPressed], [wasPressed], [wasReleased]).
+  /// The view gives the game every key, and claims these: the others reach
+  /// Flutter's shortcuts and focus too, so Escape can close a dialog and
+  /// Tab move focus, unless the game asks about them. [onKeyDown] and
+  /// [onKeyUp] hear every key. While the world is paused the view claims
+  /// none, so a pause menu's shortcuts get them all.
+  bool usesKey(KeyCode key) => _used[key.index];
+
+  @pragma('vm:prefer-inline')
+  bool _use(KeyCode key) {
+    _used[key.index] = true;
+    return true;
+  }
+
+  void _useAll(List<InputButton> buttons) {
+    for (final b in buttons) {
+      if (b is KeyCode) _use(b);
+    }
+  }
 
   /// Where the mouse is (or a hovering pen), or else the first finger
   /// down; null with neither.
@@ -190,16 +229,33 @@ final class Input {
 
   /// The named two-way control [name] now, as a [Vec2] of length at most
   /// 1: x to the right, y up. `'move'` reads W, A, S, D and the arrow
-  /// keys; [bindAxis2] adds others. Throws an [ArgumentError] for a name
-  /// that isn't bound.
+  /// keys; [bindAxis2] adds others, and [setAxis2] adds a Flutter stick's
+  /// value to the keys'. Throws an [ArgumentError] for a name that isn't
+  /// bound or set. Zero while the world is paused.
   Vec2 axis2(String name) {
     final axis = _axes[name] ?? (throw ArgumentError.value(name, 'name', 'is no axis (bound: ${_axes.keys})'));
+    if (_paused) return Vec2.zero;
     final x = (_anyDown(axis.right) ? 1 : 0) - (_anyDown(axis.left) ? 1 : 0);
     final y = (_anyDown(axis.up) ? 1 : 0) - (_anyDown(axis.down) ? 1 : 0);
-    if (x == 0 && y == 0) return Vec2.zero;
+    final set = axis.value;
+    if (x == 0 && y == 0) return set;
     // Diagonals are no faster.
     final scale = x != 0 && y != 0 ? math.sqrt1_2 : 1.0;
-    return Vec2(x * scale, y * scale);
+    if (identical(set, Vec2.zero)) return Vec2(x * scale, y * scale);
+    final sx = x * scale + set.x, sy = y * scale + set.y;
+    final length = math.sqrt(sx * sx + sy * sy);
+    return length > 1 ? Vec2(sx / length, sy / length) : Vec2(sx, sy);
+  }
+
+  /// Sets the two-way control [name] from outside the keys, such as an
+  /// on-screen stick drawn by Flutter, until it's set again: back to
+  /// [Vec2.zero] when the stick is let go. A longer [value] is cut to
+  /// length 1. [axis2] adds it to what its keys say. An axis that isn't
+  /// bound is made, with no keys. Takes effect at once.
+  void setAxis2(String name, Vec2 value) {
+    final axis = _axes[name] ??= _Axis2(const [], const [], const [], const []);
+    final length = value.length;
+    axis.value = length == 0 ? Vec2.zero : (length > 1 ? value * (1 / length) : value);
   }
 
   /// Binds the two-way control [name] to keys or buttons for each way,
@@ -211,7 +267,12 @@ final class Input {
     required List<InputButton> left,
     required List<InputButton> right,
   }) {
-    _axes[name] = _Axis2(List.of(up), List.of(down), List.of(left), List.of(right));
+    final kept = _axes[name]?.value ?? Vec2.zero;
+    _axes[name] = _Axis2(List.of(up), List.of(down), List.of(left), List.of(right))..value = kept;
+    _useAll(up);
+    _useAll(down);
+    _useAll(left);
+    _useAll(right);
   }
 
   /// The named button [name], held by any of the keys and mouse buttons
@@ -222,9 +283,12 @@ final class Input {
       _actions[name] ?? (throw ArgumentError.value(name, 'name', 'is no action (bound: ${_actions.keys})'));
 
   /// Binds the action [name] to [buttons], replacing what it had, and
-  /// returns it.
-  InputAction bindAction(String name, List<InputButton> buttons) =>
-      _actions[name] = InputAction._(this, name, List.unmodifiable(buttons));
+  /// returns it. With no buttons, it's pressed only from outside
+  /// ([InputAction.press]).
+  InputAction bindAction(String name, List<InputButton> buttons) {
+    _useAll(buttons);
+    return _actions[name] = InputAction._(this, name, List.unmodifiable(buttons));
+  }
 
   bool _anyDown(List<InputButton> buttons) {
     for (var i = 0; i < buttons.length; i++) {
@@ -243,59 +307,6 @@ final class Input {
     );
     bindAction('jump', const [KeyCode.space]);
   }
-
-  // --- Feeding ---
-
-  /// The view is [width] by [height] logical pixels. Takes effect at once.
-  void resize(double width, double height) {
-    _width = width;
-    _height = height;
-  }
-
-  /// Finger [id] went down at ([x], [y]). For the mouse, [buttons] are
-  /// Flutter's bits (`kPrimaryButton` and the rest); a mouse that's
-  /// hovering keeps its id.
-  void fingerDown(
-    int id,
-    double x,
-    double y, {
-    FingerKind kind = FingerKind.touch,
-    int buttons = 1,
-    double pressure = 1,
-  }) => _queue.add(_Raw(_RawKind.down, id, x, y, fingerKind: kind, buttons: buttons, pressure: pressure));
-
-  /// Finger [id], down, moved to ([x], [y]). A mouse's [buttons] may change
-  /// while it's down.
-  void fingerMove(int id, double x, double y, {int? buttons, double? pressure}) =>
-      _queue.add(_Raw(_RawKind.move, id, x, y, buttons: buttons, pressure: pressure));
-
-  /// Finger [id] went up at ([x], [y]).
-  void fingerUp(int id, double x, double y) => _queue.add(_Raw(_RawKind.up, id, x, y));
-
-  /// Finger [id] was taken away (by the system, or a widget over the
-  /// view): it goes without tapping or swiping.
-  void fingerCancel(int id) => _queue.add(_Raw(_RawKind.cancel, id, 0, 0));
-
-  /// The mouse (or a pen) [id] moved over the view with nothing pressed.
-  void hover(int id, double x, double y, {FingerKind kind = FingerKind.mouse}) =>
-      _queue.add(_Raw(_RawKind.hover, id, x, y, fingerKind: kind));
-
-  /// The mouse (or a pen) [id] left the view.
-  void leave(int id) => _queue.add(_Raw(_RawKind.leave, id, 0, 0));
-
-  /// A mouse wheel or a trackpad scrolled by ([dx], [dy]).
-  void scrollBy(double dx, double dy) => _queue.add(_Raw(_RawKind.scroll, 0, dx, dy));
-
-  /// A trackpad pinched by [scale] (2 is twice as far apart) and turned by
-  /// [twist] radians since its last event.
-  void trackpad({double scale = 1, double twist = 0}) => _queue.add(_Raw(_RawKind.pad, 0, scale, twist));
-
-  void keyDown(KeyCode key) => _queue.add(_Raw(_RawKind.keyDown, 0, 0, 0, key: key));
-  void keyUp(KeyCode key) => _queue.add(_Raw(_RawKind.keyUp, 0, 0, 0, key: key));
-
-  /// The view lost focus: its keys won't come up here, so each held one
-  /// goes up.
-  void releaseKeys() => _queue.add(_Raw(_RawKind.release, 0, 0, 0));
 
   // --- The input step ---
 
@@ -316,6 +327,17 @@ final class Input {
     _pressedButtons = 0;
     _releasedButtons = 0;
     _scroll = Vec2.zero;
+    if (_paused) {
+      if (_pausing) {
+        _pausing = false;
+        _letGo();
+      }
+      if (_queue.isNotEmpty) _queue.clear();
+      _scrollX = _scrollY = 0;
+      _padScale = 1;
+      _padTwist = 0;
+      return;
+    }
     // Events a handler feeds meanwhile wait for the next frame.
     final n = _queue.length;
     try {
@@ -405,6 +427,33 @@ final class Input {
         for (final key in [..._keys]) {
           _keyUp(key);
         }
+      case _RawKind.actionDown:
+        final action = raw.action!;
+        if (action._held) return;
+        action._held = true;
+        action._pressedAt = _frame;
+      case _RawKind.actionUp:
+        final action = raw.action!;
+        if (!action._held) return;
+        action._held = false;
+        action._releasedAt = _frame;
+    }
+  }
+
+  /// The pause starts: every key, finger and action held goes up, the
+  /// fingers as cancelled.
+  void _letGo() {
+    for (final key in [..._keys]) {
+      _keyUp(key);
+    }
+    for (final finger in [..._fingers]) {
+      if (finger._down) _up(finger, cancelled: true);
+    }
+    for (final action in _actions.values) {
+      if (action._held) {
+        action._held = false;
+        action._releasedAt = _frame;
+      }
     }
   }
 
@@ -950,7 +999,8 @@ final class KeyPress {
       'KeyPress(${[if (control) 'control', if (alt) 'alt', if (shift) 'shift', if (meta) 'meta', key.name].join('+')})';
 }
 
-/// A named button ([Input.action]), held by any of its [buttons].
+/// A named button ([Input.action]), held by any of its [buttons], or from
+/// outside ([press]), such as by a Flutter button.
 final class InputAction {
   InputAction._(this._input, this.name, this.buttons);
 
@@ -958,12 +1008,27 @@ final class InputAction {
   final String name;
   final List<InputButton> buttons;
 
-  bool get isPressed => _input._anyDown(buttons);
+  // Held from outside, and the input frames that pressed and let go of it.
+  bool _held = false;
+  int _pressedAt = -1, _releasedAt = -1;
 
-  /// Whether it went down this frame: one of its buttons did, and none was
-  /// already held.
+  /// Holds it down from outside the keys, as a Flutter button does when
+  /// pressed, until [release]: from the next frame's input step, as a
+  /// key's press is. Pressing and releasing between two frames still
+  /// makes one [wasPressed] and [wasReleased]. Does nothing while the
+  /// world is paused.
+  void press() => _input._queue.add(_Raw(_RawKind.actionDown, 0, 0, 0, action: this));
+
+  /// Lets go of what [press] held.
+  void release() => _input._queue.add(_Raw(_RawKind.actionUp, 0, 0, 0, action: this));
+
+  bool get isPressed => _held || _input._anyDown(buttons);
+
+  /// Whether it went down this frame: one of its buttons did, or [press],
+  /// and nothing already held it.
   bool get wasPressed {
-    var pressed = false;
+    var pressed = _pressedAt == _input._frame;
+    if (_held && !pressed) return false;
     for (var i = 0; i < buttons.length; i++) {
       final b = buttons[i];
       if (_input.wasPressed(b)) {
@@ -975,10 +1040,11 @@ final class InputAction {
     return pressed;
   }
 
-  /// Whether it went up this frame: one of its buttons did, and none is
-  /// held.
+  /// Whether it went up this frame: one of its buttons did, or [release],
+  /// and nothing holds it.
   bool get wasReleased {
-    var released = false;
+    if (_held) return false;
+    var released = _releasedAt == _input._frame;
     for (var i = 0; i < buttons.length; i++) {
       final b = buttons[i];
       if (_input.isPressed(b)) return false;
@@ -994,13 +1060,26 @@ final class InputAction {
 final class _Axis2 {
   _Axis2(this.up, this.down, this.left, this.right);
   final List<InputButton> up, down, left, right;
+
+  // What [Input.setAxis2] set.
+  Vec2 value = Vec2.zero;
 }
 
-enum _RawKind { down, move, up, cancel, hover, leave, scroll, pad, keyDown, keyUp, release }
+enum _RawKind { down, move, up, cancel, hover, leave, scroll, pad, keyDown, keyUp, release, actionDown, actionUp }
 
 /// A queued event.
 final class _Raw {
-  _Raw(this.kind, this.id, this.x, this.y, {this.fingerKind = FingerKind.touch, this.buttons, this.pressure, this.key});
+  _Raw(
+    this.kind,
+    this.id,
+    this.x,
+    this.y, {
+    this.fingerKind = FingerKind.touch,
+    this.buttons,
+    this.pressure,
+    this.key,
+    this.action,
+  });
 
   final _RawKind kind;
   final int id;
@@ -1009,6 +1088,86 @@ final class _Raw {
   final int? buttons;
   final double? pressure;
   final KeyCode? key;
+  final InputAction? action;
+}
+
+/// What feeds an [Input] ([Input.simulate]): package:fynkel_flutter's view
+/// gives it Flutter's events, and a test its own, as a player would:
+/// `world.input.simulate.fingerDown(1, 50, 50)`. Each is queued, and the
+/// next frame's input step handles them in order.
+///
+/// Positions are in the view's logical pixels from its top-left corner
+/// ([resize] gives its size); times are the world's unscaled frame times,
+/// so a test's `world.update(0.6)` holds a finger down for 0.6 seconds.
+final class InputSimulation {
+  InputSimulation._(this._input);
+
+  final Input _input;
+
+  /// The view is [width] by [height] logical pixels. Takes effect at once.
+  void resize(double width, double height) {
+    _input._width = width;
+    _input._height = height;
+  }
+
+  /// Finger [id] went down at ([x], [y]). For the mouse, [buttons] are
+  /// Flutter's bits (`kPrimaryButton` and the rest); a mouse that's
+  /// hovering keeps its id.
+  void fingerDown(
+    int id,
+    double x,
+    double y, {
+    FingerKind kind = FingerKind.touch,
+    int buttons = 1,
+    double pressure = 1,
+  }) => _input._queue.add(_Raw(_RawKind.down, id, x, y, fingerKind: kind, buttons: buttons, pressure: pressure));
+
+  /// Finger [id], down, moved to ([x], [y]). A mouse's [buttons] may change
+  /// while it's down.
+  void fingerMove(int id, double x, double y, {int? buttons, double? pressure}) =>
+      _input._queue.add(_Raw(_RawKind.move, id, x, y, buttons: buttons, pressure: pressure));
+
+  /// Finger [id] went up at ([x], [y]).
+  void fingerUp(int id, double x, double y) => _input._queue.add(_Raw(_RawKind.up, id, x, y));
+
+  /// Finger [id] was taken away (by the system, or a widget over the
+  /// view): it goes without tapping or swiping.
+  void fingerCancel(int id) => _input._queue.add(_Raw(_RawKind.cancel, id, 0, 0));
+
+  /// The mouse (or a pen) [id] moved over the view with nothing pressed.
+  void hover(int id, double x, double y, {FingerKind kind = FingerKind.mouse}) =>
+      _input._queue.add(_Raw(_RawKind.hover, id, x, y, fingerKind: kind));
+
+  /// The mouse (or a pen) [id] left the view.
+  void leave(int id) => _input._queue.add(_Raw(_RawKind.leave, id, 0, 0));
+
+  /// A mouse wheel or a trackpad scrolled by ([dx], [dy]).
+  void scrollBy(double dx, double dy) => _input._queue.add(_Raw(_RawKind.scroll, 0, dx, dy));
+
+  /// A trackpad pinched by [scale] (2 is twice as far apart) and turned by
+  /// [twist] radians since its last event.
+  void trackpad({double scale = 1, double twist = 0}) => _input._queue.add(_Raw(_RawKind.pad, 0, scale, twist));
+
+  /// [key] went down. Returns whether the view should claim it from
+  /// Flutter: the game uses it ([Input.usesKey]) and isn't paused.
+  bool keyDown(KeyCode key) {
+    _input._queue.add(_Raw(_RawKind.keyDown, 0, 0, 0, key: key));
+    return claims(key);
+  }
+
+  /// [key] went up. Returns whether the view should claim it, as [keyDown].
+  bool keyUp(KeyCode key) {
+    _input._queue.add(_Raw(_RawKind.keyUp, 0, 0, 0, key: key));
+    return claims(key);
+  }
+
+  /// Whether the view should claim [key] from Flutter now, as [keyDown]
+  /// returns: for a key held down and repeating.
+  bool claims(KeyCode key) => !_input._paused && _input.usesKey(key);
+
+  /// The view lost focus: its keys won't come up here, so each held one
+  /// goes up.
+  void releaseKeys() => _input._queue.add(_Raw(_RawKind.release, 0, 0, 0));
 }
 
 /// What the input step reaches through the world: what's under a finger,
