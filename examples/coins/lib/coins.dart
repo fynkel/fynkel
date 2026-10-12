@@ -197,7 +197,7 @@ class Player extends GameObject {
   /// Puts down what it carries and takes [item] in its right hand.
   void carry(GameObject item) {
     _carried?.destroy();
-    _carried = _hand.add(item)..translate(Vec3(0, -0.7, 0.45));
+    _carried = _hand.add(item)..localPosition += Vec3(0, -0.7, 0.45);
   }
 
   @override

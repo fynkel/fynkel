@@ -573,7 +573,7 @@ void main() {
       thing.rotateBy(Vec3.up, 2 * math.pi, seconds: 1, ease: Ease.linear);
       frame();
       expectVec(thing.position, const Vec3(1.5, 1, 1));
-      expectVec(thing.scale, const Vec3(1.5, 1.5, 1.5));
+      expectVec(thing.localScale, const Vec3(1.5, 1.5, 1.5));
       expect(thing.rotation.closeTo(Quat.axisAngle(Vec3.up, math.pi / 2)), isTrue);
       frames(3);
       expectVec(thing.position, const Vec3(3, 1, 1));
@@ -585,10 +585,10 @@ void main() {
       mover.position = const Vec3(1, 0, 0);
       mover.translate(const Vec3(0, 2, 0));
       mover.rotate(Vec3.up, math.pi / 2);
-      mover.scale = Vec3.one * 2;
+      mover.localScale = Vec3.one * 2;
       expectVec(thing.position, const Vec3(1, 2, 0));
       expect(thing.rotation.closeTo(Quat.axisAngle(Vec3.up, math.pi / 2)), isTrue);
-      expectVec(thing.scale, const Vec3(2, 2, 2));
+      expectVec(thing.localScale, const Vec3(2, 2, 2));
     });
 
     test('lookAtOver ends looking at the point', () {
@@ -612,15 +612,15 @@ void main() {
     });
 
     test('punchScale swells by up to the punch and ends where it began', () {
-      thing.scale = const Vec3(2, 2, 2);
+      thing.localScale = const Vec3(2, 2, 2);
       final m = thing.punchScale(const Vec3(1, 1, 1), seconds: 1);
       var most = 0.0;
       for (var i = 0; i < 64; i++) {
         frame(1 / 64);
-        most = math.max(most, thing.scale.x - 2);
+        most = math.max(most, thing.localScale.x - 2);
       }
       expect(most, inInclusiveRange(0.5, 1));
-      expectVec(thing.scale, const Vec3(2, 2, 2));
+      expectVec(thing.localScale, const Vec3(2, 2, 2));
       expect(m.isCompleted, isTrue);
     });
 

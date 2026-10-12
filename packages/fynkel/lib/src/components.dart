@@ -106,6 +106,32 @@ final class Transform {
   Transform copyWith({Vec3? position, Quat? rotation, Vec3? scale}) =>
       Transform._(position ?? this.position, rotation ?? this.rotation, scale ?? this.scale);
 
+  /// [local], a child's, in the space this transform is in, as Unity
+  /// works it out: the position exactly, the rotation this one's times the
+  /// child's, and the scale this one's times the child's (Unity's "lossy"
+  /// scale, approximate under a rotated child of an uneven scale).
+  Transform _then(Transform local) => Transform._(
+    position + rotation.rotate(local.position.scaledBy(scale)),
+    (rotation * local.rotation).normalized,
+    scale.scaledBy(local.scale),
+  );
+
+  /// The transform that, under this one, is [world]: [_then]'s other way.
+  /// A side of this scale that is 0 keeps [keepScale]'s.
+  Transform _under(Transform world, Vec3 keepScale) {
+    final p = rotation.inverse.rotate(world.position - position);
+    double div(double a, double b, double keep) => b == 0 ? keep : a / b;
+    return Transform._(
+      Vec3(div(p.x, scale.x, 0), div(p.y, scale.y, 0), div(p.z, scale.z, 0)),
+      (rotation.inverse * world.rotation).normalized,
+      Vec3(
+        div(world.scale.x, scale.x, keepScale.x),
+        div(world.scale.y, scale.y, keepScale.y),
+        div(world.scale.z, scale.z, keepScale.z),
+      ),
+    );
+  }
+
   @override
   bool operator ==(Object other) =>
       other is Transform && other.position == position && other.rotation == rotation && other.scale == scale;
@@ -115,6 +141,17 @@ final class Transform {
 
   @override
   String toString() => 'Transform(position: $position, rotation: $rotation, scale: $scale)';
+}
+
+/// The space a move or a turn is in: the object's own axes ([self], as
+/// Unity's `Space.Self`, what [GameObject.translate] and
+/// [GameObject.rotate] use unless told), or the world's.
+enum Space {
+  /// The object's own axes: forward is the way it faces.
+  self,
+
+  /// The world's axes.
+  world,
 }
 
 /// Makes the object a camera. The view is drawn from the camera with the

@@ -623,32 +623,56 @@ mixin _Moving {
 
   // --- Moving by hand ---
 
+  /// Where the object is in the world, as Unity's `transform.position`.
+  /// Setting it moves the object there, whatever its parents are.
+  /// [localPosition] is the same, counted from its parent.
+  Vec3 get position => _self.worldTransform.position;
+  set position(Vec3 value) => _setPosition(value);
+
+  /// How the object is turned in the world: its parents' rotations and
+  /// its own. Setting it turns the object so, whatever its parents are.
+  /// [localRotation] is the same, counted from its parent.
+  Quat get rotation => _self.worldTransform.rotation;
+  set rotation(Quat value) => _setRotation(value);
+
   /// Where the object is relative to its parent (the world, for a root):
-  /// its [GameObject.transform]'s position. Set it to move it there.
-  Vec3 get position => _self.transform.position;
-  set position(Vec3 value) => _self.transform = _self.transform.copyWith(position: value);
+  /// its [GameObject.transform]'s position.
+  Vec3 get localPosition => _self.transform.position;
+  set localPosition(Vec3 value) => _setLocalPosition(value);
 
   /// How the object is turned relative to its parent.
-  Quat get rotation => _self.transform.rotation;
-  set rotation(Quat value) => _self.transform = _self.transform.copyWith(rotation: value);
+  Quat get localRotation => _self.transform.rotation;
+  set localRotation(Quat value) => _setLocalRotation(value);
 
-  /// How big the object is relative to its parent.
-  Vec3 get scale => _self.transform.scale;
-  set scale(Vec3 value) => _self.transform = _self.transform.copyWith(scale: value);
+  /// How big the object is relative to its parent. There is no world
+  /// scale to set: see [lossyScale].
+  Vec3 get localScale => _self.transform.scale;
+  set localScale(Vec3 value) => _setScale(value);
 
-  /// Turns the object [angle] radians around [axis], in its own frame.
-  void rotate(Vec3 axis, double angle) => _self.transform = _self.transform.rotated(axis, angle);
+  /// How big the object is in the world: its parents' scales times its
+  /// own. Approximate when a parent with an uneven scale has a rotated
+  /// child, as Unity's.
+  Vec3 get lossyScale => _self.worldTransform.scale;
 
-  /// Moves the object by [offset], in its parent's space (the world's for
-  /// a root).
-  void translate(Vec3 offset) => _self.transform = _self.transform.translated(offset);
+  /// Turns the object [angle] radians around [axis]: an axis of its own
+  /// by default (`rotate(Vec3.up, a)` turns it about its own up), or of the
+  /// world's with `relativeTo: Space.world`.
+  void rotate(Vec3 axis, double angle, {Space relativeTo = Space.self}) {
+    final turn = Quat.axisAngle(axis.normalized, angle);
+    switch (relativeTo) {
+      case Space.self:
+        _setLocalRotation((_self.transform.rotation * turn).normalized);
+      case Space.world:
+        _setRotation((turn * _self.worldTransform.rotation).normalized);
+    }
+  }
 
-  /// Where the object is in the world. Setting it moves the object there,
-  /// whatever its parents are.
-  Vec3 get worldPosition => _self.worldTransform.position;
-  set worldPosition(Vec3 value) {
-    final parent = _self.parent;
-    _setPosition(parent == null ? value : parent.inverseTransformPoint(value));
+  /// Moves the object by [offset]: along its own axes by default
+  /// (`translate(Vec3.forward)` moves it a metre the way it looks, its
+  /// scale aside), or the world's with `relativeTo: Space.world`.
+  void translate(Vec3 offset, {Space relativeTo = Space.self}) {
+    final world = _self.worldTransform;
+    _setPosition(world.position + (relativeTo == Space.self ? world.rotation.rotate(offset) : offset));
   }
 
   /// The way the object looks, in the world: its -Z.
@@ -665,11 +689,8 @@ mixin _Moving {
   /// at [point] already.
   void lookAt(Vec3 point, {Vec3 worldUp = Vec3.up}) => _setRotation(_rotationToLookAt(point, worldUp));
 
-  Quat _rotationToLookAt(Vec3 point, Vec3 worldUp) {
-    final turn = Quat.lookRotation(point - _self.worldTransform.position, up: worldUp);
-    final parent = _self.parent;
-    return parent == null ? turn : (parent.worldTransform.rotation.inverse * turn).normalized;
-  }
+  Quat _rotationToLookAt(Vec3 point, Vec3 worldUp) =>
+      Quat.lookRotation(point - _self.worldTransform.position, up: worldUp);
 
   /// [point], given in the object's own space, in the world's: where a
   /// point on it is.
@@ -822,9 +843,10 @@ mixin _Moving {
 
   // --- Helpers ---
 
-  /// Moves the object to [position] (relative to its parent, as
-  /// [position] is) over [seconds], or at [speed] units a second, from
-  /// wherever it is when it begins. The rest is as [tween]'s.
+  /// Moves the object to [position] in the world over [seconds], or at
+  /// [speed] units a second, from wherever it is when it begins (Unity's
+  /// `DOMove`). The rest is as [tween]'s. [localMoveTo] counts from the
+  /// parent, so it moves with it.
   Motion moveTo(
     Vec3 position, {
     double? seconds,
@@ -836,7 +858,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) => _value<Vec3>(
-    () => _self.transform.position,
+    () => _self.worldTransform.position,
     (_) => position,
     Vec3.lerp,
     _distance3,
@@ -851,8 +873,8 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Moves the object by [offset] (in its parent's space) from wherever
-  /// it is when it begins: see [moveTo].
+  /// Moves the object by [offset], in the world, from wherever it is when
+  /// it begins: see [moveTo].
   Motion moveBy(
     Vec3 offset, {
     double? seconds,
@@ -864,7 +886,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) => _value<Vec3>(
-    () => _self.transform.position,
+    () => _self.worldTransform.position,
     (from) => from + offset,
     Vec3.lerp,
     _distance3,
@@ -879,8 +901,9 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Turns the object to [rotation] (relative to its parent) the short way
-  /// round, over [seconds] or at [speed] radians a second: see [moveTo].
+  /// Turns the object to [rotation] in the world the short way round, over
+  /// [seconds] or at [speed] radians a second: see [moveTo].
+  /// [localRotateTo] counts from the parent.
   Motion rotateTo(
     Quat rotation, {
     double? seconds,
@@ -892,7 +915,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) => _value<Quat>(
-    () => _self.transform.rotation,
+    () => _self.worldTransform.rotation,
     (_) => rotation,
     Quat.slerp,
     _angle,
@@ -907,8 +930,64 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Turns the object [angle] radians around [axis] (in its own space, as
-  /// [GameObject.rotate]), any number of turns, over [seconds] or at
+  /// Moves the object to [position] relative to its parent, as
+  /// [localPosition] is: see [moveTo].
+  Motion localMoveTo(
+    Vec3 position, {
+    double? seconds,
+    double? speed,
+    EaseFunction ease = Ease.outQuad,
+    double delay = 0,
+    int loops = 1,
+    bool yoyo = false,
+    bool unscaled = false,
+    void Function()? onComplete,
+  }) => _value<Vec3>(
+    () => _self.transform.position,
+    (_) => position,
+    Vec3.lerp,
+    _distance3,
+    _setLocalPosition,
+    seconds: seconds,
+    speed: speed,
+    ease: ease,
+    delay: delay,
+    loops: loops,
+    yoyo: yoyo,
+    unscaled: unscaled,
+    onComplete: onComplete,
+  );
+
+  /// Turns the object to [rotation] relative to its parent, as
+  /// [localRotation] is: see [rotateTo].
+  Motion localRotateTo(
+    Quat rotation, {
+    double? seconds,
+    double? speed,
+    EaseFunction ease = Ease.outQuad,
+    double delay = 0,
+    int loops = 1,
+    bool yoyo = false,
+    bool unscaled = false,
+    void Function()? onComplete,
+  }) => _value<Quat>(
+    () => _self.transform.rotation,
+    (_) => rotation,
+    Quat.slerp,
+    _angle,
+    _setLocalRotation,
+    seconds: seconds,
+    speed: speed,
+    ease: ease,
+    delay: delay,
+    loops: loops,
+    yoyo: yoyo,
+    unscaled: unscaled,
+    onComplete: onComplete,
+  );
+
+  /// Turns the object [angle] radians around [axis] (one of its own, as
+  /// [rotate]'s), any number of turns, over [seconds] or at
   /// [speed] radians a second. A coin that spins for ever:
   /// `rotateBy(Vec3.up, 2 * pi, seconds: 1, ease: Ease.linear, loops: -1)`.
   Motion rotateBy(
@@ -933,7 +1012,7 @@ mixin _Moving {
       (_) => angle,
       lerp,
       (a, b) => (b - a).abs(),
-      (a) => _setRotation((start * Quat.axisAngle(along, a)).normalized),
+      (a) => _setLocalRotation((start * Quat.axisAngle(along, a)).normalized),
       seconds: seconds,
       speed: speed,
       ease: ease,
@@ -960,7 +1039,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) => _value<Quat>(
-    () => _self.transform.rotation,
+    () => _self.worldTransform.rotation,
     (_) => _rotationToLookAt(point, worldUp),
     Quat.slerp,
     _angle,
@@ -975,7 +1054,8 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Sizes the object to [scale] (relative to its parent): see [moveTo].
+  /// Sizes the object to [scale] relative to its parent, as [localScale]
+  /// is (Unity's `DOScale`): see [moveTo].
   Motion scaleTo(
     Vec3 scale, {
     double? seconds,
@@ -1102,7 +1182,7 @@ mixin _Moving {
           math.sin(turns * 1.13 * p + phase.y),
           math.sin(turns * 0.89 * p + phase.z),
         );
-        _setPosition(base + wobble * fade);
+        _setLocalPosition(base + wobble * fade);
       },
       seconds: seconds,
       speed: null,
@@ -1116,9 +1196,20 @@ mixin _Moving {
   }
 
   // What the helpers use, rather than [position] and the rest, which a
-  // game's class may have overridden with its own.
-  void _setPosition(Vec3 v) => _self.transform = _self.transform.copyWith(position: v);
-  void _setRotation(Quat q) => _self.transform = _self.transform.copyWith(rotation: q);
+  // game's class may have overridden with its own. The world's position
+  // and rotation are turned into the parent's here.
+  void _setPosition(Vec3 v) {
+    final parent = _self._above;
+    _setLocalPosition(parent == null ? v : parent.inverseTransformPoint(v));
+  }
+
+  void _setRotation(Quat q) {
+    final parent = _self._above;
+    _setLocalRotation(parent == null ? q : (parent.worldTransform.rotation.inverse * q).normalized);
+  }
+
+  void _setLocalPosition(Vec3 v) => _self.transform = _self.transform.copyWith(position: v);
+  void _setLocalRotation(Quat q) => _self.transform = _self.transform.copyWith(rotation: q);
   void _setScale(Vec3 v) => _self.transform = _self.transform.copyWith(scale: v);
 }
 

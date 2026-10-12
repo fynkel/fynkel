@@ -21,6 +21,7 @@ import 'scenes/lifecycle.dart';
 import 'scenes/mesh_colliders_basics.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
+import 'scenes/moving_basics.dart';
 import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/rigidbody_basics.dart';
@@ -43,6 +44,7 @@ final List<LabScene Function()> scenes = [
   MotionBasicsScene.new,
   EasesScene.new,
   MotionScene.new,
+  MovingBasicsScene.new,
   CameraBasicsScene.new,
   CameraRigsScene.new,
   LayersBasicsScene.new,

@@ -58,13 +58,15 @@ void main() {
     b.rotate(Vec3.up, 0.5);
     expect(a.transform.position, Vec3(5, 0, 0));
     expect(engine(a).$1, Vec3.zero, reason: 'not sent yet');
-    expect(b.worldTransform.position, Vec3(5, 1, 0), reason: 'a world transform sends first');
+    expect(b.worldTransform.position, Vec3(5, 1, 0), reason: 'worked out in Dart');
+    expect(engine(a).$1, Vec3.zero, reason: 'so still not sent');
+    world.raycast(Ray(Vec3.zero, Vec3.forward));
     expect(engine(a), parts(a.transform));
     expect(engine(b), parts(b.transform));
 
     a.transform = Transform(position: Vec3(0, 0, -5));
     world.raycast(Ray(Vec3.zero, Vec3.forward));
-    expect(engine(a).$1, Vec3(0, 0, -5), reason: 'so does a raycast');
+    expect(engine(a).$1, Vec3(0, 0, -5), reason: 'a raycast sends them');
   });
 
   test("a view's frame sends them, all in one go, however many", () {
@@ -97,7 +99,7 @@ void main() {
   test('it reads back exactly as it was set; the engine keeps it in 32-bit floats', () {
     final o = world.add(GameObject(transform: Transform(position: Vec3(0.1, 0, 0))));
     expect(o.transform.position.x, 0.1);
-    o.worldTransform;
+    world.raycast(Ray(Vec3.zero, Vec3.forward));
     expect(engine(o).$1.x, (Float32List(1)..[0] = 0.1)[0]);
   });
 
@@ -148,7 +150,7 @@ void main() {
     final part = copy.find('Cesium_Milk_Truck')!;
     expect(parts(part.transform), engine(part));
     part.transform = part.transform.translated(Vec3(0, 1, 0));
-    part.worldTransform;
+    world.raycast(Ray(Vec3.zero, Vec3.forward));
     expect(engine(part), parts(part.transform));
   });
 

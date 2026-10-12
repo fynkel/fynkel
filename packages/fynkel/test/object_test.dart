@@ -76,10 +76,10 @@ void main() {
       () => light.parent,
       () => light.children,
       () => light.find('x'),
-      () => light.worldTransform,
     ]) {
       expect(touch, throwsStateErrorSaying('onLoad'));
     }
+    expect(light.worldTransform, light.transform, reason: 'a root, until it is added');
     expect(light.isAlive, isFalse);
     expect(light.toString(), 'GameObject (not added)');
 

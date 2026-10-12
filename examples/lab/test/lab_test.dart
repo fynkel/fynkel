@@ -23,6 +23,7 @@ import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
+import 'package:lab/scenes/moving_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
@@ -152,6 +153,30 @@ void main() {
     expect(scene.cube.position.y, greaterThan(0.5), reason: 'still on its way');
     frames(60);
     expect(scene.cube.position, const Vec3(0, 0.5, 0));
+  });
+
+  test('Moving: the basics: forward goes the cube\'s way, and off and on the table it stays put', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final scene = world.add(MovingBasicsScene());
+    await scene.loaded;
+    final [forward, forwardInWorld, ..., off, on, _, startOver] = scene.controls.cast<Button>();
+    final cube = scene.cube;
+    final way = cube.forward;
+    final start = cube.position;
+    forward.onPressed();
+    expect(cube.position.closeTo(start + way, 1e-9), isTrue, reason: 'the way it looks, turned with the table');
+    forwardInWorld.onPressed();
+    expect(cube.position.closeTo(start + way + Vec3.forward, 1e-9), isTrue);
+    final at = cube.position;
+    off.onPressed();
+    expect(cube.parent, scene);
+    expect(cube.position.closeTo(at, 1e-9), isTrue, reason: 'parent = keeps where it is');
+    on.onPressed();
+    expect(cube.parent, scene.table);
+    expect(cube.position.closeTo(at, 1e-9), isTrue);
+    startOver.onPressed();
+    expect(cube.localPosition, const Vec3(0, 0.75, 0));
   });
 
   test('Motion: the door is awaited, the race is won by the wait, and the patrol comes round again', () async {

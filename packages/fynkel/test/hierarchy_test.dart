@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
+import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:test/test.dart';
@@ -35,6 +36,19 @@ final class Engine {
     final out = arena<Bool>();
     expect(fy_is_part_of(world.pointer, o.id, other.id, out), FyStatus.FY_STATUS_OK);
     return out.value;
+  });
+
+  /// [o]'s world transform as the engine works it out (sending the moves
+  /// first), from its matrix.
+  Transform worldOf(GameObject o) => using((arena) {
+    final id = arena<Uint64>()..value = o.id;
+    final t = arena<Float>(10);
+    world.readWorldTransforms(id, 1, t);
+    return Transform(
+      position: Vec3(t[0], t[1], t[2]),
+      rotation: Quat(t[3], t[4], t[5], t[6]),
+      scale: Vec3(t[7], t[8], t[9]),
+    );
   });
 
   /// Every Dart answer about [objects] is the engine's.
@@ -88,6 +102,48 @@ void main() {
       if (step % 50 == 0) engine.agrees(objects);
     }
     engine.agrees(objects);
+  });
+
+  test('the world transforms Dart works out are the engine\'s, and parent = keeps them', () {
+    final engine = Engine(world);
+    final random = math.Random(5);
+    double r() => random.nextDouble() * 4 - 2;
+    Transform any() => Transform(
+      position: Vec3(r(), r(), r()),
+      rotation: Quat.axisAngle(Vec3(r(), r(), r() + 5).normalized, r()),
+      scale: Vec3.one * (0.5 + random.nextDouble()),
+    );
+    final objects = <GameObject>[for (var i = 0; i < 12; i++) world.add(GameObject(transform: any()))];
+    for (var step = 0; step < 300; step++) {
+      final o = objects[random.nextInt(objects.length)];
+      switch (random.nextInt(4)) {
+        case 0:
+          final parent = random.nextInt(4) == 0 ? null : objects[random.nextInt(objects.length)];
+          if (parent != null && parent.isPartOf(o)) continue;
+          final before = o.worldTransform;
+          o.parent = parent;
+          expect(o.position.closeTo(before.position, 1e-6), isTrue, reason: '$o stays put');
+          expect(o.rotation.closeTo(before.rotation, 1e-6), isTrue, reason: '$o stays turned');
+        case 1:
+          objects.add(o.add(GameObject(transform: any())));
+        case 2:
+          o.transform = any();
+        default:
+          o.position = Vec3(r(), r(), r());
+          o.rotation = Quat.axisAngle(Vec3.up, r());
+      }
+      if (step % 25 != 0) continue;
+      for (final x in objects) {
+        final dart = x.worldTransform, theirs = engine.worldOf(x);
+        expect(
+          dart.position.closeTo(theirs.position, 1e-4),
+          isTrue,
+          reason: '$x at ${dart.position}, ${theirs.position}',
+        );
+        expect(dart.rotation.closeTo(theirs.rotation, 1e-4), isTrue, reason: '$x turned');
+        expect(dart.scale.closeTo(theirs.scale, 1e-4), isTrue, reason: '$x sized');
+      }
+    }
   });
 
   test("a model's parts are read once, as the engine has them, and change through Dart from then on", () async {
