@@ -27,7 +27,7 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 | 9 | #77, **done**: **Pooling**: a pool with versioned handles, and the guide's section | F8, F30 |
 | 10 | #78, **done**: **Input and pause**: `world.paused`; Flutter controls feed axes and actions; keys reach Flutter's shortcuts; `Signal.stream`, `on` takes a `Listenable` | F2, F3, F4, F5, F32, B |
 | 11 | #79, **done**: **Look, physics and motion**: a per-object tint and `Material.copy`; gravity wakes bodies, `wakeUp` before the world does nothing, errors name the real reason; moving platforms; `Follow(space:)`; B's renames and small fixes; `FynkelGame.of`, `FynkelView` split | F12, F14, F15, F18, F20, F22, B |
-| 12 | #80 is 12b (the C base, the duplicated loops, the release profile); 12a (`extend.dart` version 2) next: **Seams**: `extend.dart` version 2; one base for the two C interfaces; the duplicated loops; a release profile | R10, R11, R17, R18 |
+| 12 | #80 is 12b (the C base, the duplicated loops, the release profile); 12a (`extend.dart` version 2) is #PR12A: **Seams**: `extend.dart` version 2; one base for the two C interfaces; the duplicated loops; a release profile | R10, R11, R17, R18 |
 | 13 | **Tests and CI**: the alloc-test flake; a soak test, decoder fuzzing, Miri; tumble run in CI | R20, R21 |
 | 14 | **Docs**: every public member documented and the lint on; one error type for one mistake; plumbing out of the public API; the guide's recipes and §20 | C, F10, F16, F17, F19, F23, F24, F26, F27, F28, F31, F34, F35 |
 | 15 | **Measured again**: the step 5 checks after 7 and 8; a Note10+ profile with Dart symbols; the Mac's GPU memory; Android performance hints | S |

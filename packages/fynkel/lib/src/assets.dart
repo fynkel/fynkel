@@ -5,9 +5,10 @@ part of 'world.dart';
 /// reads the app's bundle; a game can read files or the network instead.
 typedef AssetSource = Future<Uint8List> Function(String name);
 
-/// Models and textures by name, from the world's [AssetSource], loaded
-/// once and shared: ten characters asking for `character.glb` load it
-/// once, and two asking in the same frame wait for the same load.
+/// Models, textures and the kinds of asset packages add ([AssetKind]),
+/// by name, from the world's [AssetSource], loaded once and shared: ten
+/// characters asking for `character.glb` load it once, and two asking in
+/// the same frame wait for the same load.
 ///
 /// Each object's [GameObject.assets] holds what it asks for until the
 /// object is destroyed; each copy of a model holds it too, until it's
@@ -28,7 +29,7 @@ final class Assets {
   /// other copy ([Model.instantiate]). Find its parts by name once it's
   /// added.
   Future<GameObject> instantiate(String name) async {
-    final asset = _hold(name, _Kind.model);
+    final asset = _hold(name, _model);
     final model = await asset.ready as Model;
     _stillUsable(name);
     asset.users++;
@@ -41,25 +42,49 @@ final class Assets {
   /// that asks for it. Freed when the last object holding it is
   /// destroyed, or, if a material still uses it then, with the material.
   Future<Texture2D> texture(String name) async {
-    final asset = _hold(name, _Kind.texture);
+    final asset = _hold(name, _texture);
     final texture = await asset.ready as Texture2D;
     _stillUsable(name);
     return texture;
   }
 
+  /// The asset in [name] as [kind] loads it: a package's kind of asset,
+  /// such as a sound, held and shared as a texture is, and freed with
+  /// [AssetKind.free]. A package gives it a getter of its own
+  /// (`assets.sound('hit.wav')`).
+  Future<T> load<T extends Object>(String name, AssetKind<T> kind) async {
+    final asset = _hold(name, kind);
+    final value = await asset.ready as T;
+    _stillUsable(name);
+    return value;
+  }
+
   /// Loads [names] without adding anything, so what asks for them later
-  /// has them at once: models (`.glb`) and textures (`.png`, `.jpg`,
-  /// `.jpeg`), told apart by their extension. They're held as anything
-  /// else asked for here is.
+  /// has them at once: models (`.glb`), textures (`.png`, `.jpg`,
+  /// `.jpeg`) and the kinds packages added ([WorldSystems.addAssetKind]),
+  /// told apart by their extension. They're held as anything else asked
+  /// for here is.
   Future<void> preload(Iterable<String> names) async {
-    final assets = [for (final name in names) _hold(name, _Kind.of(name))];
+    final assets = [for (final name in names) _hold(name, _kindOf(name))];
     await Future.wait([for (final asset in assets) asset.ready]);
     _stillUsable(assets.map((a) => a.name).join(', '));
   }
 
+  AssetKind<Object> _kindOf(String name) {
+    final lower = name.toLowerCase();
+    final kinds = <AssetKind<Object>>[_model, _texture, ..._world._assetKinds];
+    for (final kind in kinds) {
+      for (final extension in kind.extensions) {
+        if (lower.endsWith(extension.toLowerCase())) return kind;
+      }
+    }
+    final known = [for (final kind in kinds) '${kind.name} (${kind.extensions.join(', ')})'].join(', ');
+    throw ArgumentError.value(name, 'name', 'is none of the kinds this world loads: $known');
+  }
+
   /// Takes a use of [name] for [_user] (or the world), starting its load
   /// if no one has it.
-  _Asset _hold(String name, _Kind kind) {
+  _Asset _hold(String name, AssetKind<Object> kind) {
     _stillUsable(name);
     final world = _world;
     final source = world._source;
@@ -67,7 +92,7 @@ final class Assets {
       throw StateError('this World has no asset source to load $name from: make it with World(source: ...)');
     }
     var asset = world._assets[name];
-    if (asset != null && asset.kind != kind) {
+    if (asset != null && asset.kind.runtimeType != kind.runtimeType) {
       throw ArgumentError.value(name, 'name', 'is loaded as a ${asset.kind.name}, not as a ${kind.name}');
     }
     asset ??= world._assets[name] = _Asset(world, name, kind)..start(source);
@@ -87,17 +112,64 @@ final class Assets {
   String toString() => 'Assets(${_user ?? 'World'})';
 }
 
-enum _Kind {
-  model,
-  texture;
+/// A kind of asset [Assets] loads, shares and frees, as it does models
+/// and textures: a package's, such as sounds. Load one with
+/// [Assets.load]; [WorldSystems.addAssetKind] lets [Assets.preload] load
+/// it by its extension too. One instance per kind is the rule (a `const`,
+/// or a `static final`): a name is loaded as one kind only.
+abstract class AssetKind<T extends Object> {
+  const AssetKind();
 
-  static _Kind of(String name) {
-    final lower = name.toLowerCase();
-    if (lower.endsWith('.glb')) return model;
-    if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return texture;
-    throw ArgumentError.value(name, 'name', 'is neither a model (.glb) nor a texture (.png, .jpg)');
-  }
+  /// What the kind is called in errors: `sound`.
+  String get name;
+
+  /// The ends of the file names it loads, with the dot: `['.wav', '.ogg']`.
+  List<String> get extensions;
+
+  /// Makes the asset from [bytes], the file [name]'s, for [world].
+  Future<T> load(World world, String name, Uint8List bytes);
+
+  /// Frees [value] when the last object holding it is destroyed, or when
+  /// [world] is disposed (before its systems are). What it throws is
+  /// reported to [World.errors].
+  void free(World world, T value) {}
+
+  void _free(World world, Object value) => free(world, value as T);
 }
+
+/// Models and textures, which the world frees itself ([_Resources._free]).
+sealed class _BuiltInKind<T extends Object> extends AssetKind<T> {
+  const _BuiltInKind();
+}
+
+final class _ModelKind extends _BuiltInKind<Model> {
+  const _ModelKind();
+
+  @override
+  String get name => 'model';
+
+  @override
+  List<String> get extensions => const ['.glb'];
+
+  @override
+  Future<Model> load(World world, String name, Uint8List bytes) => Model.load(bytes);
+}
+
+final class _TextureKind extends _BuiltInKind<Texture2D> {
+  const _TextureKind();
+
+  @override
+  String get name => 'texture';
+
+  @override
+  List<String> get extensions => const ['.png', '.jpg', '.jpeg'];
+
+  @override
+  Future<Texture2D> load(World world, String name, Uint8List bytes) => Texture2D.load(bytes);
+}
+
+const _model = _ModelKind();
+const _texture = _TextureKind();
 
 /// One loaded (or loading) asset, and how many uses of it are held.
 final class _Asset {
@@ -105,7 +177,7 @@ final class _Asset {
 
   final World world;
   final String name;
-  final _Kind kind;
+  final AssetKind<Object> kind;
   late final Future<Object> ready;
 
   // The model or texture, once loaded and while it's held.
@@ -116,13 +188,10 @@ final class _Asset {
     ready = () async {
       try {
         final bytes = await source(name);
-        final Object loaded = switch (kind) {
-          _Kind.model => await Model.load(bytes),
-          _Kind.texture => await Texture2D.load(bytes),
-        };
+        final loaded = await kind.load(world, name, bytes);
         if (users == 0 || world.isDisposed) {
           // Everyone who wanted it went while it loaded.
-          world._free([loaded], null);
+          world._freeAsset(kind, loaded, null);
         } else {
           value = loaded;
         }
@@ -147,6 +216,16 @@ extension on World {
     if (identical(_assets[asset.name], asset)) _assets.remove(asset.name);
     final value = asset.value;
     asset.value = null;
-    if (value != null) _free([value], user);
+    if (value != null) _freeAsset(asset.kind, value, user);
+  }
+
+  /// Frees [value], a [kind] of asset [user] held (or the world).
+  void _freeAsset(AssetKind<Object> kind, Object value, GameObject? user) {
+    if (kind is _BuiltInKind) return _free([value], user);
+    try {
+      kind._free(this, value);
+    } catch (error, stack) {
+      _report(user, error, stack);
+    }
   }
 }

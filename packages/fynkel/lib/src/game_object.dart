@@ -312,6 +312,14 @@ class GameObject with _Moving {
   @protected
   void onDestroy() {}
 
+  /// Called when the app goes away (true: to the background, or hidden)
+  /// and comes back (false), while the object is shown, as Unity's
+  /// `OnApplicationPause`: to save, as the app may be closed while away.
+  /// See [World.applicationPaused].
+  @mustCallSuper
+  @protected
+  void onApplicationPause(bool paused) {}
+
   // --- Pointers (docs/stage-4.md §3.6) ---
   //
   // As Unity's IPointerDownHandler and the rest. What's under a finger is
@@ -689,6 +697,7 @@ class GameObject with _Moving {
     component
       .._removed = true
       .._takenOff = true;
+    world._componentRemoved(this, component);
     world._unregister(component);
     world._compact.add(this);
   }

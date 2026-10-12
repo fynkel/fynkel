@@ -105,9 +105,20 @@ final class World implements Finalizable {
         root.destroy();
       }
     }
-    // The assets still held: the engine's side goes with the world, the
-    // rest goes after it.
-    final owned = [for (final asset in _assets.values) ?asset.value];
+    // The assets still held: a package's are freed now, while its system
+    // is there; the engine's side of the rest goes with the world, and
+    // what's left after it.
+    final owned = <Object>[];
+    for (final asset in _assets.values) {
+      final value = asset.value;
+      if (value == null) continue;
+      if (asset.kind is _BuiltInKind) {
+        owned.add(value);
+      } else {
+        asset.value = null;
+        _freeAsset(asset.kind, value, null);
+      }
+    }
     // Nothing of a disposed world hears a signal again, or holds one.
     for (final object in _objects.values) {
       object._stopListening();
@@ -115,9 +126,10 @@ final class World implements Finalizable {
     for (final wait in [..._waits, ..._fixedWaits]) {
       wait.over = true;
     }
-    final systems = [..._systems];
-    _systems.clear();
+    final systems = _systems;
+    _systems = [];
     _systemsByType.clear();
+    _assetKinds.clear();
     for (final system in systems) {
       try {
         system.dispose();
@@ -281,6 +293,43 @@ final class World implements Finalizable {
 
   var _paused = false;
 
+  /// Whether the app is away: in the background, or hidden. [FynkelView]
+  /// sets it from the app's lifecycle; a test can set it. When it changes,
+  /// the [WorldSystem]s' `applicationPause`, then every shown object's
+  /// [GameObject.onApplicationPause] and its enabled behaviours',
+  /// [Behaviour.onApplicationPause], as Unity's `OnApplicationPause`: to
+  /// save, or stop the sound. Unlike [paused], it stops nothing.
+  bool get applicationPaused => _applicationPaused;
+  set applicationPaused(bool value) {
+    if (value == _applicationPaused || isDisposed) return;
+    _applicationPaused = value;
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      if (system._off) continue;
+      try {
+        system.applicationPause(value);
+      } catch (error, stack) {
+        _systemThrew(system, error, stack);
+      }
+    }
+    final count = _live.length;
+    for (var i = 0; i < count && i < _live.length; i++) {
+      final object = _live[i];
+      if (object._destroyed || _isHidden(object)) continue;
+      _safely(object, () => object.onApplicationPause(value));
+      final components = object._components;
+      if (components == null) continue;
+      for (var j = 0; j < components.length && !object._destroyed; j++) {
+        if (components[j] case final Behaviour b when b._enabledNow && !b._removed) {
+          _safely(object, () => b.onApplicationPause(value));
+        }
+      }
+    }
+  }
+
+  var _applicationPaused = false;
+
   /// The virtual cameras, their blends, and shaking the view's camera
   /// (docs/stage-4.md §3.8).
   late final Cameras cameras = Cameras._(this);
@@ -333,6 +382,7 @@ final class World implements Finalizable {
   /// 5. **Motions and routines.** Each running [Motion] moves on
   ///    ([GameObject.tween], [GameObject.moveTo]...), in the order they
   ///    were made, then the routines' waits end ([GameObject.start]).
+  ///    Then the systems' `afterUpdate` (where an animator poses).
   /// 6. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
   ///    what follows where the others went. Then the systems'
@@ -428,6 +478,8 @@ final class World implements Finalizable {
     _runMotions();
     _runRoutines();
     if (_disposeAsked) return;
+    _runSystems(_SystemHook.afterUpdate);
+    if (_disposeAsked) return;
 
     _callEach(_Call.lateUpdate, updated);
 
@@ -447,9 +499,11 @@ final class World implements Finalizable {
 
   // --- Systems ---
 
-  // The world's systems, in the order they were made (systems.dart).
-  final _systems = <WorldSystem>[];
+  // The world's systems, in the order their hooks run (systems.dart): a
+  // new list each time one is made. The asset kinds packages added.
+  var _systems = <WorldSystem>[];
   final _systemsByType = <Type, WorldSystem>{};
+  final _assetKinds = <AssetKind<Object>>[];
 
   // --- Routines ---
 
@@ -565,13 +619,14 @@ final class World implements Finalizable {
     check(fy_raycast(pointer, scratch.ray, maxDistance, layers.value, scratch.rayHit));
     final hit = scratch.rayHit.ref;
     if (hit.object == 0) return null;
-    return RayHit._(_object(hit.object), hit.point.read(), hit.normal.read(), hit.distance);
+    return RayHit(_object(hit.object), hit.point.read(), hit.normal.read(), hit.distance);
   }
 }
 
 /// Where a ray hit first ([World.raycast]).
 final class RayHit {
-  RayHit._(this.gameObject, this.point, this.normal, this.distance);
+  /// A hit a package makes, for [WorldSystem.pointerHit].
+  RayHit(this.gameObject, this.point, this.normal, this.distance);
 
   /// The object hit.
   final GameObject gameObject;

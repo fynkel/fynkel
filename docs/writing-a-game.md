@@ -341,6 +341,7 @@ Each object and behaviour gets these calls, in the order they were added:
 | `onLateUpdate` | Every frame, after every `onUpdate`, the routines and the tweens: for what follows where things ended up. |
 | `onDisable` | Each time it stops being shown, and before `onDestroy`. |
 | `onDestroy` | Once, when it's destroyed. |
+| `onApplicationPause` | When the app goes to the background (`true`) and comes back (`false`): save here, as the app may be closed while it's away. `world.applicationPaused` says which. |
 
 A frame goes: input → starts → fixed steps → updates → routines and
 tweens → late updates → cameras → drawing. This order is fixed and
@@ -640,7 +641,9 @@ class Button3D extends GameObject {
   `onPointerExit`, `onClick`, `onLongPress`, `onDragStart`, `onDrag`,
   `onDragEnd`, on behaviours too. They go to the object under the finger,
   then up to its parents until one returns true. What takes a drag's start
-  gets the rest of that drag.
+  gets the rest of that drag. With physics, a collider takes taps too,
+  even with nothing drawn (an invisible button); triggers don't
+  (`physics.pointerHitsColliders = false` turns it off).
 - **Keys** are `KeyCode`s, by where they are on the keyboard, so W, A, S,
   D stay put on any layout. `input.bindAxis2` and `input.bindAction` add
   your own names.
@@ -720,6 +723,8 @@ class Tree extends GameObject {
 - Each file is loaded once, off the UI thread, and shared. It's freed when
   the last object that asked for it is destroyed.
 - `assets.preload([...])` loads ahead, so a level appears at once later.
+- A package can add a kind of asset of its own (a sound package's `.wav`):
+  it's loaded, preloaded, shared and freed in the same way.
 - A level that's `async` in `onLoad` appears only when all of it is there:
   `await add(level).loaded` waits for that.
 
@@ -958,7 +963,7 @@ A hit is a `RaycastHit`, as Unity's: `point`, `normal`, `distance`,
 `collider`, `gameObject` and `rigidbody`. As Unity's, a ray doesn't hit what it starts inside, and a
 query that misses allocates nothing. `collider.raycast(ray)` and
 `collider.closestPoint(point)` ask one collider. `world.raycast` still
-finds what's drawn, with no colliders: use it for taps.
+finds what's drawn, with no colliders; taps find both (§11).
 `physics.drawColliders = true` draws every collider with the debug lines.
 
 **Callbacks** come to an object or behaviour that asks for them with a
@@ -1356,6 +1361,11 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - For packages (`package:fynkel/extend.dart`): `WorldSystem.componentAdded`
+    is also called for the components an object comes with when it's
+    added, not only for `addComponent`; `componentRemoved` is new. A
+    system whose hooks throw in 5 frames in a row is turned off
+    (`isTurnedOff`), and that's reported once.
   - `PhysicsStatus` (in `package:fynkel_physics/raw.dart`) has a `code`,
     and its numbers match the engine's `FynkelStatus` where they mean the
     same: compare statuses by name, not by `index`.

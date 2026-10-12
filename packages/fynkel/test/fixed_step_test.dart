@@ -373,14 +373,14 @@ void main() {
       expect(errors.first.error, isA<StateError>());
     });
 
-    test('hear of components put on live objects, and read them without a list', () async {
+    test('hear of components coming into the world, and read them without a list', () async {
       final world = newWorld();
       final system = world.system(_Components.new);
       final early = _Plain();
       final object = world.add(GameObject(components: [early]));
-      expect(system.added, isEmpty, reason: 'an object\'s own components come with it');
+      expect(system.added, [(object, early)], reason: 'an object\'s own components, as it\'s added');
       final late = object.addComponent(_Plain());
-      expect(system.added, [(object, late)]);
+      expect(system.added, [(object, early), (object, late)]);
       expect([for (var i = 0; i < object.componentCount; i++) object.componentAt(i)], [early, late]);
       object.removeComponent(early);
       expect(object.componentAt(0).isRemoved, isTrue);

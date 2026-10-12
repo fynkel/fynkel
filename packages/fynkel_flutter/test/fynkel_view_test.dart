@@ -291,6 +291,24 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('the app going to the background and back sets the world\'s applicationPaused', (tester) async {
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    final binding = tester.binding;
+    expect(world.applicationPaused, isFalse);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    expect(world.applicationPaused, isFalse, reason: 'inactive is on the way');
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(world.applicationPaused, isTrue);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.paused);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+    expect(world.applicationPaused, isTrue, reason: 'coming back');
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(world.applicationPaused, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   // A hot restart starts a new isolate and disposes nothing, so the first
   // view of each isolate has the plugin free what an earlier one left.
   testWidgets('the plugin is reset once per isolate, before its first view registers', (tester) async {
