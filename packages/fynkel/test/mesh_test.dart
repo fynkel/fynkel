@@ -82,7 +82,35 @@ void main() {
       indices: const [3, 4, 1, 3, 1, 0, 4, 5, 2, 4, 2, 1],
     );
     expect((mesh.vertexCount, mesh.indexCount), (8, 12));
-    expect((Mesh.sphere().vertexCount, Mesh.sphere().indexCount), (49 * 25, 48 * 23 * 2 * 3));
+    expect((Mesh.sphere().vertexCount, Mesh.sphere().indexCount), (25 * 17, 24 * 15 * 2 * 3));
+  });
+
+  test('the built-in shapes: the same mesh each time, of Unity\'s sizes', () {
+    for (final make in [Mesh.cube, Mesh.sphere, Mesh.capsule, Mesh.cylinder, Mesh.plane, Mesh.quad]) {
+      expect(make(), same(make()));
+    }
+    (Vec3, Vec3) bounds(Mesh mesh) {
+      final p = mesh.positions;
+      var (lo, hi) = (Vec3.one * 1e9, Vec3.one * -1e9);
+      for (var i = 0; i < p.length; i += 3) {
+        final v = Vec3(p[i], p[i + 1], p[i + 2]);
+        lo = Vec3(math.min(lo.x, v.x), math.min(lo.y, v.y), math.min(lo.z, v.z));
+        hi = Vec3(math.max(hi.x, v.x), math.max(hi.y, v.y), math.max(hi.z, v.z));
+      }
+      return (lo, hi);
+    }
+
+    Matcher near(Vec3 v) => predicate<Vec3>((got) => (got - v).length < 1e-5, '$v');
+    for (final (mesh, half) in [
+      (Mesh.capsule(), const Vec3(0.5, 1, 0.5)),
+      (Mesh.cylinder(), const Vec3(0.5, 1, 0.5)),
+      (Mesh.quad(), const Vec3(0.5, 0.5, 0)),
+    ]) {
+      final (lo, hi) = bounds(mesh);
+      expect(lo, near(-half), reason: '$mesh');
+      expect(hi, near(half), reason: '$mesh');
+    }
+    expect(Mesh.sphere().indexCount ~/ 3, 720, reason: 'as light as Unity\'s sphere');
   });
 
   test('a mesh reads back its positions and triangles, built-in shapes too', () {

@@ -35,17 +35,34 @@ final class Mesh implements Finalizable {
   /// upright on the four sides.
   factory Mesh.cube() => _cube;
 
-  /// A sphere of radius 0.5. The texture wraps around it once, with its
-  /// top at the north pole.
+  /// A sphere of radius 0.5 (720 triangles, as light as Unity's). The
+  /// texture wraps around it once, with its top at the north pole.
   factory Mesh.sphere() => _sphere;
+
+  /// A capsule along Y, 2 high from end to end and of radius 0.5: the
+  /// shape of a default `CapsuleCollider` or `CharacterController`, as Unity's. The
+  /// texture wraps around it once, its top at the top.
+  factory Mesh.capsule() => _capsule;
+
+  /// A cylinder along Y, 2 high and of radius 0.5, with flat ends, as
+  /// Unity's. The texture wraps around its side once.
+  factory Mesh.cylinder() => _cylinder;
 
   /// A 1×1 plane facing +Y. Seen from above, the texture's top is towards
   /// -Z.
   factory Mesh.plane() => _plane;
 
+  /// A 1×1 square standing in XY, facing +Z: a camera looking along its
+  /// forward (-Z) sees its front, the texture upright. Its back isn't
+  /// drawn unless the material is [Material.doubleSided].
+  factory Mesh.quad() => _quad;
+
   static final _cube = Mesh._shape(FY_MESH_CUBE, 'Mesh.cube()');
   static final _sphere = Mesh._shape(FY_MESH_SPHERE, 'Mesh.sphere()');
+  static final _capsule = Mesh._shape(FY_MESH_CAPSULE, 'Mesh.capsule()');
+  static final _cylinder = Mesh._shape(FY_MESH_CYLINDER, 'Mesh.cylinder()');
   static final _plane = Mesh._shape(FY_MESH_PLANE, 'Mesh.plane()');
+  static final _quad = Mesh._shape(FY_MESH_QUAD, 'Mesh.quad()');
 
   factory Mesh._shape(int shape, String name) {
     ensureEngine();

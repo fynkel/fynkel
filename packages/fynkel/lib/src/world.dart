@@ -244,6 +244,9 @@ final class World implements Finalizable {
   // readWorldTransforms' last buffer, as the engine's type.
   Pointer<FyTransform> _manyOut = nullptr;
 
+  // Whether the world has said that it draws only one sun ([_noteSun]).
+  var _warnedSuns = false;
+
   // Whether a destroyed object is in [_unsent], to be dropped at the next
   // update: with no view drawing, nothing else would let go of it.
   var _unsentGone = false;

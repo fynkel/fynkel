@@ -9,7 +9,7 @@
 use std::collections::HashMap;
 
 use bytemuck::{Pod, Zeroable};
-use glam::{Mat3, Mat4, Vec3};
+use glam::{Mat3, Mat4, Vec3, Vec4};
 
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
@@ -27,6 +27,8 @@ pub struct FrameStats {
     pub draw_calls: u32,
     /// Draws skipped because their mesh key wasn't uploaded.
     pub missing_meshes: u32,
+    /// Draws skipped because they're wholly outside the camera's view.
+    pub culled: u32,
     /// Debug lines drawn.
     pub lines: u32,
 }
@@ -70,6 +72,10 @@ struct GpuMesh {
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     index_count: u32,
+    /// A sphere around every vertex, in the mesh's own space: its centre
+    /// and radius, for culling.
+    centre: Vec3,
+    radius: f32,
 }
 
 impl GpuMesh {
@@ -146,8 +152,11 @@ pub struct Renderer {
     instances: Vec<Instance>,
     batches: Vec<Batch>,
     line_vertices: Vec<LineVertex>,
-    /// Indices into the scene's draws, sorted by mesh.
-    order: Vec<u32>,
+    /// The scene's draws that are seen, each with its sort key, sorted.
+    order: Vec<(SortKey, u32)>,
+    /// Each seen draw's normal matrix and whether it mirrors, by its index
+    /// in the scene.
+    normals: Vec<(Mat3, bool)>,
     clear: wgpu::Color,
     size: (u32, u32),
 }
@@ -352,6 +361,7 @@ impl Renderer {
             batches: Vec::new(),
             line_vertices: Vec::new(),
             order: Vec::new(),
+            normals: Vec::new(),
             clear: wgpu::Color::BLACK,
             size: (0, 0),
         }
@@ -369,7 +379,11 @@ impl Renderer {
             filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
         let indices =
             filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
-        self.meshes.insert(key, GpuMesh { vertices, indices, index_count: data.indices().len() as u32 });
+        let (min, max) = data.bounds();
+        let centre = (min + max) * 0.5;
+        let radius = data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max);
+        self.meshes
+            .insert(key, GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius });
     }
 
     /// Frees the mesh under `key`. Returns whether there was one.
@@ -456,41 +470,40 @@ impl Renderer {
             ambient: scene.ambient.extend(0.0).into(),
         };
 
-        // Group draws by pipeline, then textures, then mesh, so each run
-        // of the same three is one instanced draw call and the state
-        // changes least between calls. The sort is in place and the order
-        // is reused, so this allocates nothing in a steady frame.
+        // Leave out what the camera can't see, then group the rest by
+        // pipeline, textures and mesh, so each run of the same three is one
+        // instanced draw call and the state changes least between calls.
+        // Each draw's key and normal matrix are worked out once. The sort
+        // is in place and the buffers reused, so a steady frame allocates
+        // nothing.
+        let planes = frustum_planes(projection * camera.view);
         self.order.clear();
-        self.order.extend(0..scene.draws.len() as u32);
-        self.order.sort_unstable_by_key(|&i| {
-            let draw = &scene.draws[i as usize];
-            let faces = Faces::of(&draw.material, mirrors(draw.model));
-            (draw.material.alpha_cutoff > 0.0, faces, draw.material.textures, draw.mesh.0)
-        });
-
-        for &i in &self.order {
-            let draw = &scene.draws[i as usize];
-            if !self.meshes.contains_key(&draw.mesh) {
+        self.normals.resize(scene.draws.len(), (Mat3::ZERO, false));
+        for (i, draw) in scene.draws.iter().enumerate() {
+            let Some(mesh) = self.meshes.get(&draw.mesh) else {
                 stats.missing_meshes += 1;
                 continue;
+            };
+            if !in_view(&planes, draw.model, mesh.centre, mesh.radius) {
+                stats.culled += 1;
+                continue;
             }
-            let m = &draw.material;
-            let cutout = m.alpha_cutoff > 0.0;
             let (normal, mirrored) = normal_matrix(draw.model);
-            let faces = Faces::of(m, mirrored);
+            self.normals[i] = (normal, mirrored);
+            let m = &draw.material;
+            let key = (m.alpha_cutoff > 0.0, Faces::of(m, mirrored), m.textures, draw.mesh.0);
+            self.order.push((key, i as u32));
+        }
+        self.order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+
+        for &((cutout, faces, textures, mesh), i) in &self.order {
+            let draw = &scene.draws[i as usize];
+            let m = &draw.material;
+            let (normal, mirrored) = self.normals[i as usize];
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
-                Some(b) if (b.cutout, b.faces, b.textures, b.mesh) == (cutout, faces, m.textures, draw.mesh) => {
-                    b.count += 1
-                }
-                _ => self.batches.push(Batch {
-                    cutout,
-                    faces,
-                    textures: m.textures,
-                    mesh: draw.mesh,
-                    first: instance,
-                    count: 1,
-                }),
+                Some(b) if (b.cutout, b.faces, b.textures, b.mesh.0) == (cutout, faces, textures, mesh) => b.count += 1,
+                _ => self.batches.push(Batch { cutout, faces, textures, mesh: draw.mesh, first: instance, count: 1 }),
             }
             let [er, eg, eb] = m.emissive;
             let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
@@ -639,8 +652,28 @@ fn normal_matrix(model: Mat4) -> (Mat3, bool) {
     (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
 }
 
-/// Whether `model` mirrors: a negative determinant, which also turns its
-/// triangles' winding around.
-fn mirrors(model: Mat4) -> bool {
-    Mat3::from_mat4(model).determinant() < 0.0
+/// A draw's sort key: cut out or not, which faces, its textures and its
+/// mesh, in the order draws are grouped.
+type SortKey = (bool, Faces, MaterialTextures, u64);
+
+/// The six planes around what `view_proj` shows (left, right, bottom, top,
+/// far and near, for reversed-Z with depth from 0 to 1), each as a normal
+/// pointing inside and a distance, scaled so the normal is unit length.
+fn frustum_planes(view_proj: Mat4) -> [Vec4; 6] {
+    let row = |i: usize| view_proj.row(i);
+    let (x, y, z, w) = (row(0), row(1), row(2), row(3));
+    [w + x, w - x, w + y, w - y, z, w - z].map(|p| p / p.truncate().length().max(f32::MIN_POSITIVE))
+}
+
+/// Whether a mesh whose bounding sphere is at `centre` with `radius`, in
+/// its own space, can be seen at all when placed by `model`: false only
+/// when the sphere is wholly outside one of the `planes`.
+fn in_view(planes: &[Vec4; 6], model: Mat4, centre: Vec3, radius: f32) -> bool {
+    let at = model.transform_point3(centre);
+    // The longest axis's stretch: the sphere stays around the mesh under
+    // any scale.
+    let stretch =
+        model.x_axis.truncate().length().max(model.y_axis.truncate().length()).max(model.z_axis.truncate().length());
+    let r = radius * stretch;
+    planes.iter().all(|p| p.truncate().dot(at) + p.w >= -r)
 }

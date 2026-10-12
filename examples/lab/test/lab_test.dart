@@ -27,6 +27,7 @@ import 'package:lab/scenes/moving_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
+import 'package:lab/scenes/shapes_basics.dart';
 
 /// The lab's assets, from its folder, as the app has them.
 Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
@@ -153,6 +154,17 @@ void main() {
     expect(scene.cube.position.y, greaterThan(0.5), reason: 'still on its way');
     frames(60);
     expect(scene.cube.position, const Vec3(0, 0.5, 0));
+  });
+
+  test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ShapesBasicsScene());
+    world.update(1 / 60);
+    expect(scene.shapes.map((s) => s.name), ['cube', 'sphere', 'capsule', 'cylinder', 'plane', 'quad']);
+    expect(scene.readout.value, allOf(contains('cube 12'), contains('sphere 720'), contains('quad 2')));
+    scene.controls.whereType<Toggle>().single.onChanged(true);
+    expect(scene.quadMaterial.doubleSided, isTrue);
   });
 
   test('Moving: the basics: forward goes the cube\'s way, and off and on the table it stays put', () async {

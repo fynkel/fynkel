@@ -22,7 +22,7 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 | 4 | #72, **done**: **The hierarchy in Dart**: parent, children and shown kept in Dart, changed only through `World` | R6, R16 |
 | 5 | #73, **done**: **Moving as Unity**: `position` is the world's, `translate`/`rotate` take a `Space`, `parent =` keeps the world position | A2, A5 |
 | 6 | #74, **done**: **The other API decisions**: radians with `.deg`, `isPressed`, the routine words, the camera's helpers on `Camera`, `gameObject` and `RaycastHit`, `world.all` skipping hidden objects | A1, A3, A4, A6, A7, A8 |
-| 7 | **Only what moved**: the core's moved log, physics follows only it; per-frame lists that keep their storage | R7, F9, R9 |
+| 7 | #75, **done**: **Only what moved**: the core's moved log, physics follows only it; per-frame lists that keep their storage | R7, F9, R9 |
 | 8 | **Drawing at scale**: lighter built-in sphere, plus capsule, cylinder and quad meshes; culling; sort keys computed once; a material looked up once per batch; a warning when lights are dropped | S, F13, R8, R12's warning |
 | 9 | **Pooling**: a pool with versioned handles, and the guide's section | F8, F30 |
 | 10 | **Input and pause**: `world.paused`; Flutter controls feed axes and actions; keys reach Flutter's shortcuts; `Signal.stream`, `on` takes a `Listenable` | F2, F3, F4, F5, F32, B |

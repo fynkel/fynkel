@@ -233,6 +233,8 @@ fn the_shapes_tangents_agree_with_mikktspace() {
         ("cube", MeshData::cube(), 0.01),
         ("sphere", MeshData::sphere(48, 24), 4.0),
         ("plane", MeshData::plane(), 0.01),
+        ("quad", MeshData::quad(), 0.01),
+        ("cylinder", MeshData::cylinder(24), 0.1),
     ] {
         let v = mesh.vertices();
         let positions: Vec<[f32; 3]> = v.iter().map(|v| v.position).collect();
@@ -254,6 +256,51 @@ fn the_shapes_tangents_agree_with_mikktspace() {
         }
         assert!(worst < limit_degrees, "{name}: up to {worst}° from MikkTSpace's");
     }
+}
+
+#[test]
+fn the_capsule_is_two_high_with_round_ends_of_radius_half() {
+    let capsule = MeshData::capsule(24, 8);
+    check_winding(&capsule);
+    check_tangents(&capsule);
+    assert_eq!(capsule.bounds(), (Vec3::new(-0.5, -1.0, -0.5), Vec3::new(0.5, 1.0, 0.5)));
+    for v in capsule.vertices() {
+        let p = Vec3::from(v.position);
+        // Every point is 0.5 from the segment between the ends' centres.
+        let on_axis = Vec3::new(0.0, p.y.clamp(-0.5, 0.5), 0.0);
+        assert!(((p - on_axis).length() - 0.5).abs() < 1e-5, "{:?}", v);
+        assert!((Vec3::from(v.normal) - (p - on_axis) * 2.0).length() < 1e-4, "{:?}", v);
+    }
+    let vs: Vec<f32> = capsule.vertices().iter().map(|v| v.uv[1]).collect();
+    assert_eq!((vs.iter().cloned().fold(1.0, f32::min), vs.iter().cloned().fold(0.0, f32::max)), (0.0, 1.0));
+}
+
+#[test]
+fn the_cylinder_is_two_high_of_radius_half_with_flat_caps() {
+    let cylinder = MeshData::cylinder(24);
+    check_winding(&cylinder);
+    check_tangents(&cylinder);
+    let (min, max) = cylinder.bounds();
+    assert!((min - Vec3::new(-0.5, -1.0, -0.5)).length() < 1e-5 && (max - Vec3::new(0.5, 1.0, 0.5)).length() < 1e-5);
+    for v in cylinder.vertices() {
+        let (p, n) = (Vec3::from(v.position), Vec3::from(v.normal));
+        if n.y == 0.0 {
+            assert!((Vec3::new(p.x, 0.0, p.z).length() - 0.5).abs() < 1e-5, "{:?}", v);
+        } else {
+            assert_eq!(p.y, n.y, "a cap at its end: {:?}", v);
+            assert!(v.uv.iter().all(|c| (0.0..=1.0).contains(c)));
+        }
+    }
+}
+
+#[test]
+fn the_quad_faces_plus_z_with_its_image_upright() {
+    let quad = MeshData::quad();
+    check_winding(&quad);
+    check_tangents(&quad);
+    assert!(quad.vertices().iter().all(|v| v.normal == [0.0, 0.0, 1.0]));
+    let top_left = quad.vertices().iter().find(|v| v.position == [-0.5, 0.5, 0.0]).unwrap();
+    assert_eq!(top_left.uv, [0.0, 0.0], "the image's top left at the top left, seen from +Z");
 }
 
 #[test]

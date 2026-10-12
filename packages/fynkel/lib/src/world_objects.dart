@@ -436,4 +436,21 @@ extension _Objects on World {
       _appearIfDone(waiter);
     }
   }
+
+  /// Says once, when a second [Light.sun] is put in the world, that only
+  /// one lights the scene: the renderer draws one sun and drops the rest.
+  void _noteSun(GameObject object) {
+    if (_warnedSuns) return;
+    for (final other in _live) {
+      if (identical(other, object) || other._destroyed) continue;
+      if (other.get<Light>()?.kind != LightKind.sun) continue;
+      _warnedSuns = true;
+      String named(GameObject o) => o.name == null ? '$o' : '$o (${o.name})';
+      print(
+        'Fynkel: ${named(object)} has a Light.sun, and so has ${named(other)}. Only one sun lights the scene, the '
+        'one on the object made first; the others are left out.',
+      );
+      return;
+    }
+  }
 }

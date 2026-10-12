@@ -146,6 +146,22 @@ void main() {
     expect(log, ['destroy child', 'destroy c', 'destroy root', 'destroy a', 'destroy b']);
   });
 
+  test('a second sun is noted once: only one lights the scene', () {
+    final said = <String>[];
+    runZoned(() {
+      final world = World();
+      addTearDown(world.dispose);
+      world.add(GameObject(name: 'sun', components: [Light.sun()]));
+      world.add(GameObject(components: [Light.ambient()]));
+      expect(said, isEmpty, reason: 'one sun, and an ambient light');
+      final second = world.add(GameObject(name: 'second', components: [Light.sun()]));
+      world.add(GameObject(components: [Light.sun()]));
+      second.get<Light>()!.intensity = 2;
+    }, zoneSpecification: ZoneSpecification(print: (_, _, _, line) => said.add(line)));
+    expect(said, hasLength(1));
+    expect(said.single, allOf(contains('second'), contains('sun'), contains('Only one sun lights the scene')));
+  });
+
   test('get finds a component by its type, a subtype or an interface, before and after adding', () {
     final armour = Armour(5);
     final renderer = cube();

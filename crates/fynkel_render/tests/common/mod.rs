@@ -21,7 +21,7 @@ pub fn gpu() -> Gpu {
 pub fn renderer(gpu: &Gpu, format: wgpu::TextureFormat) -> Renderer {
     let mut r = Renderer::new(gpu, format);
     r.upload_mesh(CUBE, &MeshData::cube());
-    r.upload_mesh(SPHERE, &MeshData::sphere(48, 24));
+    r.upload_mesh(SPHERE, &MeshData::sphere(24, 16));
     r.upload_mesh(PLANE, &MeshData::plane());
     r
 }
