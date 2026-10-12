@@ -1000,6 +1000,12 @@ class ScoreHud extends StatelessWidget {
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
 ScoreHud(game)))`.
 
+`FynkelApp` is a `MaterialApp` with the game as its page, so the overlay
+can hold any Material widget (a `Slider`, a `TextField`, a button), open a
+dialog with `showDialog`, or push a page over the game with
+`Navigator.of(context)`. Give it a `theme:` (Material's dark one if not),
+and a `navigatorKey:` to open pages from the game's code.
+
 **Keep the HUD in its own file.** Flutter and Fynkel both have a `Color`,
 so a game's files import `package:fynkel/fynkel.dart` (and
 `package:flutter/foundation.dart` for `ValueNotifier`), and its widgets'
@@ -1041,7 +1047,9 @@ class PlayPage extends StatelessWidget {
 }
 ```
 
-Leaving the page destroys the game and frees the engine's memory.
+Leaving the page, or starting over, destroys the game as a scene unloads
+in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
+saving there run, and then the engine's memory is freed.
 
 ## 16. Hot reload and starting over
 
@@ -1161,3 +1169,18 @@ multibody joints).
 | `HingeJoint` with both a motor and a spring | the motor wins |
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |
+
+## 21. What changed
+
+For code written before: each change that breaks it, newest first.
+
+- **Stage 6** (2026-10-12):
+  - `World.dispose` destroys every object first: `onDisable` and
+    `onDestroy` run, and the objects say `isDestroyed`. Leaving a
+    `FynkelView`'s page and F5 dispose the world, so they run there too.
+  - What a routine schedules outside the routines step (`await` on a
+    routine that ended at once, say) runs in the next routines step, not in
+    Dart's own microtask queue. A test's plain loop of `world.update`
+    drains it; take a routine's `done` before running the frame it ends in.
+  - `FynkelApp` is a `MaterialApp` in Material's dark theme: text in an
+    overlay with no style of its own is light and in Material's font.

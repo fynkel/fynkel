@@ -98,6 +98,19 @@ void main() {
     expect(log, ['update', 'a', 'b', 'late']);
   });
 
+  test('awaiting routines that end at once goes on in the next routines step, with no event loop (finding 29)', () {
+    object.start(() async {
+      log.add('a');
+      await object.start(() async {});
+      log.add('b');
+      await Future.wait([object.start(() async {}).done, object.start(() async => 1).done]);
+      log.add('c');
+    });
+    expect(log, ['a']);
+    frames(1);
+    expect(log, ['a', 'update', 'b', 'c', 'late'], reason: 'a plain loop of updates, as a game test is, drains them');
+  });
+
   test('what a routine schedules runs before the next routine goes on', () {
     object.start(() async {
       await nextFrame;
@@ -367,8 +380,9 @@ void main() {
       });
       return all([other, object.start<int>(() async => throw StateError('no'))]);
     });
+    final done = routine.done; // awaited: its error isn't the world's
     frames(1);
-    await expectLater(routine.done, throwsStateError);
+    await expectLater(done, throwsStateError);
     expect(other.isStopped, isTrue);
   });
 
@@ -440,6 +454,8 @@ void main() {
     expect(() => GameObject().start(() async {}), throwsStateError);
     final gone = world.add(GameObject())..destroy();
     expect(() => gone.start(() async {}), throwsStateError);
-    expect(object.start(() async => wait(-1)).done, throwsArgumentError);
+    final negative = object.start(() async => wait(-1)).done;
+    frames(1);
+    expect(negative, throwsArgumentError);
   });
 }

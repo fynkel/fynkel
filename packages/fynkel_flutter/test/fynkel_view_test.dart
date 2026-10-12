@@ -4,7 +4,7 @@ import 'dart:io';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter/widgets.dart' hide Transform;
+import 'package:flutter/material.dart' hide Color, Material, Transform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
@@ -499,6 +499,46 @@ void main() {
       expect(game.isAlive, isFalse);
     });
 
+    testWidgets(
+      "FynkelApp's overlay holds Material widgets, in its theme, and opens dialogs over the game (finding 1)",
+      (tester) async {
+        final volume = ValueNotifier(0.5);
+        await tester.pumpWidget(
+          FynkelApp(
+            Tiny.new,
+            theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: Colors.green)),
+            source: bundleSource(Bundle({'assets/grid.png': png})),
+            overlay: (context, game) => Column(
+              children: [
+                ValueListenableBuilder(
+                  valueListenable: volume,
+                  builder: (context, value, _) => Slider(value: value, onChanged: (v) => volume.value = v),
+                ),
+                Builder(
+                  builder: (context) => TextButton(
+                    onPressed: () => showDialog<void>(context: context, builder: (_) => const Text('paused')),
+                    child: const Text('pause'),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+        expect(tester.takeException(), isNull);
+        await tester.drag(find.byType(Slider), const Offset(100, 0));
+        expect(volume.value, isNot(0.5));
+        await tester.tap(find.text('pause'));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 300));
+        expect(find.text('paused'), findsOneWidget);
+        expect(find.byType(FynkelView), findsOneWidget, reason: 'the game stays under the dialog');
+        final game = tester.widget<FynkelView>(find.byType(FynkelView)).root!;
+        await tester.pumpWidget(const SizedBox());
+        await tester.pump(const Duration(milliseconds: 1));
+        expect(game.isDestroyed, isTrue, reason: 'leaving the app destroys the game: its onDestroy ran');
+      },
+    );
+
     testWidgets('F5 starts a FynkelGame over: a new root in a new world, and what was built around it again', (
       tester,
     ) async {
@@ -525,6 +565,7 @@ void main() {
       final second = made.last;
       expect(world.isDisposed, isTrue, reason: 'the old view went, and its world with it');
       expect(first.isAlive, isFalse);
+      expect(first.isDestroyed, isTrue, reason: 'its onDestroy ran (finding 7)');
       expect(second.world, isNot(same(world)));
       expect(find.text('game 1'), findsOneWidget);
       expect(second.world.input.isDown(KeyCode.f5), isFalse, reason: 'the restart key is not the game\'s');

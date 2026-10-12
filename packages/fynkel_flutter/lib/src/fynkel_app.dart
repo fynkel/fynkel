@@ -1,4 +1,4 @@
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject;
 
 import 'fynkel_game.dart';
@@ -9,16 +9,33 @@ import 'fynkel_view.dart';
 /// `FynkelApp(ArenaGame.new, overlay: (context, game) => Hud(game))`. It
 /// shows the root [make] makes in a [FynkelView] full screen, with assets
 /// from the app's bundle under `assets/` unless [source] says otherwise.
-/// It's a [FynkelGame], so F5 starts the game over in a debug build. A
-/// game with menus around it puts a [FynkelGame] in its own app instead.
+///
+/// It's a [MaterialApp], with the game as its first page: the overlay can
+/// hold any Material widget (a `Slider`, a `TextField`, a dialog from
+/// `showDialog`), in the app's [theme], and push pages over the game with
+/// `Navigator.of(context)`. It's a [FynkelGame] too, so F5 starts the game
+/// over in a debug build. A game with menus around it puts a [FynkelGame]
+/// in its own app instead.
 class FynkelApp<T extends GameObject> extends StatelessWidget {
-  const FynkelApp(this.make, {super.key, this.overlay, this.source, this.title = '', this.restartOnReload = false});
+  const FynkelApp(
+    this.make, {
+    super.key,
+    this.overlay,
+    this.source,
+    this.title = '',
+    this.restartOnReload = false,
+    this.theme,
+    this.darkTheme,
+    this.themeMode = ThemeMode.system,
+    this.navigatorKey,
+  });
 
   /// Makes the game's root, as `Garden.new` does: when the app starts,
   /// and again each time it starts over.
   final T Function() make;
 
-  /// What shows over the game, such as a HUD, given its root.
+  /// What shows over the game, such as a HUD, given its root. It's on a
+  /// transparent [Material], so Material widgets work in it.
   final Widget Function(BuildContext context, T game)? overlay;
 
   final AssetSource? source;
@@ -29,19 +46,43 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
   /// See [FynkelGame.restartOnReload].
   final bool restartOnReload;
 
+  /// The overlay's and the app's themes, as [MaterialApp]'s. Without
+  /// one, Material's dark theme, whose light text reads over most games.
+  final ThemeData? theme, darkTheme;
+
+  /// Which of [theme] and [darkTheme] is used, as [MaterialApp]'s.
+  final ThemeMode themeMode;
+
+  /// The app's navigator, to show pages or dialogs from outside a widget,
+  /// such as from the game's code.
+  final GlobalKey<NavigatorState>? navigatorKey;
+
   @override
-  Widget build(BuildContext context) => WidgetsApp(
+  Widget build(BuildContext context) => MaterialApp(
     title: title,
     color: const Color(0xFF000000),
+    theme: theme ?? ThemeData.dark(),
+    darkTheme: darkTheme,
+    themeMode: themeMode,
+    navigatorKey: navigatorKey,
     debugShowCheckedModeBanner: false,
-    builder: (context, _) => FynkelGame(
+    home: FynkelGame(
       make: make,
       restartOnReload: restartOnReload,
       builder: (context, game) {
         final view = FynkelView(root: game, source: source);
         final over = overlay;
         if (over == null) return view;
-        return Stack(fit: StackFit.expand, children: [view, over(context, game)]);
+        return Stack(
+          fit: StackFit.expand,
+          children: [
+            view,
+            Material(
+              type: MaterialType.transparency,
+              child: Builder(builder: (context) => over(context, game)),
+            ),
+          ],
+        );
       },
     ),
   );
