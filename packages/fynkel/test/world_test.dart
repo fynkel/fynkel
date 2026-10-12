@@ -105,14 +105,54 @@ void main() {
     expect(o.transform.position, Vec3(1, 0, 0));
   });
 
-  test('a disposed world refuses calls with a clear error, and dispose twice is fine', () {
+  test('a disposed world refuses calls with a clear error, its objects are destroyed, and dispose twice is fine', () {
     final other = World();
     final o = other.add(GameObject(transform: Transform()));
     other.dispose();
     other.dispose();
     expect(o.isAlive, isFalse);
-    expect(() => o.transform, throwsA(isA<StateError>().having((e) => e.message, 'message', contains('disposed'))));
+    expect(() => o.transform, throwsA(isA<StateError>().having((e) => e.message, 'message', contains('destroyed'))));
     expect(() => other.add(GameObject()), throwsStateError);
+  });
+
+  test('dispose destroys every object first: onDisable and onDestroy run, roots in order, children first', () {
+    final other = World();
+    final heard = <String>[];
+    final a = other.add(_Noted('a', heard));
+    a.add(_Noted('a.child', heard));
+    final b = other.add(_Noted('b', heard));
+    b.add(GameObject(components: [_NotedBehaviour('b.behaviour', heard)]));
+    other.dispose();
+    expect(heard, [
+      'a.child disable',
+      'a.child destroy',
+      'a disable',
+      'a destroy',
+      'b.behaviour disable',
+      'b.behaviour destroy',
+      'b disable',
+      'b destroy',
+    ]);
+    expect(a.isDestroyed, isTrue);
+    expect(b.isDestroyed, isTrue);
+  });
+
+  test('an onDestroy that adds an object or disposes again, while its world is disposed, is fine', () {
+    final other = World();
+    final heard = <String>[];
+    other.add(
+      _Noted(
+        'a',
+        heard,
+        onDestroyed: (o) {
+          o.world.add(_Noted('late', heard));
+          o.world.dispose();
+        },
+      ),
+    );
+    other.dispose();
+    expect(heard, ['a disable', 'a destroy', 'late disable', 'late destroy']);
+    expect(other.isDisposed, isTrue);
   });
 
   test('a material used in two worlds changes in both, and a disposed world is forgotten', () {
@@ -277,4 +317,42 @@ void main() {
       expect(world.add(GameObject()).worldTransform, Transform(), reason: 'no transform and no parent: not moved');
     });
   });
+}
+
+class _Noted extends GameObject {
+  _Noted(this.label, this.heard, {this.onDestroyed});
+  final String label;
+  final List<String> heard;
+  final void Function(_Noted)? onDestroyed;
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    heard.add('$label disable');
+  }
+
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    heard.add('$label destroy');
+    onDestroyed?.call(this);
+  }
+}
+
+class _NotedBehaviour extends Behaviour {
+  _NotedBehaviour(this.name, this.heard);
+  final String name;
+  final List<String> heard;
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    heard.add('$name disable');
+  }
+
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    heard.add('$name destroy');
+  }
 }

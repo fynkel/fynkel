@@ -5,9 +5,11 @@ part of 'world.dart';
 //
 // A routine's body runs in a zone of its own. Its waits complete
 // synchronously in [World._runRoutines], so the code after them runs
-// there, in the order the waits were made; the microtasks it schedules
-// while that step runs (an `await` on a finished future, say) run before
-// the step ends. Once a routine is stopped its zone runs none of its
+// there, in the order the waits were made. The microtasks it schedules
+// (an `await` on a finished future, or on a routine that ended at once)
+// go to the world's own queue, never Dart's: those scheduled while that
+// step runs run before it ends, and the others in the next one. So a game
+// test's plain loop of updates, with no event loop between, drains them. Once a routine is stopped its zone runs none of its
 // callbacks but those carrying [RoutineStopped], which unwind it through
 // its `finally` blocks: nothing else of it ever runs again, even when a
 // future from outside it completes later.
@@ -51,11 +53,9 @@ R _runBinary<R, T1, T2>(Zone self, ZoneDelegate parent, Zone zone, R Function(T1
 
 void _scheduleMicrotask(Zone self, ZoneDelegate parent, Zone zone, void Function() f) {
   final world = (self[_routineKey] as Routine<Object?>)._world;
-  if (world._inRoutineStep) {
-    world._microtasks.add(zone.bindCallbackGuarded(f));
-  } else {
-    parent.scheduleMicrotask(zone, f);
-  }
+  // A disposed world's routines are over.
+  if (world.isDisposed) return;
+  (world._inRoutineStep ? world._microtasks : world._laterMicrotasks).add(zone.bindCallbackGuarded(f));
 }
 
 /// Thrown into a routine, at the `await` it waits at, when it's stopped,

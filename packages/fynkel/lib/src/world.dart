@@ -80,14 +80,30 @@ final class World implements Finalizable {
 
   bool get isDisposed => _pointer == nullptr;
 
-  /// Frees the world. Its objects can't be used after this; a view of it
-  /// keeps drawing what it last had until the view is disposed too. Called
-  /// from inside [update], it waits for the update to return.
+  /// Destroys every object, as a scene unloads in Unity, then frees the
+  /// world. Each object gets its `onDisable` and `onDestroy`, root by root
+  /// in the order they were added, so a game's clean-up and saving run
+  /// when its page is left or it starts over. Nothing can be used after
+  /// this; a view of the world keeps drawing what it last had until the
+  /// view is disposed too. Called from inside [update], it waits for the
+  /// update to return.
   void dispose() {
-    if (_pointer == nullptr) return;
+    if (_pointer == nullptr || _disposing) return;
     if (_updating) {
       _disposeAsked = true;
       return;
+    }
+    _disposing = true;
+    // What an onDestroy adds is destroyed too, a few rounds deep.
+    for (var round = 0; round < 8 && _objects.isNotEmpty; round++) {
+      final roots = [
+        // A copy: reading a model part's parent makes its Dart object.
+        for (final object in [..._objects.values])
+          if (!object._destroyed && object.parent == null) object,
+      ];
+      for (final root in roots) {
+        root.destroy();
+      }
     }
     // The assets still held: the engine's side goes with the world, the
     // rest goes after it.
@@ -127,6 +143,7 @@ final class World implements Finalizable {
     _waits.clear();
     _fixedWaits.clear();
     _microtasks.clear();
+    _laterMicrotasks.clear();
     _motions.clear();
     _moved.clear();
     _off.clear();
@@ -325,6 +342,10 @@ final class World implements Finalizable {
   var _updating = false;
   var _disposeAsked = false;
 
+  // Whether dispose is destroying the objects, for one called again from
+  // an onDestroy.
+  var _disposing = false;
+
   void _update(double dt) {
     time._advance(dt);
     _tidy();
@@ -440,11 +461,13 @@ final class World implements Finalizable {
 
   // --- Routines ---
 
-  // What routines wait for, in the order they were made, and the
-  // microtasks routines scheduled during [_runRoutines].
+  // What routines wait for, in the order they were made; the microtasks
+  // routines scheduled during [_runRoutines], and those they scheduled
+  // outside it, for the next one (not a fixed step's).
   final _waits = <_Wait>[];
   final _fixedWaits = <_Wait>[];
   final _microtasks = <void Function()>[];
+  final _laterMicrotasks = <void Function()>[];
   var _inRoutineStep = false;
 
   /// Makes [root] live in this world, with everything added to it so

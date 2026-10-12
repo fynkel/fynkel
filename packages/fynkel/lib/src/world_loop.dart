@@ -96,15 +96,21 @@ extension _Loop on World {
     return routine;
   }
 
-  /// Ends what routines wait for, in the order the waits were made, each
-  /// running its routine on to its next wait; then what those runs
-  /// scheduled. Waits made during it end in a later frame. With [fixed],
-  /// the waits for a fixed step ([fixedStep]), in a later step.
+  /// Runs what routines scheduled since the last step, then ends what
+  /// they wait for, in the order the waits were made, each running its
+  /// routine on to its next wait, then what that run scheduled. Waits made
+  /// during it end in a later frame. With [fixed], the waits for a fixed
+  /// step ([fixedStep]), in a later step.
   void _runRoutines({bool fixed = false}) {
     final waits = fixed ? _fixedWaits : _waits;
-    if (waits.isEmpty) return;
+    if (waits.isEmpty && (fixed || _laterMicrotasks.isEmpty)) return;
     _inRoutineStep = true;
     try {
+      if (!fixed && _laterMicrotasks.isNotEmpty) {
+        _microtasks.addAll(_laterMicrotasks);
+        _laterMicrotasks.clear();
+        _runMicrotasks();
+      }
       final n = waits.length;
       final now = fixed ? time._fixedSteps : time._frame;
       for (var i = 0; i < n; i++) {
