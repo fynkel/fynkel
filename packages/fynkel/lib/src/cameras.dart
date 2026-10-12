@@ -122,11 +122,6 @@ bool _present(GameObject o) => o._world != null && !o._gone;
 /// none; with some, 99 % of the way after [damping] seconds (Cinemachine's).
 double _damp(double damping, double dt) => damping > 0 ? 1 - math.pow(0.01, dt / damping).toDouble() : 1;
 
-void _setWorldRotation(GameObject object, Quat rotation) {
-  final parent = object.parent;
-  object._setRotation(parent == null ? rotation : (parent.worldTransform.rotation.inverse * rotation).normalized);
-}
-
 /// Keeps its object at [offset] from [target], in the world's directions:
 /// `Follow(player, offset: Vec3(0, 6, 8))` stays above and behind it. It
 /// moves the object, and doesn't turn it: add a [LookAt], or turn it once.
@@ -154,7 +149,7 @@ final class Follow extends _Rig {
   @override
   void _move(double dt) {
     if (!_present(target)) return;
-    final p = target.worldPosition;
+    final p = target.position;
     var goal = p + offset;
     final was = _targetWas;
     _targetWas = p;
@@ -162,7 +157,7 @@ final class Follow extends _Rig {
     final at = _at;
     final next = at == null ? goal : Vec3.lerp(at, goal, _damp(damping, dt));
     _at = next;
-    gameObject.worldPosition = next;
+    gameObject._setPosition(next);
   }
 
   @override
@@ -194,13 +189,13 @@ final class LookAt extends _Rig {
   @override
   void _move(double dt) {
     if (!_present(target)) return;
-    final to = target.worldPosition + offset - gameObject.worldPosition;
+    final to = target.position + offset - gameObject.position;
     if (to.length < 1e-9) return;
     final goal = Quat.lookRotation(to);
     final turn = _turn;
     final next = turn == null ? goal : Quat.slerp(turn, goal, _damp(damping, dt));
     _turn = next;
-    _setWorldRotation(gameObject, next);
+    gameObject._setRotation(next);
   }
 
   @override
@@ -281,10 +276,10 @@ final class Orbit extends _Rig {
     if (!_present(target)) return;
     pitch = pitch.clamp(minPitch, maxPitch);
     distance = distance.clamp(minDistance, maxDistance);
-    final centre = target.worldPosition + offset;
+    final centre = target.position + offset;
     final around = Vec3(math.sin(yaw) * math.cos(pitch), math.sin(pitch), math.cos(yaw) * math.cos(pitch));
-    gameObject.worldPosition = centre + around * distance;
-    _setWorldRotation(gameObject, Quat.lookRotation(-around));
+    gameObject._setPosition(centre + around * distance);
+    gameObject._setRotation(Quat.lookRotation(-around));
   }
 
   @override
@@ -472,8 +467,8 @@ final class Cameras {
     if (camera.parent == null) {
       camera.transform = camera.transform.copyWith(position: pose.position, rotation: pose.rotation);
     } else {
-      camera.worldPosition = pose.position;
-      _setWorldRotation(camera, pose.rotation);
+      camera._setPosition(pose.position);
+      camera._setRotation(pose.rotation);
     }
     final lens = camera.get<Camera>();
     if (lens == null) return;

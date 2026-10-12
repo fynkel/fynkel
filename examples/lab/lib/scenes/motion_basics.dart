@@ -45,7 +45,7 @@ class MotionBasicsScene extends LabScene {
   @override
   void onUpdate() {
     super.onUpdate();
-    readout.value = 'position ${_vec(cube.position)}   scale ${cube.scale.x.toStringAsFixed(2)}';
+    readout.value = 'position ${_vec(cube.position)}   scale ${cube.localScale.x.toStringAsFixed(2)}';
   }
 
   static String _vec(Vec3 v) => '(${v.x.toStringAsFixed(1)}, ${v.y.toStringAsFixed(1)}, ${v.z.toStringAsFixed(1)})';

@@ -111,8 +111,9 @@ extension WorldSystems on World {
 
   /// Reads the world transforms of [count] objects, by their [GameObject.id]s
   /// at [ids], into [out]: ten 32-bit floats each, the position (x, y, z),
-  /// the rotation (x, y, z, w) and the scale (x, y, z), as
-  /// [GameObject.worldTransform] gives them. One call however many there
+  /// the rotation (x, y, z, w) and the scale (x, y, z), as the engine
+  /// works them out (from its matrices: [GameObject.worldTransform]'s, but
+  /// for a rotation under an uneven scale). One call however many there
   /// are; the moves set since the last send are sent first. Throws a
   /// [FynkelException] if an id isn't a live object.
   void readWorldTransforms(Pointer<Uint64> ids, int count, Pointer<Float> out) {

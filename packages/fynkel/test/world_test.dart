@@ -101,7 +101,7 @@ void main() {
       isTrue,
       reason: 'spinning around its own up keeps it',
     );
-    o.translate(Vec3(1, 0, 0));
+    o.translate(Vec3(1, 0, 0), relativeTo: Space.world);
     expect(o.transform.position, Vec3(1, 0, 0));
   });
 
@@ -303,7 +303,8 @@ void main() {
           ),
         ),
       );
-      final child = world.add(GameObject(transform: Transform(position: Vec3(0, 0, -1))))..parent = parent;
+      final child = world.add(GameObject(transform: Transform(position: Vec3(0, 0, -1))))
+        ..setParent(parent, worldPositionStays: false);
       // One unit ahead (-Z), doubled, then turned a quarter to the left: two
       // units along -X from the parent.
       final t = child.worldTransform;

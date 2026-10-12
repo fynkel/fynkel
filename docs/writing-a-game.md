@@ -304,11 +304,11 @@ class Drone extends Behaviour {
   @override
   void onUpdate() {
     super.onUpdate();
-    translate(Vec3(0, 0, -1) * time.delta); // by an offset
-    rotate(Vec3.up, 0.5 * time.delta); // about an axis
+    translate(Vec3.forward * time.delta); // the way it looks
+    rotate(Vec3.up, 0.5 * time.delta); // about its own up
     final player = world.first<Pilot>();
     if (player == null) return;
-    lookAt(player.worldPosition);
+    lookAt(player.position);
     position = _follow.step(position, player.position + Vec3(0, 3, 0), time.delta);
   }
 }
@@ -316,12 +316,20 @@ class Drone extends Behaviour {
 class Pilot extends GameObject {}
 ```
 
-- `position`, `rotation` and `scale` read and set the local transform;
-  `worldPosition` and `forward`, `right` and `up` are in the world.
-- `rotate`, `translate`, `lookAt(point)`, `transformPoint` and
-  `inverseTransformPoint`.
-- The whole transform is one value, a position, a rotation and a scale:
-  `transform = Transform(position: …, rotation: …)` sets it at once.
+- **As Unity's**: `position` and `rotation` are in the world, whatever
+  the object's parents; `localPosition`, `localRotation` and `localScale`
+  are relative to its parent, and `lossyScale` is its size in the world.
+  `forward`, `right` and `up` are in the world. For a root the two are the
+  same.
+- `translate` and `rotate` go by the object's own axes; give
+  `relativeTo: Space.world` for the world's. `lookAt(point)`,
+  `transformPoint` and `inverseTransformPoint` too.
+- `parent = other` keeps the object where it is in the world, as Unity's;
+  `setParent(other, worldPositionStays: false)` keeps its local transform
+  instead, so it moves with its new parent.
+- The local transform is one value, a position, a rotation and a scale:
+  `transform = Transform(position: …, rotation: …)` sets it at once, and
+  `worldTransform` reads the world's.
 - **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
@@ -355,7 +363,10 @@ class Door extends GameObject {
 
 - **Helpers**: `moveTo`, `moveBy`, `rotateTo`, `rotateBy`, `lookAtOver`,
   `scaleTo`, `colorTo`, `punchScale`, `shake`. Each takes `seconds:` or
-  `speed:`.
+  `speed:`. `moveTo`, `moveBy` and `rotateTo` are in the world, as
+  `position`; `localMoveTo` and `localRotateTo` relative to the parent;
+  `scaleTo` sets `localScale`, and `rotateBy` turns about the object's own
+  axis.
 - **`tween(from, to, …, onUpdate:)`** for any value: `double`, `Vec2`,
   `Vec3`, `Quat`, `Color`, or anything with a `lerp:` you give.
 - **Options**: `ease:` (`Ease.outQuad` by default; any `double
@@ -505,7 +516,7 @@ class Gestures extends GameObject {
       if (finger.over case final hit?) debug.sphere(hit.point, 0.2, seconds: 1);
     });
     on(input.onSwipe, (swipe) => print('swiped ${swipe.direction} at ${swipe.speed} px/s'));
-    on(input.onPinch, (pinch) => scale = scale * pinch.scale);
+    on(input.onPinch, (pinch) => localScale = localScale * pinch.scale);
     on(input.onKeyDown, (press) => print('${press.key} ${press.shift ? 'with shift' : ''}'));
   }
 }
@@ -1144,6 +1155,9 @@ multibody joints).
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `yield return new WaitForSeconds(1)` | `start(() async {...})`, `await wait(1)` |
 | `FindObjectOfType<T>()`, `FindObjectsOfType<T>()` | `world.first<T>()`, `world.all<T>()` |
+| `transform.position`, `rotation`, `localPosition`, `localRotation`, `localScale`, `lossyScale` | the same, on the object or a behaviour |
+| `transform.Translate(v)`, `Rotate(axis, angle)`, `Space.World` | `translate(v)`, `rotate(axis, angle)` (radians), `relativeTo: Space.world` |
+| `transform.parent = p`, `SetParent(p, false)` | `parent = p`, `setParent(p, worldPositionStays: false)` |
 | `transform.Find("name")` | `find('name')` |
 | `GetComponentInParent<T>()` | `getInParent<T>()`, or `ancestor<T>()` for an object |
 | C# events, `UnityEvent` | `Signal<T>` and `on(signal, ...)` |
@@ -1175,6 +1189,18 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - `position` and `rotation` are the world's, as Unity's; what they were
+    (relative to the parent) is now `localPosition` and `localRotation`.
+    `scale` is `localScale`, and `worldPosition` is `position`. `moveTo`,
+    `moveBy` and `rotateTo` go in the world; `localMoveTo` and
+    `localRotateTo` do what they did. For a root nothing changes.
+  - `translate` moves along the object's own axes, not its parent's; give
+    `relativeTo: Space.world` for the world's.
+  - `parent = p` keeps the object where it is in the world;
+    `setParent(p, worldPositionStays: false)` does what it did.
+  - `worldTransform`'s rotation is the parents' rotations times the
+    object's, as Unity's; under a parent with an uneven scale it can
+    differ a little from before.
   - `World.dispose` destroys every object first: `onDisable` and
     `onDestroy` run, and the objects say `isDestroyed`. Leaving a
     `FynkelView`'s page and F5 dispose the world, so they run there too.

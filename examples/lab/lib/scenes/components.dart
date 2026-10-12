@@ -137,14 +137,14 @@ class Bob extends LabBehaviour {
   void onUpdate() {
     super.onUpdate();
     final now = 0.4 * math.sin(time.sinceStart * 3);
-    gameObject.translate(Vec3(0, now - _was, 0));
+    gameObject.translate(Vec3(0, now - _was, 0), relativeTo: Space.world);
     _was = now;
   }
 
   @override
   void onDestroy() {
     // Taken off: put the object back where it was. (Not when it's going.)
-    if (!gameObject.isDestroyed) gameObject.translate(Vec3(0, -_was, 0));
+    if (!gameObject.isDestroyed) gameObject.translate(Vec3(0, -_was, 0), relativeTo: Space.world);
     super.onDestroy();
   }
 }
@@ -154,12 +154,12 @@ class Pulse extends LabBehaviour {
   @override
   void onUpdate() {
     super.onUpdate();
-    scale = Vec3.one * (1 + 0.25 * math.sin(time.sinceStart * 5));
+    localScale = Vec3.one * (1 + 0.25 * math.sin(time.sinceStart * 5));
   }
 
   @override
   void onDestroy() {
-    if (!gameObject.isDestroyed) scale = Vec3.one;
+    if (!gameObject.isDestroyed) localScale = Vec3.one;
     super.onDestroy();
   }
 }

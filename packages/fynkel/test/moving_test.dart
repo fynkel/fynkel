@@ -1,6 +1,8 @@
-// Moving things by hand (docs/stage-4.md §3.7, step 6): position,
-// rotation and scale on objects and behaviours, the world's directions and
-// points, and Unity's Mathf, against hand-worked values.
+// Moving things by hand (docs/stage-4.md §3.7, step 6; Unity's meanings
+// since stage 6, A2 and A5): position and rotation in the world, the local
+// ones, translate and rotate in a Space, parenting that keeps the world
+// position, the world's directions and points, and Unity's Mathf, against
+// hand-worked values.
 
 import 'dart:math' as math;
 
@@ -8,8 +10,11 @@ import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
 // The world's transforms come back from the engine in 32-bit floats.
-void expectVec(Vec3 actual, Vec3 expected, [double tolerance = 1e-6]) =>
-    expect(actual.closeTo(expected, tolerance), isTrue, reason: '$actual is not $expected');
+void expectVec(Vec3 actual, Vec3 expected, [double tolerance = 1e-6, String? reason]) => expect(
+  actual.closeTo(expected, tolerance),
+  isTrue,
+  reason: '$actual is not $expected${reason == null ? '' : ': $reason'}',
+);
 
 class Steer extends Behaviour {}
 
@@ -32,16 +37,17 @@ void main() {
   );
 
   group('on an object', () {
-    test('position, rotation and scale read and set its transform', () {
+    test('on a root, position, rotation and the local ones are its transform', () {
       final o = world.add(GameObject());
       o.position = const Vec3(1, 2, 3);
       o.rotation = Quat.axisAngle(Vec3.up, 1);
-      o.scale = const Vec3(2, 2, 2);
+      o.localScale = const Vec3(2, 2, 2);
       expect(
         o.transform,
         Transform(position: const Vec3(1, 2, 3), rotation: Quat.axisAngle(Vec3.up, 1), scale: Vec3.one * 2),
       );
-      expect((o.position, o.rotation, o.scale), (o.transform.position, o.transform.rotation, o.transform.scale));
+      expect((o.position, o.rotation, o.lossyScale), (o.transform.position, o.transform.rotation, o.transform.scale));
+      expect((o.localPosition, o.localRotation, o.localScale), (o.position, o.rotation, o.lossyScale));
     });
 
     test('before it is added too', () {
@@ -49,12 +55,85 @@ void main() {
       expect(world.add(o).position, const Vec3(0, 1, 0));
     });
 
-    test('worldPosition is where it is in the world, and setting it puts it there, whatever its parents', () {
+    test('position is where it is in the world, and setting it puts it there, whatever its parents', () {
       final child = parent().add(GameObject(transform: Transform(position: const Vec3(0, 0, -1))));
-      expectVec(child.worldPosition, const Vec3(-1, 0, 0));
-      child.worldPosition = const Vec3(1, 4, -2);
-      expectVec(child.worldPosition, const Vec3(1, 4, -2));
-      expectVec(child.position, const Vec3(1, 2, 0));
+      expectVec(child.position, const Vec3(-1, 0, 0));
+      expectVec(child.localPosition, const Vec3(0, 0, -1));
+      child.position = const Vec3(1, 4, -2);
+      expectVec(child.position, const Vec3(1, 4, -2));
+      expectVec(child.localPosition, const Vec3(1, 2, 0));
+      child.localPosition = const Vec3(0, 0, -1);
+      expectVec(child.position, const Vec3(-1, 0, 0));
+    });
+
+    test('rotation is how it is turned in the world: its parents\' and its own', () {
+      final child = parent().add(GameObject(transform: Transform(rotation: Quat.axisAngle(Vec3.up, 0.5))));
+      expect(child.rotation.closeTo(Quat.axisAngle(Vec3.up, math.pi / 2 + 0.5)), isTrue);
+      expect(child.localRotation.closeTo(Quat.axisAngle(Vec3.up, 0.5)), isTrue);
+      child.rotation = Quat.axisAngle(Vec3.right, 1);
+      expect(child.rotation.closeTo(Quat.axisAngle(Vec3.right, 1)), isTrue);
+      expect((Quat.axisAngle(Vec3.up, math.pi / 2) * child.localRotation).closeTo(child.rotation), isTrue);
+      expectVec(child.lossyScale, Vec3.one * 2);
+      expectVec(child.localScale, Vec3.one);
+    });
+
+    test('translate moves along its own axes, or the world\'s', () {
+      final o = world.add(GameObject(transform: Transform(rotation: Quat.axisAngle(Vec3.up, math.pi / 2))));
+      o.translate(Vec3.forward);
+      expectVec(o.position, Vec3.left, 1e-6, 'its forward is the world\'s left');
+      o.translate(Vec3.forward, relativeTo: Space.world);
+      expectVec(o.position, const Vec3(-1, 0, -1));
+      // Under the parent (turned, twice the size), a metre is a metre.
+      final child = parent().add(GameObject());
+      child.translate(Vec3.forward);
+      expectVec(child.position, const Vec3(0, 0, 0));
+      child.translate(Vec3.up, relativeTo: Space.world);
+      expectVec(child.position, Vec3.up);
+    });
+
+    test('rotate turns about its own axes, or the world\'s', () {
+      final o = world.add(GameObject(transform: Transform(rotation: Quat.axisAngle(Vec3.right, math.pi / 2))));
+      // Tipped back: its up is the world's back (+Z).
+      o.rotate(Vec3.up, math.pi / 2);
+      expectVec(o.forward, Vec3.left, 1e-6);
+      final p = world.add(GameObject(transform: Transform(rotation: Quat.axisAngle(Vec3.right, math.pi / 2))));
+      p.rotate(Vec3.up, math.pi / 2, relativeTo: Space.world);
+      expectVec(p.forward, Vec3.up, 1e-6, 'it turned about the world\'s up, its forward');
+      expectVec(p.up, Vec3.right, 1e-6);
+      expectVec(o.up, Vec3.back, 1e-6);
+      // Under the parent, the world's up is still the world's.
+      final child = parent().add(GameObject());
+      child.rotate(Vec3.up, math.pi / 2, relativeTo: Space.world);
+      expectVec(child.forward, Vec3.back, 1e-6);
+    });
+
+    test('parent = keeps it where it is in the world; setParent can keep its transform instead', () {
+      final p = parent();
+      final o = world.add(
+        GameObject(
+          transform: Transform(position: const Vec3(3, 0, 0), rotation: Quat.axisAngle(Vec3.up, 1)),
+        ),
+      );
+      o.parent = p;
+      expectVec(o.position, const Vec3(3, 0, 0));
+      expect(o.rotation.closeTo(Quat.axisAngle(Vec3.up, 1)), isTrue);
+      expectVec(o.lossyScale, Vec3.one, 1e-6);
+      expectVec(o.localPosition, const Vec3(0, 0, 1));
+      expectVec(o.localScale, Vec3.one * 0.5);
+      o.parent = null;
+      expect(o.transform.position.closeTo(const Vec3(3, 0, 0), 1e-6), isTrue);
+      expectVec(o.localScale, Vec3.one, 1e-6);
+      o.setParent(p, worldPositionStays: false);
+      expectVec(o.localPosition, const Vec3(3, 0, 0), 1e-6);
+      expectVec(o.position, const Vec3(1, 0, -6), 1e-6);
+    });
+
+    test('worldTransform is kept until something moves', () {
+      final child = parent().add(GameObject(transform: Transform(position: const Vec3(0, 0, -1))));
+      final a = child.worldTransform;
+      expect(identical(child.worldTransform, a), isTrue);
+      child.parent!.position = Vec3.zero;
+      expectVec(child.worldTransform.position, const Vec3(-2, 0, 0));
     });
 
     test('forward, right and up are its -Z, +X and +Y in the world', () {
@@ -94,7 +173,7 @@ void main() {
     steer.lookAt(const Vec3(4, 0, -3));
     expect(o.position, const Vec3(0, 0, -3));
     expectVec(steer.forward, Vec3.right);
-    expectVec(steer.worldPosition, const Vec3(0, 0, -3));
+    expectVec(steer.localPosition, const Vec3(0, 0, -3));
   });
 
   group("Unity's Mathf", () {

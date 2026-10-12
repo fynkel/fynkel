@@ -150,7 +150,7 @@ final class CharacterController extends Collider {
     _flags = CollisionFlags._(words[3]);
     _velocity = moved / seconds;
     final object = gameObject;
-    object.worldPosition = object.worldPosition + moved;
+    object.position += moved;
     final hits = words[4];
     if (hits > 0 && _listening(object)) physics._tellHits(this, hits, motion);
     return _flags;

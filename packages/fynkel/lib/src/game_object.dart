@@ -100,6 +100,11 @@ class GameObject with _Moving {
   // was last set (systems.dart).
   int _transformStamp = 0;
 
+  // Its world transform, worked out in Dart from its parents', as of
+  // [World._transformVersion] [_worldAt]: good until anything moves.
+  Transform? _worldTransform;
+  int _worldAt = -1;
+
   // Loading: how many loads this object waits for (its own, and those of
   // the objects added during it), the object waiting for this one, and
   // whether it's hidden until they're done. [_activeSelf] is the game's
@@ -424,18 +429,34 @@ class GameObject with _Moving {
   /// The object this one hangs from, or null for a root. Its [transform] is
   /// relative to its parent, so it moves, turns and scales with it.
   ///
-  /// Setting it keeps [transform] as it is (now counted from the new
-  /// parent) and puts the object last among the parent's [children].
-  /// Setting null makes it a root. A parent that is this object or below it
-  /// throws [FynkelStatus.invalidValue], as does one from another world.
+  /// Setting it is [setParent] with the object staying where it is in the
+  /// world, as Unity's `transform.parent =`.
   GameObject? get parent {
     _engine('its parent can\'t be read');
     return _parent;
   }
 
-  set parent(GameObject? value) {
+  set parent(GameObject? value) => setParent(value);
+
+  // Its parent; before it's added, what it was added to.
+  GameObject? get _above => _described != null ? _queuedIn : parent;
+
+  /// Hangs this object from [parent], last among its [children]; null
+  /// makes it a root. With [worldPositionStays] (as Unity's `SetParent`)
+  /// it stays where it is in the world, turned and sized as it was, so its
+  /// [transform] changes; without, its [transform] stays, now counted from
+  /// the new parent, so it moves with it. A parent that is this object or
+  /// below it throws [FynkelStatus.invalidValue], as does one from another
+  /// world.
+  void setParent(GameObject? parent, {bool worldPositionStays = true}) {
     _engine('its parent can\'t be set');
-    world._setParent(this, value);
+    if (!worldPositionStays) {
+      world._setParent(this, parent);
+      return;
+    }
+    final before = worldTransform;
+    world._setParent(this, parent);
+    transform = parent == null ? before : parent.worldTransform._under(before, transform.scale);
   }
 
   /// The objects whose [parent] is this one, in the order they were added.
@@ -540,19 +561,27 @@ class GameObject with _Moving {
     return found == 0 ? null : world._object(found);
   }
 
-  /// Where the object is in the world: its [transform] after its parents'.
-  /// Read only; to move it, set [transform].
+  /// Where the object is in the world: its [transform] after its parents',
+  /// worked out in Dart with no call into the engine, and kept until
+  /// anything moves. Read only; to move it, set [position] and [rotation].
   ///
-  /// The position and rotation are exact. The scale is approximate when a
-  /// parent with an uneven scale has a rotated child: the result is then
-  /// skewed, which no position, rotation and scale can describe (Unity
-  /// calls this the "lossy" scale).
+  /// The position is exact; the rotation is the parents' rotations times
+  /// the object's, as Unity's. The scale is approximate when a parent with
+  /// an uneven scale has a rotated child: the result is then skewed, which
+  /// no position, rotation and scale can describe (Unity's "lossy" scale).
   Transform get worldTransform {
-    final w = _engine('its worldTransform can\'t be read');
-    world._sendTransforms();
-    check(fy_world_transform_get(w, id, scratch.transform));
-    final t = scratch.transform.ref;
-    return Transform._(t.position.read(), t.rotation.read(), t.scale.read());
+    if (_described != null) {
+      final up = _queuedIn;
+      return up == null ? transform : up.worldTransform._then(transform);
+    }
+    _engine('its worldTransform can\'t be read');
+    final version = world._transformVersion;
+    if (_worldAt == version) return _worldTransform!;
+    final local = transform;
+    final parent = _parent;
+    final t = parent == null ? local : parent.worldTransform._then(local);
+    _worldAt = version;
+    return _worldTransform = t;
   }
 
   /// The ray from this camera through [point] in a view showing it: from
@@ -800,7 +829,9 @@ class GameObject with _Moving {
   };
 
   /// Where the object is, how it's turned and how big it is, relative to
-  /// its [parent]. Reading it makes no call into the engine. Setting it
+  /// its [parent]: [localPosition], [localRotation] and [localScale] in
+  /// one. [position] and [rotation] are the world's. Reading it makes no
+  /// call into the engine. Setting it
   /// checks the value at once, as the engine would, and sends it with the
   /// frame's other moves in one call when something next reads the
   /// engine's transforms (a view's frame, [World.raycast],

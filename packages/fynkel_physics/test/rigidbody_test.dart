@@ -278,7 +278,7 @@ void main() {
     final rest = child.worldTransform;
     // Scaled twice, the ball's radius is 1.
     expect(rest.position, near(const Vec3(10, 1, 0), 0.02));
-    expect(child.position.y, closeTo(0.5, 0.01), reason: 'in the parent\'s space');
+    expect(child.localPosition.y, closeTo(0.5, 0.01), reason: 'in the parent\'s space');
     parent.position = const Vec3(20, 0, 0);
     frames(world, 2);
     expect(child.worldTransform.position.x, closeTo(20, 1e-3), reason: 'it went with its parent');

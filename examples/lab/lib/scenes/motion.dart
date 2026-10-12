@@ -174,7 +174,7 @@ class Crate extends GameObject {
   @override
   bool onClick(Finger finger) {
     hits++;
-    scale = Vec3.one;
+    localScale = Vec3.one;
     punchScale(Vec3.one * 0.35, seconds: 0.45);
     sequence([colorTo(Color.white, seconds: 0.05), colorTo(_color, seconds: 0.3)]);
     ancestor<LabScene>()?.log.add('crate: hit ${hits}x (punchScale, and a sequence of two colorTo)');
