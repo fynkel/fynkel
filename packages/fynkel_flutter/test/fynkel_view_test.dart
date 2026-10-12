@@ -590,6 +590,46 @@ void main() {
     expect(frames, 140);
   });
 
+  testWidgets('a lost GPU device brings a new view, up to three times a minute, then the error', (tester) async {
+    final dts = <double>[];
+    await tester.pumpWidget(sized(FynkelView(world: world, onFrame: dts.add)));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(calls, ['register']);
+
+    Future<void> lose() async {
+      final address = views[nextTexture - 1]!;
+      expect(fy_view_lose_device(Pointer.fromAddress(address)), FyStatus.FY_STATUS_OK);
+      // The render thread destroys it in real time.
+      for (var i = 0; i < 200 && tester.takeException() == null; i++) {
+        await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+    }
+
+    for (var loss = 1; loss <= 3; loss++) {
+      await lose();
+      expect(calls, [
+        'register',
+        for (var i = 0; i < loss; i++) ...['unregister ${7 + i}', 'register'],
+      ]);
+      expect(find.byType(Texture), findsOneWidget);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7 + loss);
+    }
+    final before = dts.length;
+    await lose();
+    expect(find.byType(ErrorWidget), findsOneWidget, reason: 'a fourth in a minute is one too many');
+    expect(calls.where((c) => c == 'register'), hasLength(4));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(dts.length, greaterThan(before + 10), reason: 'the world runs on');
+  });
+
   testWidgets('with no plugin, as in a widget test of the game, the game runs on unseen', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     forgetReset();

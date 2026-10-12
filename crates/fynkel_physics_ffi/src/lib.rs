@@ -497,11 +497,12 @@ pub struct FpWorld {
     /// The thread `fp_step_begin` steps on, once there's been one; first,
     /// so a running step ends before the rest is dropped.
     worker: Option<Worker>,
-    /// Between `fp_step_begin` and `fp_step_end`: the worker has the world.
+    /// Between `fp_step_begin` and `fp_step_end`: the worker has [`Core`].
     stepping: bool,
-    physics: Physics,
-    /// What the last step moved, until `fp_moved_read`.
-    moved: Vec<Moved>,
+    /// The physics and what its last step moved; `None` while the worker
+    /// has them (or lost them, which poisons the world). Reach it with
+    /// `core!`.
+    core: Option<Box<Core>>,
     /// What the last `_all` query hit, until `fp_hits_read`.
     hits: Vec<Hit>,
     /// What the last overlap found, until `fp_found_read`.
@@ -515,9 +516,30 @@ pub struct FpWorld {
     poisoned: bool,
 }
 
+/// What a step changes, moved to the physics thread and back for a step
+/// run there (`fp_step_begin`), so no two threads ever reach it at once.
+struct Core {
+    physics: Physics,
+    /// What the last step moved, until `fp_moved_read`.
+    moved: Vec<Moved>,
+}
+
+/// The world's [`Core`]. Every call that uses it goes through
+/// `with_world`, which refuses while a step runs and once the world is
+/// poisoned, so it's there. A macro, not a method, so it borrows the field
+/// alone and the world's other buffers stay free to borrow beside it.
+macro_rules! core {
+    ($w:expr) => {
+        $w.core.as_deref_mut().expect("with_world checks that no step runs")
+    };
+}
+
 impl std::fmt::Debug for FpWorld {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("FpWorld").field("physics", &self.physics).field("poisoned", &self.poisoned).finish()
+        f.debug_struct("FpWorld")
+            .field("physics", &self.core.as_ref().map(|core| &core.physics))
+            .field("poisoned", &self.poisoned)
+            .finish()
     }
 }
 
@@ -875,8 +897,7 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
     Box::into_raw(Box::new(FpWorld {
         worker: None,
         stepping: false,
-        physics: Physics::new(),
-        moved: Vec::new(),
+        core: Some(Box::new(Core { physics: Physics::new(), moved: Vec::new() })),
         hits: Vec::new(),
         found: Vec::new(),
         edges: Vec::new(),
@@ -894,9 +915,15 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_world_free(world: *mut FpWorld) {
     if !world.is_null() {
-        // SAFETY: made by Box::into_raw in fp_world_new; the caller gives
-        // it up.
-        drop(unsafe { Box::from_raw(world) });
+        // A panic while dropping must not unwind into the caller, which
+        // aborts: what's left leaks instead, and the message is the last
+        // error.
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in fp_world_new; the caller
+            // gives it up.
+            drop(unsafe { Box::from_raw(world) });
+            Ok(())
+        });
     }
 }
 
@@ -908,7 +935,7 @@ pub unsafe extern "C" fn fp_world_free(world: *mut FpWorld) {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_gravity_set(world: *mut FpWorld, gravity: FpVec3) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_gravity(vector(gravity))?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_gravity(vector(gravity))?)) }
 }
 
 /// Adds a body of `kind` (an `FpBodyKind`) at `pose`, with `key` to know it
@@ -931,7 +958,7 @@ pub unsafe extern "C" fn fp_body_add(
             if out.is_null() {
                 return Err(Error::null("out"));
             }
-            let id = w.physics.add_body(body_kind(kind)?, key, self::pose(pose))?;
+            let id = core!(w).physics.add_body(body_kind(kind)?, key, self::pose(pose))?;
             write(out, "out", id)
         })
     }
@@ -945,7 +972,7 @@ pub unsafe extern "C" fn fp_body_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_body_remove(world: *mut FpWorld, body: u64) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.remove_body(body)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.remove_body(body)?)) }
 }
 
 /// Writes where a body is to `out`.
@@ -956,7 +983,7 @@ pub unsafe extern "C" fn fp_body_remove(world: *mut FpWorld, body: u64) -> FpSta
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_body_pose_get(world: *mut FpWorld, body: u64, out: *mut FpPose) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| write(out, "out", fp_pose(w.physics.body_pose(body)?))) }
+    unsafe { with_world(world, |w| write(out, "out", fp_pose(core!(w).physics.body_pose(body)?))) }
 }
 
 /// Puts a body at `pose` at once (a teleport), and wakes it.
@@ -967,7 +994,7 @@ pub unsafe extern "C" fn fp_body_pose_get(world: *mut FpWorld, body: u64, out: *
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_body_pose_set(world: *mut FpWorld, body: u64, pose: FpPose) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_body_pose(body, self::pose(pose))?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_body_pose(body, self::pose(pose))?)) }
 }
 
 /// Adds a collider of `shape` at `pose`, relative to `body`, or in the world
@@ -991,7 +1018,7 @@ pub unsafe extern "C" fn fp_collider_add(
                 return Err(Error::null("out"));
             }
             let body = (body != 0).then_some(body);
-            let id = w.physics.add_collider(body, self::shape(shape)?, self::pose(pose))?;
+            let id = core!(w).physics.add_collider(body, self::shape(shape)?, self::pose(pose))?;
             write(out, "out", id)
         })
     }
@@ -1041,7 +1068,7 @@ pub unsafe extern "C" fn fp_mesh_add(
                 let flat = std::slice::from_raw_parts(indices, index_count);
                 flat.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()
             };
-            let id = w.physics.add_mesh(&points, &triangles)?;
+            let id = core!(w).physics.add_mesh(&points, &triangles)?;
             write(out, "out", id)
         })
     }
@@ -1055,7 +1082,7 @@ pub unsafe extern "C" fn fp_mesh_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_mesh_remove(world: *mut FpWorld, mesh: u64) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.remove_mesh(mesh)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.remove_mesh(mesh)?)) }
 }
 
 /// Removes a collider.
@@ -1066,7 +1093,7 @@ pub unsafe extern "C" fn fp_mesh_remove(world: *mut FpWorld, mesh: u64) -> FpSta
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_collider_remove(world: *mut FpWorld, collider: u64) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.remove_collider(collider)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.remove_collider(collider)?)) }
 }
 
 /// Moves the world on by `dt` seconds, and writes to `out_moved` how many
@@ -1083,9 +1110,10 @@ pub unsafe extern "C" fn fp_step(world: *mut FpWorld, dt: f32, out_moved: *mut u
             if out_moved.is_null() {
                 return Err(Error::null("out_moved"));
             }
-            w.physics.step(dt)?;
-            w.physics.moved(&mut w.moved);
-            let count = u32::try_from(w.moved.len())
+            let core = core!(w);
+            core.physics.step(dt)?;
+            core.physics.moved(&mut core.moved);
+            let count = u32::try_from(core.moved.len())
                 .map_err(|_| Error::new(FpStatus::InvalidValue, "more than 4 billion bodies moved"))?;
             write(out_moved, "out_moved", count)
         })
@@ -1094,20 +1122,16 @@ pub unsafe extern "C" fn fp_step(world: *mut FpWorld, dt: f32, out_moved: *mut u
 
 // --- The step on a thread of its own (an experiment, docs/stage-5.md §6) ----
 
-/// What the worker steps: the world's physics and its moved list, which
-/// nothing else touches until the step ends (`FpWorld::stepping`).
+/// What the worker steps: the world's [`Core`], which is the worker's
+/// alone until it sends it back.
 struct Job {
-    physics: *mut Physics,
-    moved: *mut Vec<Moved>,
+    core: Box<Core>,
     dt: f32,
 }
 
-// SAFETY: the pointers are used by the worker alone while the step runs.
-unsafe impl Send for Job {}
-
 struct Worker {
     start: Option<std::sync::mpsc::Sender<Job>>,
-    done: std::sync::mpsc::Receiver<Result<(), Error>>,
+    done: std::sync::mpsc::Receiver<(Box<Core>, Result<(), Error>)>,
     thread: Option<std::thread::JoinHandle<()>>,
 }
 
@@ -1118,18 +1142,17 @@ impl Worker {
         let thread = std::thread::Builder::new()
             .name("fynkel physics".into())
             .spawn(move || {
-                for job in jobs {
+                for Job { mut core, dt } in jobs {
                     let result = panic::catch_unwind(AssertUnwindSafe(|| {
-                        // SAFETY: see Job.
-                        let (physics, moved) = unsafe { (&mut *job.physics, &mut *job.moved) };
-                        physics.step(job.dt)?;
+                        let Core { physics, moved } = &mut *core;
+                        physics.step(dt)?;
                         physics.moved(moved);
                         Ok(())
                     }))
                     .unwrap_or_else(|payload| {
                         Err(Error::new(FpStatus::Panic, format!("panicked: {}", panic_message(&*payload))))
                     });
-                    if finished.send(result).is_err() {
+                    if finished.send((core, result)).is_err() {
                         return;
                     }
                 }
@@ -1160,12 +1183,15 @@ pub unsafe extern "C" fn fp_step_begin(world: *mut FpWorld, dt: f32) -> FpStatus
     unsafe {
         with_world(world, |w| {
             let worker = w.worker.get_or_insert_with(Worker::new);
-            let job = Job { physics: &raw mut w.physics, moved: &raw mut w.moved, dt };
-            worker
-                .start
-                .as_ref()
-                .and_then(|start| start.send(job).ok())
-                .ok_or_else(|| Error::new(FpStatus::Panic, "the physics thread is gone"))?;
+            let core = w.core.take().expect("with_world checks that no step runs");
+            let Some(start) = worker.start.as_ref() else {
+                w.core = Some(core);
+                return Err(Error::new(FpStatus::Panic, "the physics thread is gone"));
+            };
+            if let Err(std::sync::mpsc::SendError(Job { core, .. })) = start.send(Job { core, dt }) {
+                w.core = Some(core);
+                return Err(Error::new(FpStatus::Panic, "the physics thread is gone"));
+            }
             w.stepping = true;
             Ok(())
         })
@@ -1190,16 +1216,20 @@ pub unsafe extern "C" fn fp_step_end(world: *mut FpWorld, out_moved: *mut u32) -
             return Err(Error::new(FpStatus::InvalidValue, "no step is running"));
         }
         let worker = w.worker.as_ref().expect("a step runs on the worker");
-        let result =
-            worker.done.recv().unwrap_or_else(|_| Err(Error::new(FpStatus::Panic, "the physics thread is gone")));
         w.stepping = false;
+        let Ok((core, result)) = worker.done.recv() else {
+            // The thread ended with the world's physics: nothing is left to use.
+            w.poisoned = true;
+            return Err(Error::new(FpStatus::Panic, "the physics thread is gone"));
+        };
+        let core = w.core.insert(core);
         if let Err(error) = result {
             if error.status == FpStatus::Panic {
                 w.poisoned = true;
             }
             return Err(error);
         }
-        let count = u32::try_from(w.moved.len())
+        let count = u32::try_from(core.moved.len())
             .map_err(|_| Error::new(FpStatus::InvalidValue, "more than 4 billion bodies moved"))?;
         // SAFETY: null or writable, as the caller promises.
         unsafe { write(out_moved, "out_moved", count) }
@@ -1217,10 +1247,10 @@ pub unsafe extern "C" fn fp_moved_read(world: *mut FpWorld, out: *mut FpMoved, l
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            if len != w.moved.len() {
+            if len != core!(w).moved.len() {
                 return Err(Error::new(
                     FpStatus::WrongSize,
-                    format!("the last step moved {} bodies, not {len}", w.moved.len()),
+                    format!("the last step moved {} bodies, not {len}", core!(w).moved.len()),
                 ));
             }
             if len == 0 {
@@ -1231,7 +1261,7 @@ pub unsafe extern "C" fn fp_moved_read(world: *mut FpWorld, out: *mut FpMoved, l
             }
             // SAFETY: writable for len entries, as the caller promises.
             let out = std::slice::from_raw_parts_mut(out, len);
-            for (slot, moved) in out.iter_mut().zip(&w.moved) {
+            for (slot, moved) in out.iter_mut().zip(&core!(w).moved) {
                 *slot = FpMoved {
                     key: moved.key,
                     pose: fp_pose(moved.pose),
@@ -1269,7 +1299,7 @@ pub unsafe extern "C" fn fp_object_collider_add(
                 return Err(Error::null("out"));
             }
             let body = (body != 0).then_some(body);
-            let id = w.physics.add_object_collider(key, self::spec(spec)?, self::object(object), body)?;
+            let id = core!(w).physics.add_object_collider(key, self::spec(spec)?, self::object(object), body)?;
             write(out, "out", id)
         })
     }
@@ -1284,7 +1314,7 @@ pub unsafe extern "C" fn fp_object_collider_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_collider_spec_set(world: *mut FpWorld, collider: u64, spec: FpColliderSpec) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_collider_spec(collider, self::spec(spec)?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_collider_spec(collider, self::spec(spec)?)?)) }
 }
 
 /// The following colliders `ids[i]`'s objects are now at `objects[i]`; those
@@ -1317,7 +1347,7 @@ pub unsafe extern "C" fn fp_colliders_follow(
             // SAFETY: valid for count reads, as the caller promises.
             let (ids, objects) = (std::slice::from_raw_parts(ids, count), std::slice::from_raw_parts(objects, count));
             let objects: Vec<ObjectPose> = objects.iter().map(|&t| self::object(t)).collect();
-            Ok(w.physics.follow(ids, &objects)?)
+            Ok(core!(w).physics.follow(ids, &objects)?)
         })
     }
 }
@@ -1339,7 +1369,7 @@ pub unsafe extern "C" fn fp_collider_shape_get(
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            let (shape, pose) = w.physics.collider_shape(collider)?;
+            let (shape, pose) = core!(w).physics.collider_shape(collider)?;
             let shape = match shape {
                 Shape::Box { half_extents: h } => FpShape { kind: 0, a: h.x, b: h.y, c: h.z },
                 Shape::Sphere { radius } => FpShape { kind: 1, a: radius, b: 0.0, c: 0.0 },
@@ -1365,7 +1395,7 @@ pub unsafe extern "C" fn fp_collider_edges(world: *mut FpWorld, collider: u64, o
             if out_count.is_null() {
                 return Err(Error::null("out_count"));
             }
-            w.physics.collider_edges(collider, &mut w.edges)?;
+            core!(w).physics.collider_edges(collider, &mut w.edges)?;
             write(out_count, "out_count", count(w.edges.len())?)
         })
     }
@@ -1429,7 +1459,7 @@ pub unsafe extern "C" fn fp_rigidbody_add(
                 return Err(Error::null("out"));
             }
             let spec = body_spec(read(spec, "spec")?)?;
-            let id = w.physics.add_rigidbody(key, spec, self::pose(read(pose, "pose")?))?;
+            let id = core!(w).physics.add_rigidbody(key, spec, self::pose(read(pose, "pose")?))?;
             write(out, "out", id)
         })
     }
@@ -1443,7 +1473,7 @@ pub unsafe extern "C" fn fp_rigidbody_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_rigidbody_spec_set(world: *mut FpWorld, body: u64, spec: *const FpBodySpec) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_body_spec(body, body_spec(read(spec, "spec")?)?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_body_spec(body, body_spec(read(spec, "spec")?)?)?)) }
 }
 
 /// Writes what a rigidbody is to `out`.
@@ -1454,7 +1484,7 @@ pub unsafe extern "C" fn fp_rigidbody_spec_set(world: *mut FpWorld, body: u64, s
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_rigidbody_spec_get(world: *mut FpWorld, body: u64, out: *mut FpBodySpec) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| write(out, "out", fp_body_spec(w.physics.body_spec(body)?))) }
+    unsafe { with_world(world, |w| write(out, "out", fp_body_spec(core!(w).physics.body_spec(body)?))) }
 }
 
 /// Pushes a rigidbody: a force, a torque, a force at a point, or an
@@ -1466,7 +1496,7 @@ pub unsafe extern "C" fn fp_rigidbody_spec_get(world: *mut FpWorld, body: u64, o
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_rigidbody_push(world: *mut FpWorld, body: u64, push: *const FpPush) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.push(body, self::push(read(push, "push")?)?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.push(body, self::push(read(push, "push")?)?)?)) }
 }
 
 /// Writes where a rigidbody is and how it moves to `out`.
@@ -1479,7 +1509,7 @@ pub unsafe extern "C" fn fp_rigidbody_state_get(world: *mut FpWorld, body: u64, 
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            let (pose, linear, angular, center, sleeping) = w.physics.body_state(body)?;
+            let (pose, linear, angular, center, sleeping) = core!(w).physics.body_state(body)?;
             let state = FpBodyState {
                 pose: fp_pose(pose),
                 linear_velocity: fp_vec3(linear),
@@ -1509,7 +1539,7 @@ pub unsafe extern "C" fn fp_rigidbody_velocities_set(
     unsafe {
         with_world(world, |w| {
             let (linear, angular) = (vector(read(linear, "linear")?), vector(read(angular, "angular")?));
-            Ok(w.physics.set_velocities(body, linear, angular)?)
+            Ok(core!(w).physics.set_velocities(body, linear, angular)?)
         })
     }
 }
@@ -1523,7 +1553,7 @@ pub unsafe extern "C" fn fp_rigidbody_velocities_set(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_rigidbody_move(world: *mut FpWorld, body: u64, pose: *const FpPose) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.move_body(body, self::pose(read(pose, "pose")?))?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.move_body(body, self::pose(read(pose, "pose")?))?)) }
 }
 
 /// Puts a rigidbody to sleep (1) or wakes it (0).
@@ -1534,7 +1564,7 @@ pub unsafe extern "C" fn fp_rigidbody_move(world: *mut FpWorld, body: u64, pose:
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_rigidbody_sleep_set(world: *mut FpWorld, body: u64, asleep: u32) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_sleeping(body, flag(asleep, "asleep")?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_sleeping(body, flag(asleep, "asleep")?)?)) }
 }
 
 /// Writes the world's settings to `out`.
@@ -1547,7 +1577,7 @@ pub unsafe extern "C" fn fp_settings_get(world: *mut FpWorld, out: *mut FpSettin
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            let Settings { solver_iterations, sleep_threshold } = w.physics.settings();
+            let Settings { solver_iterations, sleep_threshold } = core!(w).physics.settings();
             write(out, "out", FpSettings { solver_iterations, sleep_threshold })
         })
     }
@@ -1564,7 +1594,7 @@ pub unsafe extern "C" fn fp_settings_set(world: *mut FpWorld, settings: *const F
     unsafe {
         with_world(world, |w| {
             let FpSettings { solver_iterations, sleep_threshold } = read(settings, "settings")?;
-            Ok(w.physics.set_settings(Settings { solver_iterations, sleep_threshold })?)
+            Ok(core!(w).physics.set_settings(Settings { solver_iterations, sleep_threshold })?)
         })
     }
 }
@@ -1595,8 +1625,9 @@ pub unsafe extern "C" fn fp_contacts_read(
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            let events = w.physics.contact_events();
-            let points = w.physics.contact_points();
+            let physics = &core!(w).physics;
+            let events = physics.contact_events();
+            let points = physics.contact_points();
             let count = u32::try_from(events.len()).map_err(|_| invalid("too many contacts".into()))?;
             let point_count = u32::try_from(points.len()).map_err(|_| invalid("too many contact points".into()))?;
             write(out_count, "out_count", count)?;
@@ -1651,7 +1682,7 @@ pub unsafe extern "C" fn fp_contacts_read(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_layer_collision_get(world: *mut FpWorld, a: u32, b: u32, out: *mut u32) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| write(out, "out", u32::from(w.physics.layer_collision(a, b)?))) }
+    unsafe { with_world(world, |w| write(out, "out", u32::from(core!(w).physics.layer_collision(a, b)?))) }
 }
 
 /// Makes colliders on layers `a` and `b` meet (`meet` 1) or not (0), from
@@ -1663,7 +1694,7 @@ pub unsafe extern "C" fn fp_layer_collision_get(world: *mut FpWorld, a: u32, b: 
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_layer_collision_set(world: *mut FpWorld, a: u32, b: u32, meet: u32) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_layer_collision(a, b, flag(meet, "meet")?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_layer_collision(a, b, flag(meet, "meet")?)?)) }
 }
 
 /// Whether two following colliders ignore each other, into `out` (1 or 0).
@@ -1679,7 +1710,7 @@ pub unsafe extern "C" fn fp_collision_ignore_get(
     out: *mut u32,
 ) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| write(out, "out", u32::from(w.physics.ignores(collider1, collider2)?))) }
+    unsafe { with_world(world, |w| write(out, "out", u32::from(core!(w).physics.ignores(collider1, collider2)?))) }
 }
 
 /// Makes two following colliders ignore each other (`ignore` 1) or not
@@ -1696,7 +1727,7 @@ pub unsafe extern "C" fn fp_collision_ignore_set(
     ignore: u32,
 ) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_ignores(collider1, collider2, flag(ignore, "ignore")?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_ignores(collider1, collider2, flag(ignore, "ignore")?)?)) }
 }
 
 /// Forgets the pairs the collider with `key` ignores, before the key is
@@ -1710,7 +1741,7 @@ pub unsafe extern "C" fn fp_collider_key_forget(world: *mut FpWorld, key: u64) -
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            w.physics.forget_key(key);
+            core!(w).physics.forget_key(key);
             Ok(())
         })
     }
@@ -1740,7 +1771,7 @@ pub unsafe extern "C" fn fp_raycast(
             }
             let ray = read(ray, "ray")?;
             let options = self::query(layers, hit_triggers)?;
-            let hit = w.physics.raycast(vector(ray.origin), vector(ray.direction), ray.max_distance, options)?;
+            let hit = core!(w).physics.raycast(vector(ray.origin), vector(ray.direction), ray.max_distance, options)?;
             write(out, "out", fp_hit(hit))
         })
     }
@@ -1769,7 +1800,13 @@ pub unsafe extern "C" fn fp_raycast_all(
             }
             let options = self::query(layers, hit_triggers)?;
             let ray = read(ray, "ray")?;
-            w.physics.raycast_all(vector(ray.origin), vector(ray.direction), ray.max_distance, options, &mut w.hits)?;
+            core!(w).physics.raycast_all(
+                vector(ray.origin),
+                vector(ray.direction),
+                ray.max_distance,
+                options,
+                &mut w.hits,
+            )?;
             write(out_count, "out_count", count(w.hits.len())?)
         })
     }
@@ -1799,7 +1836,7 @@ pub unsafe extern "C" fn fp_cast(
             }
             let (shape, sweep) = (query_shape(read(shape, "shape")?)?, read(sweep, "sweep")?);
             let options = self::query(layers, hit_triggers)?;
-            let hit = w.physics.cast(shape, vector(sweep.direction), sweep.max_distance, options)?;
+            let hit = core!(w).physics.cast(shape, vector(sweep.direction), sweep.max_distance, options)?;
             write(out, "out", fp_hit(hit))
         })
     }
@@ -1830,7 +1867,7 @@ pub unsafe extern "C" fn fp_cast_all(
             }
             let (shape, options) = (query_shape(read(shape, "shape")?)?, self::query(layers, hit_triggers)?);
             let sweep = read(sweep, "sweep")?;
-            w.physics.cast_all(shape, vector(sweep.direction), sweep.max_distance, options, &mut w.hits)?;
+            core!(w).physics.cast_all(shape, vector(sweep.direction), sweep.max_distance, options, &mut w.hits)?;
             write(out_count, "out_count", count(w.hits.len())?)
         })
     }
@@ -1887,7 +1924,11 @@ pub unsafe extern "C" fn fp_overlap(
             if out_count.is_null() {
                 return Err(Error::null("out_count"));
             }
-            w.physics.overlap(query_shape(read(shape, "shape")?)?, self::query(layers, hit_triggers)?, &mut w.found)?;
+            core!(w).physics.overlap(
+                query_shape(read(shape, "shape")?)?,
+                self::query(layers, hit_triggers)?,
+                &mut w.found,
+            )?;
             write(out_count, "out_count", count(w.found.len())?)
         })
     }
@@ -1946,7 +1987,8 @@ pub unsafe extern "C" fn fp_check(
             if out.is_null() {
                 return Err(Error::null("out"));
             }
-            let any = w.physics.check(query_shape(read(shape, "shape")?)?, self::query(layers, hit_triggers)?)?;
+            let any =
+                core!(w).physics.check(query_shape(read(shape, "shape")?)?, self::query(layers, hit_triggers)?)?;
             write(out, "out", u32::from(any))
         })
     }
@@ -1970,7 +2012,7 @@ pub unsafe extern "C" fn fp_closest_point(
     unsafe {
         with_world(world, |w| {
             let point = vector(read(point, "point")?);
-            write(out, "out", fp_vec3(w.physics.closest_point(collider, point)?))
+            write(out, "out", fp_vec3(core!(w).physics.closest_point(collider, point)?))
         })
     }
 }
@@ -1996,8 +2038,12 @@ pub unsafe extern "C" fn fp_collider_raycast(
                 return Err(Error::null("out"));
             }
             let ray = read(ray, "ray")?;
-            let hit =
-                w.physics.raycast_collider(collider, vector(ray.origin), vector(ray.direction), ray.max_distance)?;
+            let hit = core!(w).physics.raycast_collider(
+                collider,
+                vector(ray.origin),
+                vector(ray.direction),
+                ray.max_distance,
+            )?;
             write(out, "out", fp_hit(hit))
         })
     }
@@ -2038,7 +2084,7 @@ pub unsafe extern "C" fn fp_character_move(
                 mass: s.mass,
             };
             let motion = vector(read(motion, "motion")?);
-            let moved = w.physics.move_character(collider, motion, dt, settings, &mut w.character_hits)?;
+            let moved = core!(w).physics.move_character(collider, motion, dt, settings, &mut w.character_hits)?;
             let hit_count = count(w.character_hits.len())?;
             write(
                 out,
@@ -2110,7 +2156,7 @@ pub unsafe extern "C" fn fp_joint_add(
             if out.is_null() {
                 return Err(Error::null("out"));
             }
-            let id = w.physics.add_joint(key, joint_spec(read(spec, "spec")?)?)?;
+            let id = core!(w).physics.add_joint(key, joint_spec(read(spec, "spec")?)?)?;
             write(out, "out", id)
         })
     }
@@ -2125,7 +2171,7 @@ pub unsafe extern "C" fn fp_joint_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_joint_spec_set(world: *mut FpWorld, joint: u64, spec: *const FpJointSpec) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.set_joint_spec(joint, joint_spec(read(spec, "spec")?)?)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.set_joint_spec(joint, joint_spec(read(spec, "spec")?)?)?)) }
 }
 
 /// # Safety
@@ -2134,7 +2180,7 @@ pub unsafe extern "C" fn fp_joint_spec_set(world: *mut FpWorld, joint: u64, spec
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_joint_remove(world: *mut FpWorld, joint: u64) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(w.physics.remove_joint(joint)?)) }
+    unsafe { with_world(world, |w| Ok(core!(w).physics.remove_joint(joint)?)) }
 }
 
 /// How hard a joint held in the last step, and where a hinge is.
@@ -2147,7 +2193,7 @@ pub unsafe extern "C" fn fp_joint_state_get(world: *mut FpWorld, joint: u64, out
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            let s = w.physics.joint_state(joint)?;
+            let s = core!(w).physics.joint_state(joint)?;
             write(
                 out,
                 "out",
@@ -2175,7 +2221,7 @@ pub unsafe extern "C" fn fp_joints_broken(world: *mut FpWorld, out_count: *mut u
     unsafe {
         with_world(world, |w| {
             w.broken.clear();
-            w.broken.extend_from_slice(w.physics.broken_joints());
+            w.broken.extend_from_slice(core!(w).physics.broken_joints());
             write(out_count, "out_count", count(w.broken.len())?)
         })
     }

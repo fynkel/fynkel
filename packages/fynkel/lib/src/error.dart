@@ -45,6 +45,11 @@ enum FynkelStatus {
   /// Not available on this platform, or not for this kind of view.
   unsupported,
   noTexture,
+
+  /// The view's GPU device was lost, or the GPU reported an error, and the
+  /// view stopped drawing. A new view gets a new device and uploads
+  /// everything again; `FynkelView` makes one by itself.
+  deviceLost,
 }
 
 /// A call into the engine failed. [message] is the engine's own

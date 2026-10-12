@@ -307,6 +307,9 @@ external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out
 @ffi.Native<ffi.Void Function(ffi.Pointer<FyView>)>()
 external void fy_view_free(ffi.Pointer<FyView> view);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>)>(isLeaf: true)
+external int fy_view_lose_device(ffi.Pointer<FyView> view);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
 external int fy_view_new_android(
   ffi.Pointer<FyWorld> world,
@@ -370,7 +373,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 15;
+const int FY_ABI_VERSION = 16;
 
 const int FY_APPLE_MORE = 2;
 
@@ -632,6 +635,7 @@ sealed class FyStatus {
   static const FY_STATUS_POISONED = 13;
   static const FY_STATUS_UNSUPPORTED = 14;
   static const FY_STATUS_NO_TEXTURE = 15;
+  static const FY_STATUS_DEVICE_LOST = 16;
 }
 
 final class FyTexture extends ffi.Opaque {}

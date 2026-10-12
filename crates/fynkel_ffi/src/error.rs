@@ -45,10 +45,14 @@ pub enum FyStatus {
     /// Not available on this platform, or not for this kind of view.
     Unsupported = 14,
     NoTexture = 15,
+    /// The view's GPU device was lost, or the GPU reported an error, and
+    /// the view stopped drawing. A new view gets a new device, and uploads
+    /// everything again.
+    DeviceLost = 16,
 }
 
 /// A failed call: its status and its message.
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub(crate) struct Error {
     pub(crate) status: FyStatus,
     pub(crate) message: String,

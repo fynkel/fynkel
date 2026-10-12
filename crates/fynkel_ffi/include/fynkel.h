@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 15
+#define FY_ABI_VERSION 16
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -72,6 +72,10 @@ enum FyStatus
   // Not available on this platform, or not for this kind of view.
   FY_STATUS_UNSUPPORTED = 14,
   FY_STATUS_NO_TEXTURE = 15,
+  // The view's GPU device was lost, or the GPU reported an error, and
+  // the view stopped drawing. A new view gets a new device, and uploads
+  // everything again.
+  FY_STATUS_DEVICE_LOST = 16,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -947,6 +951,14 @@ FyStatus fy_view_read(const struct FyView *view,
 //
 // `view` is null or live.
 FyStatus fy_view_resize(const struct FyView *view, uint32_t width, uint32_t height);
+
+// For tests: destroys the view's GPU device, as a driver reset would.
+// Soon after, `fy_view_frame` returns `FY_STATUS_DEVICE_LOST`.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_lose_device(const struct FyView *view);
 
 // # Safety
 //

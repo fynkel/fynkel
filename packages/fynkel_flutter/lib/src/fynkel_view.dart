@@ -7,7 +7,17 @@ import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart'
-    show AssetSource, GameObject, HeadlessView, Input, ObjectError, ViewStats, WorldView, World;
+    show
+        AssetSource,
+        FynkelException,
+        FynkelStatus,
+        GameObject,
+        HeadlessView,
+        Input,
+        ObjectError,
+        ViewStats,
+        WorldView,
+        World;
 import 'package:fynkel/platform.dart';
 
 import 'error_panel.dart';
@@ -219,6 +229,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   // every frame is reported once a second.
   int? _reportedMicros;
 
+  // When the GPU device was lost in the last minute: a loss now and then (a
+  // driver reset) brings a new view, one that keeps coming fails the view.
+  final _losses = <int>[];
+
   // What the game's code threw, shown over it (showErrors).
   StreamSubscription<ObjectError>? _errorsHeard;
   final _gameErrors = <ObjectError>[];
@@ -334,11 +348,17 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
     final view = _view ?? _open();
     if (view == null) return;
-    if (!_android) view.resize(_width, _height);
-    final texture = _texture;
-    if (texture == null) return;
-    if (_android) _sendSize(view, texture);
-    view.frame();
+    try {
+      if (!_android) view.resize(_width, _height);
+      final texture = _texture;
+      if (texture == null) return;
+      if (_android) _sendSize(view, texture);
+      view.frame();
+    } on FynkelException catch (error, stack) {
+      if (error.status != FynkelStatus.deviceLost) rethrow;
+      _lost(error, stack, micros);
+      return;
+    }
     widget.onViewStats?.call(view.stats);
 
     _windowTicks++;
@@ -445,6 +465,30 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     _withoutPicture();
     setState(() => _error = error);
   }
+
+  /// The GPU device was lost: a new view, with a new device, takes the old
+  /// one's place from the next frame and uploads everything again. More than
+  /// [_maxLosses] in a minute, and the view fails.
+  void _lost(FynkelException error, StackTrace stack, int micros) {
+    _losses
+      ..removeWhere((at) => micros - at > 60000000)
+      ..add(micros);
+    if (_losses.length > _maxLosses) {
+      _fail(error, stack);
+      return;
+    }
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: error,
+        stack: stack,
+        library: 'fynkel_flutter',
+        context: ErrorDescription('in FynkelView (a new view takes its place)'),
+      ),
+    );
+    setState(_release);
+  }
+
+  static const _maxLosses = 3;
 
   /// Lets go of the engine view; the world's frames go on without it.
   void _withoutPicture() {

@@ -292,8 +292,8 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_14() {
-    assert_eq!(fy_abi_version(), 15);
+fn the_abi_version_is_16() {
+    assert_eq!(fy_abi_version(), 16);
 }
 
 #[cfg(not(target_os = "android"))]

@@ -26,6 +26,7 @@ use std::thread;
 use fynkel_present::Target;
 use fynkel_render::{Gpu, RenderScene, Renderer};
 
+use crate::error::{Error, FyStatus};
 use crate::extract::ResourceOp;
 
 /// Counts since the worker started. Every scene posted is rendered,
@@ -68,10 +69,14 @@ struct Mailbox {
     /// A new size for the target, applied before the next scene is drawn.
     size: Option<(u32, u32)>,
     stop: bool,
+    /// A test asked the worker to destroy its device ([`Worker::lose_device`]).
+    lose_device: bool,
     /// The worker stopped and dropped everything it owned.
     finished: bool,
-    /// Why the worker stopped, if it panicked.
-    failure: Option<String>,
+    /// Why the worker stopped, if it did on its own: it panicked
+    /// ([`FyStatus::WorkerFailed`]), or the GPU reported an error or lost
+    /// the device ([`FyStatus::DeviceLost`]).
+    failure: Option<(FyStatus, String)>,
     stats: WorkerStats,
 }
 
@@ -90,6 +95,25 @@ impl Worker {
         target: T,
     ) -> std::io::Result<Self> {
         let shared = Arc::new(Shared { mailbox: Mutex::default(), wake: Condvar::new(), finished: Condvar::new() });
+        // wgpu's own handlers panic, on whichever thread calls next. These
+        // stop the worker instead, with a status the view can act on: a new
+        // view has a new device, and uploads everything again.
+        gpu.device.on_uncaptured_error(Arc::new({
+            let shared = shared.clone();
+            move |error| shared.fail(format!("the GPU reported an error: {error}"))
+        }));
+        gpu.device.set_device_lost_callback({
+            let shared = shared.clone();
+            // Dropping the device doesn't call it, and nothing here
+            // destroys it but a test.
+            move |_reason, message| {
+                shared.fail(if message.is_empty() {
+                    "the GPU device was lost".to_owned()
+                } else {
+                    format!("the GPU device was lost: {message}")
+                })
+            }
+        });
         let job = Job {
             work: Box::new({
                 let shared = shared.clone();
@@ -103,7 +127,9 @@ impl Worker {
                         Err(payload) => format!("the render worker panicked: {}", panic_message(&*payload)),
                     };
                     let mut mailbox = shared.lock();
-                    mailbox.failure = Some(failure);
+                    // A lost device is the reason, when that's what made it
+                    // panic.
+                    mailbox.failure.get_or_insert((FyStatus::WorkerFailed, failure));
                     mailbox.pending = None;
                 }
             }),
@@ -120,11 +146,11 @@ impl Worker {
 
     /// Hands `scene` (frame `number`) and the mesh changes in `ops` to the
     /// worker. `ops` is left empty. Fails only when the worker has stopped
-    /// after a panic.
-    pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<ResourceOp>) -> Result<(), String> {
+    /// ([`Worker::failure`]).
+    pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<ResourceOp>) -> Result<(), Error> {
         let mut mailbox = self.shared.lock();
-        if let Some(failure) = &mailbox.failure {
-            return Err(failure.clone());
+        if let Some((status, message)) = &mailbox.failure {
+            return Err(Error::new(*status, message.clone()));
         }
         mailbox.ops.append(ops);
         mailbox.stats.posted += 1;
@@ -139,18 +165,25 @@ impl Worker {
 
     /// Draws the scenes posted from now on at `width` × `height`. Fails
     /// only when the worker has stopped.
-    pub(crate) fn resize(&self, width: u32, height: u32) -> Result<(), String> {
+    pub(crate) fn resize(&self, width: u32, height: u32) -> Result<(), Error> {
         let mut mailbox = self.shared.lock();
-        if let Some(failure) = &mailbox.failure {
-            return Err(failure.clone());
+        if let Some((status, message)) = &mailbox.failure {
+            return Err(Error::new(*status, message.clone()));
         }
         mailbox.size = Some((width, height));
         Ok(())
     }
 
+    /// For tests: destroys the worker's device, as a driver reset would.
+    /// It's done on the render thread, which owns the device.
+    pub(crate) fn lose_device(&self) {
+        self.shared.lock().lose_device = true;
+        self.shared.wake.notify_one();
+    }
+
     /// Why the worker stopped, if it did.
-    pub(crate) fn failure(&self) -> Option<String> {
-        self.shared.lock().failure.clone()
+    pub(crate) fn failure(&self) -> Option<Error> {
+        self.shared.lock().failure.as_ref().map(|(status, message)| Error::new(*status, message.clone()))
     }
 
     pub(crate) fn stats(&self) -> WorkerStats {
@@ -254,6 +287,18 @@ impl Shared {
         // is always consistent.
         self.mailbox.lock().unwrap_or_else(PoisonError::into_inner)
     }
+
+    /// Stops the worker after what it's drawing, for `message`: a GPU
+    /// error or a lost device. The first reason stays.
+    fn fail(&self, message: String) {
+        let mut mailbox = self.lock();
+        if mailbox.failure.is_none() {
+            mailbox.failure = Some((FyStatus::DeviceLost, message));
+        }
+        mailbox.pending = None;
+        drop(mailbox);
+        self.wake.notify_one();
+    }
 }
 
 /// Draws until stopped. Fails when the target can't take a new size.
@@ -263,7 +308,17 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
         let (number, scene, size) = {
             let mut mailbox = shared.lock();
             loop {
-                if mailbox.stop {
+                if mailbox.stop || mailbox.failure.is_some() {
+                    return Ok(());
+                }
+                if mailbox.lose_device {
+                    mailbox.lose_device = false;
+                    drop(mailbox);
+                    gpu.device.destroy();
+                    // wgpu calls the device-lost callback only once the
+                    // device is polled with nothing left to do; stop now, as
+                    // a real loss does before the next frame.
+                    shared.fail("the GPU device was lost".to_owned());
                     return Ok(());
                 }
                 if let Some((number, scene)) = mailbox.pending.take() {
