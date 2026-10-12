@@ -10,36 +10,42 @@ import 'package:fynkel/fynkel.dart';
 import 'bindings.g.dart';
 import 'owned_memory.dart';
 
-/// Why a call into the physics failed. The same codes, in the same order,
-/// as `FpStatus` in crates/fynkel_physics_ffi/include/fynkel_physics.h.
+/// Why a call into the physics failed: `FpStatus` in
+/// crates/fynkel_physics_ffi/include/fynkel_physics.h, by its [code]. The
+/// ones the engine has too have its numbers.
 enum PhysicsStatus {
-  ok,
+  ok(FpStatus.FP_STATUS_OK),
 
   /// No body has this id: it was removed, or never added.
-  noBody,
+  noBody(FpStatus.FP_STATUS_NO_BODY),
 
   /// No collider has this id.
-  noCollider,
+  noCollider(FpStatus.FP_STATUS_NO_COLLIDER),
+
+  /// No joint has this id: it was removed, broke, or was never added.
+  noJoint(FpStatus.FP_STATUS_NO_JOINT),
 
   /// A value was out of range, not finite, or not one of the choices.
-  invalidValue,
+  invalidValue(FpStatus.FP_STATUS_INVALID_VALUE),
 
   /// A pointer was null. package:fynkel_physics never passes one, so this
   /// is a bug in it.
-  nullPointer,
+  nullPointer(FpStatus.FP_STATUS_NULL_POINTER),
 
   /// A buffer had the wrong size.
-  wrongSize,
+  wrongSize(FpStatus.FP_STATUS_WRONG_SIZE),
 
   /// The physics panicked. The message says what happened.
-  panic,
+  panic(FpStatus.FP_STATUS_PANIC),
 
   /// An earlier call panicked while changing this world, so it can't be
   /// trusted any more.
-  poisoned,
+  poisoned(FpStatus.FP_STATUS_POISONED);
 
-  /// No joint has this id: it was removed, broke, or was never added.
-  noJoint,
+  const PhysicsStatus(this.code);
+
+  /// Its number in the C interface.
+  final int code;
 }
 
 /// A call into the physics failed.
@@ -84,10 +90,10 @@ final bool _library = () {
 void _check(int status) {
   if (status == FpStatus.FP_STATUS_OK) return;
   final message = fp_last_error().cast<Utf8>().toDartString();
-  if (status < 0 || status >= PhysicsStatus.values.length) {
-    throw PhysicsException(PhysicsStatus.panic, 'unknown status $status: $message');
+  for (final known in PhysicsStatus.values) {
+    if (known.code == status) throw PhysicsException(known, message);
   }
-  throw PhysicsException(PhysicsStatus.values[status], message);
+  throw PhysicsException(PhysicsStatus.panic, 'unknown status $status: $message');
 }
 
 /// A physics world in the native library, used through ids: the layer the

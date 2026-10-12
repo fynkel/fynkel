@@ -120,7 +120,7 @@ sealed class Motion implements Future<void> {
   }
 
   final World _world;
-  final Object _owner; // the GameObject or Behaviour that made it
+  final _Moving _owner; // the GameObject or Behaviour that made it
   final int _made;
 
   /// Seconds before it starts moving, and reads what it moves from.
@@ -204,7 +204,7 @@ sealed class Motion implements Future<void> {
     try {
       _seek(double.infinity);
     } catch (error, stack) {
-      _world._report(_objectOf(_owner), error, stack);
+      _world._report(_owner._ownerObject, error, stack);
     }
     _finish();
   }
@@ -215,7 +215,7 @@ sealed class Motion implements Future<void> {
   void _halt() {
     if (_group == null) return stop();
     _broken = true;
-    _motionsOf(_owner)?.remove(this);
+    _owner._motions?.remove(this);
   }
 
   /// Moves its time on by [dt]: for one the world moves on.
@@ -237,12 +237,12 @@ sealed class Motion implements Future<void> {
     try {
       callback();
     } catch (error, stack) {
-      _world._report(_objectOf(_owner), error, stack);
+      _world._report(_owner._ownerObject, error, stack);
     }
   }
 
   void _ended() {
-    _motionsOf(_owner)?.remove(this);
+    _owner._motions?.remove(this);
     if (!_done.isCompleted) _done.complete();
     if (this case final _Group g) {
       for (final part in g._parts) {
@@ -317,7 +317,7 @@ sealed class Motion implements Future<void> {
     try {
       _seek(t);
     } catch (error, stack) {
-      _world._report(_objectOf(_owner), error, stack);
+      _world._report(_owner._ownerObject, error, stack);
       _broken = true;
       return;
     }
@@ -366,18 +366,6 @@ sealed class Motion implements Future<void> {
 }
 
 enum _MotionState { running, completed, stopped }
-
-GameObject? _objectOf(Object owner) => switch (owner) {
-  final GameObject o => o,
-  final Behaviour b => b._owner,
-  _ => null,
-};
-
-List<Motion>? _motionsOf(Object owner) => switch (owner) {
-  final GameObject o => o._motions,
-  final Behaviour b => b._motions,
-  _ => null,
-};
 
 /// One value going from one end to the other.
 final class _Tween<T> extends Motion {
@@ -556,14 +544,6 @@ final class _Group extends Motion {
   String toString() => together ? 'together(${_parts.length} motions)' : 'sequence(${_parts.length} motions)';
 }
 
-/// Whether what [owner] runs holds still: its object hidden, or the
-/// behaviour disabled.
-bool _pausedOwner(Object owner) => switch (owner) {
-  final GameObject o => !o._enabled,
-  final Behaviour b => !b._enabledNow,
-  _ => false,
-};
-
 /// The built-in lerp and distance for [T], or an [ArgumentError].
 (T Function(T a, T b, double t), double Function(T a, T b)?) _builtIn<T>(T sample, String type) {
   final Object l, d;
@@ -602,10 +582,20 @@ mixin _Moving {
   GameObject get _self;
 
   /// Who owns its motions: the object, or the behaviour.
-  Object get _motionOwner => this;
+  _Moving get _motionOwner => this;
 
-  // The motions it made that are still running.
+  // What it made and started that's still running, and the signals it
+  // listens to with `on`: a GameObject's or a Behaviour's.
   List<Motion>? _motions;
+  List<Routine<Object?>>? _routines;
+  _Listening? _listening;
+
+  /// Its object: itself, or the behaviour's (null before it has one).
+  GameObject? get _ownerObject;
+
+  /// Whether what it runs holds still: the object hidden, or the
+  /// behaviour disabled.
+  bool get _holdsStill;
 
   M _own<M extends Motion>(M motion) {
     (_motions ??= []).add(motion);

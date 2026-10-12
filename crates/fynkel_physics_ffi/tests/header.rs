@@ -1,6 +1,8 @@
 //! `include/fynkel_physics.h` is what cbindgen makes of the source right now, so the
 //! header (and the Dart bindings generated from it) can't drift from the
-//! Rust functions. `FYNKEL_BLESS=1` rewrites it.
+//! Rust functions, and `include/abi.lock` says which ABI version it was
+//! made with, so a change without a new version fails here.
+//! `FYNKEL_BLESS=1` rewrites both.
 
 use std::path::Path;
 
@@ -15,18 +17,11 @@ fn the_header_is_up_to_date() {
         .generate()
         .expect("cbindgen understands the crate")
         .write(&mut generated);
-    let generated = String::from_utf8(generated).unwrap();
-
-    let path = crate_dir.join("include/fynkel_physics.h");
-    if std::env::var("FYNKEL_BLESS").as_deref() == Ok("1") {
-        std::fs::write(&path, &generated).unwrap();
-        return;
-    }
-    let current = std::fs::read_to_string(&path).unwrap_or_default();
-    assert!(
-        current == generated,
-        "{} is out of date; run `FYNKEL_BLESS=1 cargo test -p fynkel_physics_ffi --test header`, then regenerate the Dart \
-         bindings (packages/fynkel_physics: dart run tool/ffigen.dart)",
-        path.display()
+    fynkel_cabi::check_header(
+        &crate_dir.join("include/fynkel_physics.h"),
+        &String::from_utf8(generated).unwrap(),
+        fynkel_physics_ffi::FP_ABI_VERSION,
+        std::env::var("FYNKEL_BLESS").as_deref() == Ok("1"),
+        "run `FYNKEL_BLESS=1 cargo test -p fynkel_physics_ffi --test header`, then regenerate the Dart bindings (packages/fynkel_physics: dart run tool/ffigen.dart)",
     );
 }

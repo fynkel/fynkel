@@ -1,0 +1,11 @@
+[package]
+name = "fynkel_cabi"
+description = "What the two C interfaces (fy_ and fp_) share: the call guard, the last error, the shared status numbers and the header lock."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true

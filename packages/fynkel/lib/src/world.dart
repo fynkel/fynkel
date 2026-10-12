@@ -422,52 +422,14 @@ final class World implements Finalizable {
     // started: they wait for the next frame. The calls are guarded inline,
     // not through [_safely], so a frame makes no closures.
     final updated = _live.length;
-    for (var i = 0; i < updated; i++) {
-      final object = _live[i];
-      if (!object._started || object._destroyed || _isHidden(object)) continue;
-      try {
-        object.onUpdate();
-      } catch (error, stack) {
-        _report(object, error, stack);
-      }
-      final components = object._components;
-      if (components == null) continue;
-      for (var j = 0; j < components.length && !object._destroyed; j++) {
-        if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
-          try {
-            b.onUpdate();
-          } catch (error, stack) {
-            _report(object, error, stack);
-          }
-        }
-      }
-    }
+    _callEach(_Call.update, updated);
 
     if (_disposeAsked) return;
     _runMotions();
     _runRoutines();
     if (_disposeAsked) return;
 
-    for (var i = 0; i < updated && i < _live.length; i++) {
-      final object = _live[i];
-      if (!object._started || object._destroyed || _isHidden(object)) continue;
-      try {
-        object.onLateUpdate();
-      } catch (error, stack) {
-        _report(object, error, stack);
-      }
-      final components = object._components;
-      if (components == null) continue;
-      for (var j = 0; j < components.length && !object._destroyed; j++) {
-        if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
-          try {
-            b.onLateUpdate();
-          } catch (error, stack) {
-            _report(object, error, stack);
-          }
-        }
-      }
-    }
+    _callEach(_Call.lateUpdate, updated);
 
     if (_disposeAsked) return;
     _runSystems(_SystemHook.afterLateUpdate);

@@ -372,7 +372,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 10;
+const int FP_ABI_VERSION = 11;
 
 const int FP_COLLIDED_ABOVE = 2;
 
@@ -894,12 +894,12 @@ sealed class FpStatus {
   static const FP_STATUS_OK = 0;
   static const FP_STATUS_NO_BODY = 1;
   static const FP_STATUS_NO_COLLIDER = 2;
-  static const FP_STATUS_INVALID_VALUE = 3;
-  static const FP_STATUS_NULL_POINTER = 4;
-  static const FP_STATUS_WRONG_SIZE = 5;
-  static const FP_STATUS_PANIC = 6;
-  static const FP_STATUS_POISONED = 7;
-  static const FP_STATUS_NO_JOINT = 8;
+  static const FP_STATUS_NO_JOINT = 3;
+  static const FP_STATUS_INVALID_VALUE = 6;
+  static const FP_STATUS_NULL_POINTER = 7;
+  static const FP_STATUS_WRONG_SIZE = 11;
+  static const FP_STATUS_PANIC = 12;
+  static const FP_STATUS_POISONED = 13;
 }
 
 final class FpSweep extends ffi.Struct {

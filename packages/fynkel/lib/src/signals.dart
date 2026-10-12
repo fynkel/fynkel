@@ -21,16 +21,18 @@ part of 'world.dart';
 final class Signal<T> {
   final _subscriptions = <SignalSubscription<T>>[];
 
-  // How deep in [emit] it is, and whether a subscription was cancelled
-  // meanwhile, to be taken out once it's done.
+  // How deep in [emit] it is, and how many subscriptions are cancelled but
+  // still in the list. A cancelled one is only marked, and the list is
+  // tidied once half of it is cancelled, so 500 listeners leaving one by
+  // one cost 500 steps, not 500 × 500.
   var _emitting = 0;
-  var _cancelledWhileEmitting = false;
+  var _cancelledCount = 0;
 
   // [stream]'s, once asked for.
   StreamController<T>? _controller;
 
   /// Whether anything listens, with [listen], `on` or [stream].
-  bool get hasListeners => _subscriptions.any((s) => !s._cancelled) || (_controller?.hasListener ?? false);
+  bool get hasListeners => _subscriptions.length > _cancelledCount || (_controller?.hasListener ?? false);
 
   /// The values emitted from now on, as a broadcast [Stream], for code
   /// outside the game such as a Flutter widget: `StreamBuilder(stream:
@@ -71,10 +73,7 @@ final class Signal<T> {
         }
       }
     } finally {
-      if (--_emitting == 0 && _cancelledWhileEmitting) {
-        _cancelledWhileEmitting = false;
-        _subscriptions.removeWhere((s) => s._cancelled);
-      }
+      if (--_emitting == 0) _tidy();
     }
     if (_controller case final controller? when controller.hasListener) controller.add(value);
     if (error != null) Error.throwWithStackTrace(error, stack!);
@@ -107,6 +106,21 @@ final class Signal<T> {
     return future;
   }
 
+  /// Takes the cancelled subscriptions out once they're half the list,
+  /// and not while emitting.
+  void _tidy() {
+    if (_emitting > 0 || _cancelledCount == 0 || _cancelledCount * 2 < _subscriptions.length) return;
+    // In place: removeWhere would make a new list.
+    final subscriptions = _subscriptions;
+    var kept = 0;
+    for (var i = 0; i < subscriptions.length; i++) {
+      final subscription = subscriptions[i];
+      if (!subscription._cancelled) subscriptions[kept++] = subscription;
+    }
+    subscriptions.length = kept;
+    _cancelledCount = 0;
+  }
+
   @override
   String toString() => 'Signal<$T>';
 }
@@ -119,7 +133,7 @@ final class SignalSubscription<T> {
   void Function(T value)? _handler;
 
   // The GameObject or Behaviour that listens with `on`, or null.
-  final Object? _owner;
+  final _Moving? _owner;
 
   bool _cancelled = false;
 
@@ -135,20 +149,13 @@ final class SignalSubscription<T> {
     _handler = null;
     final signal = _signal!;
     _signal = null;
-    if (signal._emitting > 0) {
-      signal._cancelledWhileEmitting = true;
-    } else {
-      signal._subscriptions.remove(this);
-    }
+    signal._cancelledCount++;
+    signal._tidy();
   }
 
   void _hear(T value) {
     final handler = _handler!;
-    final object = switch (_owner) {
-      final GameObject o => o,
-      final Behaviour b => b._owner,
-      _ => null,
-    };
+    final object = _owner?._ownerObject;
     final world = object?._world;
     if (world == null || world.isDisposed) return handler(value);
     try {
@@ -183,14 +190,9 @@ final class _Listening {
   }
 }
 
-SignalSubscription<T> _on<T>(Object owner, Signal<T> signal, void Function(T value) handler) {
+SignalSubscription<T> _on<T>(_Moving owner, Signal<T> signal, void Function(T value) handler) {
   final subscription = signal._add(SignalSubscription<T>._(signal, handler, owner));
-  switch (owner) {
-    case final GameObject o:
-      (o._listening ??= _Listening()).add(subscription);
-    case final Behaviour b:
-      (b._listening ??= _Listening()).add(subscription);
-  }
+  (owner._listening ??= _Listening()).add(subscription);
   return subscription;
 }
 

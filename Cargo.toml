@@ -10,6 +10,7 @@ license = "UNLICENSED"
 publish = false
 
 [workspace.dependencies]
+fynkel_cabi = { path = "crates/fynkel_cabi" }
 fynkel_world = { path = "crates/fynkel_world" }
 fynkel_render = { path = "crates/fynkel_render" }
 fynkel_present = { path = "crates/fynkel_present" }
@@ -34,6 +35,16 @@ bevy_mikktspace = { version = "1.0.0", default-features = false, features = ["st
 # Physics (packages/fynkel_physics): single-threaded, 32-bit floats.
 rapier3d = "0.36.1"
 cbindgen = { version = "0.29.4", default-features = false }
+
+# The build hook (package:fynkel/hooks.dart) always builds in release, so
+# this is what every app ships. Measured on the Mac (stage 6, PR 12b):
+# the engine library 7.2 → 5.0 MB and physics 3.3 → 2.4 MB; a clean build
+# 31 → 49 s, a rebuild after an edit 3 → 5 s. Thin LTO shrank nothing more
+# than strip alone.
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
 
 # Unsafe code is denied everywhere. `fynkel_ffi` (the C boundary) and the
 # platform modules of `fynkel_present` allow it locally, and nothing else.

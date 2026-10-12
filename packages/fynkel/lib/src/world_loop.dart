@@ -50,11 +50,11 @@ extension _Loop on World {
         ended = true;
         continue;
       }
-      if (m._made >= frame || _pausedOwner(m._owner)) continue;
+      if (m._made >= frame || m._owner._holdsStill) continue;
       try {
         m._step(m.unscaled ? time._unscaledDelta : time._delta);
       } catch (error, stack) {
-        _report(_objectOf(m._owner), error, stack);
+        _report(m._owner._ownerObject, error, stack);
         m.stop();
       }
       if (!m.isRunning) ended = true;
@@ -72,18 +72,13 @@ extension _Loop on World {
     }
   }
 
-  Routine<T> _start<T>(Object owner, GameObject object, Future<T> Function() body) {
+  Routine<T> _start<T>(_Moving owner, GameObject object, Future<T> Function() body) {
     if (isDisposed || object._destroyed) throw StateError('$owner was destroyed, so it can\'t start a routine');
     final parent = _currentRoutine;
     final base = _baseZone;
     final routine = Routine<T>._(this, owner, object, parent?._running == true ? parent : null);
     if (routine._parent case final p?) (p._children ??= []).add(routine);
-    switch (owner) {
-      case final GameObject o:
-        (o._routines ??= []).add(routine);
-      case final Behaviour b:
-        (b._routines ??= []).add(routine);
-    }
+    (owner._routines ??= []).add(routine);
     final zone = base.fork(specification: _routineZone, zoneValues: {_routineKey: routine, _baseKey: base});
     final Future<T> future;
     try {
@@ -192,6 +187,46 @@ extension _Loop on World {
   /// [GameObject.onFixedUpdate] and its behaviours', the systems'
   /// [WorldSystem.afterFixedUpdate], then the routines waiting for
   /// [fixedStep]. Objects added during a step start next frame.
+  /// Calls [call] on the first [count] live objects that are started and
+  /// shown, and on their started, enabled behaviours, each guarded. A
+  /// switch, not a closure, so a frame makes nothing.
+  void _callEach(_Call call, int count) {
+    for (var i = 0; i < count && i < _live.length; i++) {
+      final object = _live[i];
+      if (!object._started || object._destroyed || _isHidden(object)) continue;
+      try {
+        switch (call) {
+          case _Call.update:
+            object.onUpdate();
+          case _Call.lateUpdate:
+            object.onLateUpdate();
+          case _Call.fixedUpdate:
+            object.onFixedUpdate();
+        }
+      } catch (error, stack) {
+        _report(object, error, stack);
+      }
+      final components = object._components;
+      if (components == null) continue;
+      for (var j = 0; j < components.length && !object._destroyed; j++) {
+        if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
+          try {
+            switch (call) {
+              case _Call.update:
+                b.onUpdate();
+              case _Call.lateUpdate:
+                b.onLateUpdate();
+              case _Call.fixedUpdate:
+                b.onFixedUpdate();
+            }
+          } catch (error, stack) {
+            _report(object, error, stack);
+          }
+        }
+      }
+    }
+  }
+
   void _runFixedSteps() {
     final time = this.time;
     if (!time._fixedDue) return;
@@ -209,27 +244,7 @@ extension _Loop on World {
             _report(null, error, stack);
           }
         }
-        final n = _live.length;
-        for (var i = 0; i < n && i < _live.length; i++) {
-          final object = _live[i];
-          if (!object._started || object._destroyed || _isHidden(object)) continue;
-          try {
-            object.onFixedUpdate();
-          } catch (error, stack) {
-            _report(object, error, stack);
-          }
-          final components = object._components;
-          if (components == null) continue;
-          for (var j = 0; j < components.length && !object._destroyed; j++) {
-            if (components[j] case final Behaviour b when b._started && b._enabledFlag && !b._removed) {
-              try {
-                b.onFixedUpdate();
-              } catch (error, stack) {
-                _report(object, error, stack);
-              }
-            }
-          }
-        }
+        _callEach(_Call.fixedUpdate, _live.length);
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
           try {
@@ -348,3 +363,6 @@ extension _Loop on World {
 
 /// The [WorldSystem] hooks run once a frame.
 enum _SystemHook { beforeFrame, beforeUpdate, afterLateUpdate, afterFrame }
+
+/// Which of the per-frame calls [_Loop._callEach] makes.
+enum _Call { update, lateUpdate, fixedUpdate }

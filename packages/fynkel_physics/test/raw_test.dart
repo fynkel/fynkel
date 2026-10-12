@@ -103,6 +103,20 @@ void main() {
     );
   });
 
+  test('the statuses the engine has too have its numbers, and every one is told apart', () {
+    for (final (physics, engine) in [
+      (PhysicsStatus.ok, FynkelStatus.ok),
+      (PhysicsStatus.invalidValue, FynkelStatus.invalidValue),
+      (PhysicsStatus.nullPointer, FynkelStatus.nullPointer),
+      (PhysicsStatus.wrongSize, FynkelStatus.wrongSize),
+      (PhysicsStatus.panic, FynkelStatus.panic),
+      (PhysicsStatus.poisoned, FynkelStatus.poisoned),
+    ]) {
+      expect(physics.code, engine.index, reason: physics.name);
+    }
+    expect(PhysicsStatus.values.map((s) => s.code).toSet(), hasLength(PhysicsStatus.values.length));
+  });
+
   test('a disposed world refuses to be used, and disposing twice is fine', () {
     final physics = RawPhysics()..dispose();
     expect(() => physics.step(step), throwsStateError);

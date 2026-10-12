@@ -292,8 +292,18 @@ fn a_view_of_zero_size_is_refused() {
 }
 
 #[test]
-fn the_abi_version_is_18() {
-    assert_eq!(fy_abi_version(), 18);
+fn the_abi_version_is_the_constant() {
+    assert_eq!(fy_abi_version(), FY_ABI_VERSION);
+}
+
+#[test]
+fn a_transform_is_laid_out_as_the_physics_one() {
+    use fynkel_cabi::transform;
+    use std::mem::{offset_of, size_of};
+    assert_eq!(size_of::<FyTransform>(), transform::SIZE);
+    assert_eq!(offset_of!(FyTransform, position), transform::POSITION);
+    assert_eq!(offset_of!(FyTransform, rotation), transform::ROTATION);
+    assert_eq!(offset_of!(FyTransform, scale), transform::SCALE);
 }
 
 #[cfg(not(target_os = "android"))]

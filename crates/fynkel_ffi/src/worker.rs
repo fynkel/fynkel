@@ -18,7 +18,6 @@
 //! So a view made after another, as at every hot restart, costs no new
 //! thread and leaves nothing behind.
 
-use std::any::Any;
 use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
 use std::thread;
@@ -386,13 +385,7 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
     }
 }
 
-pub(crate) fn panic_message(payload: &(dyn Any + Send)) -> &str {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("(no message)")
-}
+pub(crate) use fynkel_cabi::panic_message;
 
 #[cfg(test)]
 mod tests;
