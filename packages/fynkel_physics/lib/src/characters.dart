@@ -143,10 +143,12 @@ final class CharacterController extends Collider {
     vectors[0] = motion.x;
     vectors[1] = motion.y;
     vectors[2] = motion.z;
-    checkPhysics(fp_character_move(physics._world, _id, physics._character, physics._point, seconds, physics._moved));
-    final out = physics._movedFloats;
+    checkPhysics(
+      fp_character_move(physics._world, _id, physics._character, physics._point, seconds, physics._characterMove),
+    );
+    final out = physics._characterFloatsOut;
     final moved = Vec3(out[0], out[1], out[2]);
-    final words = physics._movedWords;
+    final words = physics._characterWordsOut;
     _flags = CollisionFlags._(words[3]);
     _velocity = moved / seconds;
     final object = gameObject;

@@ -190,6 +190,57 @@ void main() {
     expect(physics.raycast(side), isNull);
   });
 
+  test('physics follows only what moved: below a moved object, a few among many, or every one', () {
+    final world = newWorld();
+    final physics = world.physics;
+    // A row of 50 spheres along x at z 10, and a grandchild's sphere two
+    // levels under a root at the origin.
+    final row = [for (var i = 0; i < 50; i++) at(world, Vec3(i * 3.0 + 10, 0, 10), SphereCollider(radius: 1))];
+    final root = world.add(GameObject());
+    final middle = root.add(GameObject());
+    final deep = middle.add(
+      GameObject(
+        transform: const Transform(position: Vec3(0, 0, 10)),
+        components: [SphereCollider()],
+      ),
+    );
+    world.update(1 / 60);
+    final ray = Ray(Vec3.zero, forward);
+    expect(physics.raycast(ray)?.gameObject, same(deep));
+
+    root.position = const Vec3(0, 50, 0);
+    expect(physics.raycast(ray), isNull, reason: 'the grandchild followed its grandparent');
+    expect(physics.raycast(Ray(const Vec3(0, 50, 0), forward))?.gameObject, same(deep));
+
+    row[7].layer = 3;
+    final seven = Ray(Vec3(7 * 3.0 + 10, 0, 0), forward);
+    expect(physics.raycast(seven, layers: LayerMask.of([3]))?.gameObject, same(row[7]), reason: 'its new layer');
+
+    // More moves than colliders: each is looked at instead.
+    for (var round = 0; round < 3; round++) {
+      for (final o in row) {
+        o.position = o.position + const Vec3(0, 0, 1);
+      }
+    }
+    expect(physics.raycast(seven)?.distance, closeTo(12, 1e-4));
+    expect(physics.raycast(Ray(Vec3(49 * 3.0 + 10, 0, 0), forward))?.distance, closeTo(12, 1e-4));
+
+    // A rigidbody's object under a moved parent: the body is put there, its
+    // collider with it.
+    final holder = world.add(GameObject());
+    final body = holder.add(
+      GameObject(
+        transform: const Transform(position: Vec3(-20, 0, 10)),
+        components: [Rigidbody(isKinematic: true), BoxCollider()],
+      ),
+    );
+    world.update(1 / 60);
+    expect(physics.raycast(Ray(const Vec3(-20, 0, 0), forward))?.gameObject, same(body));
+    holder.position = const Vec3(0, -30, 0);
+    expect(physics.raycast(Ray(const Vec3(-20, 0, 0), forward)), isNull);
+    expect(physics.raycast(Ray(const Vec3(-20, -30, 0), forward))?.gameObject, same(body));
+  });
+
   test('a collider is found while it\'s enabled and its object shown, and only then', () {
     final world = newWorld();
     final physics = world.physics;

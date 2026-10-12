@@ -1127,6 +1127,10 @@ What keeps a game fast:
 - **Listen only where you need to.** Contacts are worked out only for
   colliders whose object or rigidbody is `with Triggers` or `with
   Collisions`.
+- **Move and query in any order.** A query first brings physics up to
+  what moved since the last one, and looks only at those objects and
+  what's below them: moving one bullet among 5,000 colliders and then
+  casting costs about 2 µs on a Mac.
 - **Query from the updates.** The step runs between frames, so a query in
   `onUpdate` never waits for it; one from a Flutter handler between frames
   may.
