@@ -1,6 +1,6 @@
 # Stage 6 plan: the review
 
-Status: a draft for you to review (2026-10-12). Scope and rules:
+Status: accepted 2026-10-12, with your answers to §3. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 5 is done
 ([report](stage-5-report.md)).
 
@@ -99,22 +99,18 @@ do.
 8. **The report**, with the findings before and after, and what goes to
    stage 7. *Done when* you have read it.
 
-## 3. Questions
+## 3. Decisions (2026-10-12)
 
-Each with a recommended answer.
-
-1. **Fresh agents as the test developers?** Recommended: yes, four in
-   step 1 and two in step 7. Each run costs tokens: about one large task
-   each. Or I write them all myself, which is cheaper, but I know the
-   framework too well to stumble where a newcomer would.
-2. **Will you write something yourself too?** Recommended: yes, a small
-   game of your choice in step 4's time, as the developer the framework
-   is for. Your log weighs more than any agent's.
-3. **Breaking changes?** Recommended: allowed in this stage, before
-   anyone else depends on the API; after stage 6 the API changes only
-   with a reason written down.
-4. **The engine (Rust) in scope?** Recommended: its boundary (the C
-   interfaces, errors coming back, versions) and anything a scale check
-   points at; not a rewrite of its insides.
-5. **The lab and the examples?** Recommended: they're code people will
-   copy, so they're reviewed as API users too, and fixed with the rest.
+1. **Fresh agents are the test developers**: four in step 1, two in
+   step 7.
+2. **You may write a game too**; not decided yet. Step 4 leaves room for
+   it.
+3. **Breaking changes when they're needed**: the goal is to make it
+   better, and this early nothing depends on the API. Each one gets a
+   line in the guide's notes.
+4. **The engine (Rust)**: most of it, or at least the important parts:
+   its C interfaces, errors coming back, versions, and the parts that
+   carry the frame (the world, rendering, presenting), as well as
+   anything a scale check points at.
+5. **The lab and the examples are reviewed** as code people will copy,
+   and fixed with the rest.
