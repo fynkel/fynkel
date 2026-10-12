@@ -30,6 +30,9 @@ Unity, or fix a finding); **C**, docs and internals.
 
 ## A. Your call
 
+**Decided 2026-10-12: all as recommended** ((a) in 1 and 2, yes to
+3 to 8).
+
 Each with a recommendation. All are breaking: the examples, the lab and
 the guide change with them.
 
