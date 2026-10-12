@@ -23,10 +23,14 @@ class RigidbodyBasicsScene extends LabScene {
   @override
   void build() {
     add(floorCollider());
-    cubeBody = Rigidbody();
-    ballBody = Rigidbody();
-    cube = add(shape('cube', Mesh.cube(), const Color(0xFFE0613A), components: [BoxCollider(), cubeBody]));
-    ball = add(shape('ball', Mesh.sphere(), const Color(0xFF3A8EE0), components: [SphereCollider(), ballBody]));
+    //cubeBody = Rigidbody();
+    //ballBody = Rigidbody();
+    cube = add(shape('cube', Mesh.cube(), const Color(0xFFE0613A), components: [BoxCollider(), Rigidbody()]));
+    ball = add(shape('ball', Mesh.sphere(), const Color(0xFF3A8EE0), components: [SphereCollider(), Rigidbody()]));
+
+    cubeBody = cube.get<Rigidbody>()!;
+    ballBody = ball.get<Rigidbody>()!;
+
     drop();
   }
 
