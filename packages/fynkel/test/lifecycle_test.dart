@@ -213,6 +213,23 @@ void main() {
   });
   tearDown(() => world.dispose());
 
+  test('turning an object on enables it, its behaviours, then each child with what\'s below it, as Unity', () {
+    final a = world.add(
+      Logged(
+        'a',
+        components: [Logs('a1')],
+        children: [
+          Logged('b', children: [Logged('c')]),
+          Logged('d'),
+        ],
+      ),
+    );
+    a.active = false;
+    log.clear();
+    a.active = true;
+    expect(log, ['enable a', 'enable a1', 'enable b', 'enable c', 'enable d']);
+  });
+
   test('a frame: enables when it appears, starts, updates, then late updates after every update', () {
     world.add(Logged('a', components: [Logs('a1')], children: [Logged('b')]));
     expect(log, ['enable a', 'enable a1', 'enable b'], reason: 'parents first, as soon as it appears');

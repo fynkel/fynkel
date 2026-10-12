@@ -16,7 +16,7 @@ const _dt = 1 / 60;
 
 /// Connects to the VM service for the file's tests, and gives back
 /// [madeEachFrame].
-Future<Map<String, int>> Function(World world, int frames) allocations() {
+Future<Map<String, int>> Function(World world, int frames, {int tries}) allocations() {
   late VmService service;
   late String isolate;
 
@@ -40,17 +40,29 @@ Future<Map<String, int>> Function(World world, int frames) allocations() {
   /// The classes [frames] frames made at least one of each of, with how
   /// many, beyond what asking for the count makes (decoding the profile
   /// makes thousands of objects, but not one per frame).
-  return (World world, int frames) async {
-    // Warm, and compiled: the VM optimizes a function after tens of
-    // thousands of calls, and until then boxes its doubles.
-    for (var i = 0; i < 100000; i++) {
-      world.update(_dt);
+  ///
+  /// When it finds some, it warms and counts again, up to [tries] times:
+  /// under `dart test`, files share the background compiler, so warmed code
+  /// can still be waiting to be optimized, and boxes or makes lists until
+  /// it is. What's still made the last time is what a frame makes.
+  return (World world, int frames, {int tries = 3}) async {
+    var found = <String, int>{};
+    for (var attempt = 0; attempt < tries; attempt++) {
+      // Time for the compiler, busy with the other files' code, to finish.
+      if (attempt > 0) await Future<void>.delayed(const Duration(milliseconds: 500));
+      // Warm, and compiled: the VM optimizes a function after tens of
+      // thousands of calls, and until then boxes its doubles.
+      for (var i = 0; i < 100000; i++) {
+        world.update(_dt);
+      }
+      final none = await made(world, 0);
+      final some = await made(world, frames);
+      found = {
+        for (final MapEntry(:key, :value) in some.entries)
+          if (value - (none[key] ?? 0) >= frames) key: value - (none[key] ?? 0),
+      };
+      if (found.isEmpty) break;
     }
-    final none = await made(world, 0);
-    final some = await made(world, frames);
-    return {
-      for (final MapEntry(:key, :value) in some.entries)
-        if (value - (none[key] ?? 0) >= frames) key: value - (none[key] ?? 0),
-    };
+    return found;
   };
 }

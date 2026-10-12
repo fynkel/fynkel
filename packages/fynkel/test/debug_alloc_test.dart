@@ -39,9 +39,9 @@ void main() {
     // The frames without drawing first: on main (2026-10-10) a world of
     // plain objects boxes one double a frame in the JIT, drawing or not.
     world.debug.enabled = false;
-    final without = await madeEachFrame(world, 20000);
+    final without = await madeEachFrame(world, 20000, tries: 1);
     world.debug.enabled = true;
-    final made = await madeEachFrame(world, 20000);
+    final made = await madeEachFrame(world, 20000, tries: 1);
     // The box and the sphere work out their corners and points as Vec3s;
     // nothing else is made per frame that wasn't made without drawing.
     expect(made.keys.toSet().difference({'Vec3', ...without.keys}), isEmpty, reason: '$made, without: $without');

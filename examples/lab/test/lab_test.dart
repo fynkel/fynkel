@@ -26,6 +26,7 @@ import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/moving_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
+import 'package:lab/scenes/pooling_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
 
@@ -165,6 +166,33 @@ void main() {
     expect(scene.readout.value, allOf(contains('cube 12'), contains('sphere 720'), contains('quad 2')));
     scene.controls.whereType<Toggle>().single.onChanged(true);
     expect(scene.quadMaterial.doubleSided, isTrue);
+  });
+
+  test('Pooling: the basics: the fountain reuses its balls, and the handle lets go of one that went back', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(PoolingBasicsScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(5);
+    final first = scene.followed!.object!;
+    frames(240);
+    final made = scene.made;
+    expect(made, inInclusiveRange(20, 25), reason: 'a ball every 0.08 s, each back after 1.6 s');
+    expect(scene.balls.countAll, made);
+    expect(scene.followed!.object, isNot(same(first)));
+    expect(scene.log.value.map((e) => e.text), contains('the ball the cube followed went back: its handle is null'));
+    frames(240);
+    expect(scene.made, made, reason: 'none made once the pool has enough');
+    final [usePool, ...] = scene.controls;
+    (usePool as Toggle).onChanged(false);
+    frames(120);
+    expect(scene.made, greaterThan(made + 10));
+    expect(world.all<Ball>().length, lessThan(25), reason: 'the ones made without the pool are destroyed');
   });
 
   test('Moving: the basics: forward goes the cube\'s way, and off and on the table it stays put', () async {

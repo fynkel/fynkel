@@ -360,6 +360,7 @@ extension _Objects on World {
     final objects = _subtree(root);
     for (final object in objects) {
       object._destroyed = true;
+      object._pool?._lost(object);
     }
     try {
       for (final object in objects.reversed) {

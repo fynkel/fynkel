@@ -25,6 +25,7 @@ part 'layers.dart';
 part 'model.dart';
 part 'motion.dart';
 part 'pointing.dart';
+part 'pool.dart';
 part 'resources.dart';
 part 'routines.dart';
 part 'signals.dart';
@@ -213,7 +214,10 @@ final class World implements Finalizable {
 
   // Live objects and behaviours that haven't had onStart yet, in the same
   // order, each object before its behaviours.
-  var _starting = <Object>[];
+  // Those still waiting (hidden, not loaded) stay, moved up in place: a
+  // list cleared and refilled each frame would drop its storage and grow
+  // it again, which allocates while a pool's hidden objects wait.
+  final _starting = <Object>[];
 
   // Objects with removed components still in their lists: taken out at the
   // start of the next update, so a removal never shifts a list being run.
@@ -277,9 +281,6 @@ final class World implements Finalizable {
     final id = scratch.id.value;
     return id == 0 ? null : _object(id);
   }
-
-  // The objects and behaviours still waiting to start, reused each frame.
-  var _waiting = <Object>[];
 
   /// Runs one frame of the game, [dt] seconds after the last one: [time]
   /// moves on (see [Time.delta]), the [WorldSystem]s' `beforeFrame` run
@@ -365,13 +366,13 @@ final class World implements Finalizable {
       .._now = time._unscaledSinceStart
       .._step();
 
-    final waiting = _waiting;
+    var kept = 0;
     for (var i = 0; i < _starting.length; i++) {
       switch (_starting[i]) {
         case final GameObject object:
           if (object._destroyed) continue;
           if (_isHidden(object)) {
-            waiting.add(object);
+            _starting[kept++] = object;
             continue;
           }
           object._started = true;
@@ -380,16 +381,15 @@ final class World implements Finalizable {
           final object = behaviour._owner!;
           if (behaviour._removed || object._destroyed) continue;
           if (!behaviour._loaded || !behaviour._enabledFlag || !object._started || _isHidden(object)) {
-            waiting.add(behaviour);
+            _starting[kept++] = behaviour;
             continue;
           }
           behaviour._started = true;
           _safely(object, behaviour.onStart);
       }
     }
-    // The two lists swap, so a frame makes none.
-    _waiting = _starting..clear();
-    _starting = waiting;
+    // Shorter unless an onStart disposed the world, which empties it.
+    if (kept < _starting.length) _starting.length = kept;
 
     if (_disposeAsked) return;
     _runFixedSteps();

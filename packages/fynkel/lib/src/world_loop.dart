@@ -66,7 +66,7 @@ extension _Loop on World {
 
   /// Stops the motions [owner] made, as it goes.
   void _haltMotions(List<Motion>? motions) {
-    if (motions == null) return;
+    if (motions == null || motions.isEmpty) return;
     for (final m in [...motions].reversed) {
       m._halt();
     }
@@ -158,7 +158,7 @@ extension _Loop on World {
 
   /// Stops the routines [owner] started, the last started first.
   void _stopRoutines(List<Routine<Object?>>? routines) {
-    if (routines == null) return;
+    if (routines == null || routines.isEmpty) return;
     for (final routine in [...routines].reversed) {
       routine.stop();
     }
@@ -299,11 +299,19 @@ extension _Loop on World {
 
   /// Calls onEnable or onDisable on [root], everything below it, and their
   /// behaviours, wherever being shown changed: parents first, each object
-  /// before its behaviours.
+  /// before its behaviours, then what's below it.
   void _refresh(GameObject root) {
     if (root._destroyed || root._world == null) return;
-    for (final object in _subtree(root)) {
-      _refreshObject(object);
+    _refreshTree(root);
+  }
+
+  // Depth first, as Unity's, and with no list: hiding and showing pooled
+  // objects allocates nothing.
+  void _refreshTree(GameObject object) {
+    _refreshObject(object);
+    final children = object._children;
+    for (var i = 0; children != null && i < children.length; i++) {
+      _refreshTree(children[i]);
     }
   }
 
@@ -311,7 +319,12 @@ extension _Loop on World {
     final shown = object._appeared && !object._destroyed && _shown(object);
     if (shown != object._enabled) {
       object._enabled = shown;
-      _safely(object, shown ? object.onEnable : object.onDisable);
+      // Called here rather than torn off for [_safely], which allocates.
+      try {
+        shown ? object.onEnable() : object.onDisable();
+      } catch (error, stack) {
+        _report(object, error, stack);
+      }
     }
     final components = object._components;
     for (var i = 0; components != null && i < components.length; i++) {
@@ -325,7 +338,11 @@ extension _Loop on World {
     final on = object._enabled && b._enabledFlag && b._loaded && !b._removed;
     if (on == b._enabledNow) return;
     b._enabledNow = on;
-    _safely(object, on ? b.onEnable : b.onDisable);
+    try {
+      on ? b.onEnable() : b.onDisable();
+    } catch (error, stack) {
+      _report(object, error, stack);
+    }
   }
 }
 
