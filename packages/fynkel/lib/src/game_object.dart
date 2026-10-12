@@ -72,6 +72,13 @@ class GameObject with _Moving {
   // onDestroy calls are done.
   bool _destroyed = false;
   bool _gone = false;
+
+  // The pool it came from, if any (pool.dart), whether it's handed out or
+  // waiting, and how many times it was released or destroyed, for
+  // [ObjectHandle].
+  Pool<GameObject>? _pool;
+  _PoolState _pooled = _PoolState.none;
+  int _generation = 0;
   bool _started = false;
 
   // Whether it had onEnable and not onDisable since: it's shown.
@@ -404,16 +411,26 @@ class GameObject with _Moving {
     }
     if (world.isDisposed || !fy_exists(world._pointer, _id)) {
       _destroyed = true;
+      _pool?._lost(this);
       _gone = true;
       return;
     }
     world._destroy(this);
   }
 
+  /// Gives this object back to the [Pool] it came from ([Pool.release]),
+  /// or destroys it if it didn't come from one: what a pooled object calls
+  /// where it would call [destroy].
+  void release() {
+    if (_pool case final pool?) return pool.release(this);
+    destroy();
+  }
+
   /// Destroys an object that was never added, and what was added to it:
   /// what they own and the assets they hold go too.
   void _destroyUnadded() {
     _destroyed = true;
+    _pool?._lost(this);
     _gone = true;
     _stopListening();
     for (final c in _components ?? const <Component>[]) {

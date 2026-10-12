@@ -166,6 +166,78 @@ class Yard extends GameObject {
   names or tags. As Unity's, they leave out objects that are turned off
   (and the components on them) unless `includeInactive: true`.
 
+**Pooling.** A game that makes and destroys many short-lived objects
+(shots, sparks, enemies of a wave) can reuse them instead, with a
+`Pool`, as Unity's `ObjectPool`: `get` hands out a hidden object or makes
+a new one, and `release` hides it again for the next `get`.
+
+```dart
+class Shot extends GameObject {
+  Shot(Material material) : super(components: [MeshRenderer(Mesh.sphere(), material)]);
+
+  var speed = 0.0;
+  var flown = 0.0;
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    flown = 0; // each time it's handed out
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    translate(Vec3.forward * (speed * time.delta));
+    flown += time.delta;
+    if (flown > 2) release(); // back to its pool
+  }
+}
+
+class Turret extends GameObject {
+  final shotMaterial = Material(color: const Color(0xFFFFD040));
+  late final shots = Pool(this, () => Shot(shotMaterial));
+  ObjectHandle<Shot>? lastShot;
+
+  void fire() {
+    final shot = shots.get((shot) {
+      shot.position = position;
+      shot.rotation = rotation;
+      shot.speed = 12;
+    });
+    lastShot = ObjectHandle(shot);
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (lastShot?.object case final shot?) debug.line(position, shot.position);
+  }
+}
+```
+
+- **Reset in `get`'s function, or in `onEnable`.** The function runs
+  first, then the object is shown, so its `onEnable` sees what the
+  function set. A new object is made by the pool's function and added
+  below the pool's parent.
+- **A released object starts clean**: it's hidden, the routines and
+  motions it and everything below it ran are stopped (a hidden object's
+  would only pause, and resume stale), and it's back below the pool's
+  parent. Its fields, and the signals it listens to, are the game's: a
+  hidden object still hears signals, so listen in `onEnable` and cancel
+  in `onDisable` if it shouldn't.
+- **`release()` on the object** gives it back to its pool, or destroys
+  it if it didn't come from one: write it where you'd write `destroy()`.
+- **Hold pooled objects with an `ObjectHandle`.** A field pointing at a
+  shot still points at it once it's released and handed out again as a
+  new shot; `ObjectHandle(shot).object` is null from the release on (and
+  once it's destroyed).
+- `countActive` and `countInactive` say how many are out and waiting;
+  `prewarm(n)` makes them ahead, so play doesn't make (and load) them;
+  `clear()` destroys the waiting ones; with `maxSize`, a release beyond
+  that many waiting destroys. Hidden objects aren't in `world.all`, so a
+  wave's "are they all gone" works the same with a pool. Getting and
+  releasing allocates nothing.
+
 ## 4. Behaviours
 
 **A behaviour is what an object does**, written once and put on any
@@ -1165,6 +1237,7 @@ multibody joints).
 | `AddComponent<T>()`, `GetComponent<T>()` | `addComponent(T())`, `get<T>()` |
 | `Destroy(go)` | `go.destroy()` |
 | `SetActive(false)`, `enabled = false` | `active = false`, `enabled = false` |
+| `ObjectPool<T>`: `Get`, `Release` | `Pool(parent, make)`: `get`, `release` |
 | `Awake`, `Start`, `Update`, `LateUpdate`, `OnDestroy` | `onLoad`, `onStart`, `onUpdate`, `onLateUpdate`, `onDestroy` |
 | `FixedUpdate`, `Time.fixedDeltaTime` | `onFixedUpdate`, `time.fixedDelta` |
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
@@ -1209,6 +1282,9 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - `onEnable` and `onDisable` run depth first, as Unity's: an object,
+    its behaviours, then each child with what's below it; they ran a
+    level at a time. `GameObject.release()` is new (see §3's pooling).
   - `Mesh.sphere()` has 720 triangles, as Unity's, not 2,208: a little
     less round up close. A world with two `Light.sun`s says so once:
     only one lights the scene.
