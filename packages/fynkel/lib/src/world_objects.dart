@@ -19,15 +19,91 @@ extension _Objects on World {
     _starting.add(object);
   }
 
-  GameObject _object(int id) => _objects[id] ?? _part(id);
+  /// The object with engine id [id]: every live one is known, a model's
+  /// parts included.
+  GameObject _object(int id) => _objects[id] ?? (throw StateError('no object has id $id in this world'));
 
-  /// The object for a part the game didn't add (a model's), made the
-  /// first time it's asked for: enabled if its tree is shown, as it would
-  /// have been had it been there all along.
-  GameObject _part(int id) {
-    final object = _objects[id] = GameObject._live(this, id);
-    _refreshObject(object);
-    return object;
+  // --- The hierarchy, kept in Dart (GameObject._parent, _children) ---
+
+  /// Hangs [child] from [parent] (null: makes it a root), last among its
+  /// children, in the engine and here: the only way an object's parent
+  /// changes after it's added.
+  void _setParent(GameObject child, GameObject? parent) {
+    if (parent != null && !identical(parent._world, this)) {
+      throw FynkelException(
+        FynkelStatus.invalidValue,
+        '$parent is in another world, so it can\'t be the parent of $child',
+      );
+    }
+    // The engine refuses a cycle, or a destroyed parent, before anything
+    // changes here.
+    check(fy_parent_set(pointer, child._id, parent?._id ?? 0));
+    _unlink(child);
+    _link(child, parent);
+    child._transformStamp = ++_transformVersion;
+    _moved.add(child);
+    _shape++;
+    _refresh(child);
+  }
+
+  void _link(GameObject child, GameObject? parent) {
+    child._parent = parent;
+    if (parent != null) (parent._children ??= []).add(child);
+  }
+
+  void _unlink(GameObject child) {
+    child._parent?._children?.remove(child);
+    child._parent = null;
+  }
+
+  /// Turns [object]'s own flag on or off. While it loads it stays hidden,
+  /// and takes the flag when it appears.
+  void _setActive(GameObject object, bool value) {
+    object._activeSelf = value;
+    if (object._hiddenForLoad) return;
+    check(fy_active_set(pointer, object._id, value));
+    _shape++;
+    _refresh(object);
+  }
+
+  /// Whether [object] is shown: it and everything above it on, and none
+  /// still loading.
+  bool _shown(GameObject object) {
+    for (GameObject? o = object; o != null; o = o._parent) {
+      if (!o._activeSelf || o._hiddenForLoad) return false;
+    }
+    return true;
+  }
+
+  /// [root] and everything below it, parents first, in children order.
+  List<GameObject> _subtree(GameObject root) {
+    final out = [root];
+    for (var i = 0; i < out.length; i++) {
+      final children = out[i]._children;
+      if (children != null) out.addAll(children);
+    }
+    return out;
+  }
+
+  /// Makes the objects for the parts below [object], a model's copy just
+  /// spawned, from the engine's tree: read once, here.
+  void _readParts(GameObject object) {
+    final w = pointer;
+    final queue = [object];
+    for (var i = 0; i < queue.length; i++) {
+      final node = queue[i];
+      final capacity = scratch.idCapacity;
+      check(fy_children_get(w, node._id, scratch.ids(), capacity, scratch.count));
+      final count = scratch.count.value;
+      if (count > capacity) check(fy_children_get(w, node._id, scratch.ids(count), count, scratch.count));
+      final ids = scratch.ids();
+      final childIds = [for (var j = 0; j < count; j++) ids[j]];
+      for (final id in childIds) {
+        final part = _objects[id] = GameObject._live(this, id);
+        _link(part, node);
+        queue.add(part);
+      }
+    }
   }
 
   /// Spawns [object] under [parent] with everything added to it so far,
@@ -59,6 +135,7 @@ extension _Objects on World {
       .._id = id;
     try {
       if (parent != null) check(fy_parent_set(pointer, id, parent.id));
+      if (described.model != null) _readParts(object);
       if (described.name != null) object._writeName(described.name!);
       if (!described.active) check(fy_active_set(pointer, id, false));
       if (object._layer != 0) check(fy_layer_set(pointer, id, object._layer));
@@ -66,6 +143,10 @@ extension _Objects on World {
         if (!component._removed) object._write(component);
       }
     } catch (_) {
+      for (final part in _subtree(object).skip(1)) {
+        _objects.remove(part._id);
+      }
+      object._children = null;
       fy_despawn(_pointer, id);
       object
         .._world = null
@@ -84,6 +165,7 @@ extension _Objects on World {
       object._waiter = parent;
       parent._pending++;
     }
+    _link(object, parent);
     fresh.add(object);
     if (described.model == null) object._setTransform(transform);
     _objects[id] = object;
@@ -95,7 +177,6 @@ extension _Objects on World {
       _register(component);
       if (component is Behaviour) _starting.add(component);
     }
-    if (!described.active) _off.add(object);
     _shape++;
     for (final child in described.children) {
       child._queuedIn = null;
@@ -210,7 +291,6 @@ extension _Objects on World {
       object._hiddenForLoad = false;
       if (object._activeSelf) {
         check(fy_active_set(pointer, object._id, true));
-        _off.remove(object);
         _shape++;
       }
     }
@@ -229,7 +309,6 @@ extension _Objects on World {
   void _hideWhileLoading(GameObject object) {
     object._hiddenForLoad = true;
     check(fy_active_set(pointer, object._id, false));
-    _off.add(object);
     _shape++;
   }
 
@@ -276,9 +355,8 @@ extension _Objects on World {
   /// there to read, gets [GameObject.onDisable] if it was enabled, then
   /// its enabled behaviours theirs, then [GameObject.onDestroy], then its
   /// behaviours theirs.
-  void _destroy(int id) {
-    final ids = _subtreeIds(id).toList();
-    final objects = [for (final id in ids) ?_objects[id]];
+  void _destroy(GameObject root) {
+    final objects = _subtree(root);
     for (final object in objects) {
       object._destroyed = true;
     }
@@ -311,7 +389,8 @@ extension _Objects on World {
         }
       }
     } finally {
-      check(fy_despawn(pointer, id));
+      check(fy_despawn(pointer, root._id));
+      _unlink(root);
       for (final object in objects) {
         if (object._unsent) _unsentGone = true;
         object
@@ -319,7 +398,6 @@ extension _Objects on World {
           .._transform = null
           .._unsent = false;
         _objects.remove(object._id);
-        _off.remove(object);
         _unregister(object);
         for (final c in object._components ?? const <Component>[]) {
           if (c._removed) continue;
@@ -356,15 +434,5 @@ extension _Objects on World {
       waiter._pending--;
       _appearIfDone(waiter);
     }
-  }
-
-  List<int> _childIds(int id) {
-    final w = pointer;
-    final capacity = scratch.idCapacity;
-    check(fy_children_get(w, id, scratch.ids(), capacity, scratch.count));
-    final count = scratch.count.value;
-    if (count > capacity) check(fy_children_get(w, id, scratch.ids(count), count, scratch.count));
-    final ids = scratch.ids();
-    return [for (var i = 0; i < count; i++) ids[i]];
   }
 }

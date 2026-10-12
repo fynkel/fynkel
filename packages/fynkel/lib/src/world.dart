@@ -97,9 +97,8 @@ final class World implements Finalizable {
     // What an onDestroy adds is destroyed too, a few rounds deep.
     for (var round = 0; round < 8 && _objects.isNotEmpty; round++) {
       final roots = [
-        // A copy: reading a model part's parent makes its Dart object.
-        for (final object in [..._objects.values])
-          if (!object._destroyed && object.parent == null) object,
+        for (final object in _objects.values)
+          if (!object._destroyed && object._parent == null) object,
       ];
       for (final root in roots) {
         root.destroy();
@@ -146,8 +145,6 @@ final class World implements Finalizable {
     _laterMicrotasks.clear();
     _motions.clear();
     _moved.clear();
-    _off.clear();
-    _hidden.clear();
     _unsent.clear();
     _assets.clear();
     _free(owned, null);
@@ -220,14 +217,9 @@ final class World implements Finalizable {
   // start of the next update, so a removal never shifts a list being run.
   final _compact = <GameObject>[];
 
-  // Objects whose own flag is off, and the ids of everything they hide,
-  // worked out again when [_shape] has changed since [_hiddenAt]. Only
-  // Dart turns objects off, so it knows them all; with none off (the
-  // usual case) nothing is worked out at all.
-  final _off = <GameObject>{};
-  final _hidden = <int>{};
+  // Goes up whenever an object is added, destroyed, shown, hidden or
+  // given a new parent (systems.dart).
   var _shape = 0;
-  var _hiddenAt = -1;
 
   // Objects whose transform the game set since it was last sent, in the
   // order they were first set. [_sendTransforms] sends them all in one

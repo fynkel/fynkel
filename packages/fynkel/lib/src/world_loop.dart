@@ -267,44 +267,48 @@ extension _Loop on World {
       _liveDirty = false;
     }
     if (_moved.isEmpty) return;
-    for (final moved in _moved) {
+    // Each moved object and what's below it go last, in the order they
+    // moved (one moved later, inside another's subtree, goes after it),
+    // keeping their order among themselves: one pass over the live list.
+    final last = <GameObject, int>{};
+    for (var i = 0; i < _moved.length; i++) {
+      final moved = _moved[i];
       if (moved._destroyed) continue;
-      final below = _subtreeIds(moved._id);
-      final tail = [
-        for (final o in _live)
-          if (below.contains(o._id)) o,
-      ];
-      _live
-        ..removeWhere((o) => below.contains(o._id))
-        ..addAll(tail);
+      for (final o in _subtree(moved)) {
+        last[o] = i;
+      }
     }
     _moved.clear();
+    if (last.isEmpty) return;
+    final tails = <int, List<GameObject>>{};
+    _live.removeWhere((o) {
+      final i = last[o];
+      if (i == null) return false;
+      (tails[i] ??= []).add(o);
+      return true;
+    });
+    for (final i in tails.keys.toList()..sort()) {
+      _live.addAll(tails[i]!);
+    }
   }
 
-  bool _isHidden(GameObject object) {
-    if (_off.isEmpty) return false;
-    if (_hiddenAt != _shape) {
-      _hidden.clear();
-      for (final off in _off) {
-        _hidden.addAll(_subtreeIds(off._id));
-      }
-      _hiddenAt = _shape;
-    }
-    return _hidden.contains(object._id);
-  }
+  /// Whether [object] is hidden, or hasn't appeared: as of the last
+  /// [_refresh] of it, which every change of parent, flag or load makes.
+  /// No walk, so the frame's loops ask it of every object.
+  bool _isHidden(GameObject object) => !object._enabled;
 
   /// Calls onEnable or onDisable on [root], everything below it, and their
   /// behaviours, wherever being shown changed: parents first, each object
   /// before its behaviours.
   void _refresh(GameObject root) {
     if (root._destroyed || root._world == null) return;
-    for (final id in _subtreeIds(root._id)) {
-      if (_objects[id] case final object?) _refreshObject(object);
+    for (final object in _subtree(root)) {
+      _refreshObject(object);
     }
   }
 
   void _refreshObject(GameObject object) {
-    final shown = object._appeared && !object._destroyed && !_isHidden(object);
+    final shown = object._appeared && !object._destroyed && _shown(object);
     if (shown != object._enabled) {
       object._enabled = shown;
       _safely(object, shown ? object.onEnable : object.onDisable);
@@ -322,20 +326,6 @@ extension _Loop on World {
     if (on == b._enabledNow) return;
     b._enabledNow = on;
     _safely(object, on ? b.onEnable : b.onDisable);
-  }
-
-  /// [id] and the ids of everything below it, parents first.
-  Set<int> _subtreeIds(int id) {
-    final ids = <int>{};
-    void collect(int id) {
-      ids.add(id);
-      for (final child in _childIds(id)) {
-        collect(child);
-      }
-    }
-
-    collect(id);
-    return ids;
   }
 }
 
