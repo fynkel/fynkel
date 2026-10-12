@@ -78,13 +78,15 @@ do.
 
 1. **The briefs.** Four fresh agents write their games; each keeps a log
    of every stumble. *Done when* the four games run (or the log says why
-   they don't), and the findings are in one list.
+   they don't), and the findings are in one list. Done:
+   [stage-6-findings.md](stage-6-findings.md).
 2. **The API review.** Every public name, in a table: kept, renamed,
    merged, removed or documented. *Done when* the table is written and
-   you have agreed it.
+   you have agreed it. Done: [stage-6-api.md](stage-6-api.md), all as
+   recommended.
 3. **The architecture review**, with the audio-package sketch. *Done
    when* the findings are written down, each with a fix or a reason to
-   leave it.
+   leave it. Done: [stage-6-architecture.md](stage-6-architecture.md).
 4. **The bigger game** (20+ files). *Done when* it runs on the three
    devices and its log is in the list.
 5. **Scale and stability.** *Done when* each check above has its numbers.

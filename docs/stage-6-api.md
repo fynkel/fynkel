@@ -105,8 +105,8 @@ the guide change with them.
 - **Physics, safe and clear**: `wakeUp`/`sleep` on a body not yet in the
   world do nothing, as Unity's; setting `gravity` wakes every body; errors
   name the real reason (destroyed, removed, disabled, hidden) (findings 14,
-  15). A query looks only at the objects that moved, from the core's
-  moved list (finding 9).
+  15). A query looks only at the objects that moved, from a moved log
+  the core will keep (finding 9; see the architecture review, item 7).
 - **`Follow(space:)`**: the offset in the world, the target's space, or
   its yaw only, as Cinemachine's binding modes (finding 22).
 - **`Signal.stream`**, for UI code (finding 5), and
