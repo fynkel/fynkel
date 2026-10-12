@@ -91,6 +91,7 @@ do.
    devices and its log is in the list. Done: Outpost, findings
    29–35 (section G of the findings).
 5. **Scale and stability.** *Done when* each check above has its numbers.
+   Done: [stage-6-scale.md](stage-6-scale.md) and examples/scale.
 6. **The fixes**, in order of how much they hurt, a PR each, with the
    guide changed to match. Breaking changes are allowed (nothing is
    published yet), each with a line in the guide's notes for anyone who

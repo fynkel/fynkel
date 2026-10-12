@@ -122,6 +122,12 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
+          cd ../scale
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          flutter build macos --debug
       # docs/writing-a-game.md's code, in a throwaway app: it must compile,
       # and its test pass, so the guide never drifts from the API.
       - name: the guide
