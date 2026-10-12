@@ -181,6 +181,31 @@ fn the_abi_version_is_the_constant() {
     assert_eq!(fp_abi_version(), FP_ABI_VERSION);
 }
 
+#[test]
+fn the_shared_statuses_have_the_shared_numbers() {
+    use fynkel_cabi::status;
+    for (ours, shared) in [
+        (FpStatus::Ok, status::OK),
+        (FpStatus::InvalidValue, status::INVALID_VALUE),
+        (FpStatus::NullPointer, status::NULL_POINTER),
+        (FpStatus::WrongSize, status::WRONG_SIZE),
+        (FpStatus::Panic, status::PANIC),
+        (FpStatus::Poisoned, status::POISONED),
+    ] {
+        assert_eq!(ours as i32, shared, "{ours:?}");
+    }
+}
+
+#[test]
+fn a_transform_is_laid_out_as_the_engine_s() {
+    use fynkel_cabi::transform;
+    use std::mem::{offset_of, size_of};
+    assert_eq!(size_of::<FpTransform>(), transform::SIZE);
+    assert_eq!(offset_of!(FpTransform, position), transform::POSITION);
+    assert_eq!(offset_of!(FpTransform, rotation), transform::ROTATION);
+    assert_eq!(offset_of!(FpTransform, scale), transform::SCALE);
+}
+
 // --- Colliders that follow objects, and queries --------------------------------
 
 const ALL: (u32, u32) = (u32::MAX, 1);

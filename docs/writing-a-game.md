@@ -1356,6 +1356,9 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - `PhysicsStatus` (in `package:fynkel_physics/raw.dart`) has a `code`,
+    and its numbers match the engine's `FynkelStatus` where they mean the
+    same: compare statuses by name, not by `index`.
   - `colorTo` changes the renderer's own `color`, not its material, so
     objects sharing the material no longer change with it; give
     `material:` for the old way. `MeshRenderer.color` and

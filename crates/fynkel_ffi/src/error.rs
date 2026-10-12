@@ -1,13 +1,7 @@
 //! Errors at the C boundary: a status code for the caller to branch on, and
 //! a message for people, kept per thread for `fy_last_error`.
 
-use std::cell::RefCell;
-use std::ffi::{CString, c_char};
-use std::panic::{self, AssertUnwindSafe};
-
 use fynkel_world::WorldError;
-
-use crate::worker::panic_message;
 
 /// What a `fy_*` call returns. Anything but `Ok` leaves a message for
 /// `fy_last_error`.
@@ -87,58 +81,45 @@ impl From<WorldError> for Error {
     }
 }
 
-thread_local! {
-    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
-}
-
-/// Runs the body of a `fy_*` call: a panic becomes [`FyStatus::Panic`] and
-/// never unwinds into the caller, and any error's message is kept for
-/// [`last_error`].
+/// Runs the body of a `fy_*` call ([`fynkel_cabi::guard`]): a panic
+/// becomes [`FyStatus::Panic`] and never unwinds into the caller, and any
+/// error's message is kept for [`last_error`].
 pub(crate) fn guard(body: impl FnOnce() -> Result<(), Error>) -> FyStatus {
-    let error = match panic::catch_unwind(AssertUnwindSafe(body)) {
-        Ok(Ok(())) => return FyStatus::Ok,
-        Ok(Err(error)) => error,
-        Err(payload) => Error::new(FyStatus::Panic, format!("panicked: {}", panic_message(&*payload))),
-    };
-    let message = CString::new(error.message.replace('\0', "")).expect("nul bytes removed");
-    LAST_ERROR.with(|last| *last.borrow_mut() = message);
-    error.status
+    fynkel_cabi::guard(|| body().map_err(|e| fynkel_cabi::Error::new(e.status, e.message)))
 }
 
-/// The message of the last failed call on this thread ("" before any).
-/// Valid until the next failed call on this thread.
-pub(crate) fn last_error() -> *const c_char {
-    LAST_ERROR.with(|last| last.borrow().as_ptr())
+pub(crate) use fynkel_cabi::last_error;
+
+impl fynkel_cabi::Status for FyStatus {
+    const OK: Self = Self::Ok;
+    const PANIC: Self = Self::Panic;
+    const NULL_POINTER: Self = Self::NullPointer;
 }
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::CStr;
+    use fynkel_cabi::status;
 
     use super::*;
 
-    fn message() -> String {
-        // SAFETY: last_error points at the thread's current message, which
-        // lives until the next failed call.
-        unsafe { CStr::from_ptr(last_error()) }.to_str().unwrap().to_owned()
+    #[test]
+    fn the_shared_statuses_have_the_shared_numbers() {
+        for (ours, shared) in [
+            (FyStatus::Ok, status::OK),
+            (FyStatus::InvalidValue, status::INVALID_VALUE),
+            (FyStatus::NullPointer, status::NULL_POINTER),
+            (FyStatus::WrongSize, status::WRONG_SIZE),
+            (FyStatus::Panic, status::PANIC),
+            (FyStatus::Poisoned, status::POISONED),
+        ] {
+            assert_eq!(ours as i32, shared, "{ours:?}");
+        }
     }
 
     #[test]
-    fn a_panic_becomes_a_status_and_a_message() {
-        assert_eq!(guard(|| panic!("the {} broke", "thing")), FyStatus::Panic);
-        assert_eq!(message(), "panicked: the thing broke");
-    }
-
-    #[test]
-    fn an_error_keeps_its_message_and_success_keeps_the_last_one() {
-        assert_eq!(guard(|| Err(Error::new(FyStatus::Timeout, "too slow"))), FyStatus::Timeout);
+    fn an_error_goes_through_the_shared_guard() {
+        assert_eq!(guard(|| Err(Error::null("world"))), FyStatus::NullPointer);
+        assert_eq!(guard(|| panic!("broke")), FyStatus::Panic);
         assert_eq!(guard(|| Ok(())), FyStatus::Ok);
-        assert_eq!(message(), "too slow");
-    }
-
-    #[test]
-    fn a_message_with_a_nul_byte_still_arrives() {
-        guard(|| Err(Error::new(FyStatus::InvalidValue, "a\0b")));
-        assert_eq!(message(), "ab");
     }
 }

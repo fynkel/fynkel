@@ -422,6 +422,12 @@ abstract class Behaviour extends Component with _Moving {
   @override
   GameObject get _self => gameObject;
 
+  @override
+  GameObject? get _ownerObject => _owner;
+
+  @override
+  bool get _holdsStill => !_enabledNow;
+
   /// Whether it gets its object's frames and pointers. A disabled behaviour
   /// waits to start until it's enabled. Setting it calls [onDisable] or
   /// [onEnable] when that changes whether it's enabled: only while it's
@@ -440,11 +446,6 @@ abstract class Behaviour extends Component with _Moving {
   bool _loaded = false;
   bool _started = false;
   bool _enabledNow = false;
-
-  // The routines it started that are still running, and the signals it
-  // listens to with [on].
-  List<Routine<Object?>>? _routines;
-  _Listening? _listening;
 
   /// The world its object is in. Throws a [StateError] before the object
   /// is added.

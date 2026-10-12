@@ -86,7 +86,7 @@ final class Routine<T> implements Future<T> {
   }
 
   final World _world;
-  final Object _owner; // the GameObject or Behaviour that started it
+  final _Moving _owner; // the GameObject or Behaviour that started it
   final GameObject _object;
   final Routine<Object?>? _parent;
   final _result = Completer<T>.sync();
@@ -126,11 +126,7 @@ final class Routine<T> implements Future<T> {
     _result.completeError(RoutineStopped._(), StackTrace.current);
   }
 
-  bool get _paused => switch (_owner) {
-    final GameObject o => !o._enabled,
-    final Behaviour b => !b._enabledNow,
-    _ => false,
-  };
+  bool get _paused => _owner._holdsStill;
 
   void _finish(T value) {
     if (!_running) return;
@@ -157,7 +153,7 @@ final class Routine<T> implements Future<T> {
   }
 
   void _detach() {
-    _routinesOf(_owner)?.remove(this);
+    _owner._routines?.remove(this);
     _parent?._children?.remove(this);
   }
 
@@ -185,12 +181,6 @@ final class Routine<T> implements Future<T> {
           ? ' (stopped)'
           : ' (ended)'}';
 }
-
-List<Routine<Object?>>? _routinesOf(Object owner) => switch (owner) {
-  final GameObject o => o._routines,
-  final Behaviour b => b._routines,
-  _ => null,
-};
 
 /// Something a routine waits for, ended by [World._runRoutines].
 final class _Wait {

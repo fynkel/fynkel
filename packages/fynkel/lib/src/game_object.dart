@@ -84,11 +84,6 @@ class GameObject with _Moving {
   // Whether it had onEnable and not onDisable since: it's shown.
   bool _enabled = false;
 
-  // The routines it started that are still running, and the signals it
-  // listens to with [on].
-  List<Routine<Object?>>? _routines;
-  _Listening? _listening;
-
   // Its components, in the order they were put on; removed ones stay until
   // the world's next update takes them out. For an object the engine made
   // (a model's part), its engine components are read the first time
@@ -137,6 +132,12 @@ class GameObject with _Moving {
 
   @override
   GameObject get _self => this;
+
+  @override
+  GameObject get _ownerObject => this;
+
+  @override
+  bool get _holdsStill => !_enabled;
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.

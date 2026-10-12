@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 10
+#define FP_ABI_VERSION 11
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -33,20 +33,20 @@ enum FpStatus
   FP_STATUS_NO_BODY = 1,
   // No collider has this id.
   FP_STATUS_NO_COLLIDER = 2,
+  // No joint has this id: it was removed, broke, or was never added.
+  FP_STATUS_NO_JOINT = 3,
   // A value was out of range, not finite, or not one of the choices.
-  FP_STATUS_INVALID_VALUE = 3,
+  FP_STATUS_INVALID_VALUE = 6,
   // A pointer argument was null.
-  FP_STATUS_NULL_POINTER = 4,
+  FP_STATUS_NULL_POINTER = 7,
   // A buffer had the wrong size.
-  FP_STATUS_WRONG_SIZE = 5,
+  FP_STATUS_WRONG_SIZE = 11,
   // The call panicked. Nothing crossed into the caller; the message says
   // what happened.
-  FP_STATUS_PANIC = 6,
+  FP_STATUS_PANIC = 12,
   // An earlier call panicked while changing this world, so it can't be
   // trusted any more.
-  FP_STATUS_POISONED = 7,
-  // No joint has this id: it was removed, broke, or was never added.
-  FP_STATUS_NO_JOINT = 8,
+  FP_STATUS_POISONED = 13,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L

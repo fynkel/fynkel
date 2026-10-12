@@ -140,6 +140,44 @@ void main() {
       expect(log, ['a 1', 'a 2', 'b 2', 'b 1']);
     });
 
+    test('many listeners leaving one by one is quick, and the rest still hear in order', () {
+      final signal = Signal<int>();
+      final heard = <int>[];
+      final subscriptions = [
+        for (var i = 0; i < 50000; i++) signal.listen((v) => i % 10000 == 0 ? heard.add(i) : null),
+      ];
+      final clock = Stopwatch()..start();
+      for (var i = 0; i < subscriptions.length; i++) {
+        if (i % 10000 != 0) subscriptions[i].cancel();
+      }
+      expect(clock.elapsedMilliseconds, lessThan(250), reason: 'each cancel is a mark, not a search of the list');
+      expect(signal.hasListeners, isTrue);
+      signal.emit(1);
+      expect(heard, [0, 10000, 20000, 30000, 40000]);
+      for (final s in subscriptions) {
+        s.cancel();
+      }
+      expect(signal.hasListeners, isFalse);
+    });
+
+    test('cancelled while it emits, the list is tidied after, and the next emit is right', () {
+      final signal = Signal<int>();
+      final all = <SignalSubscription<int>>[];
+      signal.listen((v) {
+        log.add('a $v');
+        for (final s in all) {
+          s.cancel();
+        }
+      });
+      for (var i = 0; i < 4; i++) {
+        all.add(signal.listen((v) => log.add('$i $v')));
+      }
+      signal.emit(1);
+      signal.emit(2);
+      expect(log, ['a 1', 'a 2']);
+      expect(signal.hasListeners, isTrue);
+    });
+
     test('next completes with the next value only, outside a routine', () async {
       final signal = Signal<int>();
       final next = signal.next;

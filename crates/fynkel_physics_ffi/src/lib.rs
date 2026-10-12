@@ -14,10 +14,10 @@
 //! This is the only physics crate where unsafe code is allowed.
 #![allow(unsafe_code)]
 
-use std::any::Any;
-use std::cell::RefCell;
-use std::ffi::{CString, c_char};
+use std::ffi::c_char;
 use std::panic::{self, AssertUnwindSafe};
+
+use fynkel_cabi::panic_message;
 
 use fynkel_physics::{
     Axis, BodyKind, BodySpec, BrokenJoint, CharacterHit, CharacterSettings, ColliderShape, ColliderSpec, Combine,
@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 10;
+pub const FP_ABI_VERSION: u32 = 11;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -479,20 +479,20 @@ pub enum FpStatus {
     NoBody = 1,
     /// No collider has this id.
     NoCollider = 2,
+    /// No joint has this id: it was removed, broke, or was never added.
+    NoJoint = 3,
     /// A value was out of range, not finite, or not one of the choices.
-    InvalidValue = 3,
+    InvalidValue = 6,
     /// A pointer argument was null.
-    NullPointer = 4,
+    NullPointer = 7,
     /// A buffer had the wrong size.
-    WrongSize = 5,
+    WrongSize = 11,
     /// The call panicked. Nothing crossed into the caller; the message says
     /// what happened.
-    Panic = 6,
+    Panic = 12,
     /// An earlier call panicked while changing this world, so it can't be
     /// trusted any more.
-    Poisoned = 7,
-    /// No joint has this id: it was removed, broke, or was never added.
-    NoJoint = 8,
+    Poisoned = 13,
 }
 
 /// A physics world. Made by `fp_world_new`, freed by `fp_world_free`.
@@ -575,30 +575,17 @@ impl From<PhysicsError> for Error {
     }
 }
 
-thread_local! {
-    static LAST_ERROR: RefCell<CString> = RefCell::new(CString::default());
-}
-
-fn panic_message(payload: &(dyn Any + Send)) -> &str {
-    payload
-        .downcast_ref::<&str>()
-        .copied()
-        .or_else(|| payload.downcast_ref::<String>().map(String::as_str))
-        .unwrap_or("(no message)")
-}
-
-/// Runs the body of an `fp_*` call: a panic becomes [`FpStatus::Panic`] and
-/// never unwinds into the caller, and any error's message is kept for
-/// `fp_last_error`.
+/// Runs the body of an `fp_*` call ([`fynkel_cabi::guard`]): a panic
+/// becomes [`FpStatus::Panic`] and never unwinds into the caller, and any
+/// error's message is kept for `fp_last_error`.
 fn guard(body: impl FnOnce() -> Result<(), Error>) -> FpStatus {
-    let error = match panic::catch_unwind(AssertUnwindSafe(body)) {
-        Ok(Ok(())) => return FpStatus::Ok,
-        Ok(Err(error)) => error,
-        Err(payload) => Error::new(FpStatus::Panic, format!("panicked: {}", panic_message(&*payload))),
-    };
-    let message = CString::new(error.message.replace('\0', "")).expect("nul bytes removed");
-    LAST_ERROR.with(|last| *last.borrow_mut() = message);
-    error.status
+    fynkel_cabi::guard(|| body().map_err(|e| fynkel_cabi::Error::new(e.status, e.message)))
+}
+
+impl fynkel_cabi::Status for FpStatus {
+    const OK: Self = Self::Ok;
+    const PANIC: Self = Self::Panic;
+    const NULL_POINTER: Self = Self::NullPointer;
 }
 
 /// Runs `body` on a live world: a panic in it poisons the world, so every
@@ -890,7 +877,7 @@ pub extern "C" fn fp_abi_version() -> u32 {
 /// any). Valid until the next failed call on this thread.
 #[unsafe(no_mangle)]
 pub extern "C" fn fp_last_error() -> *const c_char {
-    LAST_ERROR.with(|last| last.borrow().as_ptr())
+    fynkel_cabi::last_error()
 }
 
 /// A new, empty world, with gravity (0, -9.81, 0). Free it with

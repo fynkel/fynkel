@@ -305,10 +305,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_cabi"
+version = "0.1.0"
+
+[[package]]
 name = "fynkel_ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "fynkel_cabi",
  "fynkel_golden",
  "fynkel_present",
  "fynkel_render",
@@ -355,6 +360,7 @@ name = "fynkel_physics_ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "fynkel_cabi",
  "fynkel_physics",
 ]
 
