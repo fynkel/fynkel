@@ -93,7 +93,7 @@ class Spawner extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    start(() async {
+    startRoutine(() async {
       while (true) {
         await wait(0.8);
         made++;
@@ -123,7 +123,7 @@ class Drop extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    start(() async {
+    startRoutine(() async {
       await over(time, 0.4, (t) => localScale = Vec3.one * (0.5 * t));
       await wait(1.5);
       await over(time, 0.4, (t) => localScale = Vec3.one * (0.5 * (1 - t)));
@@ -187,7 +187,7 @@ class TrafficLight extends GameObject {
   void go() {
     if (running) return;
     final log = ancestor<LabScene>()!.log..add('traffic light: started');
-    _routine = start(() async {
+    _routine = startRoutine(() async {
       try {
         while (true) {
           _show(0);
@@ -267,15 +267,15 @@ class Race extends GameObject {
   void go() {
     if (running) return;
     final log = ancestor<LabScene>()!.log;
-    _routine = start(() async {
+    _routine = startRoutine(() async {
       while (true) {
         round++;
         final speed = 1.2 + 2 * _random.nextDouble();
         _paint.color = Color.white;
         _runner.transform = Transform(position: Vec3(0, 0.3, _from), scale: Vec3(0.6, 0.6, 0.6));
         final result = await race([
-          start(() => _run(speed)),
-          start(() async {
+          startRoutine(() => _run(speed)),
+          startRoutine(() async {
             await wait(3);
             return 'too slow';
           }),

@@ -251,9 +251,12 @@ final class World implements Finalizable {
   Debug get debug => _debug ??= Debug._(this);
   Debug? _debug;
 
-  /// The object the view draws from: the one with a [Camera] and the
-  /// lowest id; null when there's none.
-  GameObject? get camera {
+  /// The camera the view draws from (Unity's `Camera.main`): of the
+  /// objects with a [Camera], the one with the lowest id; null when there's
+  /// none. Its object is `camera.gameObject`.
+  Camera? get camera => _cameraObject?.get<Camera>();
+
+  GameObject? get _cameraObject {
     final w = pointer;
     _sendTransforms();
     check(fy_camera_active(w, scratch.id));
@@ -481,22 +484,32 @@ final class World implements Finalizable {
   /// class, each class in the order they were added: `world.all<Enemy>()`,
   /// `world.all<Health>()`. The parts a model makes, and the components the
   /// engine gave them, aren't included: find them by name.
-  List<T> all<T extends Object>() => [
+  ///
+  /// As Unity's `FindObjectsByType`, objects turned off ([GameObject.active]
+  /// false, theirs or a parent's), and the components on them, are left
+  /// out unless [includeInactive]: a pool's waiting objects aren't found. A
+  /// disabled behaviour on an active object is found.
+  List<T> all<T extends Object>({bool includeInactive = false}) => [
     for (final objects in _byClass.values)
-      if (objects.first is T) ...objects.cast<T>(),
+      if (objects.first is T)
+        for (final o in objects)
+          if (includeInactive || _isActive(o)) o as T,
   ];
 
   /// The one live object or component of type [T] that the game added:
   /// `world.only<Score>()`. Throws a [StateError] if there's none or more
   /// than one, so a game's singletons need no `static instance`. See
-  /// [all].
-  T only<T extends Object>() {
+  /// [all], for [includeInactive] too.
+  T only<T extends Object>({bool includeInactive = false}) {
     T? found;
     var count = 0;
     for (final objects in _byClass.values) {
       if (objects.first is! T) continue;
-      found ??= objects.first as T;
-      count += objects.length;
+      for (final o in objects) {
+        if (!includeInactive && !_isActive(o)) continue;
+        found ??= o as T;
+        count++;
+      }
     }
     if (count == 1) return found!;
     throw StateError(
@@ -507,12 +520,24 @@ final class World implements Finalizable {
   }
 
   /// The first live object or component of type [T] that the game added,
-  /// or null. See [all].
-  T? first<T extends Object>() {
+  /// or null. See [all], for [includeInactive] too.
+  T? first<T extends Object>({bool includeInactive = false}) {
     for (final objects in _byClass.values) {
-      if (objects.first is T) return objects.first as T;
+      if (objects.first is! T) continue;
+      for (final o in objects) {
+        if (includeInactive || _isActive(o)) return o as T;
+      }
     }
     return null;
+  }
+
+  // Whether [o], an object or a component the game added, is on an object
+  // that's active, and every one above it too.
+  bool _isActive(Object o) {
+    for (GameObject? x = o is Component ? o._owner : o as GameObject; x != null; x = x._parent) {
+      if (!x._activeSelf) return false;
+    }
+    return true;
   }
 
   // The Dart object for each live engine id that has been asked for, so
@@ -549,9 +574,10 @@ final class World implements Finalizable {
 
 /// Where a ray hit first ([World.raycast]).
 final class RayHit {
-  RayHit._(this.object, this.point, this.normal, this.distance);
+  RayHit._(this.gameObject, this.point, this.normal, this.distance);
 
-  final GameObject object;
+  /// The object hit.
+  final GameObject gameObject;
 
   /// In the world.
   final Vec3 point;
@@ -564,7 +590,7 @@ final class RayHit {
   final double distance;
 
   @override
-  String toString() => 'RayHit($object at $point, normal $normal, distance $distance)';
+  String toString() => 'RayHit($gameObject at $point, normal $normal, distance $distance)';
 }
 
 /// For package:fynkel's views: sends the transforms the game set since the
@@ -578,14 +604,14 @@ extension SendTransforms on World {
 /// An error no caller could catch, from an object's load or from freeing
 /// what it held: see [World.errors].
 final class ObjectError {
-  ObjectError._(this.object, this.error, this.stackTrace);
+  ObjectError._(this.gameObject, this.error, this.stackTrace);
 
   /// The object whose load failed (now destroyed), or that was being
   /// destroyed; null for an asset the world freed.
-  final GameObject? object;
+  final GameObject? gameObject;
   final Object error;
   final StackTrace stackTrace;
 
   @override
-  String toString() => '${object ?? 'World'}: $error';
+  String toString() => '${gameObject ?? 'World'}: $error';
 }

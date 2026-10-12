@@ -120,7 +120,7 @@ sealed class Collider extends Behaviour {
   /// Where [ray] hits this collider within [maxDistance], or null: only
   /// this one, whatever is in front of it, and not from inside it (Unity's
   /// `Collider.Raycast`). Throws a [StateError] while it isn't in the world.
-  PhysicsHit? raycast(Ray ray, {double maxDistance = double.infinity}) {
+  RaycastHit? raycast(Ray ray, {double maxDistance = double.infinity}) {
     final physics = _inWorld('raycast');
     physics._follow();
     physics._writeRay(ray.origin, ray.direction);

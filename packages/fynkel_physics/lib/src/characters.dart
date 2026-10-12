@@ -43,7 +43,7 @@ final class CharacterController extends Collider {
   CharacterController({
     this._height = 2,
     this._radius = 0.5,
-    this._slopeLimit = 45,
+    this._slopeLimit = 45 * _degree,
     this._stepOffset = 0.3,
     this._skinWidth = 0.08,
     this._mass = 70,
@@ -70,7 +70,7 @@ final class CharacterController extends Collider {
 
   double _radius;
 
-  /// The steepest slope it walks up, in degrees from flat (45 unless
+  /// The steepest slope it walks up, in radians from flat (45.deg unless
   /// given).
   double get slopeLimit => _slopeLimit;
   set slopeLimit(double value) {
@@ -135,7 +135,7 @@ final class CharacterController extends Collider {
     final time = world.time;
     final seconds = time.delta > 0 ? time.delta : time.fixedDelta;
     final floats = physics._characterFloats;
-    floats[0] = _slopeLimit;
+    floats[0] = math.min(_slopeLimit.inDegrees, 180);
     floats[1] = _stepOffset;
     floats[2] = _skinWidth;
     floats[3] = _mass;
@@ -184,8 +184,8 @@ final class CharacterController extends Collider {
   }
 
   void _checkMoving() {
-    if (!(_slopeLimit >= 0 && _slopeLimit <= 180)) {
-      throw ArgumentError.value(_slopeLimit, 'slopeLimit', 'must be 0 to 180 degrees');
+    if (!(_slopeLimit >= 0 && _slopeLimit <= _halfTurn)) {
+      throw ArgumentError.value(_slopeLimit, 'slopeLimit', 'must be 0 to pi radians');
     }
     if (!(_stepOffset >= 0) || !_stepOffset.isFinite) {
       throw ArgumentError.value(_stepOffset, 'stepOffset', 'must be finite and 0 or more');

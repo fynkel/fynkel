@@ -119,13 +119,13 @@ void main() {
       final cube = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())]));
       final ray = Ray(Vec3(0, 0, 5), Vec3.forward);
       cube.layer = 9;
-      expect(world.raycast(ray, layers: LayerMask.of([9]))?.object, cube);
+      expect(world.raycast(ray, layers: LayerMask.of([9]))?.gameObject, cube);
       expect(world.raycast(ray, layers: LayerMask.except([9])), isNull);
       final early = GameObject(layer: 9, components: [MeshRenderer(Mesh.cube(), Material())]);
       cube.destroy();
       world.update(0);
       world.add(early);
-      expect(world.raycast(ray, layers: LayerMask.of([9]))?.object, early, reason: 'set before it was added');
+      expect(world.raycast(ray, layers: LayerMask.of([9]))?.gameObject, early, reason: 'set before it was added');
       expect(world.raycast(ray, layers: LayerMask.of([0])), isNull);
     });
 
@@ -153,7 +153,7 @@ void main() {
       addTearDown(world.dispose);
       final view = HeadlessView(world, width: 256, height: 256);
       addTearDown(view.dispose);
-      final camera = world.camera!.get<Camera>()!;
+      final camera = world.camera!;
       expect(camera.cullingMask, LayerMask.all);
 
       bool blueAt(({int number, Uint8List rgba}) frame, int x, int y) {
@@ -177,9 +177,9 @@ void main() {
       final scene = behindAWall();
       addTearDown(scene.world.dispose);
       RayHit? hit(LayerMask layers) => scene.world.raycast(Ray(Vec3(0.1, 0.2, 5), Vec3.forward), layers: layers);
-      expect(hit(LayerMask.all)?.object, scene.wall);
-      expect(hit(LayerMask.except([3]))?.object, scene.cube);
-      expect(hit(LayerMask.of([0]))?.object, scene.cube);
+      expect(hit(LayerMask.all)?.gameObject, scene.wall);
+      expect(hit(LayerMask.except([3]))?.gameObject, scene.cube);
+      expect(hit(LayerMask.of([0]))?.gameObject, scene.cube);
       expect(hit(LayerMask.none), isNull);
     });
 
@@ -187,7 +187,7 @@ void main() {
       final scene = behindAWall();
       final world = scene.world;
       addTearDown(world.dispose);
-      final camera = world.camera!.get<Camera>()!;
+      final camera = world.camera!;
       final middle = ViewPoint(200, 200, width: 400, height: 400);
       void over() {
         tap(world, middle);

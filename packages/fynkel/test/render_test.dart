@@ -51,7 +51,7 @@ void main() {
       ..add(
         GameObject(
           transform: Transform(position: Vec3(0, 0, 6)),
-          components: [Camera(fovY: 100, clearColor: Color.rgb(1, 0, 0))],
+          components: [Camera(fovY: 100.deg, clearColor: Color.rgb(1, 0, 0))],
         ),
       )
       ..add(GameObject(components: [Light.ambient(color: Color.rgb(0, 0, 1), intensity: 5)]))

@@ -158,7 +158,7 @@ class Enemy extends GameObject {
     final health = get<Health>()!;
     // Its own signals: they go with it.
     on(health.hit, (hp) {
-      start(() async {
+      startRoutine(() async {
         _paint.color = Color.white;
         await wait(0.1);
         // Darker as it weakens.
@@ -303,7 +303,7 @@ class Door extends GameObject {
   void onStart() {
     super.onStart();
     final log = ancestor<LabScene>()!.log;
-    start(() async {
+    startRoutine(() async {
       while (true) {
         state = 'waiting for the plate (5 s)';
         _paint.color = const Color(0xFF8A8F99);

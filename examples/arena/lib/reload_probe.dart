@@ -31,7 +31,7 @@ class Probe extends GameObject {
       ),
     );
     print('probe: onLoad v1');
-    start(() async {
+    startRoutine(() async {
       while (true) {
         await wait(1);
         print('probe: routine v1');

@@ -293,7 +293,7 @@ void main() {
       await pumpEventQueue();
       expect(a.fixed, 2);
       expect(errors, hasLength(2));
-      expect(errors.first.object, bad);
+      expect(errors.first.gameObject, bad);
       expect(errors.first.error, isA<StateError>());
     });
   });
@@ -305,7 +305,7 @@ void main() {
       world.system(Recorder.new);
       world.update(0); // a starts
       final steps = <int>[];
-      a.start(() async {
+      a.startRoutine(() async {
         for (var i = 0; i < 3; i++) {
           await fixedStep;
           expect(world.time.inFixedStep, isTrue);
@@ -369,7 +369,7 @@ void main() {
       expect(a.fixed, 2);
       expect(log, contains('update a'));
       expect(errors, hasLength(2));
-      expect(errors.first.object, isNull);
+      expect(errors.first.gameObject, isNull);
       expect(errors.first.error, isA<StateError>());
     });
 
@@ -388,7 +388,7 @@ void main() {
       world.errors.listen(errors.add);
       world.report(object, StateError('a callback broke'), StackTrace.current);
       await pumpEventQueue();
-      expect(errors.single.object, same(object));
+      expect(errors.single.gameObject, same(object));
     });
   });
 }
@@ -434,7 +434,7 @@ class _StartsInFixed extends GameObject {
   void onFixedUpdate() {
     super.onFixedUpdate();
     if (_steps++ > 0) return;
-    start(() async {
+    startRoutine(() async {
       await fixedStep;
       woke.add(_steps - 1);
     });

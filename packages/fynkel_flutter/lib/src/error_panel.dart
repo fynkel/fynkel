@@ -41,7 +41,7 @@ class ErrorPanel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '${latest.object ?? 'The world'} threw:',
+                        '${latest.gameObject ?? 'The world'} threw:',
                         style: _style.copyWith(fontWeight: FontWeight.bold),
                       ),
                       const SizedBox(height: 4),

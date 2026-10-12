@@ -116,7 +116,7 @@ class Round extends GameObject {
       world.cameras.shake(0.3);
     });
     on(player.health.healed, (left) => game.health.value = left);
-    final waves = start(() => _waves(game));
+    final waves = startRoutine(() => _waves(game));
     on(player.health.died, (_) {
       waves.stop();
       player.scaleTo(Vec3.zero, seconds: 0.4, ease: Ease.inBack);
@@ -138,7 +138,7 @@ class Round extends GameObject {
         });
         await wait(0.5);
       }
-      await until(() => world.all<Enemy>().isEmpty);
+      await waitUntil(() => world.all<Enemy>().isEmpty);
     }
   }
 
@@ -275,7 +275,7 @@ class Player extends GameObject {
   /// A finger dragging alone, as a stick: from where it went down to where
   /// it is, full speed at 60 pixels.
   Vec3? _stick() {
-    final down = input.fingers.where((f) => f.isDown).toList();
+    final down = input.fingers.where((f) => f.isPressed).toList();
     if (down.length != 1 || !down.single.isDragging) return null;
     final d = down.single.totalDelta;
     final v = Vec3(d.x, 0, d.y) * (1 / 60);
@@ -290,7 +290,7 @@ class Player extends GameObject {
     facing = flat.normalized;
     rotation = Quat.lookRotation(facing);
     dashing = true;
-    start(() async {
+    startRoutine(() async {
       await moveTo(inside(position + facing * 5) + Vec3(0, 0.5, 0), seconds: 0.18);
       dashing = false;
     });
@@ -380,7 +380,7 @@ class Sparks extends GameObject {
       spark.moveBy(Vec3(math.cos(angle), 0.5 + _random.nextDouble(), math.sin(angle)) * 1.5, seconds: 0.5);
       spark.scaleTo(Vec3.zero, seconds: 0.5, ease: Ease.inQuad);
     }
-    start(() async {
+    startRoutine(() async {
       await wait(0.5);
       destroy();
     });
@@ -435,7 +435,7 @@ class ArenaCamera extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(Camera(fovY: 50, clearColor: Color.rgb(0.08, 0.09, 0.12)));
+    addComponent(Camera(fovY: 50.deg, clearColor: Color.rgb(0.08, 0.09, 0.12)));
     addComponent(_follow);
     addComponent(_look);
     on(input.onPinch, (pinch) => _zoomBy(1 / pinch.scale));

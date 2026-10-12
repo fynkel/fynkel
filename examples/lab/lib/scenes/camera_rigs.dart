@@ -16,7 +16,7 @@ class CameraRigsScene extends LabScene {
       'The green ball runs round a square. Pick a camera: "chase" follows it (Follow and LookAt), "orbit" circles it '
       '(drag to turn, pinch or scroll to zoom), "corner" stands still and turns to watch it (LookAt). Damping makes '
       'the chase lag; look-ahead puts it where the ball is going. Tap the floor: a marker goes where the finger is '
-      '(screenToPlane).';
+      '(screenPointToPlane).';
 
   late final GameObject ball, marker;
   late final VirtualCamera chase, orbit, corner;
@@ -56,7 +56,7 @@ class CameraRigsScene extends LabScene {
         ball.moveTo(corner, speed: 2.5, ease: Ease.linear),
     ], loops: -1);
     on(input.onTap, (finger) {
-      final spot = world.camera!.screenToPlane(finger.position, Plane.ground);
+      final spot = world.camera!.screenPointToPlane(finger.position, Plane.ground);
       if (spot == null) return;
       marker.position = spot + Vec3(0, 0.05, 0);
       log.add('tap: the floor at (${spot.x.toStringAsFixed(1)}, ${spot.z.toStringAsFixed(1)})');
@@ -74,7 +74,7 @@ class CameraRigsScene extends LabScene {
   void onUpdate() {
     super.onUpdate();
     final live = world.cameras.live?.gameObject.name ?? '–';
-    final onScreen = input.width > 0 ? world.camera!.worldToScreen(ball.position) : null;
+    final onScreen = input.width > 0 ? world.camera!.worldToScreenPoint(ball.position) : null;
     readout.value = [
       'live: $live${world.cameras.isBlending ? ' (blending)' : ''}',
       'the ball on screen: ${onScreen == null ? 'behind' : '(${onScreen.x.round()}, ${onScreen.y.round()})'}',

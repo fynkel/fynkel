@@ -211,12 +211,12 @@ class GameObject with _Moving {
 
   /// Starts a routine: runs [body] now, up to its first wait, and returns
   /// the [Routine], which can be awaited for what [body] returns, or
-  /// stopped. Its waits ([nextFrame], [wait], [until], [whileTrue],
-  /// [race], [all]) end in the routines step of a later frame, after
+  /// stopped. Its waits ([nextFrame], [wait], [waitUntil], [waitWhile],
+  /// [race], [waitAll]) end in the routines step of a later frame, after
   /// every [onUpdate] (docs/stage-4.md §3.2):
   ///
   /// ```dart
-  /// start(() async {
+  /// startRoutine(() async {
   ///   while (true) {
   ///     await wait(2);
   ///     add(Coin());
@@ -226,7 +226,11 @@ class GameObject with _Moving {
   ///
   /// It stops when this object is destroyed, and is paused while it's
   /// hidden. Throws a [StateError] before the object is added.
-  Routine<T> start<T>(Future<T> Function() body) => world._start(this, this, body);
+  Routine<T> startRoutine<T>(Future<T> Function() body) => world._start(this, this, body);
+
+  /// Stops every routine this object started ([startRoutine]), not those
+  /// its behaviours did (Unity's `StopAllCoroutines`).
+  void stopAllRoutines() => world._stopRoutines(_routines);
 
   /// Calls [handler] with each value [signal] emits, until this object is
   /// destroyed (with its routines: after its onDisable, before its
@@ -584,72 +588,6 @@ class GameObject with _Moving {
     return _worldTransform = t;
   }
 
-  /// The ray from this camera through [point] in a view showing it: from
-  /// the point on the near plane, away from the camera. Cast it with
-  /// [World.raycast] to find what's drawn there (Unity's
-  /// `ScreenPointToRay`).
-  ///
-  /// Uses the object's [Camera] and its [worldTransform] (its scale is
-  /// ignored, as the view ignores it). Throws a [FynkelException] with
-  /// [FynkelStatus.noComponent] when it has no camera.
-  Ray screenToRay(ViewPoint point) {
-    if (!(point.width > 0 && point.height > 0)) {
-      throw ArgumentError.value(point, 'point', 'needs a view with an area');
-    }
-    final c = _lens();
-    final t = worldTransform;
-    // Across the view from -1 to 1, up positive, so the view's y flips.
-    final across = 2 * point.x / point.width - 1;
-    final up = 1 - 2 * point.y / point.height;
-    final aspect = point.width / point.height;
-    if (c.orthographic) {
-      // Straight ahead, from the point on the near plane.
-      final from = Vec3(across * c.size * aspect, up * c.size, -c.near);
-      return Ray(t.position + t.rotation.rotate(from), t.rotation.rotate(Vec3.forward));
-    }
-    final tanHalf = math.tan(c.fovY * math.pi / 360);
-    // Through the point on the plane 1 in front of the camera.
-    final through = t.rotation.rotate(Vec3(across * tanHalf * aspect, up * tanHalf, -1));
-    return Ray(t.position + through * c.near, through);
-  }
-
-  /// Where the ray through [point] meets [plane]: the spot on the ground
-  /// under a finger, say. Null when the ray runs along the plane or away
-  /// from it.
-  Vec3? screenToPlane(ViewPoint point, Plane plane) {
-    final ray = screenToRay(point);
-    final distance = plane.raycast(ray);
-    return distance == null ? null : ray.at(distance);
-  }
-
-  /// Where [point], in the world, is in a view showing this camera
-  /// (Unity's `WorldToScreenPoint`), in the view's logical pixels from its
-  /// top left: in [width] × [height], by default the size [World.input]
-  /// was last given. Null when it's behind a perspective camera; it can be
-  /// outside the view.
-  ViewPoint? worldToScreen(Vec3 point, {double? width, double? height}) {
-    final w = width ?? world.input.width, h = height ?? world.input.height;
-    if (!(w > 0 && h > 0)) throw ArgumentError('worldToScreen needs a view with an area; got ${w}x$h');
-    final c = _lens();
-    final t = worldTransform;
-    final p = t.rotation.inverse.rotate(point - t.position);
-    final aspect = w / h;
-    double across, up;
-    if (c.orthographic) {
-      across = p.x / (c.size * aspect);
-      up = p.y / c.size;
-    } else {
-      final ahead = -p.z;
-      if (!(ahead > 0)) return null;
-      final tanHalf = math.tan(c.fovY * math.pi / 360);
-      across = p.x / (ahead * tanHalf * aspect);
-      up = p.y / (ahead * tanHalf);
-    }
-    return ViewPoint((across + 1) / 2 * w, (1 - up) / 2 * h, width: w, height: h);
-  }
-
-  Camera _lens() => get<Camera>() ?? (throw FynkelException(FynkelStatus.noComponent, '$this has no Camera'));
-
   // --- Components ---
 
   /// Puts [component] on this object and returns it: a [Behaviour] (any
@@ -791,7 +729,7 @@ class GameObject with _Moving {
     final found = <Component>[
       if (missing<Camera>() && fy_camera_get(w, _id, scratch.camera) == FyStatus.FY_STATUS_OK)
         Camera(
-          fovY: scratch.camera.ref.fov_y,
+          fovY: scratch.camera.ref.fov_y.deg,
           near: scratch.camera.ref.near_clip,
           far: scratch.camera.ref.far_clip,
           clearColor: scratch.camera.ref.clear_color.read(),
@@ -892,7 +830,7 @@ class GameObject with _Moving {
 
   void _writeCamera(Camera value) {
     final c = scratch.camera.ref;
-    c.fov_y = value.fovY;
+    c.fov_y = value.fovY.inDegrees;
     c.near_clip = value.near;
     c.far_clip = value.far;
     c.clear_color.write(value.clearColor);

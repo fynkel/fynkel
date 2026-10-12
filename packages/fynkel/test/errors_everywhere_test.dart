@@ -30,11 +30,11 @@ class Thrower extends GameObject {
   void onStart() {
     super.onStart();
     on(pulse, (_) => _throw('signal'));
-    start(() async {
+    startRoutine(() async {
       while (true) {
         await nextFrame;
         // A routine that throws ends; start another each time.
-        start(() async {
+        startRoutine(() async {
           await nextFrame;
           _throw('routine');
         });
@@ -182,7 +182,7 @@ class Witness extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    start(() async {
+    startRoutine(() async {
       while (true) {
         await wait(0.1);
         waits++;

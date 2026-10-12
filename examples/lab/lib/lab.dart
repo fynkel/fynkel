@@ -38,7 +38,7 @@ abstract class LabScene extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    world.errors.listen((e) => log.add('error in ${e.object?.name ?? e.object}: ${e.error}', error: true));
+    world.errors.listen((e) => log.add('error in ${e.gameObject?.name ?? e.gameObject}: ${e.error}', error: true));
     add(
       GameObject(
         name: 'camera',

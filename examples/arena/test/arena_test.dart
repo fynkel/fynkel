@@ -146,7 +146,7 @@ void main() {
   test('a tap dashes towards what it hits, through the sparks: they are on the effects layer', () {
     run(0.1);
     final target = Vec3(4, 0, 0);
-    final at = world.camera!.worldToScreen(target, width: width, height: height)!;
+    final at = world.camera!.worldToScreenPoint(target, width: width, height: height)!;
     // Sparks right where the tap goes, between the camera and the floor.
     final sparks = game.round.add(Sparks(Vec3(3, 1, 0)));
     run(1 / 60);

@@ -35,7 +35,7 @@ class StartsIn extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    start(() => body(this));
+    startRoutine(() => body(this));
   }
 }
 
@@ -58,8 +58,23 @@ void main() {
     }
   }
 
+  test('stopAllRoutines stops what this object or behaviour started, and nothing else', () {
+    final plain = object.addComponent(Plain());
+    final mine = [object.startRoutine(() => wait(10)), object.startRoutine(() => wait(10))];
+    final its = plain.startRoutine(() => wait(10));
+    for (final r in [...mine, its]) {
+      r.done.ignore();
+    }
+    object.stopAllRoutines();
+    expect(mine.map((r) => r.isStopped), [true, true]);
+    expect(its.isRunning, isTrue, reason: 'its behaviour\'s own');
+    plain.stopAllRoutines();
+    expect(its.isStopped, isTrue);
+    object.stopAllRoutines();
+  });
+
   test('a routine runs at once up to its first wait, then in the routines step: after updates, before late', () {
-    object.start(() async {
+    object.startRoutine(() async {
       log.add('a');
       await nextFrame;
       log.add('b');
@@ -87,7 +102,7 @@ void main() {
 
   test('routines go on in the order their waits were made, with what they schedule, inside the step', () {
     for (final name in ['a', 'b']) {
-      object.start(() async {
+      object.startRoutine(() async {
         await nextFrame;
         await Future<void>.value(); // a finished future: a microtask
         await null;
@@ -99,11 +114,11 @@ void main() {
   });
 
   test('awaiting routines that end at once goes on in the next routines step, with no event loop (finding 29)', () {
-    object.start(() async {
+    object.startRoutine(() async {
       log.add('a');
-      await object.start(() async {});
+      await object.startRoutine(() async {});
       log.add('b');
-      await Future.wait([object.start(() async {}).done, object.start(() async => 1).done]);
+      await Future.wait([object.startRoutine(() async {}).done, object.startRoutine(() async => 1).done]);
       log.add('c');
     });
     expect(log, ['a']);
@@ -112,12 +127,12 @@ void main() {
   });
 
   test('what a routine schedules runs before the next routine goes on', () {
-    object.start(() async {
+    object.startRoutine(() async {
       await nextFrame;
       await null;
       log.add('a');
     });
-    object.start(() async {
+    object.startRoutine(() async {
       await nextFrame;
       log.add('b');
     });
@@ -126,8 +141,8 @@ void main() {
   });
 
   test('wait counts game time: scale slows it, 0 stops it; unscaled counts real time', () {
-    final scaled = object.start(() async => wait(1));
-    final real = object.start(() async => wait(1, unscaled: true));
+    final scaled = object.startRoutine(() async => wait(1));
+    final real = object.startRoutine(() async => wait(1, unscaled: true));
     world.time.scale = 0.5;
     frames(4); // 1 s real, 0.5 s game
     expect((scaled.isRunning, real.isRunning), (true, false));
@@ -141,10 +156,10 @@ void main() {
 
   test('until ends when its test is true, whileTrue when it turns false; both from the next frame', () {
     var open = false;
-    object.start(() async {
-      await until(() => open);
+    object.startRoutine(() async {
+      await waitUntil(() => open);
       log.add('open');
-      await whileTrue(() => open);
+      await waitWhile(() => open);
       log.add('closed');
     });
     Iterable<String> mine() => log.where((l) => l != 'update' && l != 'late');
@@ -164,9 +179,9 @@ void main() {
       return 42;
     }
 
-    final asked = object.start(answer);
-    final outer = object.start(() async {
-      final got = await object.start(answer);
+    final asked = object.startRoutine(answer);
+    final outer = object.startRoutine(() async {
+      final got = await object.startRoutine(answer);
       log.add('got $got');
       return got + 1;
     });
@@ -177,7 +192,7 @@ void main() {
   });
 
   test('stop unwinds a routine through its finally at once, and nothing of it runs after', () async {
-    final routine = object.start(() async {
+    final routine = object.startRoutine(() async {
       try {
         await wait(10);
         log.add('never');
@@ -197,7 +212,7 @@ void main() {
 
   test('a routine stops with its object, and a behaviour\'s with the behaviour, finally first', () {
     final behaviour = object.addComponent(Plain());
-    object.start(() async {
+    object.startRoutine(() async {
       try {
         await nextFrame;
         await wait(10);
@@ -205,7 +220,7 @@ void main() {
         log.add('object finally');
       }
     });
-    final b = behaviour.start(() async {
+    final b = behaviour.startRoutine(() async {
       try {
         await wait(10);
       } finally {
@@ -218,7 +233,7 @@ void main() {
     expect(log, ['behaviour finally']);
     expect(b.isStopped, isTrue);
     final other = object.addComponent(Plain());
-    other.start(() async {
+    other.startRoutine(() async {
       try {
         await wait(10);
       } finally {
@@ -232,18 +247,18 @@ void main() {
   test('no routine code runs after its object is destroyed, even when an outside future completes later', () async {
     final outside = Completer<int>();
     final failing = Completer<int>();
-    object.start(() async {
+    object.startRoutine(() async {
       final n = await outside.future;
       log.add('after outside $n');
     });
-    object.start(() async {
+    object.startRoutine(() async {
       try {
         await failing.future;
       } catch (_) {
         log.add('caught');
       }
     });
-    object.start(() async {
+    object.startRoutine(() async {
       unawaited(outside.future.then((n) => log.add('then $n')));
       await wait(10);
     });
@@ -255,7 +270,7 @@ void main() {
   });
 
   test('a routine pauses while its object is hidden, and goes on where it was', () {
-    final routine = object.start(() async {
+    final routine = object.startRoutine(() async {
       await wait(1);
       log.add('done');
     });
@@ -272,7 +287,7 @@ void main() {
 
   test('a behaviour\'s routine pauses while it is disabled', () {
     final behaviour = object.addComponent(Plain());
-    final routine = behaviour.start(() async => nextFrame);
+    final routine = behaviour.startRoutine(() async => nextFrame);
     behaviour.enabled = false;
     frames(3);
     expect(routine.isRunning, isTrue);
@@ -284,8 +299,8 @@ void main() {
   test('routines started in a routine stop with it; one that ends lets them go on', () {
     late Routine<void> inner;
     late Routine<void> kept;
-    final outer = object.start(() async {
-      inner = object.start(() async {
+    final outer = object.startRoutine(() async {
+      inner = object.startRoutine(() async {
         try {
           await wait(10);
         } finally {
@@ -298,8 +313,8 @@ void main() {
         log.add('outer finally');
       }
     });
-    object.start(() async {
-      kept = object.start(() async => wait(10));
+    object.startRoutine(() async {
+      kept = object.startRoutine(() async => wait(10));
     });
     frames(1);
     outer.stop();
@@ -309,9 +324,9 @@ void main() {
   });
 
   test('stopping a routine that awaits its own routines (in a race) stops them, then it, once', () async {
-    final outer = object.start(() async {
+    final outer = object.startRoutine(() async {
       try {
-        await race([object.start(() async => wait(5)), object.start(() async => wait(5))]);
+        await race([object.startRoutine(() async => wait(5)), object.startRoutine(() async => wait(5))]);
       } finally {
         log.add('outer finally');
       }
@@ -324,7 +339,7 @@ void main() {
   });
 
   test('race gives the first to end and stops the rest; all gives each, in order', () {
-    final loser = object.start(() async {
+    final loser = object.startRoutine(() async {
       try {
         await wait(5);
       } finally {
@@ -332,10 +347,10 @@ void main() {
       }
       return 'loser';
     });
-    object.start(() async {
+    object.startRoutine(() async {
       final first = await race([wait(1).then((_) => 'timer'), loser]);
       log.add('race $first');
-      final each = await all([object.start(() async => 1), Future.value(2), wait(0.5).then((_) => 3)]);
+      final each = await waitAll([object.startRoutine(() async => 1), Future.value(2), wait(0.5).then((_) => 3)]);
       log.add('all $each');
     });
     frames(4);
@@ -348,15 +363,15 @@ void main() {
   test('race stops a losing routine and drops a losing wait, which then wakes nothing', () {
     late Routine<String> slow;
     var checks = 0;
-    object.start(() async {
-      slow = object.start(() async {
+    object.startRoutine(() async {
+      slow = object.startRoutine(() async {
         await wait(5);
         return 'slow';
       });
-      log.add(await race([slow, until(() => world.time.frame == 3).then((_) => 'until')]));
+      log.add(await race([slow, waitUntil(() => world.time.frame == 3).then((_) => 'until')]));
       await race([
         wait(1),
-        until(() {
+        waitUntil(() {
           checks++;
           return false;
         }),
@@ -373,12 +388,12 @@ void main() {
 
   test('all with a failure stops the rest and throws it', () async {
     late Routine<int> other;
-    final routine = object.start(() async {
-      other = object.start(() async {
+    final routine = object.startRoutine(() async {
+      other = object.startRoutine(() async {
         await wait(10);
         return 1;
       });
-      return all([other, object.start<int>(() async => throw StateError('no'))]);
+      return waitAll([other, object.startRoutine<int>(() async => throw StateError('no'))]);
     });
     final done = routine.done; // awaited: its error isn't the world's
     frames(1);
@@ -389,13 +404,13 @@ void main() {
   test('an error a routine doesn\'t catch goes to world.errors, unless it is awaited; try catches one', () async {
     final errors = <ObjectError>[];
     world.errors.listen(errors.add);
-    object.start(() async {
+    object.startRoutine(() async {
       await nextFrame;
       throw StateError('alone');
     });
-    object.start(() async {
+    object.startRoutine(() async {
       try {
-        await object.start(() async {
+        await object.startRoutine(() async {
           await nextFrame;
           throw StateError('awaited');
         });
@@ -403,7 +418,7 @@ void main() {
         log.add('caught ${e.message}');
       }
     });
-    object.start(() async {
+    object.startRoutine(() async {
       try {
         await Future<void>.error(StateError('outside'));
       } on StateError catch (e) {
@@ -412,12 +427,12 @@ void main() {
     });
     frames(1);
     await pumpEventQueue();
-    expect(errors.map((e) => (e.object, (e.error as StateError).message)), [(object, 'alone')]);
+    expect(errors.map((e) => (e.gameObject, (e.error as StateError).message)), [(object, 'alone')]);
     expect(log, containsAll(['caught awaited', 'caught outside']));
   });
 
   test('a routine that catches its stop gets stopped again at its next wait', () {
-    final routine = object.start(() async {
+    final routine = object.startRoutine(() async {
       try {
         await wait(10);
       } on RoutineStopped {
@@ -435,7 +450,7 @@ void main() {
 
   test('a routine that stops itself is stopped at its next wait, at once', () {
     late Routine<void> routine;
-    routine = object.start(() async {
+    routine = object.startRoutine(() async {
       await nextFrame;
       routine.stop();
       try {
@@ -451,10 +466,10 @@ void main() {
   test('waits work only inside a routine, and start only on a live object', () {
     expect(() => nextFrame, throwsStateError);
     expect(() => wait(1), throwsStateError);
-    expect(() => GameObject().start(() async {}), throwsStateError);
+    expect(() => GameObject().startRoutine(() async {}), throwsStateError);
     final gone = world.add(GameObject())..destroy();
-    expect(() => gone.start(() async {}), throwsStateError);
-    final negative = object.start(() async => wait(-1)).done;
+    expect(() => gone.startRoutine(() async {}), throwsStateError);
+    final negative = object.startRoutine(() async => wait(-1)).done;
     frames(1);
     expect(negative, throwsArgumentError);
   });

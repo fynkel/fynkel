@@ -382,7 +382,7 @@ void main() {
       thrower.destroy();
       other.destroy();
       await pumpEventQueue();
-      expect(errors.map((e) => (e.object, (e.error as StateError).message)), [(thrower, 'in $where')]);
+      expect(errors.map((e) => (e.gameObject, (e.error as StateError).message)), [(thrower, 'in $where')]);
       expect(log, containsAllInOrder(['start other', 'update other', 'late other', 'destroy other']));
       expect(thrower.isDestroyed, isTrue);
     });
@@ -402,7 +402,7 @@ void main() {
     tap(world, const ViewPoint(50, 50, width: 100, height: 100));
     world.update(1 / 60);
     await pumpEventQueue();
-    expect(errors.map((e) => (e.object, (e.error as StateError).message)), [(hit, 'in tap'), (hit, 'in mine')]);
+    expect(errors.map((e) => (e.gameObject, (e.error as StateError).message)), [(hit, 'in tap'), (hit, 'in mine')]);
     expect(log, ['tap parent']);
   });
 

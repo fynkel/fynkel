@@ -159,7 +159,7 @@ enum Space {
 /// place: `get<Camera>()!.fovY = 40`.
 final class Camera extends Component {
   Camera({
-    this._fovY = 60,
+    this._fovY = 60 * (math.pi / 180),
     this._near = 0.1,
     this._far = 1000,
     this._clearColor = const Color.rgb(0.1, 0.1, 0.12),
@@ -173,7 +173,7 @@ final class Camera extends Component {
   bool _orthographic;
   LayerMask _cullingMask;
 
-  /// Vertical field of view in degrees, 1–179.
+  /// Vertical field of view in radians, 1° to 179°: 60.deg unless set.
   double get fovY => _fovY;
   set fovY(double value) => _change(() => _fovY = value);
 
@@ -202,6 +202,70 @@ final class Camera extends Component {
   /// every layer.
   LayerMask get cullingMask => _cullingMask;
   set cullingMask(LayerMask value) => _change(() => _cullingMask = value);
+
+  /// The ray from this camera through [point] in a view showing it: from
+  /// the point on the near plane, away from the camera. Cast it with
+  /// [World.raycast] to find what's drawn there (Unity's
+  /// `ScreenPointToRay`).
+  ///
+  /// Uses its object's [GameObject.worldTransform] (its scale is ignored,
+  /// as the view ignores it). Throws a [StateError] when it's on no object.
+  Ray screenPointToRay(ViewPoint point) {
+    if (!(point.width > 0 && point.height > 0)) {
+      throw ArgumentError.value(point, 'point', 'needs a view with an area');
+    }
+    final c = this;
+    final t = gameObject.worldTransform;
+    // Across the view from -1 to 1, up positive, so the view's y flips.
+    final across = 2 * point.x / point.width - 1;
+    final up = 1 - 2 * point.y / point.height;
+    final aspect = point.width / point.height;
+    if (c.orthographic) {
+      // Straight ahead, from the point on the near plane.
+      final from = Vec3(across * c.size * aspect, up * c.size, -c.near);
+      return Ray(t.position + t.rotation.rotate(from), t.rotation.rotate(Vec3.forward));
+    }
+    final tanHalf = math.tan(c.fovY / 2);
+    // Through the point on the plane 1 in front of the camera.
+    final through = t.rotation.rotate(Vec3(across * tanHalf * aspect, up * tanHalf, -1));
+    return Ray(t.position + through * c.near, through);
+  }
+
+  /// Where the ray through [point] meets [plane]: the spot on the ground
+  /// under a finger, say. Null when the ray runs along the plane or away
+  /// from it.
+  Vec3? screenPointToPlane(ViewPoint point, Plane plane) {
+    final ray = screenPointToRay(point);
+    final distance = plane.raycast(ray);
+    return distance == null ? null : ray.at(distance);
+  }
+
+  /// Where [point], in the world, is in a view showing this camera
+  /// (Unity's `WorldToScreenPoint`), in the view's logical pixels from its
+  /// top left: in [width] × [height], by default the size [World.input]
+  /// was last given. Null when it's behind a perspective camera; it can be
+  /// outside the view.
+  ViewPoint? worldToScreenPoint(Vec3 point, {double? width, double? height}) {
+    final input = gameObject.world.input;
+    final w = width ?? input.width, h = height ?? input.height;
+    if (!(w > 0 && h > 0)) throw ArgumentError('worldToScreenPoint needs a view with an area; got ${w}x$h');
+    final c = this;
+    final t = gameObject.worldTransform;
+    final p = t.rotation.inverse.rotate(point - t.position);
+    final aspect = w / h;
+    double across, up;
+    if (c.orthographic) {
+      across = p.x / (c.size * aspect);
+      up = p.y / c.size;
+    } else {
+      final ahead = -p.z;
+      if (!(ahead > 0)) return null;
+      final tanHalf = math.tan(c.fovY / 2);
+      across = p.x / (ahead * tanHalf * aspect);
+      up = p.y / (ahead * tanHalf);
+    }
+    return ViewPoint((across + 1) / 2 * w, (1 - up) / 2 * h, width: w, height: h);
+  }
 
   /// Makes a change and writes it to the engine; undoes it if the engine
   /// refuses it.
@@ -390,10 +454,14 @@ abstract class Behaviour extends Component with _Moving {
   /// destroyed. See [GameObject.assets].
   Assets get assets => gameObject.assets;
 
-  /// Starts a routine, as [GameObject.start] does; it stops when this
+  /// Starts a routine, as [GameObject.startRoutine] does; it stops when this
   /// behaviour is removed or its object destroyed, and is paused while
   /// the behaviour isn't enabled.
-  Routine<T> start<T>(Future<T> Function() body) => gameObject.world._start(this, gameObject, body);
+  Routine<T> startRoutine<T>(Future<T> Function() body) => gameObject.world._start(this, gameObject, body);
+
+  /// Stops every routine this behaviour started (Unity's
+  /// `StopAllCoroutines`).
+  void stopAllRoutines() => gameObject.world._stopRoutines(_routines);
 
   /// Listens to [signal], as [GameObject.on] does, until this behaviour
   /// is removed or its object destroyed.

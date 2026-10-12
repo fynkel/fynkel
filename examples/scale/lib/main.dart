@@ -194,7 +194,7 @@ class Group extends GameObject {
       final angle = i / 9 * 2 * math.pi;
       add(Part(kind, i, Transform(position: Vec3(math.cos(angle), 0.8, math.sin(angle)), scale: Vec3.one * 0.3)));
     }
-    if (kind.behave == Behave.blink) start(_blink);
+    if (kind.behave == Behave.blink) startRoutine(_blink);
   }
 
   @override

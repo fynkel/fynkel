@@ -325,12 +325,12 @@ void main() {
     final f = down(middle);
     frame();
     final finger = input.fingers.single;
-    expect(finger.startedOver!.object, same(r.arm));
+    expect(finger.startedOver!.gameObject, same(r.arm));
     expect(finger.startedOver!.point.z, closeTo(-4.5, 1e-5));
     move(f, nothing);
     frame();
     expect(finger.over, isNull);
-    expect(finger.startedOver!.object, same(r.arm));
+    expect(finger.startedOver!.gameObject, same(r.arm));
   });
 
   test('input comes first in the frame: signals, then handlers, then starts and updates', () {
@@ -360,7 +360,7 @@ void main() {
     await pumpEventQueue();
     expect(log, contains('click level'));
     expect(errors.map((e) => '${e.error}'), ['Bad state: listen', 'Bad state: click']);
-    expect(errors.last.object, same(r.arm));
+    expect(errors.last.gameObject, same(r.arm));
   });
 
   test('without a camera, or a view size, nothing is under a finger', () {

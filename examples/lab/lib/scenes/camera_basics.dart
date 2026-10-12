@@ -44,10 +44,10 @@ class CameraBasicsScene extends LabScene {
   void onUpdate() {
     super.onUpdate();
     final live = world.cameras.live == front ? 'front' : 'above';
-    final lens = world.camera!.get<Camera>()!;
+    final lens = world.camera!;
     readout.value = [
       'live: $live${world.cameras.isBlending ? ' (blending)' : ''}',
-      'lens: ${lens.orthographic ? 'orthographic, size ${lens.size}' : 'perspective, fovY ${lens.fovY}'}',
+      'lens: ${lens.orthographic ? 'orthographic, size ${lens.size}' : 'perspective, fovY ${lens.fovY.inDegrees.round()}°'}',
       'blend: ${world.cameras.defaultBlend}',
     ].join('\n');
   }
@@ -58,8 +58,8 @@ class CameraBasicsScene extends LabScene {
     Toggle('cut', () => world.cameras.defaultBlend.isCut, (on) {
       world.cameras.defaultBlend = on ? Blend.cut : const Blend(1);
     }),
-    Toggle('orthographic', () => world.camera!.get<Camera>()!.orthographic, (on) {
-      world.camera!.get<Camera>()!.orthographic = on;
+    Toggle('orthographic', () => world.camera!.orthographic, (on) {
+      world.camera!.orthographic = on;
     }),
     Button('shake', () => world.cameras.shake(0.3)),
   ];

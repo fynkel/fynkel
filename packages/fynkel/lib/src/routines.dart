@@ -69,8 +69,9 @@ final class RoutineStopped implements Exception {
   String toString() => 'RoutineStopped: the routine was stopped';
 }
 
-/// A running routine: what `start` returns. Await it for what its body
-/// returns (`final choice = await start(askPlayer);`), or [stop] it.
+/// A running routine: what `startRoutine` returns. Await it for what its
+/// body returns (`final choice = await startRoutine(askPlayer);`), or
+/// [stop] it.
 ///
 /// It stops by itself when the object or behaviour that started it is
 /// destroyed or removed, and when the routine it was started in is
@@ -265,16 +266,16 @@ Future<void> wait(double seconds, {bool unscaled = false}) {
 
 /// Ends in the first routines step, from the next frame on, where [test]
 /// returns true. Only inside a routine.
-Future<void> until(bool Function() test) => _addWait((r, frame) => _Wait(r, frame, test: test), 'until');
+Future<void> waitUntil(bool Function() test) => _addWait((r, frame) => _Wait(r, frame, test: test), 'waitUntil');
 
 /// Ends in the first routines step, from the next frame on, where [test]
 /// returns false. Only inside a routine.
-Future<void> whileTrue(bool Function() test) =>
-    _addWait((r, frame) => _Wait(r, frame, test: test, until: false), 'whileTrue');
+Future<void> waitWhile(bool Function() test) =>
+    _addWait((r, frame) => _Wait(r, frame, test: test, until: false), 'waitWhile');
 
 /// What the first of [racers] to end gives, or throws; the rest are
 /// stopped (routines, with their `finally` blocks run first) or dropped
-/// (waits). `await race([wait(3), start(fight)])` fights for at most 3
+/// (waits). `await race([wait(3), startRoutine(fight)])` fights for at most 3
 /// seconds. Only routines and waits given as they are can be stopped:
 /// another future, such as `wait(3).then(...)`, still ends, into nothing.
 Future<T> race<T>(Iterable<Future<T>> racers) {
@@ -310,7 +311,7 @@ Future<T> race<T>(Iterable<Future<T>> racers) {
 /// What each of [futures] gives, in order, once all have ended. If one
 /// throws, the rest are stopped or dropped (as [race] does) and this
 /// throws that.
-Future<List<T>> all<T>(Iterable<Future<T>> futures) {
+Future<List<T>> waitAll<T>(Iterable<Future<T>> futures) {
   final list = futures.toList();
   final result = Completer<List<T>>.sync();
   if (list.isEmpty) {

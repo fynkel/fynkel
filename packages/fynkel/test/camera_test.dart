@@ -87,10 +87,11 @@ void main() {
       expect(world.camera, isNull);
       final a = camera();
       camera();
-      expect(world.camera, a);
+      expect(world.camera, a.get<Camera>());
+      expect(world.camera!.gameObject, a);
     });
 
-    test('screenToRay through an orthographic camera goes straight ahead from the point on the near plane', () {
+    test('screenPointToRay through an orthographic camera goes straight ahead from the point on the near plane', () {
       final o = world.add(
         GameObject(
           transform: Transform(position: const Vec3(1, 2, 3)),
@@ -98,24 +99,32 @@ void main() {
         ),
       );
       // A 200 × 100 view shows 8 m by 4 m.
-      final centre = o.screenToRay(const ViewPoint(100, 50, width: 200, height: 100));
+      final centre = o.get<Camera>()!.screenPointToRay(const ViewPoint(100, 50, width: 200, height: 100));
       expectVec(centre.origin, const Vec3(1, 2, 2.5));
       expectVec(centre.direction, Vec3.forward);
-      final corner = o.screenToRay(const ViewPoint(0, 0, width: 200, height: 100));
+      final corner = o.get<Camera>()!.screenPointToRay(const ViewPoint(0, 0, width: 200, height: 100));
       expectVec(corner.origin, const Vec3(-3, 4, 2.5));
       expectVec(corner.direction, Vec3.forward);
     });
 
-    test('worldToScreen finds a point in the view, the other way from screenToRay', () {
+    test('worldToScreenPoint finds a point in the view, the other way from screenPointToRay', () {
       // 90° up and down, a 200 × 100 view: 1 m ahead the view is 4 m across.
-      final o = camera(lens: Camera(fovY: 90));
-      expectPoint(o.worldToScreen(const Vec3(0, 0, -1), width: 200, height: 100), 100, 50);
-      expectPoint(o.worldToScreen(const Vec3(1, 0, -1), width: 200, height: 100), 150, 50);
-      expectPoint(o.worldToScreen(const Vec3(0, 2, -2), width: 200, height: 100), 100, 0);
-      expect(o.worldToScreen(const Vec3(0, 0, 1), width: 200, height: 100), isNull, reason: 'behind');
-      expect(() => o.worldToScreen(Vec3.zero), throwsArgumentError, reason: 'the input has no view size yet');
+      final o = camera(lens: Camera(fovY: 90.deg));
+      expectPoint(o.get<Camera>()!.worldToScreenPoint(const Vec3(0, 0, -1), width: 200, height: 100), 100, 50);
+      expectPoint(o.get<Camera>()!.worldToScreenPoint(const Vec3(1, 0, -1), width: 200, height: 100), 150, 50);
+      expectPoint(o.get<Camera>()!.worldToScreenPoint(const Vec3(0, 2, -2), width: 200, height: 100), 100, 0);
+      expect(
+        o.get<Camera>()!.worldToScreenPoint(const Vec3(0, 0, 1), width: 200, height: 100),
+        isNull,
+        reason: 'behind',
+      );
+      expect(
+        () => o.get<Camera>()!.worldToScreenPoint(Vec3.zero),
+        throwsArgumentError,
+        reason: 'the input has no view size yet',
+      );
       world.input.resize(200, 100);
-      expectPoint(o.worldToScreen(const Vec3(1, 0, -1)), 150, 50);
+      expectPoint(o.get<Camera>()!.worldToScreenPoint(const Vec3(1, 0, -1)), 150, 50);
 
       // Round trips, turned and orthographic too.
       o.transform = Transform(
@@ -128,27 +137,39 @@ void main() {
           const ViewPoint(10, 20, width: 200, height: 100),
           const ViewPoint(190, 77, width: 200, height: 100),
         ]) {
-          final ray = o.screenToRay(p);
-          expectPoint(o.worldToScreen(ray.at(7)), p.x, p.y, 1e-4);
+          final ray = o.get<Camera>()!.screenPointToRay(p);
+          expectPoint(o.get<Camera>()!.worldToScreenPoint(ray.at(7)), p.x, p.y, 1e-4);
         }
       }
     });
 
-    test('screenToPlane finds the spot on the ground under a point', () {
+    test('screenPointToPlane finds the spot on the ground under a point', () {
       final o = world.add(
         GameObject(
           transform: Transform(position: const Vec3(0, 10, 10), rotation: Quat.lookRotation(Vec3(0, -10, -10))),
           components: [Camera()],
         ),
       );
-      expectVec(o.screenToPlane(const ViewPoint(50, 50, width: 100, height: 100), Plane.ground)!, Vec3.zero, 1e-5);
+      expectVec(
+        o.get<Camera>()!.screenPointToPlane(const ViewPoint(50, 50, width: 100, height: 100), Plane.ground)!,
+        Vec3.zero,
+        1e-5,
+      );
       // Looking down 45°: the view's top edge (30° above the middle) is
       // 15° below level, so it meets the ground far off.
-      final top = o.screenToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground)!;
+      final top = o.get<Camera>()!.screenPointToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground)!;
       expect(top.z, closeTo(10 - 10 / math.tan(15 * math.pi / 180), 1e-4));
       o.transform = Transform(position: const Vec3(0, 10, 0), rotation: Quat.lookRotation(Vec3.right));
-      expect(o.screenToPlane(const ViewPoint(50, 50, width: 100, height: 100), Plane.ground), isNull, reason: 'level');
-      expect(o.screenToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground), isNull, reason: 'up');
+      expect(
+        o.get<Camera>()!.screenPointToPlane(const ViewPoint(50, 50, width: 100, height: 100), Plane.ground),
+        isNull,
+        reason: 'level',
+      );
+      expect(
+        o.get<Camera>()!.screenPointToPlane(const ViewPoint(50, 0, width: 100, height: 100), Plane.ground),
+        isNull,
+        reason: 'up',
+      );
     });
 
     test('Plane', () {
@@ -162,11 +183,11 @@ void main() {
   });
 
   group('virtual cameras', () {
-    GameObject at(Vec3 p, {int priority = 0, double fovY = 60, Iterable<Component> more = const []}) => world.add(
+    GameObject at(Vec3 p, {int priority = 0, double? fovY, Iterable<Component> more = const []}) => world.add(
       GameObject(
         transform: Transform(position: p),
         components: [
-          VirtualCamera(priority: priority, fovY: fovY),
+          VirtualCamera(priority: priority, fovY: fovY ?? 60.deg),
           ...more,
         ],
       ),
@@ -203,9 +224,9 @@ void main() {
 
     test('its lens: the field of view, or the size of an orthographic camera', () {
       final view = camera();
-      at(Vec3.zero, fovY: 30).get<VirtualCamera>()!.size = 3;
+      at(Vec3.zero, fovY: 30.deg).get<VirtualCamera>()!.size = 3;
       frames(1);
-      expect(view.get<Camera>()!.fovY, 30);
+      expect(view.get<Camera>()!.fovY, 30.deg);
       view.get<Camera>()!.orthographic = true;
       frames(1);
       expect(view.get<Camera>()!.size, 3);
@@ -214,21 +235,21 @@ void main() {
     test('going to another blends over the seconds with the ease, position, turn and lens together', () {
       final view = camera();
       world.cameras.defaultBlend = const Blend(1, ease: Ease.linear);
-      at(Vec3.zero, priority: 1, fovY: 40);
+      at(Vec3.zero, priority: 1, fovY: 40.deg);
       frames(1);
-      final b = at(const Vec3(4, 0, 0), fovY: 80)..rotation = Quat.axisAngle(Vec3.up, 1);
+      final b = at(const Vec3(4, 0, 0), fovY: 80.deg)..rotation = Quat.axisAngle(Vec3.up, 1);
       b.get<VirtualCamera>()!.priority = 2;
       frames(1);
       expect(world.cameras.isBlending, isTrue);
       expectVec(view.position, const Vec3(1, 0, 0));
-      expect(view.get<Camera>()!.fovY, closeTo(50, 1e-9));
+      expect(view.get<Camera>()!.fovY, closeTo(50.deg, 1e-9));
       expect(view.rotation.closeTo(Quat.axisAngle(Vec3.up, 0.25)), isTrue);
       frames(2);
       expectVec(view.position, const Vec3(3, 0, 0));
       frames(1);
       expect(world.cameras.isBlending, isFalse);
       expect(view.position, const Vec3(4, 0, 0));
-      expect(view.get<Camera>()!.fovY, 80);
+      expect(view.get<Camera>()!.fovY, 80.deg);
     });
 
     test('the blend follows the cameras as they move', () {
@@ -306,12 +327,18 @@ void main() {
     });
 
     test('one on the view\'s camera itself leaves it, and its lens, alone', () {
-      final view = world.add(GameObject(components: [Camera(fovY: 40), VirtualCamera(fovY: 70)]))
-        ..position = const Vec3(1, 2, 3);
+      final view = world.add(
+        GameObject(
+          components: [
+            Camera(fovY: 40.deg),
+            VirtualCamera(fovY: 70.deg),
+          ],
+        ),
+      )..position = const Vec3(1, 2, 3);
       frames(1);
       expect(world.cameras.live, view.get<VirtualCamera>());
       expect(view.position, const Vec3(1, 2, 3));
-      expect(view.get<Camera>()!.fovY, 40);
+      expect(view.get<Camera>()!.fovY, 40.deg);
     });
 
     test('a blend measures 3 s for a to b, from the pair', () {
@@ -493,7 +520,7 @@ void main() {
         expect(orbit.distance, closeTo(4 * math.e, 1e-9));
 
         // Over the grabbed cube, at x = −3: the cube takes the drag.
-        final over = world.camera!.worldToScreen(const Vec3(-3, 0, 0))!;
+        final over = world.camera!.worldToScreenPoint(const Vec3(-3, 0, 0))!;
         input.fingerDown(2, over.x, over.y);
         frames(1);
         input.fingerMove(2, over.x + 60, over.y);

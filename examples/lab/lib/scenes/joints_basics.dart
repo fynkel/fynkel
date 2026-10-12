@@ -40,7 +40,7 @@ class JointsBasicsScene extends LabScene {
       anchor: Vec3(-0.5, 0, 0),
       axis: Vec3(0, 1, 0),
       useLimits: true,
-      limits: const JointLimits(min: -90, max: 90),
+      limits: JointLimits(min: -90.deg, max: 90.deg),
       useSpring: true,
       spring: const JointSpring(spring: 20, damper: 8),
     );
@@ -103,7 +103,7 @@ class JointsBasicsScene extends LabScene {
       scale: Vec3(0.04, 0.04, to.length),
     );
     readout.value = [
-      'the door is at ${hinge.angle.toStringAsFixed(0)}°',
+      'the door is at ${hinge.angle.inDegrees.toStringAsFixed(0)}°',
       'the crate is ${to.length.toStringAsFixed(2)} m below the hook',
     ].join('\n');
   }

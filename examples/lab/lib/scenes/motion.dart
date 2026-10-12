@@ -71,7 +71,7 @@ class MotionScene extends LabScene {
 
   void _openDoor() {
     if (_doorRoutine?.isRunning ?? false) return log.add('the door is busy');
-    _doorRoutine = start(() async {
+    _doorRoutine = startRoutine(() async {
       log.add('door: opening…');
       await door.moveBy(Vec3(0, 1.9, 0), seconds: 1, ease: Ease.inOutCubic);
       log.add('door: open (the routine went on after the await)');
@@ -83,7 +83,7 @@ class MotionScene extends LabScene {
 
   void _runRace() {
     if (_race?.isRunning ?? false) return;
-    start(() async {
+    startRoutine(() async {
       runner.position = Vec3(-3.5, 0.3, 3);
       final move = _race = runner.moveTo(Vec3(3.5, 0.3, 3), seconds: 3, ease: Ease.linear);
       await race([move, wait(1)]);

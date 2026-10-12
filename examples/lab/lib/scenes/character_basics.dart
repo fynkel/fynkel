@@ -20,7 +20,7 @@ class CharacterBasicsScene extends LabScene {
 
   late final Player player;
   late final GameObject crate;
-  late final GameObject camera = find('camera')!;
+  late final Camera camera = find('camera')!.get<Camera>()!;
 
   @override
   void build() {
@@ -53,7 +53,7 @@ class CharacterBasicsScene extends LabScene {
   void onStart() {
     super.onStart();
     on(input.onTap, (finger) {
-      final hit = physics.raycast(camera.screenToRay(finger.position));
+      final hit = physics.raycast(camera.screenPointToRay(finger.position));
       if (hit == null) return;
       player.walker.target = hit.point;
       log.add('walking to ${hit.collider.gameObject.name}');

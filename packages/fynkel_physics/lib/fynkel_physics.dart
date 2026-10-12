@@ -37,7 +37,7 @@ export 'src/physics.dart'
         JointSpring,
         MeshCollider,
         Physics,
-        PhysicsHit,
+        RaycastHit,
         PhysicsLayers,
         PhysicsMaterial,
         PhysicsMaterialCombine,

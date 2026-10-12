@@ -20,11 +20,11 @@ final class _Pointing implements _Targets {
     check(fy_camera_active(w, scratch.id));
     final camera = scratch.id.value;
     if (camera == 0) return null;
-    final object = world._object(camera);
+    final lens = world._object(camera).get<Camera>()!;
     // What the camera doesn't draw can't be touched through it.
-    final drawn = object.get<Camera>()?.cullingMask ?? LayerMask.all;
+    final drawn = lens.cullingMask;
     return world.raycast(
-      object.screenToRay(ViewPoint(x, y, width: input._width, height: input._height)),
+      lens.screenPointToRay(ViewPoint(x, y, width: input._width, height: input._height)),
       layers: drawn & input.layers,
     );
   }
@@ -35,7 +35,7 @@ final class _Pointing implements _Targets {
   @override
   void down(Finger finger) {
     final hit = finger._startedOver = finger.over;
-    finger._taker = _bubble(hit?.object, finger, _Handler.down);
+    finger._taker = _bubble(hit?.gameObject, finger, _Handler.down);
   }
 
   @override
@@ -46,13 +46,14 @@ final class _Pointing implements _Targets {
   }
 
   @override
-  void click(Finger finger) => _bubble(finger.over?.object, finger, _Handler.click);
+  void click(Finger finger) => _bubble(finger.over?.gameObject, finger, _Handler.click);
 
   @override
-  void longPress(Finger finger) => _bubble(finger.over?.object, finger, _Handler.longPress);
+  void longPress(Finger finger) => _bubble(finger.over?.gameObject, finger, _Handler.longPress);
 
   @override
-  void dragStart(Finger finger) => finger._captor = _bubble(finger._startedOver?.object, finger, _Handler.dragStart);
+  void dragStart(Finger finger) =>
+      finger._captor = _bubble(finger._startedOver?.gameObject, finger, _Handler.dragStart);
 
   @override
   void drag(Finger finger) {
@@ -68,7 +69,7 @@ final class _Pointing implements _Targets {
   }
 
   @override
-  void moved(Finger finger) => _overNow(finger, finger.over?.object);
+  void moved(Finger finger) => _overNow(finger, finger.over?.gameObject);
 
   @override
   void left(Finger finger) => _overNow(finger, null);

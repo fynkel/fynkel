@@ -118,7 +118,7 @@ class Lamp extends GameObject {
   }
 
   void _light() {
-    start(() async {
+    startRoutine(() async {
       _glass
         ..color = _on
         ..emissive = _on;

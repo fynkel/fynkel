@@ -257,7 +257,7 @@ void main() {
         frames(world, 4);
         await Future<void>.delayed(Duration.zero);
         expect(errors, isNotEmpty);
-        expect(errors.first.object, same(dropped));
+        expect(errors.first.gameObject, same(dropped));
         expect(errors.first.error, isA<StateError>());
         expect(log.first, 'collisionEnter floor');
       });

@@ -168,7 +168,7 @@ void main() {
       final dying = world.add(_AddsWhileDying());
       dying.destroy();
       await pumpEventQueue();
-      expect(errors.single.object, dying);
+      expect(errors.single.gameObject, dying);
       expect(errors.single.error, isA<StateError>());
       expect(dying.isDestroyed, isTrue);
       expect(dying.isAlive, isFalse, reason: 'it goes even when its onDestroy throws');
@@ -192,7 +192,7 @@ void main() {
     tap(world, centre);
     world.update(0.1);
     expect(log, ['tap arm', 'tap robot', 'tap level']);
-    expect(robot.taps.single.over!.object, same(arm), reason: 'it learns which part was hit');
+    expect(robot.taps.single.over!.gameObject, same(arm), reason: 'it learns which part was hit');
     expect(robot.taps.single.position, centre);
     expect(robot.taps.single.over!.point.z, closeTo(-4.5, 1e-5));
     expect(robot.taps.single.over!.distance, closeTo(4.4, 1e-5), reason: 'from the near plane, 0.1 ahead');
@@ -406,7 +406,7 @@ class _ReadsInput extends GameObject {
   void onUpdate() {
     super.onUpdate();
     seen = input;
-    wasDown = input.isDown(KeyCode.w);
+    wasDown = input.isPressed(KeyCode.w);
   }
 }
 

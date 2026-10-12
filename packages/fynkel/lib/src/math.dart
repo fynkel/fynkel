@@ -255,7 +255,7 @@ final class Quat {
 }
 
 /// A half-line in the world: from [origin], along [direction]. Make one
-/// with [GameObject.screenToRay] to find what's under a point in a view, and
+/// with [Camera.screenPointToRay] to find what's under a point in a view, and
 /// cast it with [World.raycast].
 final class Ray {
   /// [direction] is made unit length; throws for a zero one.
@@ -324,7 +324,7 @@ final class Plane {
 }
 
 /// A point in a view, in logical pixels from its top-left corner, with
-/// the view's size: what [GameObject.screenToRay] needs to aim a ray.
+/// the view's size: what [Camera.screenPointToRay] needs to aim a ray.
 /// package:fynkel_flutter's `FrameInput` gives pointer positions as these.
 final class ViewPoint {
   const ViewPoint(this.x, this.y, {required this.width, required this.height});
@@ -345,6 +345,17 @@ final class ViewPoint {
 
   @override
   String toString() => 'ViewPoint($x, $y in ${width}x$height)';
+}
+
+/// Angles are radians everywhere in Fynkel, as in Dart's `math`: `90.deg`
+/// writes one in degrees, as `Quat.euler(0, 90.deg, 0)` or
+/// `JointLimits(min: -45.deg)`, and `angle.inDegrees` reads one back.
+extension Degrees on num {
+  /// This many degrees, in radians: `180.deg` is pi.
+  double get deg => this * (math.pi / 180);
+
+  /// This many radians, in degrees: `math.pi.inDegrees` is 180.
+  double get inDegrees => this * (180 / math.pi);
 }
 
 // Unity's Mathf, for moving things by hand.

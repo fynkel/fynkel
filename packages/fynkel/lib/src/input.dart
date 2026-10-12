@@ -12,7 +12,7 @@ part of 'world.dart';
 /// **Listening**: its signals tell what happened, in the input step at
 /// the start of [World.update] (before any start or update):
 /// `on(input.onTap, (finger) => ...)`. **Polling**, as Unity's `Input`:
-/// [isDown], [wasPressed] and [wasReleased] for keys and mouse buttons,
+/// [isPressed], [wasPressed] and [wasReleased] for keys and mouse buttons,
 /// [fingers], [mousePosition], [scroll], [axis2] and [action], in any
 /// update.
 ///
@@ -155,7 +155,7 @@ final class Input {
 
   /// Whether a key or mouse button is held now. A touch or a pen down
   /// holds [MouseButton.left], as in Unity.
-  bool isDown(InputButton button) => switch (button) {
+  bool isPressed(InputButton button) => switch (button) {
     final KeyCode key => _keys.contains(key),
     final MouseButton m => _buttons & m.bit != 0,
   };
@@ -228,7 +228,7 @@ final class Input {
 
   bool _anyDown(List<InputButton> buttons) {
     for (var i = 0; i < buttons.length; i++) {
-      if (isDown(buttons[i])) return true;
+      if (isPressed(buttons[i])) return true;
     }
     return false;
   }
@@ -682,10 +682,10 @@ final class InputSettings {
 /// What a [Finger] is.
 enum FingerKind { touch, mouse, pen }
 
-/// A key or a mouse button: what [Input.isDown] and the others take.
+/// A key or a mouse button: what [Input.isPressed] and the others take.
 sealed class InputButton {}
 
-/// A mouse button. A touch counts as [left] in [Input.isDown].
+/// A mouse button. A touch counts as [left] in [Input.isPressed].
 enum MouseButton implements InputButton {
   left(1),
   right(2),
@@ -700,7 +700,7 @@ enum MouseButton implements InputButton {
 
 /// One touch, the mouse or a pen: from down to up, as Lean Touch's
 /// `LeanFinger`. The mouse is one finger for as long as it's over the
-/// view, pressed or not ([isDown]); each press starts it over.
+/// view, pressed or not ([isPressed]); each press starts it over.
 final class Finger {
   Finger._(this._input, this.id, this.kind);
 
@@ -839,7 +839,7 @@ final class Finger {
   /// For a tap: 1, or 2 for a double tap's second, and so on.
   int get tapCount => _tapCount;
 
-  bool get isDown => _down;
+  bool get isPressed => _down;
 
   /// Whether it may still tap (it's within the tap's slop and time, and
   /// wasn't long pressed), or, once up, whether it tapped.
@@ -958,7 +958,7 @@ final class InputAction {
   final String name;
   final List<InputButton> buttons;
 
-  bool get isDown => _input._anyDown(buttons);
+  bool get isPressed => _input._anyDown(buttons);
 
   /// Whether it went down this frame: one of its buttons did, and none was
   /// already held.
@@ -968,7 +968,7 @@ final class InputAction {
       final b = buttons[i];
       if (_input.wasPressed(b)) {
         pressed = true;
-      } else if (_input.isDown(b)) {
+      } else if (_input.isPressed(b)) {
         return false;
       }
     }
@@ -981,7 +981,7 @@ final class InputAction {
     var released = false;
     for (var i = 0; i < buttons.length; i++) {
       final b = buttons[i];
-      if (_input.isDown(b)) return false;
+      if (_input.isPressed(b)) return false;
       if (_input.wasReleased(b)) released = true;
     }
     return released;

@@ -234,7 +234,7 @@ void main() {
   });
 
   test('bad settings are refused, and moving out of the world throws', () {
-    expect(() => CharacterController(slopeLimit: -1), throwsArgumentError);
+    expect(() => CharacterController(slopeLimit: -1.deg), throwsArgumentError);
     expect(() => CharacterController(stepOffset: double.nan), throwsArgumentError);
     expect(() => CharacterController(skinWidth: 0), throwsArgumentError);
     expect(() => CharacterController(mass: -1), throwsArgumentError);

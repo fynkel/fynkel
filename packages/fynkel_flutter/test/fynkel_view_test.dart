@@ -568,7 +568,7 @@ void main() {
       expect(first.isDestroyed, isTrue, reason: 'its onDestroy ran (finding 7)');
       expect(second.world, isNot(same(world)));
       expect(find.text('game 1'), findsOneWidget);
-      expect(second.world.input.isDown(KeyCode.f5), isFalse, reason: 'the restart key is not the game\'s');
+      expect(second.world.input.isPressed(KeyCode.f5), isFalse, reason: 'the restart key is not the game\'s');
       await finish(tester, second.loaded);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));
@@ -602,7 +602,7 @@ void main() {
       await tester.pump();
       await tester.sendKeyDownEvent(LogicalKeyboardKey.f5);
       world.update(1 / 60);
-      expect(world.input.isDown(KeyCode.f5), isTrue);
+      expect(world.input.isPressed(KeyCode.f5), isTrue);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.f5);
     });
   });

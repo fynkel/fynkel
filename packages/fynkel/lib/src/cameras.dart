@@ -45,7 +45,7 @@ final class _Pose {
 /// close.get<VirtualCamera>()!.priority = 20; // the view blends to it
 /// ```
 final class VirtualCamera extends Behaviour {
-  VirtualCamera({this._priority = 0, this.fovY = 60, this.size = 5});
+  VirtualCamera({this._priority = 0, this.fovY = 60 * (math.pi / 180), this.size = 5});
 
   int _priority;
   int _order = 0;
@@ -58,7 +58,8 @@ final class VirtualCamera extends Behaviour {
     _order = ++_orders;
   }
 
-  /// The view's field of view, in degrees, while this is live ([Camera.fovY]).
+  /// The view's field of view, in radians, while this is live
+  /// ([Camera.fovY]): 60.deg unless set.
   double fovY;
 
   /// Half the view's height, while this is live and the camera is
@@ -256,7 +257,7 @@ final class Orbit extends _Rig {
       // Two fingers pinch rather than turn.
       var down = 0;
       for (final f in input.fingers) {
-        if (f.isDown) down++;
+        if (f.isPressed) down++;
       }
       if (down > 1) return;
       final d = finger.delta;
@@ -397,7 +398,7 @@ final class Cameras {
     }
     if (_virtual.isEmpty && _live == null && _shakes.isEmpty && _shaken == null) return;
 
-    final camera = _world.camera;
+    final camera = _world._cameraObject;
     _choose();
     final live = _live;
     if (live != null && camera != null && camera != live._owner) {

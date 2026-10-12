@@ -194,13 +194,30 @@ void main() {
     expect(world.first<Light>(), isNull);
   });
 
+  test('the world leaves out what is turned off, with its components, unless asked; a disabled behaviour is found', () {
+    final pool = world.add(GameObject()..active = false);
+    final waiting = pool.add(GameObject(components: [Health(1)]));
+    final out = world.add(GameObject(components: [Health(2)]));
+    expect(world.all<Health>().map((h) => h.hp), [2], reason: 'its parent is off');
+    expect(world.only<Health>().hp, 2);
+    expect(world.all<Health>(includeInactive: true).map((h) => h.hp), unorderedEquals([1, 2]));
+    expect(() => world.only<Health>(includeInactive: true), throwsStateError);
+    out.active = false;
+    expect(world.first<Health>(), isNull);
+    expect(world.first<Health>(includeInactive: true), isNotNull);
+    pool.active = true;
+    expect(world.only<Health>(), waiting.get<Health>());
+    waiting.get<Health>()!.enabled = false;
+    expect(world.all<Health>(), hasLength(1), reason: 'disabled, on an active object');
+  });
+
   test("the engine's components are changed in place, and the engine checks each change", () {
-    final eye = world.add(GameObject(components: [Camera(fovY: 50)]));
+    final eye = world.add(GameObject(components: [Camera(fovY: 50.deg)]));
     final camera = eye.get<Camera>()!;
-    camera.fovY = 70;
-    expect(camera.fovY, 70);
-    expect(() => camera.fovY = 500, throwsFynkel(FynkelStatus.invalidValue));
-    expect(camera.fovY, 70, reason: 'a refused change is undone');
+    camera.fovY = 70.deg;
+    expect(camera.fovY, 70.deg);
+    expect(() => camera.fovY = 500.deg, throwsFynkel(FynkelStatus.invalidValue));
+    expect(camera.fovY, 70.deg, reason: 'a refused change is undone');
 
     final box = world.add(
       GameObject(
@@ -209,16 +226,16 @@ void main() {
       ),
     );
     final ray = Ray(Vec3.zero, Vec3(0, 0, -1));
-    expect(world.raycast(ray)?.object, same(box));
+    expect(world.raycast(ray)?.gameObject, same(box));
     box.get<MeshRenderer>()!.mesh = null;
     expect(world.raycast(ray), isNull, reason: 'the engine has the change at once');
     box.get<MeshRenderer>()!.mesh = Mesh.cube();
-    expect(world.raycast(ray)?.object, same(box));
+    expect(world.raycast(ray)?.gameObject, same(box));
     box.removeComponent(box.get<MeshRenderer>()!);
     expect(world.raycast(ray), isNull);
     expect(box.has<MeshRenderer>(), isFalse);
     box.addComponent(cube());
-    expect(world.raycast(ray)?.object, same(box));
+    expect(world.raycast(ray)?.gameObject, same(box));
   });
 
   test('a behaviour added to a live object loads, starts the next frame and updates, without hiding it', () async {
@@ -364,10 +381,10 @@ void main() {
 
   test('a component the engine refuses on a live object is not put on, and can go elsewhere', () {
     final object = world.add(GameObject());
-    final camera = Camera(fovY: 500);
+    final camera = Camera(fovY: 500.deg);
     expect(() => object.addComponent(camera), throwsFynkel(FynkelStatus.invalidValue));
     expect(object.has<Camera>(), isFalse);
-    camera.fovY = 60;
+    camera.fovY = 60.deg;
     world.add(GameObject(components: [camera]));
     expect(world.first<Camera>(), same(camera));
   });

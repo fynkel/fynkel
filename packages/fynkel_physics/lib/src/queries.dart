@@ -16,9 +16,9 @@ enum QueryTriggers {
   collide,
 }
 
-/// Where a query hit a collider.
-final class PhysicsHit {
-  PhysicsHit._(this.collider, this.point, this.normal, this.distance);
+/// Where a query hit a collider (Unity's `RaycastHit`, for casts too).
+final class RaycastHit {
+  RaycastHit._(this.collider, this.point, this.normal, this.distance);
 
   final Collider collider;
 
@@ -36,9 +36,13 @@ final class PhysicsHit {
   /// The collider's object.
   GameObject get gameObject => collider.gameObject;
 
+  /// The rigidbody the collider moves with, if any
+  /// ([Collider.attachedRigidbody]).
+  Rigidbody? get rigidbody => collider.attachedRigidbody;
+
   @override
   String toString() =>
-      'PhysicsHit(${collider.runtimeType} on $gameObject at $point, normal $normal, distance $distance)';
+      'RaycastHit(${collider.runtimeType} on $gameObject at $point, normal $normal, distance $distance)';
 }
 
 extension _Queries on Physics {
@@ -97,14 +101,14 @@ extension _Queries on Physics {
       ..[6] = point2.z;
   }
 
-  PhysicsHit? _cast(Vec3 direction, LayerMask layers, QueryTriggers triggers) {
+  RaycastHit? _cast(Vec3 direction, LayerMask layers, QueryTriggers triggers) {
     _follow();
     _writeRay(Vec3.zero, direction);
     checkPhysics(fp_cast(_world, _shape, _sweep, layers.value, _hitTriggers(triggers), _hit));
     return _readHit(_hitFloats, _hitIds, 0);
   }
 
-  List<PhysicsHit> _castAll(Vec3 direction, LayerMask layers, QueryTriggers triggers) {
+  List<RaycastHit> _castAll(Vec3 direction, LayerMask layers, QueryTriggers triggers) {
     _follow();
     _writeRay(Vec3.zero, direction);
     checkPhysics(fp_cast_all(_world, _shape, _sweep, layers.value, _hitTriggers(triggers), _count));
@@ -135,10 +139,10 @@ extension _Queries on Physics {
 
   /// The hit [i] FpHits into [floats] and [ids], or null if its collider
   /// is 0.
-  PhysicsHit? _readHit(Pointer<Float> floats, Pointer<Uint64> ids, int i) {
+  RaycastHit? _readHit(Pointer<Float> floats, Pointer<Uint64> ids, int i) {
     if (ids[i * 6] == 0) return null;
     final f = i * 12;
-    return PhysicsHit._(
+    return RaycastHit._(
       _byKey[ids[i * 6 + 1]]!,
       Vec3(floats[f + 4], floats[f + 5], floats[f + 6]),
       Vec3(floats[f + 7], floats[f + 8], floats[f + 9]),
@@ -146,7 +150,7 @@ extension _Queries on Physics {
     );
   }
 
-  List<PhysicsHit> _readHits() {
+  List<RaycastHit> _readHits() {
     final count = _count.value;
     if (count == 0) return const [];
     if (count > _hitsCapacity) {
@@ -168,7 +172,7 @@ extension _Queries on Physics {
 extension PhysicsQueries on Physics {
   /// The first collider [ray] hits within [maxDistance], or null (Unity's
   /// `Physics.Raycast`).
-  PhysicsHit? raycast(
+  RaycastHit? raycast(
     Ray ray, {
     double maxDistance = double.infinity,
     LayerMask layers = LayerMask.all,
@@ -183,7 +187,7 @@ extension PhysicsQueries on Physics {
 
   /// Every collider [ray] hits within [maxDistance], nearest first
   /// (Unity's `Physics.RaycastAll`, sorted).
-  List<PhysicsHit> raycastAll(
+  List<RaycastHit> raycastAll(
     Ray ray, {
     double maxDistance = double.infinity,
     LayerMask layers = LayerMask.all,
@@ -198,7 +202,7 @@ extension PhysicsQueries on Physics {
 
   /// The first collider a sphere of [radius] hits, swept from [ray]'s
   /// origin along it (Unity's `Physics.SphereCast`).
-  PhysicsHit? sphereCast(
+  RaycastHit? sphereCast(
     Ray ray,
     double radius, {
     double maxDistance = double.infinity,
@@ -212,7 +216,7 @@ extension PhysicsQueries on Physics {
   }
 
   /// Every collider [sphereCast]'s sphere hits, nearest first.
-  List<PhysicsHit> sphereCastAll(
+  List<RaycastHit> sphereCastAll(
     Ray ray,
     double radius, {
     double maxDistance = double.infinity,
@@ -228,7 +232,7 @@ extension PhysicsQueries on Physics {
   /// The first collider a box hits, half [halfExtents] across, its middle
   /// at [center], turned by [orientation], swept along [direction] (Unity's
   /// `Physics.BoxCast`).
-  PhysicsHit? boxCast(
+  RaycastHit? boxCast(
     Vec3 center,
     Vec3 halfExtents,
     Vec3 direction, {
@@ -243,7 +247,7 @@ extension PhysicsQueries on Physics {
   }
 
   /// Every collider [boxCast]'s box hits, nearest first.
-  List<PhysicsHit> boxCastAll(
+  List<RaycastHit> boxCastAll(
     Vec3 center,
     Vec3 halfExtents,
     Vec3 direction, {
@@ -260,7 +264,7 @@ extension PhysicsQueries on Physics {
   /// The first collider a capsule hits, its half-spheres' centres at
   /// [point1] and [point2], swept along [direction] (Unity's
   /// `Physics.CapsuleCast`).
-  PhysicsHit? capsuleCast(
+  RaycastHit? capsuleCast(
     Vec3 point1,
     Vec3 point2,
     double radius,
@@ -276,7 +280,7 @@ extension PhysicsQueries on Physics {
   }
 
   /// Every collider [capsuleCast]'s capsule hits, nearest first.
-  List<PhysicsHit> capsuleCastAll(
+  List<RaycastHit> capsuleCastAll(
     Vec3 point1,
     Vec3 point2,
     double radius,

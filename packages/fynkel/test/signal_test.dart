@@ -204,7 +204,7 @@ void main() {
         signal.emit(1);
         await pumpEventQueue();
         expect(log, ['ear heard 1']);
-        expect(errors.single.object, same(bad));
+        expect(errors.single.gameObject, same(bad));
         expect(errors.single.error, isA<StateError>());
       },
     );
@@ -287,7 +287,7 @@ void main() {
     test('the code after it runs in the routines step, after the updates, with the value', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         final value = await signal.next;
         log.add('got $value in frame ${object.time.frame}');
       });
@@ -302,7 +302,7 @@ void main() {
     test('a value emitted in the frame it started waiting comes in the next frame', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         log.add('waiting in frame ${object.time.frame}');
         log.add('got ${await signal.next} in frame ${object.time.frame}');
       });
@@ -314,7 +314,7 @@ void main() {
     test('it holds while the routine is paused, and goes on when it\'s back', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         log.add('got ${await signal.next}');
       });
       frames(1);
@@ -331,7 +331,7 @@ void main() {
     test('stopping the routine unwinds it from there, and it stops listening', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      final routine = object.start(() async {
+      final routine = object.startRoutine(() async {
         try {
           await signal.next;
           log.add('never');
@@ -351,7 +351,7 @@ void main() {
     test('destroying the object stops it, and it stops listening', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         await signal.next;
         log.add('never');
       });
@@ -363,7 +363,7 @@ void main() {
     test('in a race, a timeout that wins drops the wait, and its listener', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         final won = await race<Object?>([signal.next, wait(1)]);
         log.add('race: $won');
       });
@@ -377,7 +377,7 @@ void main() {
     test('in a race, the signal that comes first wins', () {
       final signal = Signal<int>();
       final object = world.add(GameObject());
-      object.start(() async {
+      object.startRoutine(() async {
         log.add('race: ${await race<Object?>([signal.next, wait(1)])}');
       });
       frames(1);
@@ -464,7 +464,7 @@ void main() {
       final object = world.add(GameObject(components: [camera]));
       object.destroy();
       expect(
-        () => camera.fovY = 1,
+        () => camera.fovY = 1.deg,
         throwsA(
           isA<StateError>().having(
             (e) => e.message,

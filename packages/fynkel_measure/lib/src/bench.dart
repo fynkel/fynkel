@@ -130,7 +130,7 @@ List<String> _routines() {
     final world = World();
     final object = world.add(GameObject());
     for (var i = 0; i < 1000; i++) {
-      object.start(body);
+      object.startRoutine(body);
     }
     for (var i = 0; i < 20; i++) {
       world.update(1 / 120);
