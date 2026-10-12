@@ -147,12 +147,13 @@ void main() {
   });
 
   test("the status codes match the engine's", () {
-    expect(FynkelStatus.values.length, FyStatus.FY_STATUS_NO_TEXTURE + 1);
+    expect(FynkelStatus.values.length, FyStatus.FY_STATUS_DEVICE_LOST + 1);
     expect(FynkelStatus.noObject.index, FyStatus.FY_STATUS_NO_OBJECT);
     expect(FynkelStatus.timeout.index, FyStatus.FY_STATUS_TIMEOUT);
     expect(FynkelStatus.poisoned.index, FyStatus.FY_STATUS_POISONED);
     expect(FynkelStatus.unsupported.index, FyStatus.FY_STATUS_UNSUPPORTED);
     expect(FynkelStatus.noTexture.index, FyStatus.FY_STATUS_NO_TEXTURE);
+    expect(FynkelStatus.deviceLost.index, FyStatus.FY_STATUS_DEVICE_LOST);
   });
 
   group('hierarchy', () {

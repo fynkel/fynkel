@@ -388,8 +388,8 @@ impl Renderer {
     ///
     /// # Panics
     ///
-    /// If `rgba` isn't `width × height × 4` bytes, or a side is 0 or more
-    /// than 8192.
+    /// If `rgba` isn't `width × height × 4` bytes, or a side is 0. A side
+    /// over the device's limit (8192 on most) is halved until it fits.
     pub fn upload_texture(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
         self.textures.upload(key, space, width, height, rgba);
     }

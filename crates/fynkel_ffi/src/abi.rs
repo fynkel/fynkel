@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 15;
+pub const FY_ABI_VERSION: u32 = 16;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -495,9 +495,15 @@ pub extern "C" fn fy_world_new() -> *mut FyWorld {
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_world_free(world: *mut FyWorld) {
     if !world.is_null() {
-        // SAFETY: made by Arc::into_raw in fy_world_new; the caller gives
-        // up its reference.
-        drop(unsafe { Arc::from_raw(world) });
+        // A panic while dropping (in a part's own drop) must not unwind
+        // into the caller, which aborts: what's left leaks instead, and the
+        // message is the last error.
+        let _ = guard(|| {
+            // SAFETY: made by Arc::into_raw in fy_world_new; the caller
+            // gives up its reference.
+            drop(unsafe { Arc::from_raw(world) });
+            Ok(())
+        });
     }
 }
 
@@ -1336,8 +1342,12 @@ pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyM
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_mesh_free(mesh: *mut FyMesh) {
     if !mesh.is_null() {
-        // SAFETY: made by Box::into_raw in new_mesh; the caller gives it up.
-        drop(unsafe { Box::from_raw(mesh) });
+        // A panic here leaks the mesh rather than abort (fy_world_free).
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in new_mesh; the caller gives it up.
+            drop(unsafe { Box::from_raw(mesh) });
+            Ok(())
+        });
     }
 }
 
@@ -2049,9 +2059,13 @@ pub unsafe extern "C" fn fy_view_new_android(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_view_free(view: *mut FyView) {
     if !view.is_null() {
-        // SAFETY: made by Box::into_raw in new_view; the caller
-        // gives it up. In a pool, like creation, for what Metal autoreleases.
-        fynkel_present::autorelease_pool(|| drop(unsafe { Box::from_raw(view) }));
+        // A panic here leaks the view rather than abort (fy_world_free).
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in new_view; the caller gives
+            // it up. In a pool, like creation, for what Metal autoreleases.
+            fynkel_present::autorelease_pool(|| drop(unsafe { Box::from_raw(view) }));
+            Ok(())
+        });
     }
 }
 
@@ -2075,7 +2089,7 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let mut scene = view.worker.scene();
         clock.extract.run(&*view.world.lock()?, &mut scene, &mut clock.ops);
         let number = clock.last_number + 1;
-        view.worker.post(number, scene, &mut clock.ops).map_err(|e| Error::new(FyStatus::WorkerFailed, e))?;
+        view.worker.post(number, scene, &mut clock.ops)?;
         clock.last_number = number;
         // SAFETY: checked non-null above; the caller promises it's writable.
         unsafe { out_number.write(number) };
@@ -2119,7 +2133,7 @@ pub unsafe extern "C" fn fy_view_read(
         let read = frames.read(number, Duration::from_millis(timeout_ms.into()), rgba).map_err(|e| {
             // A frame that never came may be the worker's fault.
             if let Some(failure) = view.worker.failure() {
-                return Error::new(FyStatus::WorkerFailed, failure);
+                return failure;
             }
             let status = match e {
                 ReadError::Timeout { .. } => FyStatus::Timeout,
@@ -2148,7 +2162,23 @@ pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height:
         if width == 0 || height == 0 {
             return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
         }
-        view.worker.resize(width, height).map_err(|e| Error::new(FyStatus::WorkerFailed, e))
+        view.worker.resize(width, height)
+    })
+}
+
+/// For tests: destroys the view's GPU device, as a driver reset would.
+/// Soon after, `fy_view_frame` returns `FY_STATUS_DEVICE_LOST`.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_lose_device(view: *const FyView) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        view.worker.lose_device();
+        Ok(())
     })
 }
 

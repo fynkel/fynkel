@@ -16,7 +16,7 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 
 | # | PR | Fixes |
 | --- | --- | --- |
-| 1 | **Holes in Dart**: the view's frames never stop, a dispose inside an update waits for it, a kept `Physics` can't write into freed memory | R1 (and so F25), R2, R3 |
+| 1 | #69, **done**: **Holes in Dart**: the view's frames never stop, a dispose inside an update waits for it, a kept `Physics` can't write into freed memory | R1 (and so F25), R2, R3 |
 | 2 | **Holes in the engine**: GPU errors and a lost device, the physics thread's aliasing, panics in the freeing calls | R4, R5, R19 |
 | 3 | **The Flutter blocker and clean endings**: `FynkelApp` on `MaterialApp`; `World.dispose` destroys the roots first; a routine's microtasks always go to the world's queue | F1, F7, F29, B |
 | 4 | **The hierarchy in Dart**: parent, children and shown kept in Dart, changed only through `World` | R6, R16 |

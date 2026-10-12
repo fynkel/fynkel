@@ -216,6 +216,17 @@ impl Textures {
     /// the device's limit. `fynkel_load::ImageData` checks all of these.
     pub(crate) fn upload(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
         assert_eq!(rgba.len() as u64, width as u64 * height as u64 * 4, "{width} × {height} RGBA8 pixels");
+        // The loader allows 8192 a side, but a device may offer less: over
+        // its limit, the image is halved until it fits, not refused by the
+        // GPU (which would stop the view).
+        let limit = self.gpu.device.limits().max_texture_dimension_2d;
+        let shrunk;
+        let (width, height, rgba) = if width.max(height) > limit {
+            shrunk = shrink_to(limit, width, height, rgba);
+            (shrunk.0, shrunk.1, shrunk.2.as_slice())
+        } else {
+            (width, height, rgba)
+        };
         let device = &self.gpu.device;
         let mip_level_count = width.max(height).ilog2() + 1;
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
@@ -331,5 +342,56 @@ fn sampler_entry(binding: u32) -> wgpu::BindGroupLayoutEntry {
         visibility: wgpu::ShaderStages::FRAGMENT,
         ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
         count: None,
+    }
+}
+
+/// `rgba` halved (each pixel the mean of the 2 × 2 it covers) until no side
+/// is over `limit`. An odd side's last row or column is averaged with
+/// itself.
+fn shrink_to(limit: u32, mut width: u32, mut height: u32, rgba: &[u8]) -> (u32, u32, Vec<u8>) {
+    let mut pixels = rgba.to_vec();
+    while width.max(height) > limit {
+        let (w, h) = ((width / 2).max(1), (height / 2).max(1));
+        let mut half = vec![0; w as usize * h as usize * 4];
+        for y in 0..h {
+            for x in 0..w {
+                let ys = [(2 * y).min(height - 1), (2 * y + 1).min(height - 1)];
+                let xs = [(2 * x).min(width - 1), (2 * x + 1).min(width - 1)];
+                for c in 0..4 {
+                    let mut sum = 0u32;
+                    for sy in ys {
+                        for sx in xs {
+                            sum += u32::from(pixels[((sy * width + sx) * 4 + c) as usize]);
+                        }
+                    }
+                    half[((y * w + x) * 4 + c) as usize] = ((sum + 2) / 4) as u8;
+                }
+            }
+        }
+        (width, height, pixels) = (w, h, half);
+    }
+    (width, height, pixels)
+}
+
+#[cfg(test)]
+mod shrink_tests {
+    use super::shrink_to;
+
+    #[test]
+    fn an_image_over_the_limit_is_halved_until_it_fits() {
+        // 8 × 2: left half black, right half white.
+        let rgba: Vec<u8> = (0..16).flat_map(|i| if i % 8 < 4 { [0, 0, 0, 255] } else { [255; 4] }).collect();
+        let (width, height, pixels) = shrink_to(2, 8, 2, &rgba);
+        assert_eq!((width, height), (2, 1));
+        assert_eq!(pixels, [0, 0, 0, 255, 255, 255, 255, 255]);
+    }
+
+    #[test]
+    fn an_odd_side_keeps_its_last_row() {
+        // 3 × 1: 0, 100, 200 in red.
+        let rgba = [0, 0, 0, 0, 100, 0, 0, 0, 200, 0, 0, 0];
+        let (width, height, pixels) = shrink_to(1, 3, 1, &rgba);
+        assert_eq!((width, height), (1, 1));
+        assert_eq!(pixels[0], 50);
     }
 }

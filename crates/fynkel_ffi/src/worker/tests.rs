@@ -154,7 +154,7 @@ fn a_panic_on_the_worker_is_reported_to_the_next_post() {
         thread::sleep(Duration::from_millis(1));
     }
     let error = worker.post(8, RenderScene::default(), &mut Vec::new()).unwrap_err();
-    assert_eq!(error, "the render worker panicked: boom in frame 7");
+    assert_eq!(error, Error::new(FyStatus::WorkerFailed, "the render worker panicked: boom in frame 7"));
     drop(worker); // joins a thread that already ended
 }
 
@@ -179,8 +179,60 @@ fn a_resize_the_target_refuses_stops_the_worker_with_a_clear_message() {
     while worker.failure().is_none() && std::time::Instant::now() < deadline {
         std::thread::yield_now();
     }
-    assert_eq!(worker.failure().as_deref(), Some("couldn't resize the view to 9 × 9: no room for 9 × 9"));
+    assert_eq!(
+        worker.failure(),
+        Some(Error::new(FyStatus::WorkerFailed, "couldn't resize the view to 9 × 9: no room for 9 × 9"))
+    );
     assert_eq!(worker.resize(10, 10), Err(worker.failure().unwrap()), "later calls report it");
+}
+
+/// Waits until the worker has stopped, and returns why.
+fn failure(worker: &Worker) -> Error {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    loop {
+        if let Some(failure) = worker.failure() {
+            return failure;
+        }
+        assert!(Instant::now() < deadline, "the worker goes on");
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
+#[test]
+fn a_lost_device_stops_the_worker_with_its_own_status() {
+    let gpu = gpu();
+    let (target, frames) = headless(&gpu);
+    let worker = start(&gpu, target);
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    frames.read(1, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]).unwrap();
+    worker.lose_device();
+    let failure = failure(&worker);
+    assert_eq!(failure, Error::new(FyStatus::DeviceLost, "the GPU device was lost"));
+    assert_eq!(worker.post(2, RenderScene::default(), &mut Vec::new()), Err(failure));
+    drop(worker);
+
+    // A new device draws again.
+    let gpu = Gpu::headless().expect("a new device");
+    let (target, frames) = headless(&gpu);
+    let worker = start(&gpu, target);
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    assert_eq!(frames.read(1, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]), Ok(1));
+}
+
+#[test]
+fn a_gpu_error_stops_the_worker_rather_than_panic() {
+    let gpu = gpu();
+    let worker = start(&gpu, headless(&gpu).0);
+    // Mapped at creation, a buffer's size must be a multiple of 4.
+    let _ = gpu.device.create_buffer(&wgpu::BufferDescriptor {
+        label: None,
+        size: 3,
+        usage: wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: true,
+    });
+    let failure = failure(&worker);
+    assert_eq!(failure.status, FyStatus::DeviceLost);
+    assert!(failure.message.starts_with("the GPU reported an error"), "{}", failure.message);
 }
 
 /// A target that notes the thread it draws on, and when it is dropped.
