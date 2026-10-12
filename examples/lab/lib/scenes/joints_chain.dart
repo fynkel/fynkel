@@ -31,7 +31,7 @@ class JointsChainScene extends LabScene {
   @override
   Vec3 get target => Vec3(0, 2.4, 0);
 
-  late final GameObject camera = find('camera')!;
+  late final Camera camera = find('camera')!.get<Camera>()!;
   final links = <GameObject>[];
   GameObject? weight;
 
@@ -107,10 +107,10 @@ class JointsChainScene extends LabScene {
     anchor: Vec3(0, 0.5, 0),
     axis: Vec3(0, 1, 0),
     swingAxis: Vec3(1, 0, 0),
-    lowTwistLimit: const SoftJointLimit(limit: -180),
-    highTwistLimit: const SoftJointLimit(limit: 180),
-    swing1Limit: const SoftJointLimit(limit: 180),
-    swing2Limit: const SoftJointLimit(limit: 180),
+    lowTwistLimit: SoftJointLimit(limit: -180.deg),
+    highTwistLimit: SoftJointLimit(limit: 180.deg),
+    swing1Limit: SoftJointLimit(limit: 180.deg),
+    swing2Limit: SoftJointLimit(limit: 180.deg),
   );
 
   @override
@@ -123,13 +123,13 @@ class JointsChainScene extends LabScene {
 
   /// Takes hold of the body under [point], where the ray meets it.
   void grab(ViewPoint point) {
-    final hit = physics.raycast(camera.screenToRay(point));
+    final hit = physics.raycast(camera.screenPointToRay(point));
     final body = hit?.collider.attachedRigidbody;
     if (hit == null || body == null || body.isKinematic) return;
     let();
     hand.gameObject.position = hit.point;
     // Dragged across the plane facing the camera, through where it was hit.
-    _dragPlane = Plane(camera.forward, hit.point);
+    _dragPlane = Plane(camera.gameObject.forward, hit.point);
     // A spring that swings what it holds 5 times a second, as Box2D's mouse
     // joint does: stiff for what it lifts, the weight and the chain, so it
     // follows within a few centimetres, and damped to 0.7 of critical, so
@@ -151,7 +151,7 @@ class JointsChainScene extends LabScene {
   void drag(ViewPoint point) {
     final plane = _dragPlane;
     if (held == null || plane == null) return;
-    final at = camera.screenToPlane(point, plane);
+    final at = camera.screenPointToPlane(point, plane);
     if (at != null) hand.movePosition(at);
   }
 

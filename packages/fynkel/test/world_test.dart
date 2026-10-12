@@ -45,7 +45,7 @@ void main() {
       rotation: Quat.axisAngle(Vec3.right, 0.5),
       scale: Vec3.one * 2,
     );
-    final camera = Camera(fovY: 45, near: 0.5, far: 50, clearColor: Color.rgb(0.25, 0.5, 0.75));
+    final camera = Camera(fovY: 45.deg, near: 0.5, far: 50, clearColor: Color.rgb(0.25, 0.5, 0.75));
     final light = Light.ambient(color: Color.rgb(1, 0.5, 0), intensity: 0.25);
     final material = Material(color: Color(0xFFE0613A), metallic: 0.25, roughness: 0.75);
     final renderer = MeshRenderer(Mesh.sphere(), material);
@@ -73,7 +73,12 @@ void main() {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
     final before = world.add(GameObject());
     expect(
-      () => world.add(GameObject(transform: Transform(), components: [Camera(fovY: 500)])),
+      () => world.add(
+        GameObject(
+          transform: Transform(),
+          components: [Camera(fovY: 500.deg)],
+        ),
+      ),
       throwsFynkel(FynkelStatus.invalidValue, 'fov_y'),
     );
     final after = world.add(GameObject());

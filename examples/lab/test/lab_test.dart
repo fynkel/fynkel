@@ -82,7 +82,7 @@ void main() {
     ViewPoint? on;
     for (var y = 0.0; y < 300 && on == null; y += 2) {
       final p = ViewPoint(200, y, width: 400, height: 300);
-      if (world.raycast(camera.screenToRay(p))?.object == crate) on = p;
+      if (world.raycast(camera.screenPointToRay(p))?.gameObject == crate) on = p;
     }
     world.input.fingerDown(1, on!.x, on.y);
     world.update(1 / 60);
@@ -106,7 +106,7 @@ void main() {
     for (var x = 0.0; x < 400 && padAt == null; x += 2) {
       for (var y = 0.0; y < 300 && padAt == null; y += 4) {
         final q = ViewPoint(x, y, width: p.width, height: p.height);
-        if (world.raycast(camera.screenToRay(q))?.object == pad) padAt = q;
+        if (world.raycast(camera.screenPointToRay(q))?.gameObject == pad) padAt = q;
       }
     }
     for (var i = 0; i < 2; i++) {
@@ -225,7 +225,7 @@ void main() {
     expect(scene.readout.value, contains('the ray hits: orange cube'));
 
     control('camera draws layer 1').onChanged(false);
-    expect(world.camera!.get<Camera>()!.cullingMask, LayerMask.except([blueLayer]));
+    expect(world.camera!.cullingMask, LayerMask.except([blueLayer]));
     expect(scene.blue.layer, blueLayer);
 
     // A line and a sphere's 96 a frame; the box's 12 stay two seconds.
@@ -411,9 +411,9 @@ void main() {
     frames(60);
     scene.controls.whereType<Button>().first.onPressed();
     frames(20);
-    expect(scene.hinge.angle.abs(), greaterThan(20), reason: 'pushed open');
+    expect(scene.hinge.angle.inDegrees.abs(), greaterThan(20), reason: 'pushed open');
     frames(600);
-    expect(scene.hinge.angle.abs(), lessThan(3), reason: 'its spring swung it shut');
+    expect(scene.hinge.angle.inDegrees.abs(), lessThan(3), reason: 'its spring swung it shut');
     expect(scene.door.position.y, closeTo(1.1, 0.05), reason: 'still on its hinge');
     for (final (i, link) in scene.links.indexed) {
       expect(link.position.y, closeTo(3.8 - i * 0.4, 0.05), reason: 'link ${i + 1} hangs where it was');
@@ -498,7 +498,7 @@ void main() {
       ViewPoint? on;
       for (var y = 0.0; y < 300 && on == null; y += 2) {
         final p = ViewPoint(200, y, width: 400, height: 300);
-        if (world.physics.raycast(scene.camera.screenToRay(p))?.gameObject == weight) on = p;
+        if (world.physics.raycast(scene.camera.screenPointToRay(p))?.gameObject == weight) on = p;
       }
       world.input.fingerDown(1, on!.x, on.y);
       frames(1);
@@ -519,7 +519,7 @@ void main() {
 
     test('the held weight follows the finger closely, going round', () {
       final weight = scene.weight!;
-      final p = scene.camera.worldToScreen(weight.position)!;
+      final p = scene.camera.worldToScreenPoint(weight.position)!;
       world.input.fingerDown(1, p.x, p.y);
       frames(1);
       // A circle 40 px across, once round in two seconds, near where it hangs.

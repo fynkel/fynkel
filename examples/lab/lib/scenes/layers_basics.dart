@@ -29,7 +29,7 @@ class LayersBasicsScene extends LabScene {
     orange = add(shape('orange cube', Mesh.cube(), const Color(0xFFE0613A), at: Vec3(1.5, 0.5, 0)));
   }
 
-  Camera get _lens => world.camera!.get<Camera>()!;
+  Camera get _lens => world.camera!;
 
   @override
   void onUpdate() {
@@ -40,7 +40,7 @@ class LayersBasicsScene extends LabScene {
     debug.line(ray.origin, end, color: const Color(0xFFFFE000));
     if (hit != null) debug.sphere(hit.point, 0.15, color: const Color(0xFFFFE000));
     readout.value = [
-      'the ray hits: ${hit?.object.name ?? 'nothing'}',
+      'the ray hits: ${hit?.gameObject.name ?? 'nothing'}',
       'it hits ${layers == LayerMask.all ? 'every layer' : 'all but layer $blueLayer'}',
       'the camera draws ${_lens.cullingMask == LayerMask.all ? 'every layer' : 'all but layer $blueLayer'}',
       'debug lines this frame: ${debug.count}',

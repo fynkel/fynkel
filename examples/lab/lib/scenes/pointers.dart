@@ -23,7 +23,7 @@ class PointersScene extends LabScene {
   @override
   Vec3 get eye => Vec3(0, 6, 8);
 
-  late final GameObject camera = find('camera')!;
+  late final Camera camera = find('camera')!.get<Camera>()!;
 
   @override
   void build() {
@@ -52,8 +52,8 @@ class PointersScene extends LabScene {
     readout.value = [
       if (input.fingers.isEmpty) 'no fingers',
       for (final f in input.fingers)
-        '${f.kind.name} ${f.id} over ${f.over?.object.name ?? 'nothing'}'
-            '${f.isDown ? ', started over ${f.startedOver?.object.name ?? 'nothing'}' : ''}',
+        '${f.kind.name} ${f.id} over ${f.over?.gameObject.name ?? 'nothing'}'
+            '${f.isPressed ? ', started over ${f.startedOver?.gameObject.name ?? 'nothing'}' : ''}',
       'clicks: ${world.all<Pad>().map((p) => p.clicks).join(' · ')}   table: ${world.only<Table>().clicks}',
     ].join('\n');
   }
@@ -83,7 +83,7 @@ class Table extends GameObject {
   @override
   bool onClick(Finger finger) {
     clicks++;
-    ancestor<LabScene>()?.log.add('table: a click on ${finger.over?.object.name} bubbled up to me');
+    ancestor<LabScene>()?.log.add('table: a click on ${finger.over?.gameObject.name} bubbled up to me');
     return true;
   }
 }
@@ -162,7 +162,7 @@ class Pad extends GameObject {
     if (!takes) return false;
     _scene.log.add('$name: long press');
     _paint.color = const Color(0xFFD04848);
-    start(() async {
+    startRoutine(() async {
       await wait(1);
       _paint.color = color;
     });
@@ -170,7 +170,7 @@ class Pad extends GameObject {
   }
 
   void _spinOnce() {
-    start(() async {
+    startRoutine(() async {
       for (var t = 0.0; t < 0.5; t += time.delta) {
         _spin = t / 0.5 * 2 * math.pi;
         _place();
@@ -197,7 +197,7 @@ class Draggable extends Behaviour {
   @override
   void onDrag(Finger finger) {
     final scene = ancestor<PointersScene>()!;
-    final ray = scene.camera.screenToRay(finger.position);
+    final ray = scene.camera.screenPointToRay(finger.position);
     // Where the ray meets the plane at the crate's height.
     if (ray.direction.y.abs() < 1e-6) return;
     final t = (_height - ray.origin.y) / ray.direction.y;
@@ -208,6 +208,6 @@ class Draggable extends Behaviour {
 
   @override
   void onDragEnd(Finger finger) => ancestor<PointersScene>()?.log.add(
-    '${gameObject.name}: dropped, ${finger.over?.object == gameObject ? 'under' : 'not under'} the finger',
+    '${gameObject.name}: dropped, ${finger.over?.gameObject == gameObject ? 'under' : 'not under'} the finger',
   );
 }

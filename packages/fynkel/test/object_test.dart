@@ -42,12 +42,12 @@ void main() {
     robot.hits = 3;
 
     final hit = world.raycast(Ray(Vec3(1, 0, 0), Vec3(0, 0, -1)))!;
-    expect(hit.object.name, 'arm');
-    expect(hit.object.ancestor<Robot>(), same(robot));
-    expect(hit.object.ancestor<Robot>()!.hits, 3);
+    expect(hit.gameObject.name, 'arm');
+    expect(hit.gameObject.ancestor<Robot>(), same(robot));
+    expect(hit.gameObject.ancestor<Robot>()!.hits, 3);
 
     final arm = robot.find('arm')!;
-    expect(arm, same(hit.object));
+    expect(arm, same(hit.gameObject));
     expect(robot.find('arm'), same(arm), reason: 'the same instance every time');
     expect(robot.children.single, same(arm));
     expect(arm.parent, same(robot));
@@ -66,7 +66,7 @@ void main() {
     light
       ..name = 'moon'
       ..get<Light>()!.kind = LightKind.ambient
-      ..addComponent(Camera(fovY: 40));
+      ..addComponent(Camera(fovY: 40.deg));
     light.removeComponent(light.get<Camera>()!);
     expect(light.get<Camera>(), isNull);
 
@@ -195,12 +195,12 @@ void main() {
   test('a refused component leaves the object unadded, to be fixed and added again', () {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
 
-    final camera = GameObject(components: [Camera(fovY: 500)]);
+    final camera = GameObject(components: [Camera(fovY: 500.deg)]);
     expect(() => world.add(camera), throwsFynkel(FynkelStatus.invalidValue, 'fov_y'));
     expect(camera.isAlive, isFalse);
-    camera.get<Camera>()!.fovY = 60;
+    camera.get<Camera>()!.fovY = 60.deg;
     world.add(camera);
-    expect(camera.get<Camera>()!.fovY, 60);
+    expect(camera.get<Camera>()!.fovY, 60.deg);
   });
 
   test('an inactive object and everything below it are not hit, and each keeps its own flag', () {
@@ -213,18 +213,18 @@ void main() {
     final robot = world.add(Robot(transform: Transform(position: Vec3(-1, 0, -3))));
     final arm = robot.find('arm')!;
     final ray = Ray(Vec3.zero, Vec3(0, 0, -1));
-    expect(world.raycast(ray)!.object, same(arm));
+    expect(world.raycast(ray)!.gameObject, same(arm));
 
     robot.active = false;
-    expect(world.raycast(ray)!.object, same(behind));
+    expect(world.raycast(ray)!.gameObject, same(behind));
     expect((robot.active, robot.activeInHierarchy), (false, false));
     expect((arm.active, arm.activeInHierarchy), (true, false), reason: 'hidden by its parent, its own flag kept');
 
     arm.active = false;
     robot.active = true;
-    expect(world.raycast(ray)!.object, same(behind), reason: 'the arm is still off');
+    expect(world.raycast(ray)!.gameObject, same(behind), reason: 'the arm is still off');
     arm.active = true;
-    expect(world.raycast(ray)!.object, same(arm));
+    expect(world.raycast(ray)!.gameObject, same(arm));
   });
 
   test('an object can be made inactive before it is added, and so can its children', () {
@@ -239,6 +239,6 @@ void main() {
     expect(robot.find('arm')!.active, isTrue);
     expect(world.raycast(Ray(Vec3.zero, Vec3(0, 0, -1))), isNull);
     robot.active = true;
-    expect(world.raycast(Ray(Vec3.zero, Vec3(0, 0, -1)))!.object.name, 'arm');
+    expect(world.raycast(Ray(Vec3.zero, Vec3(0, 0, -1)))!.gameObject.name, 'arm');
   });
 }

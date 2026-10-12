@@ -270,7 +270,7 @@ void main() {
       frames(2);
       await pumpEventQueue();
       expect(errors.map((e) => '${e.error}'), ['Bad state: bad']);
-      expect(errors.single.object, same(thing));
+      expect(errors.single.gameObject, same(thing));
       expect(bad.isStopped, isTrue);
       expect(values, [0.25, 0.5]);
     });
@@ -330,7 +330,7 @@ void main() {
 
   group('in a routine', () {
     test('await goes on in the routines step of the frame it ends', () {
-      thing.start(() async {
+      thing.startRoutine(() async {
         await thing.moveTo(const Vec3(1, 0, 0), seconds: 0.5);
         log.add('moved, frame ${world.time.frame}, x ${thing.position.x}');
       });
@@ -340,7 +340,7 @@ void main() {
 
     test('a stopped routine unwinds from it, and the motion goes on', () {
       late Motion m;
-      final r = thing.start(() async {
+      final r = thing.startRoutine(() async {
         try {
           await (m = thing.moveTo(const Vec3(1, 0, 0), seconds: 1));
         } finally {
@@ -356,7 +356,7 @@ void main() {
 
     test('race stops the motion that loses', () {
       late Motion m;
-      thing.start(() async {
+      thing.startRoutine(() async {
         await race([m = thing.moveTo(const Vec3(1, 0, 0), seconds: 2), wait(0.5)]);
         log.add('won');
       });

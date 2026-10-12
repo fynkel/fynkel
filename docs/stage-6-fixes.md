@@ -20,7 +20,7 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 | 2 | #70, **done**: **Holes in the engine**: GPU errors and a lost device, the physics thread's aliasing, panics in the freeing calls | R4, R5, R19 |
 | 3 | #71, **done**: **The Flutter blocker and clean endings**: `FynkelApp` on `MaterialApp`; `World.dispose` destroys the roots first; a routine's microtasks always go to the world's queue | F1, F7, F29, B |
 | 4 | #72, **done**: **The hierarchy in Dart**: parent, children and shown kept in Dart, changed only through `World` | R6, R16 |
-| 5 | **Moving as Unity**: `position` is the world's, `translate`/`rotate` take a `Space`, `parent =` keeps the world position | A2, A5 |
+| 5 | #73, **done**: **Moving as Unity**: `position` is the world's, `translate`/`rotate` take a `Space`, `parent =` keeps the world position | A2, A5 |
 | 6 | **The other API decisions**: radians with `.deg`, `isPressed`, the routine words, the camera's helpers on `Camera`, `gameObject` and `RaycastHit`, `world.all` skipping hidden objects | A1, A3, A4, A6, A7, A8 |
 | 7 | **Only what moved**: the core's moved log, physics follows only it; per-frame lists that keep their storage | R7, F9, R9 |
 | 8 | **Drawing at scale**: lighter built-in sphere, plus capsule, cylinder and quad meshes; culling; sort keys computed once; a material looked up once per batch; a warning when lights are dropped | S, F13, R8, R12's warning |

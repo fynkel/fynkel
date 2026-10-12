@@ -64,9 +64,9 @@ class InputScene extends LabScene {
     readout.value = [
       if (fingers.isEmpty) 'no fingers',
       for (final f in fingers)
-        '${f.kind.name} ${f.id}${f.isDown ? ' down ${secs(f.age)}' : ''} at ${_at(f.position)}'
+        '${f.kind.name} ${f.id}${f.isPressed ? ' down ${secs(f.age)}' : ''} at ${_at(f.position)}'
             '${f.isDragging ? ', dragging ${f.velocity.length.round()} px/s' : ''}',
-      'move ${_vec(input.axis2('move'))}   jump ${input.action('jump').isDown ? 'held' : '–'}   '
+      'move ${_vec(input.axis2('move'))}   jump ${input.action('jump').isPressed ? 'held' : '–'}   '
           'dial ×${_size.toStringAsFixed(2)}, ${(_turn * 180 / math.pi).round()}°',
     ].join('\n');
   }

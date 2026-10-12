@@ -25,7 +25,7 @@ class JointsBridgeScene extends LabScene {
   @override
   Vec3 get target => Vec3(0, 1.5, 0);
 
-  late final GameObject camera = find('camera')!;
+  late final Camera camera = find('camera')!.get<Camera>()!;
   final planks = <Plank>[];
   final crates = <GameObject>[];
 
@@ -100,7 +100,7 @@ class JointsBridgeScene extends LabScene {
   void onStart() {
     super.onStart();
     on(input.onTap, (finger) {
-      final hit = physics.raycast(camera.screenToRay(finger.position));
+      final hit = physics.raycast(camera.screenPointToRay(finger.position));
       if (hit == null) return;
       dropCrate(Vec3(hit.point.x, 4.5, 0));
     });

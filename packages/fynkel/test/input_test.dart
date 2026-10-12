@@ -41,7 +41,7 @@ void main() {
       step();
       expect(heard, ['down 1']);
       final finger = input.fingers.single;
-      expect(finger.isDown, isTrue);
+      expect(finger.isPressed, isTrue);
       expect(finger.isTap, isTrue, reason: 'it may still tap');
       expect(finger.position, const ViewPoint(50, 50, width: 200, height: 100));
 
@@ -50,7 +50,7 @@ void main() {
       step();
       expect(heard, ['move 1 2.0,1.0', 'tap 1 x1', 'up 1'], reason: 'within the slop');
       expect(input.fingers, isEmpty);
-      expect(finger.isDown, isFalse);
+      expect(finger.isPressed, isFalse);
       expect(finger.isTap, isTrue, reason: 'once up, whether it tapped');
       expect(finger.age, closeTo(frame, 1e-9), reason: 'down one frame, then up');
     });
@@ -359,7 +359,7 @@ void main() {
       step();
       final mouse = input.fingers.single;
       expect(mouse.kind, FingerKind.mouse);
-      expect(mouse.isDown, isFalse);
+      expect(mouse.isPressed, isFalse);
       expect(input.mousePosition, const ViewPoint(10, 20, width: 200, height: 100));
       expect(heard, isEmpty, reason: 'appearing is no move');
 
@@ -371,8 +371,8 @@ void main() {
       input.fingerDown(-1, 15, 20, kind: FingerKind.mouse);
       step();
       expect(input.fingers.single, same(mouse));
-      expect(mouse.isDown, isTrue);
-      expect(input.isDown(MouseButton.left), isTrue);
+      expect(mouse.isPressed, isTrue);
+      expect(input.isPressed(MouseButton.left), isTrue);
       expect(input.wasPressed(MouseButton.left), isTrue);
 
       input.fingerUp(-1, 15, 20);
@@ -380,7 +380,7 @@ void main() {
       expect(heard, ['down -1', 'tap -1 x1', 'up -1']);
       expect(input.fingers.single, same(mouse), reason: 'still over the view');
       expect(input.wasReleased(MouseButton.left), isTrue);
-      expect(input.isDown(MouseButton.left), isFalse);
+      expect(input.isPressed(MouseButton.left), isFalse);
 
       input.leave(-1);
       step();
@@ -394,7 +394,7 @@ void main() {
       final mouse = input.fingers.single;
       expect(mouse.button, MouseButton.right);
       expect(input.wasPressed(MouseButton.right), isTrue);
-      expect(input.isDown(MouseButton.left), isFalse);
+      expect(input.isPressed(MouseButton.left), isFalse);
 
       input.fingerMove(-1, 50, 50, buttons: 2 | 4);
       step();
@@ -405,7 +405,7 @@ void main() {
       input.fingerMove(-1, 50, 50, buttons: 2);
       step();
       expect(input.wasReleased(MouseButton.middle), isTrue);
-      expect(input.isDown(MouseButton.right), isTrue);
+      expect(input.isPressed(MouseButton.right), isTrue);
 
       final taps = <Finger>[];
       input.onTap.listen(taps.add);
@@ -432,11 +432,11 @@ void main() {
       expect(input.wasPressed(MouseButton.left), isFalse);
       input.fingerUp(1, 50, 50);
       step();
-      expect(input.isDown(MouseButton.left), isTrue);
+      expect(input.isPressed(MouseButton.left), isTrue);
       input.fingerUp(2, 60, 50);
       step();
       expect(input.wasReleased(MouseButton.left), isTrue);
-      expect(input.isDown(MouseButton.left), isFalse);
+      expect(input.isPressed(MouseButton.left), isFalse);
     });
 
     test('mousePosition is the mouse, or else the first finger down', () {
@@ -469,19 +469,19 @@ void main() {
       input.keyDown(KeyCode.w);
       step();
       expect(heard, ['key down KeyPress(w)']);
-      expect(input.isDown(KeyCode.w), isTrue);
+      expect(input.isPressed(KeyCode.w), isTrue);
       expect(input.wasPressed(KeyCode.w), isTrue);
 
       input.keyDown(KeyCode.w);
       step();
       expect(input.wasPressed(KeyCode.w), isFalse);
-      expect(input.isDown(KeyCode.w), isTrue);
+      expect(input.isPressed(KeyCode.w), isTrue);
       expect(heard, hasLength(1));
 
       input.keyUp(KeyCode.w);
       step();
       expect(input.wasReleased(KeyCode.w), isTrue);
-      expect(input.isDown(KeyCode.w), isFalse);
+      expect(input.isPressed(KeyCode.w), isFalse);
       expect(heard.last, 'key up KeyPress(w)');
     });
 
@@ -492,7 +492,7 @@ void main() {
       step();
       expect(input.wasPressed(KeyCode.space), isTrue);
       expect(input.wasReleased(KeyCode.space), isTrue);
-      expect(input.isDown(KeyCode.space), isFalse);
+      expect(input.isPressed(KeyCode.space), isFalse);
     });
 
     test('carry the modifiers held', () {
@@ -562,7 +562,7 @@ void main() {
       input.keyDown(KeyCode.space);
       step();
       expect(jump.wasPressed, isTrue);
-      expect(jump.isDown, isTrue);
+      expect(jump.isPressed, isTrue);
 
       final fire = input.bindAction('fire', const [KeyCode.f, MouseButton.left]);
       expect(input.action('fire'), same(fire));
@@ -575,7 +575,7 @@ void main() {
       input.keyUp(KeyCode.f);
       step();
       expect(fire.wasReleased, isFalse, reason: 'the mouse still holds it');
-      expect(fire.isDown, isTrue);
+      expect(fire.isPressed, isTrue);
       input.fingerUp(-1, 5, 5);
       step();
       expect(fire.wasReleased, isTrue);

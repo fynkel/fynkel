@@ -231,7 +231,7 @@ class FollowCamera extends GameObject {
   FollowCamera(GameObject player)
     : super(
         components: [
-          Camera(fovY: 50),
+          Camera(fovY: 50.deg),
           Follow(player, offset: Vec3(0, 7, 9)),
           LookAt(player, offset: Vec3(0, 1, 0)),
         ],

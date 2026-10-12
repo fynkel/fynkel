@@ -43,10 +43,10 @@ class JointsCharacterScene extends LabScene {
         anchor: Vec3(0, 0.5, 0),
         axis: Vec3(0, 1, 0),
         swingAxis: Vec3(1, 0, 0),
-        lowTwistLimit: const SoftJointLimit(limit: -180),
-        highTwistLimit: const SoftJointLimit(limit: 180),
-        swing1Limit: const SoftJointLimit(limit: 180),
-        swing2Limit: const SoftJointLimit(limit: 180),
+        lowTwistLimit: SoftJointLimit(limit: -180.deg),
+        highTwistLimit: SoftJointLimit(limit: 180.deg),
+        swing1Limit: SoftJointLimit(limit: 180.deg),
+        swing2Limit: SoftJointLimit(limit: 180.deg),
       ),
     );
   }
@@ -106,9 +106,9 @@ class JointsCharacterScene extends LabScene {
     }),
     Slider(
       'the limited arm\'s swing (°)',
-      () => joint.swing1Limit.limit,
+      () => joint.swing1Limit.limit.inDegrees,
       (v) {
-        final limit = SoftJointLimit(limit: v.roundToDouble());
+        final limit = SoftJointLimit(limit: v.roundToDouble().deg);
         joint
           ..swing1Limit = limit
           ..swing2Limit = limit;

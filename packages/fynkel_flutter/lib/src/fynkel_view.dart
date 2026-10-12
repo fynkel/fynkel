@@ -273,7 +273,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         exception: error.error,
         stack: error.stackTrace,
         library: 'fynkel',
-        context: ErrorDescription('in ${error.object ?? 'the world'}'),
+        context: ErrorDescription('in ${error.gameObject ?? 'the world'}'),
       ),
     );
     if (_gameErrors.length == 100) _gameErrors.removeAt(0);

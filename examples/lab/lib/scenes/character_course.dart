@@ -29,7 +29,7 @@ class CharacterCourseScene extends LabScene {
   Vec3 get target => Vec3(0, 0, 0);
 
   late final Player player;
-  late final GameObject camera = find('camera')!;
+  late final Camera camera = find('camera')!.get<Camera>()!;
   final _coins = <GameObject>[];
   var _picked = 0;
 
@@ -95,7 +95,7 @@ class CharacterCourseScene extends LabScene {
   void onStart() {
     super.onStart();
     on(input.onTap, (finger) {
-      final hit = physics.raycast(camera.screenToRay(finger.position), triggers: QueryTriggers.ignore);
+      final hit = physics.raycast(camera.screenPointToRay(finger.position), triggers: QueryTriggers.ignore);
       if (hit == null) return;
       player.walker.target = hit.point;
       log.add('walking to ${hit.collider.gameObject.name}');
@@ -114,7 +114,12 @@ class CharacterCourseScene extends LabScene {
 
   @override
   List<Control> get controls => [
-    Slider('slope limit (°)', () => player.controller.slopeLimit, (v) => player.controller.slopeLimit = v, max: 80),
+    Slider(
+      'slope limit (°)',
+      () => player.controller.slopeLimit.inDegrees,
+      (v) => player.controller.slopeLimit = v.deg,
+      max: 80,
+    ),
     Slider('step offset (m)', () => player.controller.stepOffset, (v) => player.controller.stepOffset = v, max: 0.8),
     Button('back to the start', () {
       player.walker.target = null;

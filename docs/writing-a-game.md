@@ -91,7 +91,8 @@ class Cube extends GameObject {
 - **Always call `super`** in the `on…` methods.
 
 Y is up, and a camera looks down its −Z. Lengths are metres and angles
-radians.
+radians everywhere, the camera's and the joints' too: `90.deg` writes
+one in degrees, and `angle.inDegrees` reads one back.
 
 ## 3. Objects
 
@@ -162,7 +163,8 @@ class Yard extends GameObject {
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
-  names or tags.
+  names or tags. As Unity's, they leave out objects that are turned off
+  (and the components on them) unless `includeInactive: true`.
 
 ## 4. Behaviours
 
@@ -240,8 +242,9 @@ class Beacon extends GameObject {
   One material can be shared by many objects; change it and all of them
   change.
 - **Lights**: `Light.sun` (from the object's forward) and `Light.ambient`.
-- **Camera**: `fovY`, `near`, `far`, `clearColor`, `orthographic` with a
-  `size`, and a `cullingMask` (§13). The view draws from the active one.
+- **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
+  `orthographic` with a `size`, and a `cullingMask` (§13). The view draws
+  from the active one, `world.camera` (Unity's `Camera.main`).
 
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
@@ -391,13 +394,13 @@ class Spawner extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    start(() async {
+    startRoutine(() async {
       for (var wave = 1; ; wave++) {
         for (var i = 0; i < wave * 3; i++) {
           add(Crate(Vec3(i.toDouble(), 0.5, -5)));
           await wait(0.4);
         }
-        await until(() => world.all<Crate>().isEmpty);
+        await waitUntil(() => world.all<Crate>().isEmpty);
         await wait(2);
       }
     });
@@ -408,11 +411,11 @@ class Spawner extends GameObject {
     clock.value = true;
     try {
       return await race([
-        start(() async {
-          await until(() => score.value >= 10);
+        startRoutine(() async {
+          await waitUntil(() => score.value >= 10);
           return true;
         }),
-        start(() async {
+        startRoutine(() async {
           await wait(10);
           return false;
         }),
@@ -423,25 +426,27 @@ class Spawner extends GameObject {
   }
 
   Future<void> bonusRound() async {
-    final won = await start(beatTheClock); // a routine returns a value
+    final won = await startRoutine(beatTheClock); // a routine returns a value
     if (won) score.value += 100;
   }
 }
 ```
 
-- **`start(() async {...})`** runs one, on an object or behaviour. It
+- **`startRoutine(() async {...})`** runs one, on an object or behaviour
+  (Unity's `StartCoroutine`); `stopAllRoutines()` stops the ones it
+  started. It
   **stops by itself** when its object is destroyed (or its behaviour
   removed), and **pauses** while its object is hidden or the behaviour
   isn't enabled.
 - **Waits**: `await nextFrame`, `await fixedStep` (right after the next
   fixed step's `onFixedUpdate` calls), `await wait(seconds)`
-  (`unscaled: true` to go on while paused), `await until(() => test)`,
-  `await whileTrue(() => test)`, a tween, a signal's `next`, or any
+  (`unscaled: true` to go on while paused), `await waitUntil(() => test)`,
+  `await waitWhile(() => test)`, a tween, a signal's `next`, or any
   `Future`.
 - **`race([...])`** gives the first to end and stops the rest (routines,
-  waits and tweens); **`all([...])`**
+  waits and tweens); **`waitAll([...])`**
   waits for every one. `race([x, wait(3)])` is a timeout.
-- `start` returns a **`Routine`**: `stop()`, `isRunning`, and it's a
+- `startRoutine` returns a **`Routine`**: `stop()`, `isRunning`, and it's a
   future of its result. When it's stopped, its `finally` blocks run, and
   routines started inside it stop too.
 - An error a routine doesn't catch goes to `world.errors`.
@@ -498,7 +503,7 @@ class Walker extends GameObject {
     translate(Vec3(move.x, 0, -move.y) * (4 * time.delta));
     if (input.action('jump').wasPressed) jump(); // space
     if (input.wasPressed(KeyCode.escape)) time.scale = time.scale == 0 ? 1 : 0;
-    if (input.isDown(MouseButton.right)) rotate(Vec3.up, time.delta);
+    if (input.isPressed(MouseButton.right)) rotate(Vec3.up, time.delta);
   }
 
   void jump() => moveBy(Vec3(0, 1, 0), seconds: 0.25, yoyo: true, loops: 2);
@@ -544,8 +549,8 @@ class Button3D extends GameObject {
 ```
 
 - **A `Finger`** is one touch, or the mouse: `position`, `startPosition`,
-  `delta`, `totalDelta`, `velocity`, `age`, `tapCount`, `isDown`,
-  `isDragging`, and `over` (what's under it in the world: `object`,
+  `delta`, `totalDelta`, `velocity`, `age`, `tapCount`, `isPressed`,
+  `isDragging`, and `over` (what's under it in the world: `gameObject`,
   `point`, `normal`). `input.fingers` lists them.
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
@@ -617,7 +622,7 @@ class CameraRig extends GameObject {
     close = add(
       GameObject(components: [VirtualCamera(priority: 1), Follow(_player, offset: Vec3(0, 3, 6), damping: 0.2), LookAt(_player)]),
     ).get<VirtualCamera>()!;
-    wide = add(GameObject(components: [VirtualCamera(fovY: 70), Orbit(_player, distance: 15)])).get<VirtualCamera>()!;
+    wide = add(GameObject(components: [VirtualCamera(fovY: 70.deg), Orbit(_player, distance: 15)])).get<VirtualCamera>()!;
   }
 
   void zoomOut() {
@@ -634,10 +639,11 @@ class CameraRig extends GameObject {
   turns with a drag and zooms with a pinch or the wheel. A rig works on a
   plain camera too, without a `VirtualCamera`.
 - `world.cameras.shake(strength)`, `setBlend(blend, from:, to:)`, `live`.
-- **Between the screen and the world**: `camera.screenToRay(point)`,
-  `screenToPlane(point, Plane.ground)` and `worldToScreen(point)`, on the
-  camera's object (`world.camera`); `world.raycast(ray)` gives what a ray
-  hits first.
+- **Between the screen and the world**: on a `Camera`, such as
+  `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
+  Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
+  gives what a ray hits first (a `RayHit`: `gameObject`, `point`,
+  `normal`, `distance`).
 - **A camera that follows a physics body** sees each fixed step's jump:
   a body steps 50 or 100 times a second, the screen draws at 60 or 120,
   and the camera moves smoothly, so the body seems to jitter. Give the
@@ -820,8 +826,8 @@ GameObject wall(Vec3 at) => GameObject(
 );
 ```
 
-A hit is a `PhysicsHit`: `point`, `normal`, `distance`, `collider` and
-`gameObject`. As Unity's, a ray doesn't hit what it starts inside, and a
+A hit is a `RaycastHit`, as Unity's: `point`, `normal`, `distance`,
+`collider`, `gameObject` and `rigidbody`. As Unity's, a ray doesn't hit what it starts inside, and a
 query that misses allocates nothing. `collider.raycast(ray)` and
 `collider.closestPoint(point)` ask one collider. `world.raycast` still
 finds what's drawn, with no colliders: use it for taps.
@@ -887,7 +893,7 @@ they hit.
 (`height:`, `radius:`, `center:`) that the game moves with
 `move(motion)`, and that goes as far as the world lets it. It slides
 along walls, walks up steps up to `stepOffset` (0.3 m) and slopes up to
-`slopeLimit` (45°), and stops at anything higher or steeper. Gravity is
+`slopeLimit` (`45.deg`), and stops at anything higher or steeper. Gravity is
 the game's to add, as in Unity, or `simpleMove(speed)` adds it. `move`
 returns `CollisionFlags`: `flags.has(CollisionFlags.below)` (the
 ground), `.sides`, `.above`; `isGrounded` and `velocity` say how the last
@@ -930,11 +936,11 @@ GameObject player() => GameObject(
 
 **Joints** hold a rigidbody to another, or to the world: `FixedJoint`
 holds them as one, `HingeJoint` lets them turn about an `axis` (with
-`limits`, a `motor` and a `spring`, in degrees, each on with `useLimits`,
+`limits`, a `motor` and a `spring`, in radians, each on with `useLimits`,
 `useMotor`, `useSpring`), `CharacterJoint` lets them turn every way, as
 a ball in a socket (twisting about its `axis` within `lowTwistLimit` and
 `highTwistLimit`, and swinging within `swing1Limit` and `swing2Limit`,
-each a `SoftJointLimit` in degrees; 180° frees it), and `SpringJoint`
+each a `SoftJointLimit`; `180.deg` frees it), and `SpringJoint`
 pulls them back together when they are further apart than `maxDistance`. A joint is a behaviour on
 the object with the rigidbody; `connectedBody` is the other one (none for
 the world), and `anchor` is where it holds, in the object's own space. It
@@ -962,7 +968,7 @@ class Door extends GameObject with JointBreaks {
             anchor: Vec3(-0.5, 0, 0),
             axis: Vec3(0, 1, 0),
             useLimits: true,
-            limits: const JointLimits(min: -90, max: 90),
+            limits: JointLimits(min: -90.deg, max: 90.deg),
             useSpring: true,
             spring: const JointSpring(spring: 20, damper: 8),
             breakForce: 2000,
@@ -1153,15 +1159,19 @@ multibody joints).
 | `FixedUpdate`, `Time.fixedDeltaTime` | `onFixedUpdate`, `time.fixedDelta` |
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
-| `StartCoroutine`, `yield return new WaitForSeconds(1)` | `start(() async {...})`, `await wait(1)` |
-| `FindObjectOfType<T>()`, `FindObjectsOfType<T>()` | `world.first<T>()`, `world.all<T>()` |
+| `StartCoroutine`, `StopAllCoroutines`, `yield return new WaitForSeconds(1)` | `startRoutine(() async {...})`, `stopAllRoutines()`, `await wait(1)` |
+| `WaitUntil`, `WaitWhile` | `await waitUntil(...)`, `await waitWhile(...)` |
+| `FindObjectOfType<T>()`, `FindObjectsByType<T>()` | `world.first<T>()`, `world.all<T>()` (`includeInactive:` too) |
+| Degrees (`Quaternion.Euler(0, 90, 0)`, joint limits, `fieldOfView`) | radians, with `90.deg`: `Quat.euler(0, 90.deg, 0)` |
+| `Camera.main`, `ScreenPointToRay`, `WorldToScreenPoint` | `world.camera`, `screenPointToRay`, `worldToScreenPoint` |
+| `RaycastHit` | `RaycastHit` (physics) and `RayHit` (`world.raycast`), each with `gameObject` |
 | `transform.position`, `rotation`, `localPosition`, `localRotation`, `localScale`, `lossyScale` | the same, on the object or a behaviour |
 | `transform.Translate(v)`, `Rotate(axis, angle)`, `Space.World` | `translate(v)`, `rotate(axis, angle)` (radians), `relativeTo: Space.world` |
 | `transform.parent = p`, `SetParent(p, false)` | `parent = p`, `setParent(p, worldPositionStays: false)` |
 | `transform.Find("name")` | `find('name')` |
 | `GetComponentInParent<T>()` | `getInParent<T>()`, or `ancestor<T>()` for an object |
 | C# events, `UnityEvent` | `Signal<T>` and `on(signal, ...)` |
-| `Input.GetKeyDown(KeyCode.Space)` | `input.wasPressed(KeyCode.space)` |
+| `Input.GetKeyDown(KeyCode.Space)`, `Input.GetKey` | `input.wasPressed(KeyCode.space)`, `input.isPressed` |
 | `IPointerClickHandler` | `onClick` |
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
@@ -1189,6 +1199,21 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - Angles are radians everywhere: `Camera.fovY`, `VirtualCamera.fovY`,
+    the joints' limits, motors, springs, `angle` and `velocity`, and
+    `CharacterController.slopeLimit` were degrees. Write `60.deg`.
+  - `isDown` is `isPressed`, on `input`, an action and a finger.
+  - Routines: `start` is `startRoutine`, `until` is `waitUntil`,
+    `whileTrue` is `waitWhile`, `all` is `waitAll`; `stopAllRoutines` is
+    new.
+  - `world.camera` is the `Camera`, not its object (`.gameObject`).
+    `screenToRay`, `screenToPlane` and `worldToScreen` moved from the
+    object to the `Camera`, as `screenPointToRay`, `screenPointToPlane`
+    and `worldToScreenPoint`.
+  - `RayHit.object` and `ObjectError.object` are `gameObject`; physics'
+    `PhysicsHit` is `RaycastHit`, with `rigidbody`.
+  - `world.all`, `first` and `only` leave out objects that are turned off
+    unless `includeInactive: true`.
   - `position` and `rotation` are the world's, as Unity's; what they were
     (relative to the parent) is now `localPosition` and `localRotation`.
     `scale` is `localScale`, and `worldPosition` is `position`. `moveTo`,

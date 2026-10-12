@@ -7,8 +7,8 @@ part of 'physics.dart';
 // when it holds harder than its break force or torque: it's taken off its
 // object, which hears of it with [JointBreaks].
 
-/// A hinge's limits, in degrees from where it was joined, -180 to 180
-/// (Unity's `JointLimits`).
+/// A hinge's limits, in radians from where it was joined, -pi to pi
+/// (Unity's `JointLimits`): `JointLimits(min: -45.deg, max: 90.deg)`.
 final class JointLimits {
   const JointLimits({this.min = 0, this.max = 0});
 
@@ -16,7 +16,7 @@ final class JointLimits {
   final double max;
 }
 
-/// One of a [CharacterJoint]'s limits, in degrees (Unity's
+/// One of a [CharacterJoint]'s limits, in radians (Unity's
 /// `SoftJointLimit`; its bounciness and contact distance aren't here).
 final class SoftJointLimit {
   const SoftJointLimit({this.limit = 0});
@@ -25,7 +25,7 @@ final class SoftJointLimit {
 }
 
 /// A hinge's motor (Unity's `JointMotor`): it turns the hinge at
-/// [targetVelocity] degrees a second, with no more than [force] newton
+/// [targetVelocity] radians a second, with no more than [force] newton
 /// metres.
 final class JointMotor {
   const JointMotor({this.targetVelocity = 0, this.force = 0});
@@ -35,7 +35,7 @@ final class JointMotor {
 }
 
 /// A hinge's spring (Unity's `JointSpring`): it turns the hinge to
-/// [targetPosition] degrees with [spring] newton metres a radian, slowed
+/// [targetPosition] radians with [spring] newton metres a radian, slowed
 /// by [damper] per radian a second.
 final class JointSpring {
   const JointSpring({this.spring = 0, this.damper = 0, this.targetPosition = 0});
@@ -281,13 +281,13 @@ final class HingeJoint extends Joint {
   set spring(JointSpring value) => _respec(() => _spring = value);
   JointSpring _spring;
 
-  /// How far it's turned from where it was joined, in degrees, -180 to
-  /// 180: its body about [axis], from the connected one. 0 while it isn't
+  /// How far it's turned from where it was joined, in radians, -pi to pi:
+  /// its body about [axis], from the connected one. 0 while it isn't
   /// joined.
-  double get angle => _id == 0 ? 0 : _readState().angle * 180 / math.pi;
+  double get angle => _id == 0 ? 0 : _readState().angle;
 
-  /// How fast it turns, in degrees a second; 0 while it isn't joined.
-  double get velocity => _id == 0 ? 0 : _readState().velocity * 180 / math.pi;
+  /// How fast it turns, in radians a second; 0 while it isn't joined.
+  double get velocity => _id == 0 ? 0 : _readState().velocity;
 
   @override
   int get _kind => FpJointKind.FP_JOINT_KIND_HINGE;
@@ -296,8 +296,8 @@ final class HingeJoint extends Joint {
   void _check() {
     if (_axis.length < 1e-6) throw ArgumentError.value(_axis, 'axis', "can't be (0, 0, 0)");
     final JointLimits(:min, :max) = _limits;
-    if (!(min >= -180 && max <= 180 && min <= max)) {
-      throw ArgumentError.value('$min to $max', 'limits', 'must be -180 to 180 degrees, the min no more than the max');
+    if (!(min >= -_halfTurn && max <= _halfTurn && min <= max)) {
+      throw ArgumentError.value('$min to $max', 'limits', 'must be -pi to pi radians, the min no more than the max');
     }
     final JointMotor(:targetVelocity, :force) = _motor;
     if (!targetVelocity.isFinite || !(force >= 0) || !force.isFinite) {
@@ -312,20 +312,19 @@ final class HingeJoint extends Joint {
   @override
   void _writeSpec(FpJointSpec spec, Rigidbody body) {
     super._writeSpec(spec, body);
-    const radians = math.pi / 180;
     final scale = body.gameObject.worldTransform.scale;
     spec.axis.set(Joint._scaled(_axis, scale).normalized);
     spec
       ..use_limits = _useLimits ? 1 : 0
-      ..limit_min = _limits.min * radians
-      ..limit_max = _limits.max * radians
+      ..limit_min = _limits.min
+      ..limit_max = _limits.max
       ..use_motor = _useMotor ? 1 : 0
-      ..motor_velocity = _motor.targetVelocity * radians
+      ..motor_velocity = _motor.targetVelocity
       ..motor_force = _motor.force
       ..use_spring = _useSpring ? 1 : 0
       ..spring = _spring.spring
       ..damper = _spring.damper
-      ..target = _spring.targetPosition * radians;
+      ..target = _spring.targetPosition;
   }
 }
 
@@ -402,9 +401,9 @@ final class SpringJoint extends Joint {
 /// (Unity's `CharacterJoint`): a chain's link, a rope's, a ragdoll's limb.
 /// It twists about [axis] between [lowTwistLimit] and [highTwistLimit],
 /// and swings [swing1Limit] each way about [swingAxis] and [swing2Limit]
-/// each way about the axis square to both. A limit at 180° (-180° for the
-/// low twist) frees it that way: all four there make a free ball joint.
-/// Unity's defaults: twist -20° to 70°, swing 40°.
+/// each way about the axis square to both, all in radians. A limit at pi
+/// (-pi for the low twist) frees it that way: all four there make a free
+/// ball joint. Unity's defaults: twist -20.deg to 70.deg, swing 40.deg.
 final class CharacterJoint extends Joint {
   CharacterJoint({
     super.connectedBody,
@@ -412,10 +411,10 @@ final class CharacterJoint extends Joint {
     super.connectedAnchor,
     this._axis = const Vec3(1, 0, 0),
     this._swingAxis = const Vec3(0, 1, 0),
-    this._lowTwistLimit = const SoftJointLimit(limit: -20),
-    this._highTwistLimit = const SoftJointLimit(limit: 70),
-    this._swing1Limit = const SoftJointLimit(limit: 40),
-    this._swing2Limit = const SoftJointLimit(limit: 40),
+    this._lowTwistLimit = const SoftJointLimit(limit: -20 * _degree),
+    this._highTwistLimit = const SoftJointLimit(limit: 70 * _degree),
+    this._swing1Limit = const SoftJointLimit(limit: 40 * _degree),
+    this._swing2Limit = const SoftJointLimit(limit: 40 * _degree),
     super.enableCollision,
     super.breakForce,
     super.breakTorque,
@@ -442,7 +441,8 @@ final class CharacterJoint extends Joint {
 
   Vec3 _swingAxis;
 
-  /// How far it twists each way, from where it was joined: -180° to 180°.
+  /// How far it twists each way, from where it was joined, in radians: -pi
+  /// to pi.
   SoftJointLimit get lowTwistLimit => _lowTwistLimit;
   set lowTwistLimit(SoftJointLimit value) => _respec(() => _lowTwistLimit = value);
   SoftJointLimit _lowTwistLimit;
@@ -452,7 +452,7 @@ final class CharacterJoint extends Joint {
   SoftJointLimit _highTwistLimit;
 
   /// How far it swings each way about [swingAxis], and about the third
-  /// axis: 0° to 180°.
+  /// axis, in radians: 0 to pi.
   SoftJointLimit get swing1Limit => _swing1Limit;
   set swing1Limit(SoftJointLimit value) => _respec(() => _swing1Limit = value);
   SoftJointLimit _swing1Limit;
@@ -475,34 +475,37 @@ final class CharacterJoint extends Joint {
   void _check() {
     _checkAxes(_axis, _swingAxis);
     final (low, high) = (_lowTwistLimit.limit, _highTwistLimit.limit);
-    if (!(low >= -180 && high <= 180 && low <= high)) {
+    if (!(low >= -_halfTurn && high <= _halfTurn && low <= high)) {
       throw ArgumentError.value(
         '$low to $high',
         'twist limits',
-        'must be -180 to 180 degrees, the low no more than the high',
+        'must be -pi to pi radians, the low no more than the high',
       );
     }
     for (final (name, swing) in [('swing1Limit', _swing1Limit.limit), ('swing2Limit', _swing2Limit.limit)]) {
-      if (!(swing >= 0 && swing <= 180)) throw ArgumentError.value(swing, name, 'must be 0 to 180 degrees');
+      if (!(swing >= 0 && swing <= _halfTurn)) throw ArgumentError.value(swing, name, 'must be 0 to pi radians');
     }
   }
 
   @override
   void _writeSpec(FpJointSpec spec, Rigidbody body) {
     super._writeSpec(spec, body);
-    const radians = math.pi / 180;
     final scale = body.gameObject.worldTransform.scale;
     spec.axis.set(Joint._scaled(_axis, scale).normalized);
     spec.swing_axis.set(Joint._scaled(_swingAxis, scale).normalized);
     spec
       ..use_limits = 1
-      ..limit_min = _lowTwistLimit.limit * radians
-      ..limit_max = _highTwistLimit.limit * radians
+      ..limit_min = _lowTwistLimit.limit
+      ..limit_max = _highTwistLimit.limit
       ..use_swing_limits = 1
-      ..swing1 = _swing1Limit.limit * radians
-      ..swing2 = _swing2Limit.limit * radians;
+      ..swing1 = _swing1Limit.limit
+      ..swing2 = _swing2Limit.limit;
   }
 }
+
+// Half a turn, with room for pi read back from 32-bit floats; a degree.
+const _halfTurn = math.pi + 1e-6;
+const _degree = math.pi / 180;
 
 void _checkSpring(double spring, double damper) {
   if (!(spring >= 0) || !spring.isFinite) throw ArgumentError.value(spring, 'spring', 'must be finite and 0 or more');

@@ -48,7 +48,7 @@ class OrbitCamera extends GameObject {
   OrbitCamera(GameObject character)
     : super(
         components: [
-          Camera(fovY: 50, clearColor: Color.rgb(0.55, 0.75, 0.95)),
+          Camera(fovY: 50.deg, clearColor: Color.rgb(0.55, 0.75, 0.95)),
           Orbit(
             character,
             offset: target,

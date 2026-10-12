@@ -133,9 +133,9 @@ class BowlingGame extends GameObject {
     message.value = '${speed.toStringAsFixed(1)} m/s';
     final velocity = Vec3(math.sin(angle), 0, -math.cos(angle)) * speed;
     ball = add(Ball(waiting.position, velocity));
-    start(() async {
+    startRoutine(() async {
       final rolled = time.sinceStart;
-      await until(() => _ballDone || time.sinceStart - rolled > 8);
+      await waitUntil(() => _ballDone || time.sinceStart - rolled > 8);
       // The pins fall for a while after the ball has gone.
       await wait(2);
       _count();
@@ -213,7 +213,7 @@ class Bowler extends Behaviour {
       if (_placing == null) return;
       game.trail.value = [...game.trail.value.skip(game.trail.value.length > 24 ? 1 : 0), _at(finger.position)];
       if (_placing!) {
-        final hit = physics.raycast(world.camera!.screenToRay(finger.position), layers: LayerMask.of([lane]));
+        final hit = physics.raycast(world.camera!.screenPointToRay(finger.position), layers: LayerMask.of([lane]));
         if (hit != null) game.aimX = hit.point.x;
       } else {
         final way = finger.totalDelta;
@@ -224,7 +224,7 @@ class Bowler extends Behaviour {
       if (_placing == false) _letGo = true;
       _placing = null;
       game.aim(null);
-      start(() async {
+      startRoutine(() async {
         await wait(0.3);
         if (_placing == null) game.trail.value = const [];
       });
@@ -456,7 +456,11 @@ class Pin extends GameObject {
 /// Behind the foul line, looking down the lane; it goes after the ball
 /// while it rolls, and stops short of the pins.
 class ChaseCamera extends GameObject {
-  ChaseCamera(this.game) : super(name: 'camera', components: [Camera(fovY: 45)]);
+  ChaseCamera(this.game)
+    : super(
+        name: 'camera',
+        components: [Camera(fovY: 45.deg)],
+      );
 
   final BowlingGame game;
   static final home = Vec3(0, 1.3, 2.8);

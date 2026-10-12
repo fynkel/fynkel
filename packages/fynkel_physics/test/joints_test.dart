@@ -125,7 +125,7 @@ void main() {
     // so its angle starts at 10°.
     ball.get<Rigidbody>()!.isKinematic = true;
     world.update(step);
-    expect(hinge.angle, closeTo(0, 1e-3));
+    expect(hinge.angle.inDegrees, closeTo(0, 1e-3));
     hinge.enabled = false;
     final pull = Quat.axisAngle(const Vec3(0, 0, 1), 10 * math.pi / 180);
     ball.transform = Transform(position: const Vec3(0, 5, 0) + pull.rotate(const Vec3(0, -2, 0)), rotation: pull);
@@ -133,63 +133,69 @@ void main() {
     hinge
       ..connectedAnchor = const Vec3(0, 5, 0)
       ..enabled = true;
-    expect(hinge.angle, closeTo(0, 1e-3), reason: 'joined as it is now');
+    expect(hinge.angle.inDegrees, closeTo(0, 1e-3), reason: 'joined as it is now');
     // Measured from the bottom, with the connected anchor at the pivot.
     final crossings = <double>[];
-    var last = hinge.angle;
+    var last = hinge.angle.inDegrees;
     for (var i = 1; i <= 300; i++) {
       world.update(step);
-      final a = hinge.angle;
+      final a = hinge.angle.inDegrees;
       if (last > -10 && a <= -10) crossings.add(i * step);
       last = a;
     }
     final period = crossings[1] - crossings[0];
     expect(period, closeTo(2 * math.pi * math.sqrt(2 / 9.81), 0.05));
-    expect(hinge.velocity.abs(), lessThan(100));
+    expect(hinge.velocity.inDegrees.abs(), lessThan(100));
   });
 
   test("a hinge stops at its limits, and they change on the joint as it is", () {
     final world = newWorld();
-    final (d, hinge) = door(world, doorHinge(useLimits: true, limits: const JointLimits(min: -30, max: 90)));
+    final (d, hinge) = door(
+      world,
+      doorHinge(
+        useLimits: true,
+        limits: JointLimits(min: -30.deg, max: 90.deg),
+      ),
+    );
     final body = d.get<Rigidbody>()!;
     body
       ..angularVelocity = const Vec3(0, 3, 0)
       ..linearVelocity = const Vec3(0, 0, -1.5);
     frames(world, 1);
-    expect(hinge.angle, closeTo(90, 3));
-    hinge.limits = const JointLimits(min: -30, max: 45);
+    expect(hinge.angle.inDegrees, closeTo(90, 3));
+    hinge.limits = JointLimits(min: -30.deg, max: 45.deg);
     frames(world, 1);
-    expect(hinge.angle, closeTo(45, 3), reason: 'pushed back to the new limit');
+    expect(hinge.angle.inDegrees, closeTo(45, 3), reason: 'pushed back to the new limit');
     hinge.useLimits = false;
     body
       ..angularVelocity = const Vec3(0, 3, 0)
       ..linearVelocity = d.rotation.rotate(const Vec3(0, 0, -1.5));
     frames(world, 0.5);
-    expect(hinge.angle.abs(), greaterThan(90));
+    expect(hinge.angle.abs(), greaterThan(90.deg));
   });
 
   test("a hinge's motor turns it at its target velocity", () {
     final world = newWorld();
-    final (_, hinge) = door(world, doorHinge(useMotor: true, motor: const JointMotor(targetVelocity: 90, force: 100)));
+    final (_, hinge) = door(world, doorHinge(useMotor: true, motor: JointMotor(targetVelocity: 90.deg, force: 100)));
     frames(world, 1);
-    expect(hinge.velocity, closeTo(90, 1));
-    hinge.motor = const JointMotor(targetVelocity: -45, force: 100);
+    expect(hinge.velocity.inDegrees, closeTo(90, 1));
+    hinge.motor = JointMotor(targetVelocity: -45.deg, force: 100);
     frames(world, 1);
-    expect(hinge.velocity, closeTo(-45, 1));
+    expect(hinge.velocity.inDegrees, closeTo(-45, 1));
     hinge.useMotor = false;
-    hinge.motor = const JointMotor(targetVelocity: 90, force: 0);
+    hinge.motor = JointMotor(targetVelocity: 90.deg, force: 0);
     hinge.useMotor = true;
-    final before = hinge.velocity;
+    final before = hinge.velocity.inDegrees;
     frames(world, 0.5);
-    expect(hinge.velocity, closeTo(before, 1), reason: 'no force: it keeps turning as it was');
+    expect(hinge.velocity.inDegrees, closeTo(before, 1), reason: 'no force: it keeps turning as it was');
   });
 
   test("a hinge's spring turns it to its target position", () {
     final world = newWorld();
-    final spring = JointSpring(spring: 50, damper: 10, targetPosition: 45);
+    final spring = JointSpring(spring: 50, damper: 10, targetPosition: 45.deg);
     final (_, hinge) = door(world, doorHinge(useSpring: true, spring: spring));
     frames(world, 6);
-    expect(hinge.angle, closeTo(45, 1));
+    expect(hinge.angle.inDegrees, closeTo(45, 1));
   });
 
   test('a spring joint keeps its bodies as far apart as they were, and stretches by its weight', () {
@@ -239,12 +245,12 @@ void main() {
 
   test('a character joint with its limits at 180° is a ball: it swings every way about its anchor, and twists', () {
     final world = newWorld();
-    const free = SoftJointLimit(limit: 180);
+    final free = SoftJointLimit(limit: 180.deg);
     final joint = CharacterJoint(
       anchor: const Vec3(0, 0.5, 0),
       axis: const Vec3(0, 1, 0),
       swingAxis: const Vec3(1, 0, 0),
-      lowTwistLimit: const SoftJointLimit(limit: -180),
+      lowTwistLimit: SoftJointLimit(limit: -180.deg),
       highTwistLimit: free,
       swing1Limit: free,
       swing2Limit: free,
@@ -277,7 +283,7 @@ void main() {
       axis: const Vec3(0, 1, 0),
       swingAxis: const Vec3(1, 0, 0),
     );
-    expect((joint.lowTwistLimit.limit, joint.highTwistLimit.limit, joint.swing1Limit.limit), (-20, 70, 40));
+    expect((joint.lowTwistLimit.limit, joint.highTwistLimit.limit, joint.swing1Limit.limit), (-20.deg, 70.deg, 40.deg));
     final rod = hangRod(world, joint);
     world.update(step);
     double swing() {
@@ -292,7 +298,7 @@ void main() {
     }
 
     expect(swing(), inInclusiveRange(35, 43), reason: 'stopped at 40°');
-    joint.swing2Limit = const SoftJointLimit(limit: 180);
+    joint.swing2Limit = SoftJointLimit(limit: 180.deg);
     expect(swing(), greaterThan(55), reason: 'freed, it swings on');
     expect(joint.isJoined, isTrue);
   });
@@ -416,21 +422,26 @@ void main() {
     expect(() => FixedJoint(breakForce: 0), throwsArgumentError);
     expect(() => FixedJoint(breakTorque: double.nan), throwsArgumentError);
     expect(() => HingeJoint(axis: Vec3.zero), throwsArgumentError);
-    expect(() => HingeJoint(limits: const JointLimits(min: 10, max: -10)), throwsArgumentError);
-    expect(() => HingeJoint(limits: const JointLimits(min: -200)), throwsArgumentError);
+    expect(
+      () => HingeJoint(
+        limits: JointLimits(min: 10.deg, max: -10.deg),
+      ),
+      throwsArgumentError,
+    );
+    expect(() => HingeJoint(limits: JointLimits(min: -200.deg)), throwsArgumentError);
     expect(() => HingeJoint(motor: const JointMotor(force: -1)), throwsArgumentError);
     expect(() => HingeJoint(spring: const JointSpring(damper: -1)), throwsArgumentError);
     expect(() => SpringJoint(spring: -1), throwsArgumentError);
     expect(() => SpringJoint(minDistance: 2, maxDistance: 1), throwsArgumentError);
     expect(() => CharacterJoint(swingAxis: const Vec3(-3, 0, 0)), throwsArgumentError);
     expect(() => CharacterJoint(swingAxis: Vec3.zero), throwsArgumentError);
-    expect(() => CharacterJoint(swing1Limit: const SoftJointLimit(limit: 181)), throwsArgumentError);
-    expect(() => CharacterJoint(lowTwistLimit: const SoftJointLimit(limit: 80)), throwsArgumentError);
+    expect(() => CharacterJoint(swing1Limit: SoftJointLimit(limit: 181.deg)), throwsArgumentError);
+    expect(() => CharacterJoint(lowTwistLimit: SoftJointLimit(limit: 80.deg)), throwsArgumentError);
     expect(() => CharacterJoint().axis = const Vec3(0, 1, 0), throwsArgumentError, reason: 'along its swing axis');
     final hinge = HingeJoint();
     expect(() => hinge.axis = Vec3.zero, throwsArgumentError);
-    expect(() => hinge.limits = const JointLimits(max: 181), throwsArgumentError);
-    expect(hinge.angle, 0);
+    expect(() => hinge.limits = JointLimits(max: 181.deg), throwsArgumentError);
+    expect(hinge.angle.inDegrees, 0);
     expect(hinge.currentForce, Vec3.zero);
   });
 }

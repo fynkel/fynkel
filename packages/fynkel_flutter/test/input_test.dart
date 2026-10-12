@@ -112,7 +112,7 @@ void main() {
     await frame(tester);
     final finger = input().fingers.single;
     expect(finger.kind, FingerKind.mouse);
-    expect(finger.isDown, isFalse);
+    expect(finger.isPressed, isFalse);
     expect(input().mousePosition, at(60, 10));
     expect(heard, ['hover']);
 
@@ -129,7 +129,7 @@ void main() {
       buttons: kSecondaryButton,
     );
     await frame(tester);
-    expect(input().isDown(MouseButton.right), isTrue);
+    expect(input().isPressed(MouseButton.right), isTrue);
     await right.moveBy(const Offset(4, 0));
     await frame(tester);
     expect(heard.last, 'drag start', reason: "a mouse's slop is 1 pixel");
@@ -210,7 +210,7 @@ void main() {
 
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
     await frame(tester);
-    expect(input().isDown(KeyCode.w), isTrue);
+    expect(input().isPressed(KeyCode.w), isTrue);
     expect(input().wasPressed(KeyCode.w), isTrue);
     expect(input().axis2('move'), Vec2(0, 1));
 
@@ -224,12 +224,12 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
     await frame(tester);
     expect(input().wasReleased(KeyCode.w), isTrue);
-    expect(input().isDown(KeyCode.arrowDown), isTrue);
+    expect(input().isPressed(KeyCode.arrowDown), isTrue);
 
     other.requestFocus();
     await frame(tester);
     expect(input().wasReleased(KeyCode.arrowDown), isTrue, reason: 'its key-up will never come here');
-    expect(input().isDown(KeyCode.arrowDown), isFalse);
+    expect(input().isPressed(KeyCode.arrowDown), isFalse);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
   });
 
@@ -241,7 +241,7 @@ void main() {
     await tester.pumpWidget(app(view(autofocus: false)));
     await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
     await frame(tester);
-    expect(input().isDown(KeyCode.space), isFalse);
+    expect(input().isPressed(KeyCode.space), isFalse);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
 
     await tester.tapAt(corner + const Offset(5, 5));

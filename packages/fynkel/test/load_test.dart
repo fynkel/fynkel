@@ -129,7 +129,7 @@ void main() {
   tearDown(() => world.dispose());
 
   /// What the camera sees at the centre, or null.
-  GameObject? hit() => world.raycast(camera.screenToRay(centre))?.object;
+  GameObject? hit() => world.raycast(camera.get<Camera>()!.screenPointToRay(centre))?.gameObject;
   Transform ahead() => Transform(position: Vec3(0, 0, -5));
 
   test('an object that loads nothing appears in the same add', () async {
@@ -219,7 +219,7 @@ void main() {
     expect(atOnce.isDestroyed, isTrue);
     expect(later.isDestroyed, isTrue);
     expect(log.where((l) => l == 'destroy fails'), hasLength(2));
-    expect(errors.map((e) => (e.object, e.error.toString())), [
+    expect(errors.map((e) => (e.gameObject, e.error.toString())), [
       (atOnce, 'Bad state: broken at once'),
       (later, 'FormatException: broken later'),
     ]);
