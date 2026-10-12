@@ -418,6 +418,27 @@ final class Material {
     _disposed = true;
   }
 
+  /// A new material with the same values and textures, and [name] if
+  /// given: to change it for some objects and not the others that share
+  /// this one. For a colour alone, [MeshRenderer.color] needs no copy.
+  Material copy({String? name}) => Material(
+    name: name ?? this.name,
+    color: _color,
+    metallic: _metallic,
+    roughness: _roughness,
+    emissive: _emissive,
+    emissiveIntensity: _emissiveIntensity,
+    uvScale: _uvScale,
+    uvOffset: _uvOffset,
+    alphaCutoff: _alphaCutoff,
+    doubleSided: _doubleSided,
+    baseColorTexture: _textures[0],
+    normalTexture: _textures[1],
+    metallicRoughnessTexture: _textures[2],
+    occlusionTexture: _textures[3],
+    emissiveTexture: _textures[4],
+  );
+
   /// The base colour (albedo). Its alpha matters only with [alphaCutoff].
   Color get color => _color;
   set color(Color value) {

@@ -26,7 +26,7 @@ use crate::extract::{Extract, ResourceOp};
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 17;
+pub const FY_ABI_VERSION: u32 = 18;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -74,12 +74,23 @@ pub struct FyTransform {
 }
 
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyMeshRenderer {
     /// 0 for none.
     pub mesh: u64,
     /// 0 for none.
     pub material: u64,
+    /// Whether `color` replaces the material's base colour for this object.
+    pub own_color: bool,
+    /// The object's own base colour (sRGB, as a material's), with
+    /// `own_color`.
+    pub color: FyColor,
+}
+
+impl Default for FyMeshRenderer {
+    fn default() -> Self {
+        Self { mesh: 0, material: 0, own_color: false, color: FyColor { r: 1.0, g: 1.0, b: 1.0, a: 1.0 } }
+    }
 }
 
 #[repr(C)]
@@ -250,10 +261,20 @@ impl CComponent for FyTransform {
 impl CComponent for FyMeshRenderer {
     type Component = MeshRenderer;
     fn to_component(self) -> Result<MeshRenderer, Error> {
-        Ok(MeshRenderer { mesh: MeshId::from_raw(self.mesh), material: MaterialId::from_raw(self.material) })
+        Ok(MeshRenderer {
+            mesh: MeshId::from_raw(self.mesh),
+            material: MaterialId::from_raw(self.material),
+            own_color: self.own_color,
+            color: self.color.into(),
+        })
     }
     fn from_component(r: MeshRenderer) -> Self {
-        Self { mesh: r.mesh.map_or(0, MeshId::raw), material: r.material.map_or(0, MaterialId::raw) }
+        Self {
+            mesh: r.mesh.map_or(0, MeshId::raw),
+            material: r.material.map_or(0, MaterialId::raw),
+            own_color: r.own_color,
+            color: r.color.into(),
+        }
     }
 }
 

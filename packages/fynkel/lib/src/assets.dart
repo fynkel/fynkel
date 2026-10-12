@@ -27,7 +27,7 @@ final class Assets {
   /// tree sharing the model's meshes, materials and textures with every
   /// other copy ([Model.instantiate]). Find its parts by name once it's
   /// added.
-  Future<GameObject> model(String name) async {
+  Future<GameObject> instantiate(String name) async {
     final asset = _hold(name, _Kind.model);
     final model = await asset.ready as Model;
     _stillUsable(name);

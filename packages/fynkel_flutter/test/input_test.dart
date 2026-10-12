@@ -41,7 +41,7 @@ void main() {
   );
 
   FynkelView view({bool autofocus = true, double resolutionScale = 1}) =>
-      FynkelView(world: world, autofocus: autofocus, resolutionScale: resolutionScale);
+      FynkelView.world(world, autofocus: autofocus, resolutionScale: resolutionScale);
 
   Input input() => world.input;
 
@@ -166,7 +166,7 @@ void main() {
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 30)));
     await tester.sendEventToBinding(PointerScrollEvent(position: inside, scrollDelta: const Offset(0, 12)));
     await frame(tester);
-    expect(input().scroll, Vec2(0, 42));
+    expect(input().scroll, Vec2(0, -42), reason: 'the wheel towards you: down, as Unity');
     expect(list.offset, 0, reason: 'the view claimed the wheel');
     await frame(tester);
     expect(input().scroll, Vec2.zero);
@@ -175,7 +175,7 @@ void main() {
     await trackpad.panZoomStart(inside);
     await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20));
     await frame(tester);
-    expect(input().scroll, Vec2(0, 20), reason: 'fingers up scroll down');
+    expect(input().scroll, Vec2(0, -20), reason: 'fingers up scroll down');
     await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20), scale: 2);
     await trackpad.panZoomUpdate(inside, pan: const Offset(0, -20), scale: 3, rotation: 0.5);
     await frame(tester);

@@ -18,7 +18,7 @@ fn main() {
         let mut world = World::new();
         let mesh = world.add_mesh(MeshData::cube());
         let material = world.add_material(Material::default()).unwrap();
-        let renderer = MeshRenderer { mesh: Some(mesh), material: Some(material) };
+        let renderer = MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() };
         let mut ids = Vec::with_capacity(N);
 
         let t = Instant::now();

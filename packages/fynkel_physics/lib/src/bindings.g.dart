@@ -372,7 +372,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 9;
+const int FP_ABI_VERSION = 10;
 
 const int FP_COLLIDED_ABOVE = 2;
 
@@ -497,6 +497,9 @@ final class FpCharacterMove extends ffi.Struct {
 
   @ffi.Uint32()
   external int hit_count;
+
+  @ffi.Uint64()
+  external int ground_key;
 }
 
 sealed class FpColliderKind {

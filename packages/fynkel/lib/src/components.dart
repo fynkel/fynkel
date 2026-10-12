@@ -92,9 +92,6 @@ final class Transform {
   final Quat rotation;
   final Vec3 scale;
 
-  /// The way the object looks: its -Z, turned by [rotation].
-  Vec3 get forward => rotation.rotate(Vec3.forward);
-
   /// Turned [angle] radians around [axis], where [axis] is in the object's
   /// own frame (so `Vec3.up` is the object's up, as in Unity's `Rotate`).
   Transform rotated(Vec3 axis, double angle) =>
@@ -164,11 +161,11 @@ final class Camera extends Component {
     this._far = 1000,
     this._clearColor = const Color.rgb(0.1, 0.1, 0.12),
     this._orthographic = false,
-    this._size = 5,
+    this._orthographicSize = 5,
     this._cullingMask = LayerMask.all,
   }) : super._();
 
-  double _fovY, _near, _far, _size;
+  double _fovY, _near, _far, _orthographicSize;
   Color _clearColor;
   bool _orthographic;
   LayerMask _cullingMask;
@@ -194,8 +191,8 @@ final class Camera extends Component {
 
   /// Half the view's height, in metres, when [orthographic] (Unity's
   /// `orthographicSize`): 5 shows 10 m from top to bottom.
-  double get size => _size;
-  set size(double value) => _change(() => _size = value);
+  double get orthographicSize => _orthographicSize;
+  set orthographicSize(double value) => _change(() => _orthographicSize = value);
 
   /// The layers it draws (Unity's `cullingMask`): objects on the others
   /// ([GameObject.layer]) aren't drawn, nor tapped through it. Lights light
@@ -222,7 +219,7 @@ final class Camera extends Component {
     final aspect = point.width / point.height;
     if (c.orthographic) {
       // Straight ahead, from the point on the near plane.
-      final from = Vec3(across * c.size * aspect, up * c.size, -c.near);
+      final from = Vec3(across * c.orthographicSize * aspect, up * c.orthographicSize, -c.near);
       return Ray(t.position + t.rotation.rotate(from), t.rotation.rotate(Vec3.forward));
     }
     final tanHalf = math.tan(c.fovY / 2);
@@ -255,8 +252,8 @@ final class Camera extends Component {
     final aspect = w / h;
     double across, up;
     if (c.orthographic) {
-      across = p.x / (c.size * aspect);
-      up = p.y / c.size;
+      across = p.x / (c.orthographicSize * aspect);
+      up = p.y / c.orthographicSize;
     } else {
       final ahead = -p.z;
       if (!(ahead > 0)) return null;
@@ -277,7 +274,7 @@ final class Camera extends Component {
       _far,
       _clearColor,
       _orthographic,
-      _size,
+      _orthographicSize,
       _cullingMask,
     );
     set();
@@ -289,7 +286,7 @@ final class Camera extends Component {
       _far = far;
       _clearColor = clearColor;
       _orthographic = orthographic;
-      _size = size;
+      _orthographicSize = size;
       _cullingMask = cullingMask;
       rethrow;
     }
@@ -297,13 +294,13 @@ final class Camera extends Component {
 
   @override
   String toString() =>
-      'Camera(${orthographic ? 'orthographic, size: $size' : 'fovY: $fovY'}, near: $near, far: $far, '
+      'Camera(${orthographic ? 'orthographic, orthographicSize: $orthographicSize' : 'fovY: $fovY'}, near: $near, far: $far, '
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'})';
 }
 
 enum LightKind {
   /// Light from far away, like the sun, shining along the object's forward
-  /// (its [Transform.forward]). Only the one with the lowest id is used.
+  /// (its [GameObject.forward]). Only the one with the lowest id is used.
   sun,
 
   /// Light from every direction, adding to every surface. All ambient
@@ -313,7 +310,7 @@ enum LightKind {
 
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
-  /// Shines along the object's [Transform.forward]: give the object
+  /// Shines along the object's [GameObject.forward]: give the object
   /// `Transform(rotation: Quat.lookRotation(direction))`.
   Light.sun({Color color = Color.white, double intensity = 1}) : this._(LightKind.sun, color, intensity);
 
@@ -354,11 +351,16 @@ final class Light extends Component {
 
 /// Draws [mesh] with [material] at the object's [Transform]. Without both,
 /// nothing is drawn. Change it in place: `get<MeshRenderer>()!.material = gold`.
+///
+/// A material is shared: every renderer that has it changes when it does.
+/// For one object alone, set [color] (a hit flash, a team colour), or give
+/// it its own material with [Material.copy].
 final class MeshRenderer extends Component {
   MeshRenderer([this._mesh, this._material]) : super._();
 
   Mesh? _mesh;
   Material? _material;
+  Color? _color;
 
   Mesh? get mesh => _mesh;
   set mesh(Mesh? value) => _change(() => _mesh = value);
@@ -366,21 +368,29 @@ final class MeshRenderer extends Component {
   Material? get material => _material;
   set material(Material? value) => _change(() => _material = value);
 
+  /// This object's own base colour, in place of its material's, which
+  /// stays as it is for the other objects that share it (Unity's
+  /// `MaterialPropertyBlock`). Null, as at first, for the material's.
+  /// `colorTo` tweens it.
+  Color? get color => _color;
+  set color(Color? value) => _change(() => _color = value);
+
   void _change(void Function() set) {
     _checkChangeable();
-    final (mesh, material) = (_mesh, _material);
+    final (mesh, material, color) = (_mesh, _material, _color);
     set();
     try {
       _live?._writeMeshRenderer(this);
     } catch (_) {
       _mesh = mesh;
       _material = material;
+      _color = color;
       rethrow;
     }
   }
 
   @override
-  String toString() => 'MeshRenderer($mesh, $material)';
+  String toString() => _color == null ? 'MeshRenderer($mesh, $material)' : 'MeshRenderer($mesh, $material, $_color)';
 }
 
 /// The game's own code on an object: extend it, and put it on any number

@@ -156,6 +156,15 @@ impl Physics {
 
     pub fn set_gravity(&mut self, gravity: Vector) -> Result<(), PhysicsError> {
         check_vector("gravity", gravity)?;
+        if gravity != self.world.gravity {
+            // A sleeping body would hang in the air under the new gravity:
+            // every dynamic one wakes, as Unity's do.
+            for (_, body) in self.world.bodies.iter_mut() {
+                if body.is_dynamic() {
+                    body.wake_up(true);
+                }
+            }
+        }
         self.world.gravity = gravity;
         Ok(())
     }

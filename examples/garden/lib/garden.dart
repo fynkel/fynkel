@@ -97,7 +97,7 @@ class Props extends GameObject {
       final angle = random.nextDouble() * 2 * math.pi;
       final radius = tree ? 13 + random.nextDouble() * 3 : 2.5 + random.nextDouble() * 3.5;
       final turn = Quat.axisAngle(Vec3.up, random.nextDouble() * 2 * math.pi);
-      add(await assets.model('props/$asset.glb')).transform = Transform(
+      add(await assets.instantiate('props/$asset.glb')).transform = Transform(
         position: Vec3(math.cos(angle) * radius, 0, math.sin(angle) * radius),
         rotation: turn,
         scale: Vec3(3, 3, 3),
@@ -116,7 +116,7 @@ class Character extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    _head = add(await assets.model('character.glb')).find('head')!;
+    _head = add(await assets.instantiate('character.glb')).find('head')!;
   }
 
   @override

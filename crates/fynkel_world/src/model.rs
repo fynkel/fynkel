@@ -136,6 +136,7 @@ impl World {
             let renderer = |part: &fynkel_load::Part| MeshRenderer {
                 mesh: Some(meshes[part.mesh]),
                 material: Some(materials[part.material]),
+                ..Default::default()
             };
             match node.parts.as_slice() {
                 [] => {}

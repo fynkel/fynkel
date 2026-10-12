@@ -53,12 +53,12 @@ class LayerMatrixScene extends LabScene {
   @override
   List<Control> get controls => [
     Toggle('layer 8 meets the floor', () => !physics.getIgnoreLayerCollision(ghostLayer, 0), (on) {
-      physics.ignoreLayerCollision(ghostLayer, 0, !on);
-      log.add('physics.ignoreLayerCollision($ghostLayer, 0, ${!on})');
+      physics.ignoreLayerCollision(ghostLayer, 0, ignore: !on);
+      log.add('physics.ignoreLayerCollision($ghostLayer, 0, ignore: ${!on})');
     }),
     Toggle('blue meets the floor', () => !physics.getIgnoreCollision(_blue, _floor), (on) {
-      physics.ignoreCollision(_blue, _floor, !on);
-      log.add('physics.ignoreCollision(blue, floor, ${!on})');
+      physics.ignoreCollision(_blue, _floor, ignore: !on);
+      log.add('physics.ignoreCollision(blue, floor, ignore: ${!on})');
     }),
     Button('drop them again', () {
       drop(red, -1);

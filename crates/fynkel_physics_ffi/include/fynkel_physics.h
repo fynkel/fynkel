@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 9
+#define FP_ABI_VERSION 10
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -445,6 +445,9 @@ typedef struct FpCharacterMove {
   struct FpVec3 translation;
   uint32_t flags;
   uint32_t hit_count;
+  // The key of the collider it stands on after the move: 0 when it isn't
+  // grounded, or what holds it up wasn't found.
+  uint64_t ground_key;
 } FpCharacterMove;
 
 // A collider a character's move hit: where, and its surface's normal

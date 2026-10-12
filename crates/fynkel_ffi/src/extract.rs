@@ -190,6 +190,10 @@ impl Extract {
                     m
                 }
             };
+            let mut material = material;
+            if r.own_color {
+                material.base_color = r.color.to_linear();
+            }
             scene.draws.push(Draw { mesh: mesh_key(mesh), model, material });
         });
 

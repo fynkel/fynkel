@@ -317,7 +317,7 @@ void main() {
         final dropped = ball(world, const Vec3(0, 1, 0), layer: 8);
         frames(world, 30);
         expect(dropped.position.y, lessThan(0));
-        physics.ignoreLayerCollision(8, 9, false);
+        physics.ignoreLayerCollision(8, 9, ignore: false);
         expect(physics.getIgnoreLayerCollision(8, 9), isFalse);
         expect(() => physics.ignoreLayerCollision(32, 0), throwsRangeError);
         expect(() => physics.getIgnoreLayerCollision(0, -1), throwsRangeError);

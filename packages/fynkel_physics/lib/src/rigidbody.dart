@@ -203,11 +203,18 @@ final class Rigidbody extends Behaviour {
   /// something touches it or the game pushes it.
   bool get isSleeping => _readState('isSleeping').sleeping == 1;
 
-  /// Puts it to sleep.
-  void sleep() => checkPhysics(fp_rigidbody_sleep_set(_inWorld('sleep')._world, _id, 1));
+  /// Puts it to sleep. Does nothing while it isn't in the world, as
+  /// Unity's.
+  void sleep() => _setSleeping(1);
 
-  /// Wakes it.
-  void wakeUp() => checkPhysics(fp_rigidbody_sleep_set(_inWorld('wakeUp')._world, _id, 0));
+  /// Wakes it. Does nothing while it isn't in the world, as Unity's.
+  void wakeUp() => _setSleeping(0);
+
+  void _setSleeping(int asleep) {
+    final physics = _physics;
+    if (physics == null || _id == 0) return;
+    checkPhysics(fp_rigidbody_sleep_set(physics._world, _id, asleep));
+  }
 
   /// Pushes it with [force] through its center of mass, in the world.
   void addForce(Vec3 force, {ForceMode mode = ForceMode.force}) =>
@@ -339,7 +346,7 @@ final class Rigidbody extends Behaviour {
 
   Physics _inWorld(String what) {
     if (_physics case final physics? when _id != 0) return physics;
-    throw StateError('Rigidbody.$what: it isn\'t in the world (not enabled, or its object isn\'t shown)');
+    throw _notInWorld(this, what);
   }
 
   FpBodyState _readState(String what) {

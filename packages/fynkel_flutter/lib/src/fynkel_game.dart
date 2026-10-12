@@ -34,9 +34,22 @@ class FynkelGame<T extends GameObject> extends StatefulWidget {
   /// moment being played.
   final bool restartOnReload;
 
-  /// The [FynkelGame] around [context], or null.
-  static FynkelGameState<GameObject>? maybeOf(BuildContext context) =>
-      context.findAncestorStateOfType<FynkelGameState<GameObject>>();
+  /// The [FynkelGame] around [context], or null: `FynkelGame.maybeOf<Arena>(context)?.game`
+  /// is an `Arena`.
+  static FynkelGameState<T>? maybeOf<T extends GameObject>(BuildContext context) =>
+      context.findAncestorStateOfType<FynkelGameState<T>>();
+
+  /// The [FynkelGame] around [context] (`FynkelGame.of<Arena>(context).restart()`).
+  /// Throws a [FlutterError] if there is none, or if its game isn't a [T].
+  static FynkelGameState<T> of<T extends GameObject>(BuildContext context) {
+    final state = maybeOf<T>(context);
+    if (state != null) return state;
+    throw FlutterError(
+      maybeOf(context) == null
+          ? 'FynkelGame.of found no FynkelGame around this context: make it in the builder of one.'
+          : 'FynkelGame.of<$T> found a FynkelGame whose game is not a $T.',
+    );
+  }
 
   @override
   State<FynkelGame<T>> createState() => FynkelGameState<T>();

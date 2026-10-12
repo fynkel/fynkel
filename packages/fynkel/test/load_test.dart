@@ -73,7 +73,7 @@ class Holder extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    add(await assets.model(file));
+    add(await assets.instantiate(file));
   }
 }
 
@@ -339,8 +339,8 @@ void main() {
     final holder = world.add(Holder('Box.glb'));
     await holder.loaded;
     final mesh = meshOf(holder)!;
-    final spare = await holder.assets.model('Box.glb');
-    final root = world.add(await holder.assets.model('Box.glb'));
+    final spare = await holder.assets.instantiate('Box.glb');
+    final root = world.add(await holder.assets.instantiate('Box.glb'));
     holder.destroy();
     expect(mesh.isDisposed, isFalse, reason: 'two copies still hold it');
     root.destroy();
@@ -400,7 +400,7 @@ void main() {
     final bare = World();
     addTearDown(bare.dispose);
     expect(
-      () => bare.assets.model('Box.glb'),
+      () => bare.assets.instantiate('Box.glb'),
       throwsA(isA<StateError>().having((e) => e.message, 'message', contains('World(source:'))),
     );
     expect(
@@ -409,7 +409,7 @@ void main() {
     );
 
     await world.assets.texture('grid.png');
-    expect(() => world.assets.model('grid.png'), throwsArgumentError);
+    expect(() => world.assets.instantiate('grid.png'), throwsArgumentError);
   });
 
   test('a load that fails is not kept, so asking again tries again', () async {
@@ -421,9 +421,9 @@ void main() {
       },
     );
     addTearDown(flaky.dispose);
-    await expectLater(flaky.assets.model('Box.glb'), throwsA(isA<FileSystemException>()));
+    await expectLater(flaky.assets.instantiate('Box.glb'), throwsA(isA<FileSystemException>()));
     fail = false;
-    expect(await flaky.assets.model('Box.glb'), isA<GameObject>());
+    expect(await flaky.assets.instantiate('Box.glb'), isA<GameObject>());
   });
 }
 

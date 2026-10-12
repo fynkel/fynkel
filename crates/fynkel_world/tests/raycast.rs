@@ -28,7 +28,9 @@ impl Scene {
     fn spawn(&mut self, mesh: MeshId, material: MaterialId, t: Transform) -> ObjectId {
         let id = self.world.spawn();
         self.world.insert(id, t).unwrap();
-        self.world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+        self.world
+            .insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() })
+            .unwrap();
         id
     }
 
@@ -141,7 +143,9 @@ fn back_faces_are_hit_only_on_double_sided_materials() {
     assert_hit(s.cast(Vec3::new(0.1, 2.0, 0.1), Vec3::NEG_Y), floor, Vec3::new(0.1, 0.0, 0.1), Vec3::Y, 2.0);
     assert!(s.cast(Vec3::new(0.1, -2.0, 0.1), Vec3::Y).is_none(), "from below, where it's culled");
 
-    s.world.insert(floor, MeshRenderer { mesh: Some(s.plane), material: Some(s.two_sided) }).unwrap();
+    s.world
+        .insert(floor, MeshRenderer { mesh: Some(s.plane), material: Some(s.two_sided), ..Default::default() })
+        .unwrap();
     // The normal faces the ray, as the renderer flips a back face's.
     assert_hit(s.cast(Vec3::new(0.1, -2.0, 0.1), Vec3::Y), floor, Vec3::new(0.1, 0.0, 0.1), Vec3::NEG_Y, 2.0);
 
@@ -171,13 +175,17 @@ fn only_what_a_view_draws_is_hit() {
     let mut s = scene();
     let target = s.cube_at(Vec3::new(0.0, 0.0, -4.0));
     let ray = (Vec3::ZERO, Vec3::NEG_Z);
-    let missing =
-        [MeshRenderer { mesh: Some(s.cube), material: None }, MeshRenderer { mesh: None, material: Some(s.one_sided) }];
+    let missing = [
+        MeshRenderer { mesh: Some(s.cube), material: None, ..Default::default() },
+        MeshRenderer { mesh: None, material: Some(s.one_sided), ..Default::default() },
+    ];
     for renderer in missing {
         s.world.insert(target, renderer).unwrap();
         assert!(s.cast(ray.0, ray.1).is_none(), "{renderer:?} draws nothing");
     }
-    s.world.insert(target, MeshRenderer { mesh: Some(s.cube), material: Some(s.one_sided) }).unwrap();
+    s.world
+        .insert(target, MeshRenderer { mesh: Some(s.cube), material: Some(s.one_sided), ..Default::default() })
+        .unwrap();
     s.world.remove::<Transform>(target).unwrap();
     assert!(s.cast(Vec3::ZERO, Vec3::NEG_Z).is_none(), "no Transform, not drawn");
     s.world.insert(target, Transform::from_position(Vec3::new(0.0, 0.0, -4.0))).unwrap();

@@ -5,6 +5,7 @@
 //! controller.
 
 use rapier3d::control::{CharacterAutostep, CharacterLength, KinematicCharacterController};
+use rapier3d::parry::query::ShapeCastOptions;
 use rapier3d::prelude::*;
 
 use crate::{Physics, PhysicsError, Vector, check_vector, collider_id};
@@ -43,6 +44,11 @@ pub struct CharacterMove {
     pub translation: Vector,
     /// What it hit: [`COLLIDED_SIDES`], [`COLLIDED_ABOVE`] and [`COLLIDED_BELOW`].
     pub flags: u32,
+    /// The collider it stands on after the move, if it's grounded: what it
+    /// hit below it, or else what's just under it.
+    pub ground: Option<u64>,
+    /// The key that collider was added with (0 with none).
+    pub ground_key: u64,
 }
 
 /// A collider a move hit.
@@ -165,7 +171,32 @@ impl Physics {
                 hits.push(CharacterHit { collider: id, key, point: c.hit.witness1, normal });
             }
         }
+        // What it stands on: the hit below that faces up the most, or what
+        // a short cast down from where it ended finds (it may have snapped
+        // to the ground without hitting it).
+        let below = collisions
+            .iter()
+            .filter(|c| c.hit.normal1.y > LEAN)
+            .max_by(|a, b| a.hit.normal1.y.total_cmp(&b.hit.normal1.y));
+        let mut ground = below.map(|c| c.handle);
+        if ground.is_none() && flags & COLLIDED_BELOW != 0 {
+            let mut at = pose;
+            at.translation += moved.translation;
+            ground = self
+                .world
+                .query_pipeline_with_filter(filter)
+                .cast_shape(
+                    &at,
+                    -Vector::Y,
+                    &*shape,
+                    ShapeCastOptions::with_max_time_of_impact(settings.skin_width * 2.0 + 0.02),
+                )
+                .map(|(handle, _)| handle);
+        }
         self.character_collisions = collisions;
-        Ok(CharacterMove { translation: moved.translation, flags })
+        // The key went in as a u64, so it comes back whole.
+        #[allow(clippy::cast_possible_truncation)]
+        let ground_key = ground.map_or(0, |handle| self.world.colliders[handle].user_data as u64);
+        Ok(CharacterMove { translation: moved.translation, flags, ground: ground.map(collider_id), ground_key })
     }
 }

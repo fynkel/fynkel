@@ -373,7 +373,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 17;
+const int FY_ABI_VERSION = 18;
 
 const int FY_APPLE_MORE = 2;
 
@@ -546,10 +546,10 @@ final class FyMeshRenderer extends ffi.Struct {
   @ffi.Uint64()
   external int material;
 
-  static ffi.Pointer<FyMeshRenderer> $allocate(ffi.Allocator $allocator, {required int mesh, required int material}) =>
-      $allocator<FyMeshRenderer>()
-        ..ref.mesh = mesh
-        ..ref.material = material;
+  @ffi.Bool()
+  external bool own_color;
+
+  external FyColor color;
 }
 
 final class FyModel extends ffi.Opaque {}

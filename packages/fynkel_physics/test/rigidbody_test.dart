@@ -451,8 +451,55 @@ void main() {
     expect(() => body.mass = double.nan, throwsArgumentError);
     object.destroy();
     world.update(0);
-    expect(() => body.addForce(Vec3.zero), throwsStateError);
+    expect(
+      () => body.addForce(Vec3.zero),
+      throwsA(isStateError.having((e) => e.message, 'message', contains('was destroyed'))),
+    );
     expect(world.physics.rigidbodyCount, 0);
+  });
+
+  test('out of the world, wakeUp and sleep do nothing, and an error says why it is out', () {
+    final world = newWorld();
+    String why(Rigidbody body) {
+      try {
+        body.addForce(Vec3.zero);
+      } on StateError catch (e) {
+        return e.message;
+      }
+      return 'in the world';
+    }
+
+    final loose = Rigidbody()
+      ..wakeUp()
+      ..sleep();
+    expect(why(loose), contains('on no object yet'));
+    final object = ball(world, Vec3.zero, body: loose);
+    expect(why(loose), 'in the world');
+    loose.enabled = false;
+    expect(why(loose), contains("it isn't enabled"));
+    loose
+      ..wakeUp()
+      ..sleep();
+    loose.enabled = true;
+    object.active = false;
+    expect(why(loose), contains("isn't shown"));
+    object.active = true;
+    object.removeComponent(loose);
+    expect(why(loose), contains('taken off its object'));
+  });
+
+  test('setting gravity wakes every sleeping body, as Unity', () {
+    final world = newWorld();
+    floor(world);
+    final body = Rigidbody();
+    cube(world, const Vec3(0, 0.5, 0), body: body);
+    frames(world, 2);
+    body.sleep();
+    frames(world, 2);
+    expect(body.isSleeping, isTrue);
+    world.physics.gravity = const Vec3(0, 9.81, 0);
+    frames(world, 30);
+    expect(body.position.y, greaterThan(1), reason: 'it fell up, not hung there asleep');
   });
 }
 

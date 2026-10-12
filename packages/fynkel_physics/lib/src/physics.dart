@@ -28,6 +28,27 @@ part 'joints.dart';
 part 'queries.dart';
 part 'rigidbody.dart';
 
+/// The error for using [component] ([what]) while it isn't in the physics
+/// world, with the reason it isn't.
+StateError _notInWorld(Behaviour component, String what) {
+  final type = component.runtimeType;
+  final GameObject object;
+  try {
+    object = component.gameObject;
+  } on StateError {
+    return StateError('$type.$what: it is on no object yet');
+  }
+  final why = switch (object) {
+    _ when object.isDestroyed => 'its object, $object, was destroyed',
+    _ when component.isRemoved => 'it was taken off its object, $object',
+    _ when !object.isAlive => 'its object, $object, isn\'t in a world yet',
+    _ when !component.enabled => 'it isn\'t enabled',
+    _ when !object.activeInHierarchy => 'its object, $object, isn\'t shown (active is false on it or above it)',
+    _ => 'it joins in its onEnable, once its object has loaded',
+  };
+  return StateError('$type.$what: it isn\'t in the physics world: $why');
+}
+
 /// A world's physics, as Unity's `Physics`: the queries ([raycast] and the
 /// rest) and the settings. Every object and behaviour reaches it as
 /// `physics`, and the world as `world.physics`; it's made the first time

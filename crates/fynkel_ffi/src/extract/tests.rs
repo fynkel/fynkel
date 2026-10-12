@@ -25,7 +25,7 @@ fn stage1_into(world: &mut World) -> (ObjectId, MeshId) {
     world
         .insert(cube, Transform { rotation: Quat::from_rotation_y(30f32.to_radians()), ..Transform::default() })
         .unwrap();
-    world.insert(cube, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(cube, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
     (cube, mesh)
 }
 
@@ -120,15 +120,18 @@ fn a_sun_without_a_transform_has_no_direction_and_is_ignored() {
 fn an_object_missing_a_mesh_material_or_transform_is_not_drawn() {
     let (mut world, mesh) = stage1_world();
     let material = world.add_material(Material::DEFAULT).unwrap();
-    for renderer in
-        [MeshRenderer { mesh: Some(mesh), material: None }, MeshRenderer { mesh: None, material: Some(material) }]
-    {
+    for renderer in [
+        MeshRenderer { mesh: Some(mesh), material: None, ..Default::default() },
+        MeshRenderer { mesh: None, material: Some(material), ..Default::default() },
+    ] {
         let id = world.spawn();
         world.insert(id, Transform::default()).unwrap();
         world.insert(id, renderer).unwrap();
     }
     let no_transform = world.spawn();
-    world.insert(no_transform, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world
+        .insert(no_transform, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() })
+        .unwrap();
     assert_eq!(extract(&world).0.draws.len(), 1, "only the cube");
 }
 
@@ -186,7 +189,7 @@ fn a_material_is_extracted_with_its_textures_and_linear_emission() {
         .unwrap();
     let id = world.spawn();
     world.insert(id, Transform::default()).unwrap();
-    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material) }).unwrap();
+    world.insert(id, MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() }).unwrap();
 
     let (scene, _) = extract(&world);
     let m = scene.draws.iter().find(|d| d.material.uv_scale == [10.0; 2]).unwrap().material;
@@ -334,7 +337,9 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
     world.insert(parts[1], Transform::default().looking_at(Vec3::X)).unwrap();
     world.insert(parts[2], Light::ambient(Color::WHITE, 9.0)).unwrap();
     world.insert(parts[3], Transform::default()).unwrap();
-    world.insert(parts[3], MeshRenderer { mesh: Some(sphere), material: Some(material) }).unwrap();
+    world
+        .insert(parts[3], MeshRenderer { mesh: Some(sphere), material: Some(material), ..Default::default() })
+        .unwrap();
     world.set_active(rig, false).unwrap();
 
     let mut extract = Extract::default();
@@ -474,4 +479,21 @@ fn the_worlds_debug_lines_are_copied_with_linear_colours() {
     assert_eq!(scene.lines, [Line { a: Vec3::ZERO, b: Vec3::X, color: grey.to_linear() }]);
     assert!(scene.lines[0].color[0] < 0.25, "linear: sRGB 0.5 is about 0.21");
     assert_eq!(scene.lines[0].color[3], 0.25, "alpha as given");
+}
+
+#[test]
+fn a_renderer_s_own_color_replaces_its_material_s_for_it_alone() {
+    let mut world = World::new();
+    let (cube, mesh) = stage1_into(&mut world);
+    let material = world.get::<MeshRenderer>(cube).unwrap().material;
+    let other = world.spawn();
+    world.insert(other, Transform::from_position(Vec3::new(1.0, 0.0, 0.0))).unwrap();
+    let white = MeshRenderer { mesh: Some(mesh), material, own_color: true, color: Color::WHITE };
+    world.insert(other, white).unwrap();
+
+    let (scene, _) = extract(&world);
+    let [plain, own] = [&scene.draws[0], &scene.draws[1]];
+    assert_eq!(plain.material.base_color, Color::from_argb32(0xFFE0613A).to_linear(), "the shared material's");
+    assert_eq!(own.material.base_color, [1.0; 4], "its own: white, for a flash");
+    assert_eq!(own.material.roughness, plain.material.roughness, "the rest is the material's");
 }

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 17
+#define FY_ABI_VERSION 18
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -177,6 +177,11 @@ typedef struct FyMeshRenderer {
   uint64_t mesh;
   // 0 for none.
   uint64_t material;
+  // Whether `color` replaces the material's base colour for this object.
+  bool own_color;
+  // The object's own base colour (sRGB, as a material's), with
+  // `own_color`.
+  struct FyColor color;
 } FyMeshRenderer;
 
 typedef struct FyCamera {

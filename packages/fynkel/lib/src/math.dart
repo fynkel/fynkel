@@ -282,12 +282,12 @@ final class Ray {
 }
 
 /// A flat surface without end, as Unity's `Plane`: the points [p] where
-/// `normal.dot(p) == distance`.
+/// `normal.dot(p) + distance == 0`.
 final class Plane {
   /// The plane through [point] facing [normal] (made unit length).
   factory Plane(Vec3 normal, Vec3 point) {
     final n = normal.normalized;
-    return Plane._(n, n.dot(point));
+    return Plane._(n, -n.dot(point));
   }
 
   const Plane._(this.normal, this.distance);
@@ -298,11 +298,12 @@ final class Plane {
   /// Unit length.
   final Vec3 normal;
 
-  /// From the origin along [normal] to the plane.
+  /// How far the origin is above the plane, along [normal] (below,
+  /// negative), as Unity's: the plane y = 3 facing up has -3.
   final double distance;
 
   /// How far [point] is above the plane (below, negative).
-  double distanceTo(Vec3 point) => normal.dot(point) - distance;
+  double distanceTo(Vec3 point) => normal.dot(point) + distance;
 
   /// How far along [ray] it meets the plane; null when it runs along the
   /// plane or away from it.

@@ -55,8 +55,9 @@ void main() {
     }
     // A quarter turn about its own up: the forward goes from -Z to -X.
     expect(
-      Transform(rotation: head.transform.rotation).forward
-          .closeTo(Transform(rotation: facing).rotated(Vec3.up, 1.5708).forward, 1e-3),
+      head.transform.rotation
+          .rotate(Vec3.forward)
+          .closeTo(Transform(rotation: facing).rotated(Vec3.up, 1.5708).rotation.rotate(Vec3.forward), 1e-3),
       isTrue,
     );
 

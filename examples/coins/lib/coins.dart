@@ -135,7 +135,7 @@ class Prop extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    add(await assets.model('props/$asset.glb'));
+    add(await assets.instantiate('props/$asset.glb'));
   }
 }
 
@@ -185,7 +185,7 @@ class Player extends GameObject {
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    _hand = add(await assets.model('character.glb')).find('arm-right')!;
+    _hand = add(await assets.instantiate('character.glb')).find('arm-right')!;
     // Kinematic: it walks where it's told, and meets the coins' triggers.
     addComponent(CapsuleCollider(radius: 0.4, height: 1.6, center: Vec3(0, 0.8, 0)));
     addComponent(Rigidbody(isKinematic: true));

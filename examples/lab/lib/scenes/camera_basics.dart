@@ -29,7 +29,7 @@ class CameraBasicsScene extends LabScene {
     GameObject(
       name: name,
       transform: Transform(position: at, rotation: Quat.lookRotation(Vec3(0, 0.5, 0) - at)),
-      components: [VirtualCamera(priority: priority, size: 3)],
+      components: [VirtualCamera(priority: priority, orthographicSize: 3)],
     ),
   ).get<VirtualCamera>()!;
 
@@ -47,7 +47,7 @@ class CameraBasicsScene extends LabScene {
     final lens = world.camera!;
     readout.value = [
       'live: $live${world.cameras.isBlending ? ' (blending)' : ''}',
-      'lens: ${lens.orthographic ? 'orthographic, size ${lens.size}' : 'perspective, fovY ${lens.fovY.inDegrees.round()}°'}',
+      'lens: ${lens.orthographic ? 'orthographic, orthographicSize ${lens.orthographicSize}' : 'perspective, fovY ${lens.fovY.inDegrees.round()}°'}',
       'blend: ${world.cameras.defaultBlend}',
     ].join('\n');
   }
