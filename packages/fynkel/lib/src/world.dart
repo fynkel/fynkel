@@ -81,9 +81,14 @@ final class World implements Finalizable {
   bool get isDisposed => _pointer == nullptr;
 
   /// Frees the world. Its objects can't be used after this; a view of it
-  /// keeps drawing what it last had until the view is disposed too.
+  /// keeps drawing what it last had until the view is disposed too. Called
+  /// from inside [update], it waits for the update to return.
   void dispose() {
     if (_pointer == nullptr) return;
+    if (_updating) {
+      _disposeAsked = true;
+      return;
+    }
     // The assets still held: the engine's side goes with the world, the
     // rest goes after it.
     final owned = [for (final asset in _assets.values) ?asset.value];
@@ -296,12 +301,35 @@ final class World implements Finalizable {
   /// view then draws the world as it is. What their code throws goes to
   /// [errors], and the frame goes on.
   ///
-  /// Throws an [ArgumentError] if [dt] is negative or NaN.
+  /// [dispose] called from inside an update (by the game's code) waits
+  /// for the update: the phases left are skipped, and the world is freed as
+  /// it returns.
+  ///
+  /// Throws an [ArgumentError] if [dt] is negative or NaN, and a
+  /// [StateError] if called from inside an update: a frame runs one.
   void update(double dt) {
     pointer;
+    if (_updating) {
+      throw StateError('World.update was called from inside an update; each frame runs one, from its view or test');
+    }
+    _updating = true;
+    try {
+      _update(dt);
+    } finally {
+      _updating = false;
+      if (_disposeAsked) dispose();
+    }
+  }
+
+  // Whether an update is running, and whether dispose was called in it.
+  var _updating = false;
+  var _disposeAsked = false;
+
+  void _update(double dt) {
     time._advance(dt);
     _tidy();
     _runSystems(_SystemHook.beforeFrame);
+    if (_disposeAsked) return;
 
     input
       .._now = time._unscaledSinceStart
@@ -333,9 +361,11 @@ final class World implements Finalizable {
     _waiting = _starting..clear();
     _starting = waiting;
 
+    if (_disposeAsked) return;
     _runFixedSteps();
-    if (isDisposed) return;
+    if (_disposeAsked) return;
     _runSystems(_SystemHook.beforeUpdate);
+    if (_disposeAsked) return;
 
     // Objects added from here on are past the end when they come, or not
     // started: they wait for the next frame. The calls are guarded inline,
@@ -362,8 +392,10 @@ final class World implements Finalizable {
       }
     }
 
+    if (_disposeAsked) return;
     _runMotions();
     _runRoutines();
+    if (_disposeAsked) return;
 
     for (var i = 0; i < updated && i < _live.length; i++) {
       final object = _live[i];
@@ -386,7 +418,9 @@ final class World implements Finalizable {
       }
     }
 
+    if (_disposeAsked) return;
     _runSystems(_SystemHook.afterLateUpdate);
+    if (_disposeAsked) return;
 
     cameras._run();
     _debug?._flush();

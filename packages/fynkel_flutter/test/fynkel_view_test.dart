@@ -566,6 +566,47 @@ void main() {
     });
   });
 
+  testWidgets('a throw from onFrame is reported, once a second at most, and the frames go on', (tester) async {
+    var frames = 0;
+    await tester.pumpWidget(
+      sized(
+        FynkelView(
+          world: world,
+          onFrame: (_) {
+            if (++frames >= 3) throw StateError('broken onFrame');
+          },
+        ),
+      ),
+    );
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(tester.takeException().toString(), contains('broken onFrame'));
+    expect(frames, 10, reason: 'every frame came');
+    for (var i = 0; i < 130; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(tester.takeException().toString(), contains('broken onFrame'), reason: 'reported again a second later');
+    expect(frames, 140);
+  });
+
+  testWidgets('with no plugin, as in a widget test of the game, the game runs on unseen', (tester) async {
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
+    forgetReset();
+    final dts = <double>[];
+    await tester.pumpWidget(sized(FynkelView(world: world, onFrame: dts.add)));
+    await tester.pump(const Duration(milliseconds: 10));
+    // The registration fails in real time.
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    for (var i = 0; i < 29; i++) {
+      await tester.pump(const Duration(milliseconds: 10));
+    }
+    expect(dts, hasLength(30));
+    expect(world.time.sinceStart, closeTo(0.29, 1e-6), reason: '29 frames of 10 ms after the first');
+    expect(find.byType(Texture), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('an unbounded size is a clear error', (tester) async {
     await tester.pumpWidget(
       Directionality(

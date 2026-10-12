@@ -18,6 +18,7 @@ import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'bindings.g.dart';
+import 'owned_memory.dart';
 import 'raw.dart';
 
 part 'characters.dart';
@@ -31,7 +32,7 @@ part 'rigidbody.dart';
 /// rest) and the settings. Every object and behaviour reaches it as
 /// `physics`, and the world as `world.physics`; it's made the first time
 /// it's asked for, so a game never sets it up.
-final class Physics extends WorldSystem {
+final class Physics extends WorldSystem implements Finalizable {
   Physics._(super.world) {
     _pointer = _raw.pointer;
   }
@@ -43,6 +44,7 @@ final class Physics extends WorldSystem {
   /// The native world, once the step running between frames, if any, is
   /// collected: every call into it goes through this.
   Pointer<FpWorld> get _world {
+    if (_disposed) throw StateError('this Physics belongs to a disposed World');
     if (_stepping) _collect();
     return _pointer;
   }
@@ -154,20 +156,23 @@ final class Physics extends WorldSystem {
   final _meshes = HashMap<Mesh, _HeldMesh>.identity();
   var _leavingBefore = 0;
 
+  // Native memory, freed when this is collected or the isolate ends.
+  late final _memory = OwnedMemory(this);
+
   // Scratch for the calls.
-  final _id = malloc<Uint64>();
-  final _count = malloc<Uint32>();
-  final _pointCount = malloc<Uint32>();
-  final _flag = malloc<Uint32>();
-  final _spec = malloc<FpColliderSpec>();
-  final _transform = malloc<FpTransform>();
-  final _bodySpec = malloc<FpBodySpec>();
-  final _pose = malloc<FpPose>();
-  final _push = malloc<FpPush>();
-  final _state = malloc<FpBodyState>();
-  final _vec = malloc<FpVec3>();
-  final _vec2 = malloc<FpVec3>();
-  final _setting = malloc<FpSettings>();
+  late final _id = _memory<Uint64>();
+  late final _count = _memory<Uint32>();
+  late final _pointCount = _memory<Uint32>();
+  late final _flag = _memory<Uint32>();
+  late final _spec = _memory<FpColliderSpec>();
+  late final _transform = _memory<FpTransform>();
+  late final _bodySpec = _memory<FpBodySpec>();
+  late final _pose = _memory<FpPose>();
+  late final _push = _memory<FpPush>();
+  late final _state = _memory<FpBodyState>();
+  late final _vec = _memory<FpVec3>();
+  late final _vec2 = _memory<FpVec3>();
+  late final _setting = _memory<FpSettings>();
   // The queries' are written and read float by float, through the
   // pointers made here once, and no double is passed to a call: in the JIT
   // a struct's `.ref` makes an object each time, and so does a double
@@ -177,21 +182,21 @@ final class Physics extends WorldSystem {
   // an FpQueryShape is the kind, then floats 1–3 a, 4–6 b, 7 the radius and
   // 8–11 the rotation; an FpHit two 64-bit ids, then floats 4–6 the point,
   // 7–9 the normal and 10 the distance, 12 floats in all.
-  final _shape = malloc<FpQueryShape>();
+  late final _shape = _memory<FpQueryShape>();
   late final _shapeFloats = _shape.cast<Float>();
   late final _shapeKind = _shape.cast<Uint32>();
-  final _vectors = malloc<Float>(7);
+  late final _vectors = _memory<Float>(7);
   late final _ray = _vectors.cast<FpRay>();
   late final _sweep = (_vectors + 3).cast<FpSweep>();
   late final _point = _vectors.cast<FpVec3>();
   late final _closest = (_vectors + 3).cast<FpVec3>();
-  final _hit = malloc<FpHit>();
+  late final _hit = _memory<FpHit>();
   late final _hitFloats = _hit.cast<Float>();
   late final _hitIds = _hit.cast<Uint64>();
-  final _drawn = malloc<FpShape>();
+  late final _drawn = _memory<FpShape>();
   Pointer<FpVec3> _edges = nullptr;
   var _edgeCapacity = 0;
-  final _drawnPose = malloc<FpPose>();
+  late final _drawnPose = _memory<FpPose>();
   Pointer<FpHit> _hits = nullptr;
   var _hitsCapacity = 0;
   Pointer<FpFound> _found = nullptr;
@@ -199,9 +204,9 @@ final class Physics extends WorldSystem {
   // The character controllers' moves: an FpCharacter is 4 floats, and an
   // FpCharacterMove floats 0–2 the translation, then words 3 the flags and
   // 4 how many colliders it hit.
-  final _character = malloc<FpCharacter>();
+  late final _character = _memory<FpCharacter>();
   late final _characterFloats = _character.cast<Float>();
-  final _moved = malloc<FpCharacterMove>();
+  late final _moved = _memory<FpCharacterMove>();
   late final _movedFloats = _moved.cast<Float>();
   late final _movedWords = _moved.cast<Uint32>();
   Pointer<FpCharacterHit> _characterHits = nullptr;
@@ -215,8 +220,8 @@ final class Physics extends WorldSystem {
   final _joints = <Joint>[];
   final _waiting = <Joint>[];
   final _broken = <(Joint, double)>[];
-  final _jointSpec = malloc<FpJointSpec>();
-  final _jointState = malloc<FpJointState>();
+  late final _jointSpec = _memory<FpJointSpec>();
+  late final _jointState = _memory<FpJointState>();
   Pointer<FpBrokenJoint> _brokenBuffer = nullptr;
   var _brokenCapacity = 0;
 
@@ -317,20 +322,8 @@ final class Physics extends WorldSystem {
     _bodies.clear();
     _interpolated.clear();
     _raw.dispose();
-    for (final p in [_id, _count, _pointCount, _flag, _spec, _transform, _shape, _vectors, _hit]) {
-      malloc.free(p);
-    }
-    for (final p in [_bodySpec, _pose, _push, _state, _vec, _vec2, _setting, _character, _moved]) {
-      malloc.free(p);
-    }
-    malloc.free(_jointSpec);
-    malloc.free(_jointState);
-    for (final p in [_drawn, _drawnPose, _hits, _found, _objectIds, _colliderIds, _transforms, _edges]) {
-      if (p != nullptr) malloc.free(p);
-    }
-    for (final p in [_contactBuffer, _pointBuffer, _characterHits, _brokenBuffer]) {
-      if (p != nullptr) malloc.free(p);
-    }
+    // The scratch stays until this is collected (OwnedMemory), so a call
+    // made after this throws before it can harm anything.
   }
 
   @override
@@ -490,12 +483,12 @@ final class Physics extends WorldSystem {
     final count = colliders.length;
     if (count > _capacity) {
       for (final p in [_objectIds, _colliderIds, _transforms]) {
-        if (p != nullptr) malloc.free(p);
+        if (p != nullptr) _memory.free(p);
       }
       _capacity = count * 2;
-      _objectIds = malloc<Uint64>(_capacity);
-      _colliderIds = malloc<Uint64>(_capacity);
-      _transforms = malloc<Float>(_capacity * 10);
+      _objectIds = _memory<Uint64>(_capacity);
+      _colliderIds = _memory<Uint64>(_capacity);
+      _transforms = _memory<Float>(_capacity * 10);
       _transformsAsStructs = _transforms.cast();
     }
     var moved = 0;
@@ -700,17 +693,17 @@ final class Physics extends WorldSystem {
 
   void _growContacts(int count, int points) {
     if (count > _contactCapacity) {
-      if (_contactBuffer != nullptr) malloc.free(_contactBuffer);
+      if (_contactBuffer != nullptr) _memory.free(_contactBuffer);
       _contactCapacity = count * 2;
-      _contactBuffer = malloc<FpContact>(_contactCapacity);
+      _contactBuffer = _memory<FpContact>(_contactCapacity);
       _contactUints = _contactBuffer.cast();
       _contactKeys = _contactBuffer.cast();
       _contactFloats = _contactBuffer.cast();
     }
     if (points > _pointCapacity) {
-      if (_pointBuffer != nullptr) malloc.free(_pointBuffer);
+      if (_pointBuffer != nullptr) _memory.free(_pointBuffer);
       _pointCapacity = points * 2;
-      _pointBuffer = malloc<FpContactPoint>(_pointCapacity);
+      _pointBuffer = _memory<FpContactPoint>(_pointCapacity);
       _pointFloats = _pointBuffer.cast();
     }
   }
@@ -846,9 +839,9 @@ final class Physics extends WorldSystem {
     final count = _count.value;
     if (count == 0) return;
     if (count > _brokenCapacity) {
-      if (_brokenBuffer != nullptr) malloc.free(_brokenBuffer);
+      if (_brokenBuffer != nullptr) _memory.free(_brokenBuffer);
       _brokenCapacity = count * 2;
-      _brokenBuffer = malloc<FpBrokenJoint>(_brokenCapacity);
+      _brokenBuffer = _memory<FpBrokenJoint>(_brokenCapacity);
     }
     checkPhysics(fp_joints_broken_read(_pointer, _brokenBuffer, count));
     final keys = _brokenBuffer.cast<Uint64>();
@@ -960,9 +953,9 @@ final class Physics extends WorldSystem {
     checkPhysics(fp_collider_edges(_world, collider._id, _count));
     final count = _count.value;
     if (count > _edgeCapacity) {
-      if (_edges != nullptr) malloc.free(_edges);
+      if (_edges != nullptr) _memory.free(_edges);
       _edgeCapacity = count * 2;
-      _edges = malloc<FpVec3>(_edgeCapacity * 2);
+      _edges = _memory<FpVec3>(_edgeCapacity * 2);
     }
     checkPhysics(fp_edges_read(_world, _edges, count));
     final f = _edges.cast<Float>();

@@ -248,9 +248,9 @@ extension on Physics {
   /// colliders the last move hit, asked to go [motion].
   void _tellHits(CharacterController controller, int count, Vec3 motion) {
     if (count > _characterHitCapacity) {
-      if (_characterHits != nullptr) malloc.free(_characterHits);
+      if (_characterHits != nullptr) _memory.free(_characterHits);
       _characterHitCapacity = count * 2;
-      _characterHits = malloc<FpCharacterHit>(_characterHitCapacity);
+      _characterHits = _memory<FpCharacterHit>(_characterHitCapacity);
     }
     checkPhysics(fp_character_hits_read(_pointer, _characterHits, count));
     // An FpCharacterHit: two 64-bit ids, then floats 4–6 the point and 7–9
