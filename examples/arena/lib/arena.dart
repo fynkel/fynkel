@@ -47,18 +47,12 @@ class ArenaGame extends GameObject {
     input.layers = LayerMask.except([effects]);
   }
 
-  @override
-  void onUpdate() {
-    super.onUpdate();
-    if (input.wasPressed(KeyCode.escape) || input.wasPressed(KeyCode.p)) togglePause();
-  }
-
-  /// Stops the game's time, or starts it again. Everything that moves uses
-  /// [Time.delta], so a scale of 0 stops it all.
+  /// Stops the game's time and input, or starts them again. Escape and P
+  /// are the app's shortcuts (main.dart), so they work while paused too.
   void togglePause() {
     if (over.value) return;
     paused.value = !paused.value;
-    time.scale = paused.value ? 0 : 1;
+    world.paused = paused.value;
   }
 
   /// A new round, from wave 1.
@@ -286,7 +280,7 @@ class Player extends GameObject {
   /// passes.
   void dash(Vec3 direction) {
     final flat = Vec3(direction.x, 0, direction.z);
-    if (dashing || health.isDead || time.scale == 0 || flat.length < 1e-6) return;
+    if (dashing || health.isDead || world.paused || flat.length < 1e-6) return;
     facing = flat.normalized;
     rotation = Quat.lookRotation(facing);
     dashing = true;

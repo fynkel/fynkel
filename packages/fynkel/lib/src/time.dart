@@ -44,7 +44,8 @@ final class Time {
   int get frame => _frame;
 
   /// How fast the game's time runs: 1 is real time, 0.5 slow motion, 0
-  /// paused (objects still get their updates, with a [delta] of 0).
+  /// stopped (objects still get their updates, with a [delta] of 0). To
+  /// pause the game, input and all, use [World.paused].
   /// Throws an [ArgumentError] unless it's finite and 0 or more.
   double get scale => _scale;
   set scale(double value) {
@@ -86,11 +87,20 @@ final class Time {
   /// Whether the frame's time holds another fixed step.
   bool get _fixedDue => _fixedTime + _fixedDelta <= _sinceStart + 1e-9;
 
+  // Whether the world is paused, and whether the next frame is the first
+  // after a pause, which counts no time.
+  bool _paused = false;
+  bool _skip = false;
+
   void _advance(double dt) {
     if (!(dt >= 0)) throw ArgumentError.value(dt, 'dt', 'must be 0 or more');
-    final raw = dt < _maxDelta ? dt : _maxDelta;
+    var raw = dt < _maxDelta ? dt : _maxDelta;
+    if (_skip) {
+      _skip = false;
+      raw = 0;
+    }
     _unscaledDelta = raw;
-    _delta = raw * _scale;
+    _delta = _paused ? 0 : raw * _scale;
     _sinceStart += _delta;
     _unscaledSinceStart += raw;
     _frame++;

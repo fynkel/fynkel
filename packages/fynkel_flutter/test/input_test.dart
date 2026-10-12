@@ -233,6 +233,50 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowDown);
   });
 
+  testWidgets('keys the game does not use reach Flutter\'s shortcuts, and every key does while paused', (tester) async {
+    final shortcuts = <String>[];
+    await tester.pumpWidget(
+      app(
+        CallbackShortcuts(
+          bindings: {
+            const SingleActivator(LogicalKeyboardKey.escape): () => shortcuts.add('escape'),
+            const SingleActivator(LogicalKeyboardKey.keyW): () => shortcuts.add('w'),
+          },
+          child: view(),
+        ),
+      ),
+    );
+    final keys = <String>[];
+    input().onKeyDown.listen((k) => keys.add(k.key.name));
+    await frame(tester);
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await frame(tester);
+    expect(shortcuts, ['escape'], reason: "the game binds W ('move'), not Escape");
+    expect(keys, ['escape', 'w'], reason: 'the game hears both');
+
+    world.paused = true;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyW);
+    await frame(tester);
+    expect(shortcuts, ['escape', 'w'], reason: 'a pause menu gets every key');
+    world.paused = false;
+  });
+
+  testWidgets('a Listenable\'s changed is a signal: an object hears it with on, until destroyed', (tester) async {
+    final volume = ValueNotifier(0.5);
+    addTearDown(volume.dispose);
+    expect(volume.changed, same(volume.changed), reason: 'one signal per Listenable');
+    final ear = world.add(GameObject());
+    ear.on(volume.changed, (_) => heard.add('volume ${volume.value}'));
+    volume.value = 0.8;
+    expect(heard, ['volume 0.8']);
+    ear.destroy();
+    world.update(0);
+    volume.value = 0.2;
+    expect(heard, ['volume 0.8']);
+  });
+
   test('every KeyCode has a Flutter key', () {
     expect(keyCodes.values.toSet(), KeyCode.values.toSet());
   });

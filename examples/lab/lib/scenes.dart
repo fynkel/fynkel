@@ -8,6 +8,7 @@ import 'scenes/character_basics.dart';
 import 'scenes/character_course.dart';
 import 'scenes/components.dart';
 import 'scenes/contacts_basics.dart';
+import 'scenes/controls_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/input.dart';
@@ -43,6 +44,7 @@ final List<LabScene Function()> scenes = [
   SignalsScene.new,
   InputScene.new,
   PointersScene.new,
+  ControlsBasicsScene.new,
   MotionBasicsScene.new,
   EasesScene.new,
   MotionScene.new,

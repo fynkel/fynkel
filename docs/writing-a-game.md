@@ -353,8 +353,9 @@ the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
 **`time`** is on every object and behaviour:
 
 - `time.delta`: this frame's seconds, scaled. Multiply every speed by it.
-- `time.scale`: 0 pauses everything that uses `delta` (moves, waits,
-  tweens); 0.5 is slow motion.
+- `time.scale`: 0 stops everything that uses `delta` (moves, waits,
+  tweens); 0.5 is slow motion. To pause the game, use `world.paused`
+  (§11), which stops the input too.
 - `time.unscaledDelta`, `time.sinceStart`, `time.unscaledSinceStart`,
   `time.frame`.
 - `time.maxDelta` (1/3 s): a long hitch counts as at most this, so nothing
@@ -577,7 +578,6 @@ class Walker extends GameObject {
     final move = input.axis2('move'); // W, A, S, D and the arrows
     translate(Vec3(move.x, 0, -move.y) * (4 * time.delta));
     if (input.action('jump').wasPressed) jump(); // space
-    if (input.wasPressed(KeyCode.escape)) time.scale = time.scale == 0 ? 1 : 0;
     if (input.isPressed(MouseButton.right)) rotate(Vec3.up, time.delta);
   }
 
@@ -641,6 +641,47 @@ class Button3D extends GameObject {
   your own names.
 - A Flutter widget over the game (a HUD button) takes its own taps; they
   don't reach the game.
+
+**Flutter controls** feed the same axes and actions as the keys, as
+Unity's on-screen controls do, so the game reads one path: a joystick
+widget calls `input.setAxis2('move', Vec2(x, y))` (it adds to the keys,
+and stays until set again), and a button calls `input.action('jump')
+.press()` when it goes down and `.release()` when it comes up (or both at
+once for a tap).
+
+**Keys and Flutter.** The view hears every key and gives each to the game
+(`onKeyDown` hears them all), but it keeps from Flutter only the keys the
+game uses: those bound to an axis or an action, and those it has asked
+`isPressed`, `wasPressed` or `wasReleased` about (`input.usesKey`). The
+others go on to Flutter's shortcuts and focus, so Tab and a dialog's
+Escape work. Keys for the app rather than the game go in `FynkelApp`'s
+`shortcuts:`, or a `CallbackShortcuts` around the view.
+
+**Pause** with `world.paused = true`: the game's time stops (`delta` is 0,
+no fixed steps; updates still run, with `unscaledDelta`), held keys,
+fingers and actions let go, and input that comes while paused is dropped.
+The view claims no keys then, so the pause menu's shortcuts get every one.
+The first frame after it counts no time, however long the pause was:
+
+```dart
+// lib/paused_app.dart
+import 'package:flutter/services.dart';
+import 'package:flutter/widgets.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+import 'game.dart';
+import 'hud.dart';
+
+void main() => runApp(
+  FynkelApp(
+    Score.new, // §15's
+    overlay: (context, game) => ScoreHud(game),
+    shortcuts: (game) => {
+      const SingleActivator(LogicalKeyboardKey.escape): () => game.world.paused = !game.world.paused,
+    },
+  ),
+);
+```
 
 ## 12. Assets
 
@@ -1092,6 +1133,13 @@ class ScoreHud extends StatelessWidget {
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
 ScoreHud(game)))`.
 
+**From the game to the UI and back.** A `Signal` has a `stream`, for
+`StreamBuilder` or a `listen` that opens a dialog when the game is over
+(it hears each value a moment after `emit`). The other way, any
+`Listenable` (a `ValueNotifier` the settings page changes) has a
+`changed` signal, from `package:fynkel_flutter`, so an object listens with
+`on(settings.volume.changed, (_) => ...)` and stops when it's destroyed.
+
 `FynkelApp` is a `MaterialApp` with the game as its page, so the overlay
 can hold any Material widget (a `Slider`, a `TextField`, a button), open a
 dialog with `showDialog`, or push a page over the game with
@@ -1172,7 +1220,7 @@ void main() {
     final world = World();
     addTearDown(world.dispose);
     final walker = world.add(Walker());
-    world.input.keyDown(KeyCode.d);
+    world.input.simulate.keyDown(KeyCode.d);
     for (var i = 0; i < 60; i++) {
       world.update(1 / 60); // a second at 60 fps
     }
@@ -1181,8 +1229,9 @@ void main() {
 }
 ```
 
-`world.input` also takes `fingerDown`, `fingerMove`, `fingerUp`, `resize`
-and the rest, so taps, drags and swipes can be tested too.
+`world.input.simulate` also takes `fingerDown`, `fingerMove`, `fingerUp`,
+`resize` and the rest, so taps, drags and swipes can be tested too; it's
+what the view itself calls.
 `HeadlessView(world, width:, height:)` renders a frame without a window,
 for a picture of the game. `examples/arena/test` tests a whole game this
 way.
@@ -1241,6 +1290,8 @@ multibody joints).
 | `Awake`, `Start`, `Update`, `LateUpdate`, `OnDestroy` | `onLoad`, `onStart`, `onUpdate`, `onLateUpdate`, `onDestroy` |
 | `FixedUpdate`, `Time.fixedDeltaTime` | `onFixedUpdate`, `time.fixedDelta` |
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
+| `Time.timeScale = 0` for a pause menu | `world.paused = true`: time and input stop |
+| On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | a Flutter widget calling `input.setAxis2` and `action.press()`/`release()` |
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `StopAllCoroutines`, `yield return new WaitForSeconds(1)` | `startRoutine(() async {...})`, `stopAllRoutines()`, `await wait(1)` |
 | `WaitUntil`, `WaitWhile` | `await waitUntil(...)`, `await waitWhile(...)` |
@@ -1282,6 +1333,13 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - What the view calls to feed input (`keyDown`, `fingerDown`,
+    `resize`, …) moved to `input.simulate`: `world.input.simulate
+    .keyDown(KeyCode.d)` in a test. `keyDown` and `keyUp` return whether
+    the view should claim the key.
+  - The view keeps only the keys the game uses (§11); the rest go on to
+    Flutter's shortcuts. A key the game hears only through `onKeyDown`,
+    and never polls, reaches Flutter too.
   - `onEnable` and `onDisable` run depth first, as Unity's: an object,
     its behaviours, then each child with what's below it; they ran a
     level at a time. `GameObject.release()` is new (see §3's pooling).

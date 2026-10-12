@@ -107,7 +107,7 @@ void main() {
     world.update(0);
     // Below the middle of the view: the ground in front of the player.
     final at = ViewPoint(width / 2, height * 0.8, width: width.toDouble(), height: height.toDouble());
-    world.input
+    world.input.simulate
       ..resize(width.toDouble(), height.toDouble())
       ..fingerDown(1, at.x, at.y)
       ..fingerUp(1, at.x, at.y);

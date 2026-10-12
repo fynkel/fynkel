@@ -57,7 +57,9 @@ void main() {
     final asker = _Asker();
     world.add(GameObject(components: [asker]));
 
-    expect(await madeEachFrame(world, 2000), isEmpty);
+    // 4,000 frames: the count's own noise, a burst of about 28,000 lists
+    // now and then, must not pass for one a frame.
+    expect(await madeEachFrame(world, 4000), isEmpty);
     expect(asker.found, 0);
   });
 }

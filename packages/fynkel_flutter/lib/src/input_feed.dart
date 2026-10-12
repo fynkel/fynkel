@@ -16,7 +16,7 @@ class InputFeed {
   double _padScale = 1, _padRotation = 0;
 
   /// The view's size in logical pixels, from its last layout.
-  void resize(Size size) => _input().resize(size.width, size.height);
+  void resize(Size size) => _input().simulate.resize(size.width, size.height);
 
   /// Touches are fingers of their own; a mouse or a pen is one finger,
   /// by its device, hovering or pressed.
@@ -33,7 +33,7 @@ class InputFeed {
     return range > 0 ? ((e.pressure - e.pressureMin) / range).clamp(0.0, 1.0) : 1.0;
   }
 
-  void pointerDown(PointerDownEvent e) => _input().fingerDown(
+  void pointerDown(PointerDownEvent e) => _input().simulate.fingerDown(
     _id(e),
     e.localPosition.dx,
     e.localPosition.dy,
@@ -42,19 +42,25 @@ class InputFeed {
     pressure: _pressure(e),
   );
 
-  void pointerMove(PointerMoveEvent e) =>
-      _input().fingerMove(_id(e), e.localPosition.dx, e.localPosition.dy, buttons: e.buttons, pressure: _pressure(e));
+  void pointerMove(PointerMoveEvent e) => _input().simulate.fingerMove(
+    _id(e),
+    e.localPosition.dx,
+    e.localPosition.dy,
+    buttons: e.buttons,
+    pressure: _pressure(e),
+  );
 
-  void pointerUp(PointerUpEvent e) => _input().fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy);
+  void pointerUp(PointerUpEvent e) => _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy);
 
-  void pointerCancel(PointerCancelEvent e) => _input().fingerCancel(_id(e));
+  void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e));
 
   /// A mouse or pen over the view with nothing pressed, or coming in.
-  void hover(PointerEvent e) => _input().hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind));
+  void hover(PointerEvent e) =>
+      _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind));
 
-  void exit(PointerExitEvent e) => _input().leave(_id(e));
+  void exit(PointerExitEvent e) => _input().simulate.leave(_id(e));
 
-  void scrolled(Offset delta) => _input().scrollBy(delta.dx, delta.dy);
+  void scrolled(Offset delta) => _input().simulate.scrollBy(delta.dx, delta.dy);
 
   void panZoomStart(PointerPanZoomStartEvent e) {
     _padScale = 1;
@@ -64,7 +70,7 @@ class InputFeed {
   /// A trackpad's two fingers: moving together scrolls (the other way, as
   /// Flutter's scroll views take it), spreading pinches, turning twists.
   void panZoomUpdate(PointerPanZoomUpdateEvent e) {
-    final input = _input();
+    final input = _input().simulate;
     final pan = e.localPanDelta;
     if (pan != Offset.zero) input.scrollBy(-pan.dx, -pan.dy);
     final scale = e.scale / _padScale, twist = e.rotation - _padRotation;
@@ -73,24 +79,23 @@ class InputFeed {
     if (scale != 1 || twist != 0) input.trackpad(scale: scale, twist: twist);
   }
 
-  /// Whether the view used the key: every key, while it has focus.
+  /// Gives the game the key, and says whether the view keeps it: only
+  /// those the game uses ([Input.usesKey]). The rest go on to Flutter's
+  /// shortcuts and focus, so Escape can close a dialog and Tab move focus.
   KeyEventResult key(KeyEvent e) {
     final key = keyCodes[e.physicalKey];
-    if (key != null) {
-      switch (e) {
-        case KeyDownEvent():
-          _input().keyDown(key);
-        case KeyUpEvent():
-          _input().keyUp(key);
-        case KeyRepeatEvent():
-          break;
-      }
-    }
-    return KeyEventResult.handled;
+    if (key == null) return KeyEventResult.ignored;
+    final input = _input();
+    final used = switch (e) {
+      KeyDownEvent() => input.simulate.keyDown(key),
+      KeyUpEvent() => input.simulate.keyUp(key),
+      _ => input.simulate.claims(key),
+    };
+    return used ? KeyEventResult.handled : KeyEventResult.ignored;
   }
 
   /// The view lost focus: its keys won't come up here, so they're let go.
-  void releaseKeys() => _input().releaseKeys();
+  void releaseKeys() => _input().simulate.releaseKeys();
 }
 
 /// Flutter's physical keys as Fynkel's: where they are, not what they

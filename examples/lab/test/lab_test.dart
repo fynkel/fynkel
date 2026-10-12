@@ -26,6 +26,7 @@ import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/moving_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
+import 'package:lab/scenes/controls_basics.dart';
 import 'package:lab/scenes/pooling_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
@@ -74,7 +75,7 @@ void main() {
     addTearDown(world.dispose);
     final scene = world.add(PointersScene());
     await scene.loaded;
-    world.input.resize(400, 300);
+    world.input.simulate.resize(400, 300);
     world.update(1 / 60);
 
     final crate = world.all<GameObject>().firstWhere((o) => o.name == 'crate 2');
@@ -86,13 +87,13 @@ void main() {
       final p = ViewPoint(200, y, width: 400, height: 300);
       if (world.raycast(camera.screenPointToRay(p))?.gameObject == crate) on = p;
     }
-    world.input.fingerDown(1, on!.x, on.y);
+    world.input.simulate.fingerDown(1, on!.x, on.y);
     world.update(1 / 60);
     for (var i = 1; i <= 10; i++) {
-      world.input.fingerMove(1, on.x + i * 10, on.y);
+      world.input.simulate.fingerMove(1, on.x + i * 10, on.y);
       world.update(1 / 60);
     }
-    world.input.fingerUp(1, on.x + 100, on.y);
+    world.input.simulate.fingerUp(1, on.x + 100, on.y);
     world.update(1 / 60);
     final to = crate.transform.position;
     expect(to.x, greaterThan(from.x + 0.5), reason: 'dragged right');
@@ -112,7 +113,7 @@ void main() {
       }
     }
     for (var i = 0; i < 2; i++) {
-      world.input
+      world.input.simulate
         ..fingerDown(2 + i, padAt!.x, padAt.y)
         ..fingerUp(2 + i, padAt.x, padAt.y);
       world.update(1 / 60);
@@ -128,7 +129,7 @@ void main() {
     final puck = world.only<Puck>();
     world.update(1 / 60);
     final from = puck.transform.position;
-    world.input.keyDown(KeyCode.d);
+    world.input.simulate.keyDown(KeyCode.d);
     for (var i = 0; i < 30; i++) {
       world.update(1 / 60);
     }
@@ -155,6 +156,40 @@ void main() {
     expect(scene.cube.position.y, greaterThan(0.5), reason: 'still on its way');
     frames(60);
     expect(scene.cube.position, const Vec3(0, 0.5, 0));
+  });
+
+  test('Input: Flutter controls and pause: the stick and the button drive the cube; pause stops it all', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ControlsBasicsScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(1);
+    final [stickX, _, jump, pause] = scene.controls;
+    (stickX as Slider).onChanged(1);
+    frames(30);
+    expect(scene.cube.position.x, closeTo(2, 0.01), reason: 'the stick moves it 4 m/s');
+    stickX.onChanged(0);
+    (jump as Button).onPressed();
+    frames(10);
+    expect(scene.cube.position.y, greaterThan(0.5));
+    expect(scene.log.value.map((e) => e.text), contains('jump'));
+    frames(60);
+    expect(scene.cube.position.y, 0.5, reason: 'back down');
+
+    (pause as Toggle).onChanged(true);
+    final turn = scene.spinner.rotation;
+    stickX.onChanged(1);
+    frames(30);
+    expect(scene.spinner.rotation, turn);
+    expect(scene.cube.position.x, closeTo(2, 0.01), reason: 'paused: the stick reads nothing');
+    pause.onChanged(false);
+    frames(31);
+    expect(scene.cube.position.x, closeTo(4, 0.01), reason: 'the first frame after counts no time');
   });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
@@ -521,7 +556,7 @@ void main() {
       world = World(source: files);
       addTearDown(world.dispose);
       scene = world.add(JointsChainScene());
-      world.input.resize(400, 300);
+      world.input.simulate.resize(400, 300);
       frames(300);
     });
 
@@ -540,16 +575,16 @@ void main() {
         final p = ViewPoint(200, y, width: 400, height: 300);
         if (world.physics.raycast(scene.camera.screenPointToRay(p))?.gameObject == weight) on = p;
       }
-      world.input.fingerDown(1, on!.x, on.y);
+      world.input.simulate.fingerDown(1, on!.x, on.y);
       frames(1);
       expect(scene.held?.$1.gameObject, weight);
       for (var i = 1; i <= 30; i++) {
-        world.input.fingerMove(1, on.x + i * 3, on.y);
+        world.input.simulate.fingerMove(1, on.x + i * 3, on.y);
         frames(1);
       }
       frames(60);
       expect(weight.position.x, greaterThan(0.5), reason: 'it followed the finger to the right');
-      world.input.fingerUp(1, on.x + 90, on.y);
+      world.input.simulate.fingerUp(1, on.x + 90, on.y);
       frames(1);
       expect(scene.held, isNull);
       expect(weight.get<SpringJoint>(), isNull, reason: 'the spring to the hand is taken off');
@@ -560,13 +595,13 @@ void main() {
     test('the held weight follows the finger closely, going round', () {
       final weight = scene.weight!;
       final p = scene.camera.worldToScreenPoint(weight.position)!;
-      world.input.fingerDown(1, p.x, p.y);
+      world.input.simulate.fingerDown(1, p.x, p.y);
       frames(1);
       // A circle 40 px across, once round in two seconds, near where it hangs.
       var worst = 0.0;
       for (var i = 0; i < 240; i++) {
         final a = i / 60 * math.pi;
-        world.input.fingerMove(1, p.x + 20 * math.sin(a), p.y - 20 + 20 * math.cos(a));
+        world.input.simulate.fingerMove(1, p.x + 20 * math.sin(a), p.y - 20 + 20 * math.cos(a));
         frames(1);
         final held = weight.transformPoint(scene.held!.$2.anchor);
         if (i > 30) worst = math.max(worst, (scene.hand.gameObject.position - held).length);

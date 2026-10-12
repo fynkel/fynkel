@@ -85,7 +85,7 @@ void main() {
 
   setUp(() {
     world = World();
-    input = world.input..resize(100, 100);
+    input = world.input..simulate.resize(100, 100);
     world.add(GameObject(name: 'camera', components: [Camera()]));
     log.clear();
   });
@@ -96,12 +96,12 @@ void main() {
 
   int down((double, double) at, {FingerKind kind = FingerKind.touch}) {
     final finger = kind == FingerKind.mouse ? -1 : ++id;
-    input.fingerDown(finger, at.$1, at.$2, kind: kind);
+    input.simulate.fingerDown(finger, at.$1, at.$2, kind: kind);
     return finger;
   }
 
-  void move(int finger, (double, double) at) => input.fingerMove(finger, at.$1, at.$2);
-  void up(int finger, (double, double) at) => input.fingerUp(finger, at.$1, at.$2);
+  void move(int finger, (double, double) at) => input.simulate.fingerMove(finger, at.$1, at.$2);
+  void up(int finger, (double, double) at) => input.simulate.fingerUp(finger, at.$1, at.$2);
 
   /// A robot 5 ahead with an arm, below a level.
   ({Pointed level, Pointed robot, Pointed arm}) robot({
@@ -301,21 +301,21 @@ void main() {
         components: [cube()],
       ),
     );
-    input.hover(-1, nothing.$1, nothing.$2);
+    input.simulate.hover(-1, nothing.$1, nothing.$2);
     frame();
     expect(log, isEmpty);
-    input.hover(-1, middle.$1, middle.$2);
+    input.simulate.hover(-1, middle.$1, middle.$2);
     frame();
     expect(log, ['enter level', 'enter robot', 'enter arm']);
     log.clear();
-    input.hover(-1, left.$1, left.$2);
+    input.simulate.hover(-1, left.$1, left.$2);
     frame();
     expect(log, ['exit arm', 'enter hand'], reason: 'still over the robot and the level');
     log.clear();
-    input.hover(-1, left.$1 + 1, left.$2);
+    input.simulate.hover(-1, left.$1 + 1, left.$2);
     frame();
     expect(log, isEmpty, reason: 'over the same hand');
-    input.leave(-1);
+    input.simulate.leave(-1);
     frame();
     expect(log, ['exit hand', 'exit robot', 'exit level']);
   });
@@ -372,7 +372,7 @@ void main() {
     expect(log, isEmpty);
 
     world.add(GameObject(components: [Camera()]));
-    input.resize(0, 0);
+    input.simulate.resize(0, 0);
     f = down(middle);
     up(f, middle);
     frame();

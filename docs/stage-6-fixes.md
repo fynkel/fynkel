@@ -24,7 +24,7 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 | 6 | #74, **done**: **The other API decisions**: radians with `.deg`, `isPressed`, the routine words, the camera's helpers on `Camera`, `gameObject` and `RaycastHit`, `world.all` skipping hidden objects | A1, A3, A4, A6, A7, A8 |
 | 7 | #75, **done**: **Only what moved**: the core's moved log, physics follows only it; per-frame lists that keep their storage | R7, F9, R9 |
 | 8 | #76, **done**: **Drawing at scale**: lighter built-in sphere, plus capsule, cylinder and quad meshes; culling; sort keys computed once; a material looked up once per batch; a warning when lights are dropped | S, F13, R8, R12's warning |
-| 9 | **Pooling**: a pool with versioned handles, and the guide's section | F8, F30 |
+| 9 | #77, **done**: **Pooling**: a pool with versioned handles, and the guide's section | F8, F30 |
 | 10 | **Input and pause**: `world.paused`; Flutter controls feed axes and actions; keys reach Flutter's shortcuts; `Signal.stream`, `on` takes a `Listenable` | F2, F3, F4, F5, F32, B |
 | 11 | **Look, physics and motion**: a per-object tint and `Material.copy`; gravity wakes bodies, `wakeUp` before the world does nothing, errors name the real reason; moving platforms; `Follow(space:)`; B's renames and small fixes; `FynkelGame.of`, `FynkelView` split | F12, F14, F15, F18, F20, F22, B |
 | 12 | **Seams**: `extend.dart` version 2; one base for the two C interfaces; the duplicated loops; a release profile | R10, R11, R17, R18 |

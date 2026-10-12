@@ -123,7 +123,7 @@ void main() {
         throwsArgumentError,
         reason: 'the input has no view size yet',
       );
-      world.input.resize(200, 100);
+      world.input.simulate.resize(200, 100);
       expectPoint(o.get<Camera>()!.worldToScreenPoint(const Vec3(1, 0, -1)), 150, 50);
 
       // Round trips, turned and orthographic too.
@@ -489,7 +489,7 @@ void main() {
       });
 
       test('dragging turns it, pinching and the mouse wheel zoom it, and a drag an object took doesn\'t', () {
-        world.input.resize(200, 200);
+        world.input.simulate.resize(200, 200);
         camera();
         world.camera!.transform = Transform(position: const Vec3(0, 0, 10));
         world.add(
@@ -501,36 +501,36 @@ void main() {
         world.add(GameObject(components: [orbit]));
         frames(1);
         final input = world.input;
-        input.fingerDown(1, 150, 100);
+        input.simulate.fingerDown(1, 150, 100);
         frames(1);
-        input.fingerMove(1, 180, 120);
+        input.simulate.fingerMove(1, 180, 120);
         frames(1);
-        input.fingerMove(1, 210, 140);
+        input.simulate.fingerMove(1, 210, 140);
         frames(1);
-        input.fingerUp(1, 210, 140);
+        input.simulate.fingerUp(1, 210, 140);
         frames(1);
         expect(orbit.yaw, closeTo(-0.6, 1e-9));
         expect(orbit.pitch, closeTo(0.4, 1e-9));
 
-        input.trackpad(scale: 2);
+        input.simulate.trackpad(scale: 2);
         frames(1);
         expect(orbit.distance, closeTo(4, 1e-9));
-        input.scrollBy(0, 500);
+        input.simulate.scrollBy(0, 500);
         frames(1);
         expect(orbit.distance, closeTo(4 * math.e, 1e-9));
 
         // Over the grabbed cube, at x = −3: the cube takes the drag.
         final over = world.camera!.worldToScreenPoint(const Vec3(-3, 0, 0))!;
-        input.fingerDown(2, over.x, over.y);
+        input.simulate.fingerDown(2, over.x, over.y);
         frames(1);
-        input.fingerMove(2, over.x + 60, over.y);
+        input.simulate.fingerMove(2, over.x + 60, over.y);
         frames(1);
-        input.fingerUp(2, over.x + 60, over.y);
+        input.simulate.fingerUp(2, over.x + 60, over.y);
         frames(1);
         expect(orbit.yaw, closeTo(-0.6, 1e-9));
 
         orbit.controls = false;
-        input.scrollBy(0, 500);
+        input.simulate.scrollBy(0, 500);
         frames(1);
         expect(orbit.distance, closeTo(4 * math.e, 1e-9));
       });

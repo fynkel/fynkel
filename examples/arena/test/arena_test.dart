@@ -12,7 +12,7 @@ void main() {
   late ArenaGame game;
   setUp(() {
     world = World();
-    world.input.resize(width, height);
+    world.input.simulate.resize(width, height);
     game = world.add(ArenaGame(seed: 1));
   });
   tearDown(() => world.dispose());
@@ -60,13 +60,13 @@ void main() {
 
   test('W, A, S, D move the player, inside the walls; it faces the way it goes', () {
     run(0.1);
-    world.input.keyDown(KeyCode.d);
+    world.input.simulate.keyDown(KeyCode.d);
     run(0.5);
     expect(player().position.x, closeTo(Player.speed * 0.5, 0.1));
     expect(player().facing, Vec3.right);
     run(5);
     expect(player().position.x, size - 0.5);
-    world.input
+    world.input.simulate
       ..keyUp(KeyCode.d)
       ..keyDown(KeyCode.w);
     run(0.2);
@@ -75,8 +75,8 @@ void main() {
 
   test('a finger dragging alone is a stick', () {
     run(0.1);
-    world.input.fingerDown(1, 100, 100);
-    world.input.fingerMove(1, 100, 160);
+    world.input.simulate.fingerDown(1, 100, 100);
+    world.input.simulate.fingerMove(1, 100, 160);
     run(0.5);
     expect(player().position.z, closeTo(Player.speed * 0.5, 0.2), reason: 'down the view is +Z');
     expect(player().position.x, closeTo(0, 1e-9));
@@ -85,9 +85,9 @@ void main() {
   test('space dashes ahead; a dash through an enemy kills it, scores, and leaves sparks', () {
     final enemy = firstWave().first;
     ahead(enemy, 3);
-    world.input.keyDown(KeyCode.space);
+    world.input.simulate.keyDown(KeyCode.space);
     run(0.1);
-    world.input.keyUp(KeyCode.space);
+    world.input.simulate.keyUp(KeyCode.space);
     expect(player().dashing, isTrue);
     run(0.2);
     expect(player().dashing, isFalse);
@@ -102,12 +102,12 @@ void main() {
 
   test('a swipe dashes the way it went', () {
     run(0.1);
-    world.input.fingerDown(1, 100, 100);
+    world.input.simulate.fingerDown(1, 100, 100);
     for (var i = 1; i <= 6; i++) {
-      world.input.fingerMove(1, 100 + 20.0 * i, 100);
+      world.input.simulate.fingerMove(1, 100 + 20.0 * i, 100);
       run(1 / 60);
     }
-    world.input.fingerUp(1, 220, 100);
+    world.input.simulate.fingerUp(1, 220, 100);
     run(0.4);
     expect(player().position.x, greaterThan(4.9), reason: 'a dash is 5 metres; the drag moved it a little too');
   });
@@ -125,20 +125,20 @@ void main() {
     expect(player().health.left, Player.hearts - 2);
   });
 
-  test('pause stops the game\'s time: enemies stand still, and a dash waits', () {
+  test('pause stops the game\'s time and input: enemies stand still, a dash waits, keys go to Flutter', () {
     final enemy = firstWave().first;
-    world.input.keyDown(KeyCode.escape);
-    run(1 / 60);
-    world.input.keyUp(KeyCode.escape);
+    game.togglePause();
     final at = enemy.position;
     expect(game.paused.value, isTrue);
-    expect(world.time.scale, 0);
+    expect(world.paused, isTrue);
     run(1);
     expect(enemy.position, at);
     player().dash(Vec3.right);
     expect(player().dashing, isFalse);
+    expect(world.input.simulate.keyDown(KeyCode.w), isFalse, reason: 'the pause menu gets every key');
+    world.input.simulate.keyUp(KeyCode.w);
     game.togglePause();
-    expect(world.time.scale, 1);
+    expect(world.paused, isFalse);
     run(0.1);
     expect(enemy.position, isNot(at));
   });
@@ -150,7 +150,7 @@ void main() {
     // Sparks right where the tap goes, between the camera and the floor.
     final sparks = game.round.add(Sparks(Vec3(3, 1, 0)));
     run(1 / 60);
-    world.input
+    world.input.simulate
       ..fingerDown(9, at.x, at.y)
       ..fingerUp(9, at.x, at.y);
     run(1 / 60);

@@ -54,12 +54,12 @@ void main() {
   test('a frame without input allocates nothing, with the mouse resting over the view', () async {
     final world = World();
     addTearDown(world.dispose);
-    world.input.resize(100, 100);
+    world.input.simulate.resize(100, 100);
     world.add(GameObject(components: [Camera()]));
     for (var i = 0; i < 50; i++) {
       world.add(_Still()..addComponent(_Idle()));
     }
-    world.input.hover(-1, 50, 50);
+    world.input.simulate.hover(-1, 50, 50);
     world.input.onFingerHeld.listen((_) {});
     world.input.onHover.listen((_) {});
     final system = world.system(_System.new);

@@ -348,7 +348,7 @@ void main() {
 
   test('every object reads the same input', () {
     final reader = world.add(_ReadsInput());
-    world.input.keyDown(KeyCode.w);
+    world.input.simulate.keyDown(KeyCode.w);
     world.update(0.1);
     expect(reader.seen, same(world.input));
     expect(reader.wasDown, isTrue, reason: 'the key went down in the input step, before the updates');

@@ -30,12 +30,12 @@ void main() {
     final world = World();
     addTearDown(world.dispose);
     // As in alloc_test.dart, which allocates nothing.
-    world.input.resize(100, 100);
+    world.input.simulate.resize(100, 100);
     world.add(GameObject(components: [Camera()]));
     for (var i = 0; i < 10; i++) {
       world.add(_Drawing(Vec3(i.toDouble(), 0, 0)));
     }
-    world.input.hover(-1, 50, 50);
+    world.input.simulate.hover(-1, 50, 50);
     // The frames without drawing first: on main (2026-10-10) a world of
     // plain objects boxes one double a frame in the JIT, drawing or not.
     world.debug.enabled = false;

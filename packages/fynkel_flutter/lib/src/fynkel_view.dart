@@ -115,8 +115,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// reads pointers with a `Listener`, which takes part in no gesture
 /// arena, so gesture widgets around it keep working, and a widget over it
 /// (a HUD's button) keeps the pointers it takes from the game. While it
-/// has focus it takes every key, so keys like the arrows and space reach
-/// the game rather than moving focus or pressing buttons.
+/// has focus it gives the game every key, and keeps those the game uses
+/// ([Input.usesKey]: bound to an axis or action, or asked about), so the
+/// arrows and space move the player rather than focus; the others go on
+/// to Flutter's shortcuts too.
 ///
 /// In a debug build ([showErrors]) it shows what the game's code throws
 /// over the game, with the object and the line it came from, as well as
