@@ -59,6 +59,12 @@ class GameObject with _Moving {
   // What the object is to be, until it's added.
   _Description? _described;
 
+  // Its place in the hierarchy, kept here and in the engine alike, and
+  // changed only by the world (world_objects.dart): the engine draws from
+  // its copy, the game reads this one, with no call.
+  GameObject? _parent;
+  List<GameObject>? _children;
+
   // The object this one was added to before either was live.
   GameObject? _queuedIn;
 
@@ -390,7 +396,7 @@ class GameObject with _Moving {
       _gone = true;
       return;
     }
-    world._destroy(_id);
+    world._destroy(this);
   }
 
   /// Destroys an object that was never added, and what was added to it:
@@ -423,37 +429,29 @@ class GameObject with _Moving {
   /// Setting null makes it a root. A parent that is this object or below it
   /// throws [FynkelStatus.invalidValue], as does one from another world.
   GameObject? get parent {
-    check(fy_parent_get(_engine('its parent can\'t be read'), id, scratch.id));
-    final parent = scratch.id.value;
-    return parent == 0 ? null : world._object(parent);
+    _engine('its parent can\'t be read');
+    return _parent;
   }
 
   set parent(GameObject? value) {
-    if (value != null && !identical(value._world, world)) {
-      throw FynkelException(
-        FynkelStatus.invalidValue,
-        '$value is in another world, so it can\'t be the parent of $this',
-      );
-    }
-    check(fy_parent_set(_engine('its parent can\'t be set'), id, value?.id ?? 0));
-    _transformStamp = ++world._transformVersion;
-    world._moved.add(this);
-    world._shape++;
-    world._refresh(this);
+    _engine('its parent can\'t be set');
+    world._setParent(this, value);
   }
 
   /// The objects whose [parent] is this one, in the order they were added.
   /// A new list each time.
   List<GameObject> get children {
     _engine('its children can\'t be read');
-    return List.unmodifiable(world._childIds(id).map(world._object));
+    return List.unmodifiable(_children ?? const <GameObject>[]);
   }
 
   /// Whether this object is [other] or below it.
   bool isPartOf(GameObject other) {
-    if (other._world == null || !identical(other._world, world)) return false;
-    check(fy_is_part_of(_engine('isPartOf can\'t tell'), id, other.id, scratch.flag));
-    return scratch.flag.value;
+    _engine('isPartOf can\'t tell');
+    for (GameObject? o = this; o != null; o = o._parent) {
+      if (identical(o, other)) return true;
+    }
+    return false;
   }
 
   /// The nearest object above this one that is a [T], or null.
@@ -471,10 +469,8 @@ class GameObject with _Moving {
   /// [activeInHierarchy].
   bool get active {
     if (_described case final d?) return d.active;
-    final w = _engine('active can\'t be read');
-    if (_hiddenForLoad) return _activeSelf;
-    check(fy_active_get(w, id, scratch.flag));
-    return scratch.flag.value;
+    _engine('active can\'t be read');
+    return _activeSelf;
   }
 
   set active(bool value) {
@@ -482,18 +478,8 @@ class GameObject with _Moving {
       d.active = value;
       return;
     }
-    final w = _engine('active can\'t be set');
-    _activeSelf = value;
-    // While it loads it stays hidden; it takes this flag when it appears.
-    if (_hiddenForLoad) return;
-    check(fy_active_set(w, id, value));
-    if (value) {
-      world._off.remove(this);
-    } else {
-      world._off.add(this);
-    }
-    world._shape++;
-    world._refresh(this);
+    _engine('active can\'t be set');
+    world._setActive(this, value);
   }
 
   /// The object's layer, 0 to 31 (Unity's layers): a camera draws only the
@@ -512,8 +498,8 @@ class GameObject with _Moving {
   /// Whether this object is shown: it and every object above it [active],
   /// and loaded (see [GameObject.onLoad]).
   bool get activeInHierarchy {
-    check(fy_active_in_hierarchy_get(_engine('activeInHierarchy can\'t be read'), id, scratch.flag));
-    return scratch.flag.value;
+    _engine('activeInHierarchy can\'t be read');
+    return world._shown(this);
   }
 
   /// The object's name, or null. Names needn't be unique; setting '' is
