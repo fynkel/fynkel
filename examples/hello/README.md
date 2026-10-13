@@ -1,9 +1,10 @@
 # hello
 
-The stage 1 acceptance app ([docs/stage-1.md](../../docs/stage-1.md)): a
-lit, spinning cube, written in Dart. It's the smallest game: `lib/main.dart`
-is a root object (`Hello`) with a camera, a sun and a cube that turns
-itself, shown by `runApp(FynkelApp(Hello.new))`.
+The smallest game: a lit, turning cube, written in Dart, and the code of
+[the guide's §2](../../docs/writing-a-game.md#2-hello). `lib/main.dart` is a
+root object (`Hello`) with a camera, a sun and a cube that turns itself,
+shown by `runApp(FynkelApp(Hello.new))`. It began as stage 1's app
+([docs/stage-1.md](../../docs/stage-1.md)).
 
 ```sh
 flutter run -d macos

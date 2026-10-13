@@ -85,8 +85,12 @@ final class Physics extends WorldSystem implements Finalizable {
   /// is done and the next frame collects it, before anything else: the
   /// frame's fixed updates and updates see the bodies where the step left
   /// them, and what they do goes into the next step. The frame doesn't
-  /// wait for the physics, and a query never waits for the step. A frame
-  /// with two fixed steps runs the first in it.
+  /// wait for the physics, but whatever reads it before the next frame
+  /// does: a query, or a body's position or velocity, waits for the step
+  /// to finish. So a Flutter widget that reads physics as it builds (a HUD
+  /// showing a speed) takes back the time the thread saved; read it in
+  /// the game and hand the HUD the number. A frame with two fixed steps
+  /// runs the first in it.
   bool stepBetweenFrames = true;
 
   /// The world's gravity, in m/s² (Unity's `Physics.gravity`): (0, -9.81,

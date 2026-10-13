@@ -1,11 +1,12 @@
 # bowling
 
-The stage 5 game ([docs/stage-5.md](../../docs/stage-5.md), step 9):
-ten-pin bowling on [fynkel_physics](../../packages/fynkel_physics). The
-ball waits on the foul line: drag sideways to place it, and flick up to
-bowl it, as fast as the flick and leaning as it leans (or the arrow keys
-and space). Ten frames, scored as bowling is. The lane, the ball and the
-pins are their real size and weight.
+Ten-pin bowling on [fynkel_physics](../../packages/fynkel_physics): the
+example for physics (made in stage 5,
+[docs/stage-5.md](../../docs/stage-5.md) step 9). The ball waits on the
+foul line: drag sideways to place it, and flick up to bowl it, as fast as
+the flick and leaning as it leans (or the arrow keys and space). Ten
+frames, scored as bowling is. The lane, the ball and the pins are their
+real size and weight.
 
 The game is `lib/bowling.dart`, and each part shows one way of working:
 

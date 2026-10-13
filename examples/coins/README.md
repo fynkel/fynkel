@@ -1,9 +1,10 @@
 # coins
 
-The second stage 3 game ([docs/stage-3.md](../../docs/stage-3.md) §3.7,
-step 6): walk about picking up coins. Tap (or click) anywhere to walk
-there. The last coin of a level takes you to the next, a meadow and then
-a field at dusk, and round again. The models are Kenney's
+Walk about picking up coins: a root that outlives its levels, triggers,
+and a Flutter HUD (made in stage 3,
+[docs/stage-3.md](../../docs/stage-3.md) §3.7). Tap (or click) anywhere to
+walk there. The last coin of a level takes you to the next, a meadow and
+then a field at dusk, and round again. The models are Kenney's
 ([assets/CREDITS.md](assets/CREDITS.md)).
 
 The game is `lib/coins.dart`, and each part shows one way of working:
