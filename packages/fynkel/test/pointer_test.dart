@@ -121,6 +121,50 @@ void main() {
     return (level: l, robot: r, arm: a);
   }
 
+  test("fingers aim from the input's camera when it has one, and touch nothing while it's gone", () {
+    // A cube ahead of the main camera, and one behind it that only a
+    // camera turned round sees.
+    world.add(
+      Pointed(
+        'ahead',
+        components: [cube()],
+        transform: Transform(position: Vec3(0, 0, -5)),
+      ),
+    );
+    world.add(
+      Pointed(
+        'behind',
+        components: [cube()],
+        transform: Transform(position: Vec3(0, 0, 5)),
+      ),
+    );
+    final turned = Camera();
+    final back = world.add(
+      GameObject(
+        transform: Transform(rotation: Quat.lookRotation(Vec3(0, 0, 1))),
+        components: [turned],
+      ),
+    );
+    void tap() {
+      final f = down(middle);
+      frame();
+      up(f, middle);
+      frame();
+    }
+
+    tap();
+    expect(log, contains('down ahead'));
+    log.clear();
+    input.camera = turned;
+    tap();
+    expect(log, contains('down behind'));
+    expect(log, isNot(contains('down ahead')));
+    log.clear();
+    back.destroy();
+    tap();
+    expect(log, isEmpty, reason: 'its camera is gone, and the main one is not used');
+  });
+
   test('a down bubbles from the part hit until one takes it; only the taker gets its up, wherever it is', () {
     robot(robot: {'down'});
     final f = down(middle);

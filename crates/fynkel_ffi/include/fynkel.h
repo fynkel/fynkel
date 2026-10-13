@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 18
+#define FY_ABI_VERSION 19
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -962,6 +962,17 @@ FyStatus fy_view_read(const struct FyView *view,
                       uint8_t *rgba,
                       size_t len,
                       uint64_t *out_number);
+
+// Draws the view's frames from the next `fy_view_frame` on from the camera
+// on object `camera`, or from the world's main camera (`fy_camera_active`)
+// when it's 0, as a new view does. A view with a camera of its own draws
+// black while that object is hidden, gone, or has no camera or transform:
+// a minimap whose camera goes stays a minimap, not a second main view.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_camera_set(const struct FyView *view, uint64_t camera);
 
 // Draws the frames from the next `fy_view_frame` on at `width` × `height`
 // pixels. Frames already on their way finish at the old size and, on

@@ -4,6 +4,7 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart' show BuildContext, Widget;
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelView, FynkelViewStats;
 import 'package:fynkel_physics/fynkel_physics.dart';
 
 /// A scene of the lab: one feature, to try by hand. Subclasses add their
@@ -26,6 +27,10 @@ abstract class LabScene extends GameObject {
   /// scene's own. Built with the page, when the scene is in its world
   /// already, so it can use [world].
   Widget? overlay(BuildContext context) => null;
+
+  /// The game's view: one [FynkelView] of the scene, unless the scene shows
+  /// it some other way (a split screen).
+  Widget view(BuildContext context) => FynkelView(root: this);
 
   /// What happened, newest last: the scene's own events, and what goes to
   /// [World.errors].
@@ -141,3 +146,24 @@ final class Slider extends Control {
 
 /// Seconds as the log shows them.
 String secs(double s) => '${s.toStringAsFixed(2)} s';
+
+/// `--dart-define=LAB_RATES=true` prints each view's rates as [fps] works
+/// them out, to read from `flutter run`.
+const printRates = bool.fromEnvironment('LAB_RATES');
+
+/// Frames shown per second in [stats]' window (drawn, for a view with
+/// nowhere to show them), as a whole number; printed with [label] when
+/// [printRates].
+String fps(String label, FynkelViewStats stats) {
+  final seconds = stats.window.inMicroseconds / 1e6;
+  final shown = stats.view.presented > 0 ? stats.view.presented : stats.view.rendered;
+  if (printRates) {
+    // ignore: avoid_print
+    print(
+      '[rate] $label shown ${(shown / seconds).toStringAsFixed(1)} drawn '
+      '${(stats.view.rendered / seconds).toStringAsFixed(1)} ticks ${(stats.ticks / seconds).toStringAsFixed(1)} '
+      'size ${stats.size.width.round()}x${stats.size.height.round()}',
+    );
+  }
+  return (shown / seconds).round().toString();
+}

@@ -7,6 +7,7 @@ mod common;
 use common::*;
 use fynkel_ffi::*;
 use fynkel_golden::assert_golden;
+use fynkel_world::{Transform, Vec3};
 
 fn stats(view: &View) -> FyViewStats {
     let mut stats = FyViewStats::default();
@@ -103,4 +104,66 @@ fn a_view_after_the_last_one_uploads_again() {
     let b = View::headless(&world, 256, 256);
     assert_golden("cube", &b.read(b.frame(), 256, 256));
     assert!(stats(&b).mesh_bytes > 0);
+}
+
+/// Adds a camera at `eye` looking at the origin, clearing to `clear`.
+fn add_camera(world: &World, eye: Vec3, clear: FyColor) -> u64 {
+    let camera = world.spawn();
+    let lens = FyCamera {
+        fov_y: 60.0,
+        near_clip: 0.1,
+        far_clip: 1000.0,
+        clear_color: clear,
+        orthographic: false,
+        size: 5.0,
+        culling_mask: u32::MAX,
+    };
+    let looking = Transform::from_position(eye).looking_at(Vec3::ZERO);
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_camera_set(world.0, camera, &lens));
+        ok(fy_transform_set(world.0, camera, &transform(looking)));
+    }
+    camera
+}
+
+fn set_camera(view: &View, camera: u64) {
+    // SAFETY: a live view.
+    ok(unsafe { fy_view_camera_set(view.0, camera) });
+}
+
+fn colours(image: &fynkel_golden::Image) -> usize {
+    image.rgba.chunks(4).collect::<std::collections::HashSet<_>>().len()
+}
+
+#[test]
+fn a_view_draws_from_its_own_camera() {
+    let world = World::new();
+    stage1(&world);
+    // Behind the cube, clearing to red.
+    let behind = add_camera(&world, Vec3::new(0.0, 0.0, -4.0), srgb(1.0, 0.0, 0.0));
+    let (main, other) = (View::headless(&world, 256, 256), View::headless(&world, 256, 256));
+    set_camera(&other, behind);
+    let seen = other.read(other.frame(), 256, 256);
+    assert_golden("cube", &main.read(main.frame(), 256, 256));
+    assert_eq!(seen.pixel(0, 0), [255, 0, 0, 255], "its clear colour");
+    assert_ne!(seen.pixel(128, 128), [255, 0, 0, 255], "and the cube in the middle");
+
+    // Back to the world's main camera.
+    set_camera(&other, 0);
+    assert_golden("cube", &other.read(other.frame(), 256, 256));
+}
+
+#[test]
+fn a_view_whose_camera_is_gone_draws_black() {
+    let world = World::new();
+    stage1(&world);
+    let own = add_camera(&world, Vec3::new(3.0, 3.0, 3.0), srgb(0.0, 0.0, 1.0));
+    let view = View::headless(&world, 64, 64);
+    set_camera(&view, own);
+    assert_eq!(view.read(view.frame(), 64, 64).pixel(0, 0), [0, 0, 255, 255]);
+    // SAFETY: a live world.
+    ok(unsafe { fy_despawn(world.0, own) });
+    let image = view.read(view.frame(), 64, 64);
+    assert_eq!((colours(&image), image.pixel(0, 0)), (1, [0, 0, 0, 255]), "not the main camera's picture");
 }

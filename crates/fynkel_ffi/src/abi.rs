@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 18;
+pub const FY_ABI_VERSION: u32 = 19;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -2199,6 +2199,26 @@ pub unsafe extern "C" fn fy_view_read(
         })?;
         // SAFETY: checked non-null above; the caller promises it's writable.
         unsafe { out_number.write(read) };
+        Ok(())
+    })
+}
+
+/// Draws the view's frames from the next `fy_view_frame` on from the camera
+/// on object `camera`, or from the world's main camera (`fy_camera_active`)
+/// when it's 0, as a new view does. A view with a camera of its own draws
+/// black while that object is hidden, gone, or has no camera or transform:
+/// a minimap whose camera goes stays a minimap, not a second main view.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_camera_set(view: *const FyView, camera: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        let mut clock = view.clock.lock().map_err(|_| Error::new(FyStatus::Poisoned, "the view's clock panicked"))?;
+        clock.extract.camera = ObjectId::from_raw(camera);
         Ok(())
     })
 }

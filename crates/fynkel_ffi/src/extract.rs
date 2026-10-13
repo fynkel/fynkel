@@ -3,8 +3,10 @@
 //! without looking anything up.
 //!
 //! The rules:
-//! - The camera is the one on the object with the lowest id that has both a
-//!   `Camera` and a `Transform`. Its transform's scale is ignored.
+//! - The camera is the view's own when it has one ([`Extract::camera`]):
+//!   drawn from while it's shown and has a `Camera` and a `Transform`, and
+//!   nothing is drawn otherwise. Else it's the one on the object with the
+//!   lowest id that has both. Its transform's scale is ignored.
 //! - The sun is the directional light with the lowest id that has a
 //!   `Transform`; it shines along its world forward (-Z). A
 //!   directional light without a transform has no direction and is
@@ -71,6 +73,8 @@ pub(crate) struct Extract {
     #[cfg(test)]
     own: Uploaded,
     matrices: WorldMatrices,
+    /// The view's own camera, or `None` for the world's main one.
+    pub(crate) camera: Option<ObjectId>,
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
     materials: HashMap<MaterialId, PbrMaterial>,
@@ -165,8 +169,10 @@ impl Extract {
         };
 
         let mut camera: Option<(ObjectId, Camera, Quat, Vec3)> = None;
+        let own = self.camera;
         world.for_each2::<Camera, Transform>(|id, c, t| {
-            if camera.is_none_or(|(best, ..)| id < best)
+            if own.is_none_or(|own| own == id)
+                && camera.is_none_or(|(best, ..)| id < best)
                 && let Some((rotation, position)) = placed(id, t)
             {
                 camera = Some((id, *c, rotation, position));

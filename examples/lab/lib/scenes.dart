@@ -32,7 +32,9 @@ import 'scenes/moving_basics.dart';
 import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/pooling_basics.dart';
+import 'scenes/minimap_basics.dart';
 import 'scenes/rebinding_basics.dart';
+import 'scenes/split_screen_basics.dart';
 import 'scenes/riding_basics.dart';
 import 'scenes/rigidbody_basics.dart';
 import 'scenes/rigidbody_stack.dart';
@@ -84,4 +86,6 @@ final List<LabScene Function()> scenes = [
   WorldWidgetsBasicsScene.new,
   MenusBasicsScene.new,
   RebindingBasicsScene.new,
+  MinimapBasicsScene.new,
+  SplitScreenBasicsScene.new,
 ];

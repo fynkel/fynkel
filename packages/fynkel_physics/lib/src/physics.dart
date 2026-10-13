@@ -178,6 +178,11 @@ final class Physics extends WorldSystem implements Finalizable {
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
   var _stepping = false;
+
+  /// Whether a step runs between frames now, not yet collected: for tests
+  /// that nothing between frames waits for it.
+  @visibleForTesting
+  bool get debugStepRunning => _stepping;
   var _due = false;
   var _steps = 0;
 

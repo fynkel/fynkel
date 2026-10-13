@@ -118,10 +118,23 @@ abstract base class WorldView implements Finalizable {
     return _pointer;
   }
 
+  /// The camera the view draws from: its own, or the world's main one
+  /// ([World.camera]) when null. Read at each [frame]. While its object
+  /// isn't a live, shown object of the world (not added yet, destroyed,
+  /// inactive), the view draws black, not the main camera's picture.
+  Camera? camera;
+  int _sentCamera = 0;
+
   /// Copies the world and hands it to the render worker, without waiting
   /// for the GPU. Returns the frame's number (1, 2, …).
   int frame() {
     final live = _live;
+    final own = this.camera;
+    final camera = own == null ? 0 : cameraObjectId(own, _world);
+    if (camera != _sentCamera) {
+      check(fy_view_camera_set(live, camera));
+      _sentCamera = camera;
+    }
     _world.sendTransforms();
     check(fy_view_frame(live, scratch.id));
     return scratch.id.value;

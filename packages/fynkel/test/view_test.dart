@@ -28,6 +28,31 @@ void main() {
     expect(frame.rgba[i], greaterThan(frame.rgba[i + 2]), reason: 'the orange cube in the middle');
   });
 
+  test("a view draws from its own camera, and black while it's gone", () {
+    final scene = stage1();
+    final world = scene.world;
+    final view = HeadlessView(world, width: 8, height: 8);
+    addTearDown(view.dispose);
+    addTearDown(world.dispose);
+    List<int> corner() => view.read(view.frame()).rgba.sublist(0, 4);
+    final main = corner();
+
+    final red = Camera(clearColor: const Color.rgb(1, 0, 0));
+    final behind = GameObject(transform: Transform(position: Vec3(0, 0, -4)), components: [red]);
+    // Not in the world yet: black, not the main camera's picture.
+    view.camera = red;
+    expect(corner(), [0, 0, 0, 255]);
+    world.add(behind);
+    expect(corner(), [255, 0, 0, 255]);
+    expect(world.camera, isNot(red), reason: 'the main camera is still the first');
+
+    view.camera = null;
+    expect(corner(), main);
+    view.camera = red;
+    behind.destroy();
+    expect(corner(), [0, 0, 0, 255]);
+  });
+
   test('stats count the frames a view drew', () {
     final scene = stage1();
     final view = HeadlessView(scene.world, width: 8, height: 8);

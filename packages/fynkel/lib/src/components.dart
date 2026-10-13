@@ -169,9 +169,18 @@ enum Space {
   world,
 }
 
-/// Makes the object a camera. The view is drawn from the shown object
-/// with a camera and the lowest id ([World.camera]). Change it in place:
-/// `get<Camera>()!.fovY = 40.deg`.
+/// For views: the id of [camera]'s object while it's a live object of
+/// [world], else -1, which names no object.
+int cameraObjectId(Camera camera, World world) {
+  final object = camera._owner;
+  if (object == null || camera.isRemoved || !identical(object._world, world) || !object.isAlive) return -1;
+  return object._id;
+}
+
+/// Makes the object a camera. A view is drawn from the shown object
+/// with a camera and the lowest id ([World.camera]), unless it has a
+/// camera of its own ([WorldView.camera]): a minimap, the other half of a
+/// split screen. Change it in place: `get<Camera>()!.fovY = 40.deg`.
 ///
 /// A value the engine refuses (out of its range, NaN) throws an
 /// [ArgumentError] from the setter and leaves the old value in place.
