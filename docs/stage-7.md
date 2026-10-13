@@ -232,7 +232,7 @@ Done so far (PR #98):
   "the §15 snippets composed into the whole brief almost line for line".
   Its log is kept outside the repository, in
   `~/Documents/fynkel-s7/menus-LOG.md`.
-- **Next:** you play Sheepdog again; then the report.
+- **The report:** [stage-7-report.md](stage-7-report.md).
 
 ## 3. Decisions (2026-10-13)
 
@@ -252,4 +252,4 @@ Done so far (PR #98):
 - [x] Phase 4: menus, pop-ups and navigation (PRs #93, #94)
 - [ ] Phase 5: several views (PRs #95, #96; the Note10+ measure is owed)
 - [x] Phase 6: the leftovers (PR #97)
-- [ ] Phase 7: a real game, and the report
+- [ ] Phase 7: a real game, and the report (PR #98; the Note10+ measure is owed)
