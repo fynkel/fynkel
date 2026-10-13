@@ -1,12 +1,14 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, ObjectError, World;
 
 import 'fynkel_view.dart' show bundleSource;
+import 'world_listenables.dart' show WorldTheme;
 
 /// Makes a game's root with [make] and builds what shows it, so the game
 /// can start over with a new root:
@@ -21,7 +23,9 @@ import 'fynkel_view.dart' show bundleSource;
 /// It makes the game's world and adds the root to it before [builder]
 /// runs, so `game.world` is there from the start: a widget beside the
 /// view can take `game.world.input` while it's built. The [FynkelView] of
-/// the root shows that world.
+/// the root shows that world. The world wears the app's theme
+/// (`world.theme`, from `Theme.of(context)` here) from before the root is
+/// added, and hears when it changes (`world.onThemeChanged`).
 ///
 /// [restart] destroys everything [builder] built, and the world, and
 /// builds it again around a new root in a new world. That runs the game's code as
@@ -93,10 +97,18 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
   /// The world [game] is in.
   World get world => _world;
 
+  var _started = false;
+
   @override
-  void initState() {
-    super.initState();
-    _start();
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The first time, after initState: the theme can be read from here on.
+    if (!_started) {
+      _started = true;
+      _start();
+    } else {
+      _world.theme = Theme.of(context);
+    }
   }
 
   /// Starts the game over with a new root and a new world.
@@ -122,6 +134,7 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
     _early.clear();
     _errorsTo = null;
     _errorsHeard = world.errors.listen(_heard);
+    world.theme = Theme.of(context);
     _game = widget.make();
     world.add(_game);
     // After the first frame and what it reported, which comes in

@@ -42,6 +42,19 @@ class Bundle extends CachingAssetBundle {
 
 /// The smallest game: a camera, a texture from the bundle, and a log of
 /// what it was told.
+/// Notes the world's theme as it loads, and every change after.
+class Themed extends Tiny {
+  final heard = <Brightness>[];
+  Brightness? atLoad;
+
+  @override
+  Future<void> onLoad() {
+    atLoad = world.theme.brightness;
+    on(world.onThemeChanged, (theme) => heard.add(theme.brightness));
+    return super.onLoad();
+  }
+}
+
 class Tiny extends GameObject {
   final log = <String>[];
   Texture2D? texture;
@@ -776,6 +789,46 @@ void main() {
       game.world.paused = false;
       await tester.pump();
       expect(find.text('playing'), findsOneWidget);
+      await finish(tester, game.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("a FynkelApp's game wears the app's theme from its onLoad, and hears it change", (tester) async {
+      final made = <Themed>[];
+      Widget app(ThemeMode mode) => FynkelApp(
+        () => (made..add(Themed())).last,
+        theme: ThemeData(brightness: Brightness.light),
+        darkTheme: ThemeData(brightness: Brightness.dark),
+        themeMode: mode,
+        source: bundleSource(Bundle({'assets/grid.png': png})),
+      );
+      await tester.pumpWidget(app(ThemeMode.dark));
+      final game = made.single;
+      expect(game.atLoad, Brightness.dark, reason: 'there before the root was added');
+      expect(game.world.isDark, isTrue);
+      await tester.pumpWidget(app(ThemeMode.light));
+      for (var i = 0; i < 30; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      expect(game.world.isDark, isFalse);
+      expect(game.heard.last, Brightness.light);
+      expect(game.heard.length, greaterThan(1), reason: 'each step of the fade');
+      expect(made, hasLength(1), reason: 'the same game, not a new one');
+      await finish(tester, game.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("a view that makes its own world gives it the theme around it", (tester) async {
+      final game = Themed();
+      await tester.pumpWidget(
+        Theme(
+          data: ThemeData(brightness: Brightness.dark),
+          child: sized(FynkelView(root: game, source: bundleSource(Bundle({'assets/grid.png': png})))),
+        ),
+      );
+      expect(game.atLoad, Brightness.dark);
       await finish(tester, game.loaded);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));
