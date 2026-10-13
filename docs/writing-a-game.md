@@ -451,7 +451,10 @@ class Beacon extends GameObject {
   on objects of their own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
   `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
-  from the active one, `world.camera` (Unity's `Camera.main`).
+  from the active one, `world.camera` (Unity's `Camera.main`). Keep `near`
+  below `far`: a view drawing from a camera that isn't throws an
+  `ArgumentError` naming it, each frame, rather than drawing nothing. It's
+  checked only then, so setting `near` and then `far` is fine.
 
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
@@ -926,6 +929,10 @@ class CameraRig extends GameObject {
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
   target turns left and right.
 - `world.cameras.shake(strength, frequency:)`, `setBlend(blend, from:, to:)`, `live`.
+  A shake moves the picture, not the camera: its transform stays where
+  the game or the virtual camera put it, so moving it during a shake
+  never drifts. `world.cameras.shakeOf(camera)` says how far it's moved
+  now; world widgets (§15) move with it.
 - **Between the screen and the world**: on a `Camera`, such as
   `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
   Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
@@ -2069,6 +2076,11 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 7** (2026-10-13):
+  - A camera shake no longer moves the camera's object: its `position`
+    stays put while the picture shakes. Code that read the shaken place
+    there adds `world.cameras.shakeOf(camera)`.
+  - A camera whose `near` isn't below its `far` makes its views' frames
+    throw an `ArgumentError`, where they drew nothing.
   - Two `FynkelView`s of one world update it once a frame between them,
     where each used to update it. A test that counted on that pumps
     twice as many frames.

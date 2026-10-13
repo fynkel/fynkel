@@ -53,6 +53,25 @@ void main() {
     expect(corner(), [0, 0, 0, 255]);
   });
 
+  test('a camera whose near is not below its far is refused when drawn, naming it', () {
+    final scene = stage1();
+    final world = scene.world;
+    final view = HeadlessView(world, width: 8, height: 8);
+    addTearDown(view.dispose);
+    addTearDown(world.dispose);
+    final camera = world.camera!..gameObject.name = 'eye';
+
+    // Further out in two steps: past far for a moment, which is fine
+    // until it draws.
+    camera.near = 2000;
+    expect(
+      view.frame,
+      throwsA(isA<ArgumentError>().having((e) => e.message, 'message', allOf(contains("'eye'"), contains('near')))),
+    );
+    camera.far = 5000;
+    expect(view.read(view.frame()).rgba, hasLength(8 * 8 * 4));
+  });
+
   test('stats count the frames a view drew', () {
     final scene = stage1();
     final view = HeadlessView(scene.world, width: 8, height: 8);

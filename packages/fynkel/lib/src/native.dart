@@ -96,6 +96,7 @@ final class Scratch {
   final flag = malloc<Bool>();
   final ray = malloc<FyRay>();
   final rayHit = malloc<FyRayHit>();
+  final vec3 = malloc<FyVec3>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -111,7 +112,7 @@ final class Scratch {
   /// Frees it all. Nothing may use it after.
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
-    all.addAll([model, modelCounts, width, height, flag, ray, rayHit, _ids, _bytes, _transforms]);
+    all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
     all.forEach(malloc.free);
   }
 

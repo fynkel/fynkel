@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 19
+#define FY_ABI_VERSION 20
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -426,6 +426,18 @@ FyStatus fy_active_in_hierarchy_get(const struct FyWorld *world, uint64_t id, bo
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_camera_active(const struct FyWorld *world, uint64_t *out);
+
+// Shakes camera `camera` by `offset` (in the world, in metres) when a view
+// draws from it, without moving the object: what the world's camera
+// shake is. 0 for `camera` (or a null `offset`) stops it. Taken by each
+// `fy_view_frame` after.
+//
+// # Safety
+//
+// `world` is null or live; `offset` is null or readable.
+FyStatus fy_camera_shake_set(const struct FyWorld *world,
+                             uint64_t camera,
+                             const struct FyVec3 *offset);
 
 // Names the object with `len` bytes of UTF-8 at `name`, or clears its name
 // when `len` is 0. Names needn't be unique.

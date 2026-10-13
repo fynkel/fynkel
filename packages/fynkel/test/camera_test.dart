@@ -562,7 +562,11 @@ void main() {
   });
 
   group('shake', () {
-    test('stays within its strength across the view, and ends where it began', () {
+    // A shake moves the camera only where it's drawn, so the game's own
+    // moves of it never drift (docs/stage-7.md phase 6).
+    Vec3 shaken(GameObject view) => world.cameras.shakeOf(view.get<Camera>()!);
+
+    test('stays within its strength across the view, fades out, and never moves the transform', () {
       final view = camera();
       view.transform = Transform(position: const Vec3(1, 2, 3), rotation: Quat.lookRotation(Vec3(-1, -2, -3)));
       final start = view.transform;
@@ -570,7 +574,8 @@ void main() {
       final offsets = <Vec3>[];
       for (var i = 0; i < 59; i++) {
         world.update(1 / 60);
-        offsets.add(view.position - start.position);
+        expect(view.transform, start);
+        offsets.add(shaken(view));
       }
       expect(world.cameras.isShaking, isTrue);
       expect(offsets.map((o) => o.length).reduce(math.max), inInclusiveRange(0.05, 0.5));
@@ -581,7 +586,17 @@ void main() {
       }
       world.update(1 / 60);
       expect(world.cameras.isShaking, isFalse);
+      expect(shaken(view), Vec3.zero);
       expect(view.transform, start);
+    });
+
+    test('only the camera drawn from shakes', () {
+      final view = camera();
+      final other = world.add(GameObject(components: [Camera()]));
+      world.cameras.shake(1, seconds: 1);
+      frames(1);
+      expect(shaken(view), isNot(Vec3.zero));
+      expect(shaken(other), Vec3.zero);
     });
 
     test('the same seed shakes the same way', () {
@@ -592,7 +607,7 @@ void main() {
         final seen = <Vec3>[];
         for (var i = 0; i < 10; i++) {
           w.update(1 / 60);
-          seen.add(v.position);
+          seen.add(w.cameras.shakeOf(v.get<Camera>()!));
         }
         w.dispose();
         return seen;
@@ -602,7 +617,21 @@ void main() {
       expect(run(4), isNot(run(5)));
     });
 
-    test('on top of a virtual camera, and of the game moving the camera', () {
+    test('a camera the game moves during a shake ends exactly where it was moved to', () {
+      final view = camera();
+      world.cameras.shake(1, seconds: 0.5);
+      const step = Vec3(0.1, 0, -0.05);
+      var expected = Vec3.zero;
+      for (var i = 0; i < 60; i++) {
+        view.position += step;
+        expected += step;
+        world.update(1 / 60);
+      }
+      expect(world.cameras.isShaking, isFalse);
+      expect(view.position, expected, reason: 'no drift: nothing but the game wrote it');
+    });
+
+    test('on top of a virtual camera', () {
       final view = camera();
       final v = world.add(
         GameObject(
@@ -612,18 +641,12 @@ void main() {
       );
       world.cameras.shake(1, seconds: 1);
       frames(1);
-      expect(view.position, isNot(const Vec3(0, 0, 9)));
+      expect(view.position, const Vec3(0, 0, 9));
+      expect(shaken(view), isNot(Vec3.zero));
       v.position = const Vec3(0, 0, 4);
       frames(3);
-      expect(view.position, const Vec3(0, 0, 4), reason: 'it ends where the virtual camera is');
-
-      v.get<VirtualCamera>()!.enabled = false;
-      frames(1);
-      world.cameras.shake(1, seconds: 1);
-      frames(1);
-      view.position = const Vec3(5, 0, 0);
-      frames(3);
-      expect(view.position, const Vec3(5, 0, 0), reason: 'and where the game put it');
+      expect(view.position, const Vec3(0, 0, 4));
+      expect(shaken(view), Vec3.zero);
     });
 
     test('stops with stopShaking; holds while paused unless unscaled', () {
@@ -632,13 +655,14 @@ void main() {
       world.cameras.shake(1, seconds: 0.5);
       frames(4);
       expect(world.cameras.isShaking, isTrue);
-      expect(view.position, isNot(Vec3.zero), reason: 'held where it was');
+      expect(shaken(view), isNot(Vec3.zero), reason: 'held where it was');
       world.cameras.stopShaking();
       frames(1);
-      expect(view.position, Vec3.zero);
+      expect(shaken(view), Vec3.zero);
       world.cameras.shake(1, seconds: 0.5, unscaled: true);
       frames(2);
       expect(world.cameras.isShaking, isFalse);
+      expect(shaken(view), Vec3.zero);
       expect(view.position, Vec3.zero);
     });
   });

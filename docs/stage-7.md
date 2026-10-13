@@ -148,6 +148,28 @@ Done so far (PRs #95, #96):
 
 *Done when* each has a test, and the scale numbers are no worse.
 
+Done (PR #97):
+
+- **Shake** goes to the engine as an offset (`fy_camera_shake_set`, ABI
+  20) and moves the camera only where it's drawn; the camera's transform
+  is the game's alone. `world.cameras.shakeOf(camera)` says how far, and
+  world widgets move with it. A camera moved by `position += step` during
+  a shake ends exactly at the sum of its steps (the old code was 0.18 off
+  after one second).
+- **near ≥ far**: the extract refuses the frame, naming the camera, and
+  the view's `frame()` throws an `ArgumentError`; a `FynkelView` reports
+  it once a second and the game goes on. Checked only when drawn, so
+  setting `near` then `far` works.
+- **The extract's work for every object: left as it is.** The probe
+  (`extract_probe`, release, Mac) takes 0.23 ms for 10,000 objects in
+  trees and 0.11 ms when the camera draws none of them, so culling in the
+  extract could save 0.11 ms at the very most, of an 8.3 ms frame, and
+  would add the sphere test to the UI thread, the busy one on the
+  Note10+. Its new row ("nothing drawn") keeps the number measured.
+- Scale, 10,000 objects, Mac, 60 s: `main` 112.1 fps median (min 65.5),
+  this PR 120.0 (min 27.2: one window); two earlier runs 120.0/44.9 and
+  119.0/40.6. The spread is the Mac's, not the change's.
+
 ### Phase 7: a real game, and the report
 
 - A new example that uses all of it: a title screen, settings (theme,
@@ -175,5 +197,5 @@ Done so far (PRs #95, #96):
 - [ ] Phase 3: widgets in the world (PR #92; the Note10+ measure is owed)
 - [x] Phase 4: menus, pop-ups and navigation (PRs #93, #94)
 - [ ] Phase 5: several views (PRs #95, #96; the Note10+ measure is owed)
-- [ ] Phase 6: the leftovers
+- [x] Phase 6: the leftovers (PR #97)
 - [ ] Phase 7: a real game, and the report
