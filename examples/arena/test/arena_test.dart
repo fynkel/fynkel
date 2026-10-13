@@ -130,18 +130,15 @@ void main() {
 
   test('pause stops the game\'s time and input: enemies stand still, a dash waits, keys go to Flutter', () {
     final enemy = firstWave().first;
-    game.togglePause();
+    world.paused = true; // As the pause menu does.
     final at = enemy.position;
-    expect(game.paused.value, isTrue);
-    expect(world.paused, isTrue);
     run(1);
     expect(enemy.position, at);
     player().dash(Vec3.right);
     expect(player().dashing, isFalse);
     expect(world.input.simulate.keyDown(KeyCode.w), isFalse, reason: 'the pause menu gets every key');
     world.input.simulate.keyUp(KeyCode.w);
-    game.togglePause();
-    expect(world.paused, isFalse);
+    world.paused = false;
     run(0.1);
     expect(enemy.position, isNot(at));
   });

@@ -24,6 +24,7 @@ import 'scenes/joints_character.dart';
 import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
+import 'scenes/menus_basics.dart';
 import 'scenes/mesh_colliders_basics.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
@@ -80,4 +81,5 @@ final List<LabScene Function()> scenes = [
   FlutterBasicsScene.new,
   ThemeBasicsScene.new,
   WorldWidgetsBasicsScene.new,
+  MenusBasicsScene.new,
 ];

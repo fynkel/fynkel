@@ -63,14 +63,19 @@ class FynkelGame<T extends GameObject> extends StatefulWidget {
       context.findAncestorStateOfType<FynkelGameState<T>>();
 
   /// The [FynkelGame] around [context] (`FynkelGame.of<Arena>(context).restart()`).
-  /// Throws a [FlutterError] if there is none, or if its game isn't a [T].
+  /// [T] is the type the `FynkelGame` was made for (what its `make` gives):
+  /// for a `FynkelGame<Level>` making a `Level1`, ask for `Level` and cast
+  /// its game. Throws a [FlutterError] if there is none, or if it isn't
+  /// one for [T].
   static FynkelGameState<T> of<T extends GameObject>(BuildContext context) {
     final state = maybeOf<T>(context);
     if (state != null) return state;
+    final other = maybeOf(context);
     throw FlutterError(
-      maybeOf(context) == null
+      other == null
           ? 'FynkelGame.of found no FynkelGame around this context: make it in the builder of one.'
-          : 'FynkelGame.of<$T> found a FynkelGame whose game is not a $T.',
+          : 'FynkelGame.of<$T> found a FynkelGame made for ${other._made}, which is not a $T: '
+                'ask for ${other._made}, and cast its game.',
     );
   }
 
@@ -80,6 +85,9 @@ class FynkelGame<T extends GameObject> extends StatefulWidget {
 
 /// A [FynkelGame]'s state: its [game] and [world], and [restart].
 class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
+  // What it was made for, as asked for in FynkelGame.of.
+  Type get _made => T;
+
   late T _game;
   late World _world;
   var _round = 0;
