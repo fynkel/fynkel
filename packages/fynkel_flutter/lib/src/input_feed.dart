@@ -109,6 +109,12 @@ class InputFeed {
   void releaseKeys() => _input().simulate.releaseKeys();
 }
 
+/// The game's key for a Flutter [KeyEvent], or null for one it has none
+/// for: what a "press a key" box on a controls page binds
+/// (`input.bindAction('dash', [keyCodeOf(event)!])`). Where the key is,
+/// not what it types, as the game reads keys.
+KeyCode? keyCodeOf(KeyEvent event) => keyCodes[event.physicalKey];
+
 /// Flutter's physical keys as Fynkel's: where they are, not what they
 /// type.
 final Map<PhysicalKeyboardKey, KeyCode> keyCodes = {

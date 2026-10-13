@@ -63,6 +63,14 @@ void main() {
     input.onTwist.listen((p) => heard.add('twist ${p.twist}'));
   }
 
+  test('keyCodeOf gives the game\'s key where the key is, whatever it types; null for one it has none for', () {
+    KeyEvent down(PhysicalKeyboardKey physical, LogicalKeyboardKey logical) =>
+        KeyDownEvent(physicalKey: physical, logicalKey: logical, timeStamp: Duration.zero);
+    expect(keyCodeOf(down(PhysicalKeyboardKey.keyW, LogicalKeyboardKey.keyZ)), KeyCode.w, reason: 'AZERTY');
+    expect(keyCodeOf(down(PhysicalKeyboardKey.space, LogicalKeyboardKey.space)), KeyCode.space);
+    expect(keyCodeOf(down(PhysicalKeyboardKey.fn, LogicalKeyboardKey.fn)), isNull);
+  });
+
   testWidgets('a tap reaches the input once, at its place in the view in logical pixels', (tester) async {
     // Positions don't depend on the pixels the view draws.
     tester.view.devicePixelRatio = 3;
