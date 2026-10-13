@@ -278,7 +278,18 @@ impl Target for Android {
     }
 
     fn finish(&mut self, frame: Frame, encoder: wgpu::CommandEncoder, _number: u64) {
-        self.queue.submit([encoder.finish()]);
+        let submitted = self.queue.submit([encoder.finish()]);
+        // Flutter takes each frame on the main thread, where Dart runs, and
+        // waits there for the GPU to finish it (Android 12's ImageReader in
+        // acquiring it, Flutter itself from 13). Waiting here first, on a
+        // thread with nothing else to do, keeps the game's next update from
+        // waiting behind the GPU: on the Note10+, 10,000 objects went from
+        // 12.7 to 27–36 fps. A GPU that takes over a second is presented all the
+        // same, and that wait falls on Flutter as before.
+        let _ = self.shared.device.poll(wgpu::PollType::Wait {
+            submission_index: Some(submitted),
+            timeout: Some(std::time::Duration::from_secs(1)),
+        });
         let Frame { texture, view, _lease } = frame;
         drop(view);
         self.queue.present(texture);

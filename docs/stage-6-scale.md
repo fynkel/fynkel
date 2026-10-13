@@ -229,3 +229,160 @@ here, so 10 restarts don't show it.
   (and the scale tools' first try) pass `--dart-define=TUMBLE_RIGIDBODIES=1`,
   but `bool.fromEnvironment` is true only for `true`. Fix the comments in
   step 6.
+
+## Step 6: measured again
+
+Stage 6 step 6's PR 15 ran check A again on 2026-10-13, after the fixes
+(culling, the lighter sphere and the material looked up once per batch
+came in PR 8). It found two slowdowns that PRs 4 to 8 had brought in, and
+fixed both in the same PR.
+
+| 10,000 objects | Step 5 | Step 6 |
+| --- | --- | --- |
+| Mac | 120 fps | **120 fps** |
+| iPhone | 44 fps, its GPU the limit | **120 fps** (min 119); all 7,199 frames drawn but one |
+| Note10+ | 34.9 fps, its UI thread the limit | **27.0 and 35.9 fps** shown, in two runs; the game updates 52–56 times a second; its GPU is now the limit |
+
+### What had got slower, and the fixes
+
+**1. World positions worked out again at every move.** Since PR 4 an
+object keeps its world transform in Dart, worked out from its parents'.
+It was kept "until anything in the world moves": one count for the whole
+world. In the scale world 9,000 parts bob, each reading and setting its
+`position` (the world's, since PR 5), so every part worked out its
+parents' transforms again at each move. That made 11 MB of Dart garbage a
+frame on the Mac with only bobbing (step 5's code: 0.84 MB).
+
+- Now each object keeps its world transform for as long as its own
+  transform and its parent's world transform are the same ones it was
+  worked out from. One object moving leaves the others' alone.
+- Setting `position` also keeps what it just learned: the world
+  transform is the position set, turned and sized as before.
+- `Quat.rotate` and `inverseTransformPoint` now work in plain numbers
+  and make only their result: the old `rotate` made seven `Vec3`s.
+
+With only bobbing: 11.3 MB a frame → 1.15 MB. That is still 37% more than
+step 5's 0.84 MB, the price of turning a world position into the
+parent's space. With all five behaviours: 2.45 MB → 0.37 MB (step 5:
+0.31 MB).
+
+**2. On Android the game's update waited for the GPU.** Bisecting the
+PRs on the Note10+ put the drop at PR 8 (30.9 → 11.8 fps), though PR 8
+draws less. A Perfetto trace showed why:
+
+- Flutter takes each of our frames on Android's main thread, and waits
+  there until the GPU has finished it. On Android 12 the `ImageReader`
+  does it when the frame is acquired; from 13 on, Flutter itself waits on
+  the frame's fence.
+- Dart runs on that same thread, so the next update waited too:
+  `waitForever` on the main thread took 44 ms a frame (6 ms on PR 7).
+- It depended on timing, which explains step 5's puzzles. A quicker
+  render thread (PR 8's culling, or cubes in step 5) handed the frame
+  over sooner, before the next update had started, and the update then
+  waited behind the GPU. A slower one handed it over while the update
+  ran, and the two overlapped. A render thread made slower on purpose
+  ran faster.
+- **The fix:** the render thread now waits for its own frame's GPU work
+  before handing the frame to Flutter
+  (`crates/fynkel_present/src/android.rs`). It has nothing else to do in
+  the meantime, and the main thread finds each frame ready. The main
+  thread's wait dropped from 44 ms to 0.01 ms a frame.
+- On the Note10+, 10,000 objects went from 12.7 fps to 27–36, and 1,000
+  from 23 (step 5) to 54.9. Arena, bowling and garden hold 59.9.
+
+### The Note10+
+
+10,000 objects of all five behaviours: **27.0 fps** on screen over 60 s
+(min 18.0), the update running 52 times a second; 35.9 fps over 30 s in
+a second run, the update 56 times a second. The render side
+skips the scenes it can't keep up with, so the UI thread is no longer the
+limit: the GPU is. ~5,500 objects are in view, the rest culled.
+
+Each behaviour alone (20 s; Dart per update, the allocation over every
+update, not over the frames shown):
+
+| Behaviour | Step 5 fps | Step 6 fps shown | Updates a second | Dart per update |
+| --- | --- | --- | --- | --- |
+| still | 34.9 | 30.0 | 58.7 | 30 KB |
+| spin | 31.9 | 26.0 | 55.4 | 275 KB |
+| bob | 35.9 | 28.0 | 54.8 | 1.19 MB |
+| beat | 35.9 | 27.0 | 54.0 | 457 KB |
+| blink | 32.9, min **13.0** | **37.9**, min 36.9 | 59.7 | 52 KB |
+
+Blink's dip is gone: PR 9 made hiding and showing an object cheap. The
+others show a few frames fewer than in step 5, but the game itself runs
+about 1.6 times as often: the update no longer waits for the GPU, and the
+GPU, now the limit, draws as often as it can. The mesh, back to back (30 s each):
+
+| Objects | Built-in sphere (720 triangles) | `SHAPE=dense` (2,208, step 5's built-in) | Cubes only |
+| --- | --- | --- | --- |
+| 1,000 | **54.9 fps** (step 5: 23.0) | 53.9 fps (step 5: 23.0) | 59.9 fps (59.9) |
+| 10,000 | 27.0 and 35.9 fps (16.7 with step 5's `SHAPE=low`) | 17.0 and 16.7 fps (34.9) | **40.9 fps** (22.0) |
+| 10,000, camera turned away | **58.9 fps** (23.0) | | |
+
+Step 5's dense sphere at 10,000 objects is the one case that shows fewer
+frames than before: 17 fps, where step 5 showed 34.9. One run right after
+the fix showed it at 35.9, and two later ones at 17.0 and 16.7. The game
+keeps updating 40 times a second, so it's the GPU. On this Mali GPU, how
+fast a frame draws swings with how the frames are paced (its clock follows
+its load). The built-in sphere is the light one now, so this is left
+open, to look at with a GPU profiler (Arm's Streamline) when the look
+work starts.
+
+**Where the UI thread's time goes now** (the Dart VM's own CPU samples,
+which name the Dart functions, at 1 kHz over 8 s of the 10,000-object
+world):
+
+- `World.update`: 53%. Most of it is the loop that calls each object's
+  `onUpdate` and the other lifecycle methods (`_callEach`: 20% on its
+  own, as the loop, before any game code). `_runFixedSteps` takes 8.7%
+  though the world has no physics: it calls every object's
+  `onFixedUpdate` 50 times a second.
+- The view's frame (`WorldView.frame`): 37%, of which the engine's
+  extract (`fy_view_frame`, Rust) is 30% and sending the moved transforms
+  7.5%.
+- Getting the world's pointer (`World._engineWorld`, `GameObject._engine`,
+  `world`, `pointer`): about 10% between them, mostly from `transform`,
+  which fetches it even when it has the transform already.
+
+Those are the next places to look for the UI thread: not calling
+lifecycle methods an object doesn't use, and the getters. None of them is
+a regression; they were there in step 5 too.
+
+**Android performance hints (ADPF)** can't help on the Note10+:
+`dumpsys performance_hint` says `HAL Support: false` (Android 12,
+Exynos 9825), so a hint session would do nothing. They wait for an
+Android 13+ phone that has them.
+
+### The Mac's GPU memory
+
+Step 5 saw the Mac's footprint grow about 14 KB an object and asked
+whether the GPU's part did. It doesn't. `footprint` and `vmmap` split it
+(the scale world, 12 s in):
+
+| Objects | Graphics (owned, tagged graphics) | Owned, not tagged | Whole footprint |
+| --- | --- | --- | --- |
+| 10 | 266 MB | 6 MB | 415 MB |
+| 1,000 | 266 MB | 31 MB | 436 MB |
+| 10,000 | 266 MB | 111 MB | 555 MB |
+| 10,000, camera turned away | 256 MB | 6 MB | |
+
+- The graphics part doesn't grow with the objects.
+- What grows (about 11 KB an object drawn) is owned memory that isn't
+  mapped into the app and isn't tagged as graphics, in 128 KB pieces.
+- It depends on what is **drawn**: with the camera turned away,
+  everything culled, it stays at 6 MB. It doesn't grow over time either
+  (114.2 → 114.4 MB over 30 s), so nothing leaks.
+- It isn't the per-frame data: that ring is written in place by the CPU,
+  with no copy (`frame_ring.rs`), and is 5 MB.
+- It fits the GPU driver's own memory for the triangles of a frame (a
+  tile-based GPU keeps the frame's geometry until it has drawn every
+  tile), which grows with what is drawn. Xcode's Metal capture could
+  name it for certain. With nothing leaking, it isn't worth more now.
+
+### The other checks
+
+The iPhone at 1,000 objects: 120 fps (min 116). The light games on the
+Note10+ with the Android fix (30 s each): arena, bowling and garden all **59.9 fps**, every frame shown. The
+Mac at 10,000: 120 fps (min 112), 13 slow frames of 7,237, 370 KB of Dart
+a frame (step 5: 310 KB).

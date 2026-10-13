@@ -532,9 +532,17 @@ mixin _Moving {
   /// [point], given in the world, in the object's own space: the other
   /// way from [transformPoint].
   Vec3 inverseTransformPoint(Vec3 point) {
-    final t = _self.worldTransform;
-    final p = t.rotation.inverse.rotate(point - t.position);
-    return Vec3(p.x / t.scale.x, p.y / t.scale.y, p.z / t.scale.z);
+    final Transform(position: o, rotation: r, scale: s) = _self.worldTransform;
+    // r.inverse.rotate(point - o) / s, in numbers so that only the result
+    // is made: it runs for every move of a child (see Quat.rotate).
+    final vx = point.x - o.x, vy = point.y - o.y, vz = point.z - o.z;
+    final x = -r.x, y = -r.y, z = -r.z, w = r.w;
+    final tx = (y * vz - z * vy) * 2, ty = (z * vx - x * vz) * 2, tz = (x * vy - y * vx) * 2;
+    return Vec3(
+      (vx + tx * w + (y * tz - z * ty)) / s.x,
+      (vy + ty * w + (z * tx - x * tz)) / s.y,
+      (vz + tz * w + (x * ty - y * tx)) / s.z,
+    );
   }
 
   // --- Tweens ---
@@ -1050,8 +1058,18 @@ mixin _Moving {
   // game's class may have overridden with its own. The world's position
   // and rotation are turned into the parent's here.
   void _setPosition(Vec3 v) {
-    final parent = _self._above;
-    _setLocalPosition(parent == null ? v : parent.inverseTransformPoint(v));
+    final self = _self;
+    final parent = self._above;
+    if (parent == null) return _setLocalPosition(v);
+    final before = self._described == null && identical(self._worldLocal, self.transform) ? self._worldTransform : null;
+    final above = self._worldAbove;
+    _setLocalPosition(parent.inverseTransformPoint(v));
+    // Its world transform is known, so the next read needn't work it out:
+    // the position set, turned and sized as it was.
+    if (before != null && identical(above, parent.worldTransform)) {
+      self._worldLocal = self.transform;
+      self._worldTransform = Transform._(v, before.rotation, before.scale);
+    }
   }
 
   void _setRotation(Quat q) {

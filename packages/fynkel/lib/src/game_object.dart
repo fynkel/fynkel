@@ -104,10 +104,13 @@ class GameObject with _Moving {
   // Its last entry's place in [World._movedLog], or -1.
   int _loggedAt = -1;
 
-  // Its world transform, worked out in Dart from its parents', as of
-  // [World._transformVersion] [_worldAt]: good until anything moves.
+  // Its world transform, worked out in Dart from its parents', with what
+  // it was worked out from: good while its own transform and its parent's
+  // world transform are the same objects (each is made anew when it
+  // changes), so one object moving leaves the others' as they are.
   Transform? _worldTransform;
-  int _worldAt = -1;
+  Transform? _worldLocal;
+  Transform? _worldAbove;
 
   // Loading: how many loads this object waits for (its own, and those of
   // the objects added during it), the object waiting for this one, and
@@ -612,13 +615,14 @@ class GameObject with _Moving {
       return up == null ? transform : up.worldTransform._then(transform);
     }
     _engine('its worldTransform can\'t be read');
-    final version = world._transformVersion;
-    if (_worldAt == version) return _worldTransform!;
     final local = transform;
     final parent = _parent;
-    final t = parent == null ? local : parent.worldTransform._then(local);
-    _worldAt = version;
-    return _worldTransform = t;
+    if (parent == null) return local;
+    final above = parent.worldTransform;
+    if (identical(local, _worldLocal) && identical(above, _worldAbove)) return _worldTransform!;
+    _worldLocal = local;
+    _worldAbove = above;
+    return _worldTransform = above._then(local);
   }
 
   // --- Components ---

@@ -253,10 +253,13 @@ final class Quat {
   );
 
   /// [v] turned by this rotation.
-  Vec3 rotate(Vec3 v) {
-    final q = Vec3(x, y, z);
-    final t = q.cross(v) * 2;
-    return v + t * w + q.cross(t);
+  Vec3 rotate(Vec3 v) => _rotate(x, y, z, w, v);
+
+  // v + w t + q × t, where t = 2 q × v, worked out in numbers so that only
+  // the result is made: it runs for every move of a child.
+  static Vec3 _rotate(double x, double y, double z, double w, Vec3 v) {
+    final tx = (y * v.z - z * v.y) * 2, ty = (z * v.x - x * v.z) * 2, tz = (x * v.y - y * v.x) * 2;
+    return Vec3(v.x + tx * w + (y * tz - z * ty), v.y + ty * w + (z * tx - x * tz), v.z + tz * w + (x * ty - y * tx));
   }
 
   /// The opposite rotation.
