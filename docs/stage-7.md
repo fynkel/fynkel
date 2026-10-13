@@ -152,8 +152,8 @@ holding stage 6's frame rates on the three devices.
 
 - [x] Phase 1: groundwork (PR #90)
 - [x] Phase 2: one look for the app and the game (PR #91)
-- [ ] Phase 3: widgets in the world
-- [ ] Phase 4: menus, pop-ups and navigation
+- [ ] Phase 3: widgets in the world (PR #92; the Note10+ measure is owed)
+- [x] Phase 4: menus, pop-ups and navigation (PRs #93, #94)
 - [ ] Phase 5: several views
 - [ ] Phase 6: the leftovers
 - [ ] Phase 7: a real game, and the report
