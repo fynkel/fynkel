@@ -4,7 +4,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
 import 'model_test.dart' show glb;
-import 'world_test.dart' show throwsFynkel;
+import 'world_test.dart' show throwsRefusal;
 
 /// A prefab: its own fields, its parts added in its constructor.
 class Robot extends GameObject {
@@ -196,7 +196,7 @@ void main() {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
 
     final camera = GameObject(components: [Camera(fovY: 500.deg)]);
-    expect(() => world.add(camera), throwsFynkel(FynkelStatus.invalidValue, 'fov_y'));
+    expect(() => world.add(camera), throwsRefusal(FynkelStatus.invalidValue, 'fov_y'));
     expect(camera.isAlive, isFalse);
     camera.get<Camera>()!.fovY = 60.deg;
     world.add(camera);

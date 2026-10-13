@@ -30,10 +30,7 @@ extension _Objects on World {
   /// changes after it's added.
   void _setParent(GameObject child, GameObject? parent) {
     if (parent != null && !identical(parent._world, this)) {
-      throw FynkelException(
-        FynkelStatus.invalidValue,
-        '$parent is in another world, so it can\'t be the parent of $child',
-      );
+      throw ArgumentError.value(parent, 'parent', 'in another world, so it can\'t be the parent of $child');
     }
     // The engine refuses a cycle, or a destroyed parent, before anything
     // changes here.

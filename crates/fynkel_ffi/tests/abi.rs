@@ -100,7 +100,7 @@ fn a_despawned_id_is_a_clear_error_everywhere() {
         ));
         ok(fy_despawn(world.0, id));
         assert!(!fy_exists(world.0, id));
-        let message = format!("object#{id} does not exist (despawned, or never spawned)");
+        let message = format!("object#{id} does not exist (destroyed, or never added)");
 
         let mut out = FyTransform::default();
         assert_eq!(fy_transform_get(world.0, id, &mut out), FyStatus::NoObject);

@@ -10,7 +10,6 @@ import 'package:meta/meta.dart';
 
 import 'bindings.g.dart';
 import 'color.dart';
-import 'error.dart';
 import 'frame_list.dart';
 import 'math.dart';
 import 'native.dart';
@@ -25,6 +24,7 @@ part 'keys.dart';
 part 'layers.dart';
 part 'model.dart';
 part 'motion.dart';
+part 'motion_kinds.dart';
 part 'pointing.dart';
 part 'pool.dart';
 part 'resources.dart';
@@ -74,12 +74,14 @@ final class World implements Finalizable {
   final _collected = <(_Resource, int)>[];
   var _collectedNew = false;
 
-  /// The engine's world, for package:fynkel's views.
-  Pointer<FyWorld> get pointer {
+  Pointer<FyWorld> get _engineWorld {
     if (_pointer == nullptr) throw StateError('this World was disposed');
     return _pointer;
   }
 
+  /// Whether [dispose] was called (and, when called from inside [update],
+  /// the update has returned). Then adding to the world and every call
+  /// that reaches the engine throw a StateError.
   bool get isDisposed => _pointer == nullptr;
 
   /// Destroys every object, as a scene unloads in Unity, then frees the
@@ -172,12 +174,17 @@ final class World implements Finalizable {
   /// (the object is destroyed, and its parent's load goes on without it),
   /// what couldn't be freed when an object was destroyed, and what an
   /// object's or behaviour's own code threw from onStart, onUpdate,
-  /// onLateUpdate, a pointer handler, onEnable, onDisable, onDestroy or a
-  /// package's callback, such as a physics trigger (the frame goes on, as
-  /// in Unity: one object's bug doesn't stop the others). With no
-  /// listener, each is an uncaught error of the current zone (for a load,
+  /// onLateUpdate, a pointer handler, onEnable, onDisable, onDestroy, a
+  /// routine, a tween's callback or a package's callback, such as a
+  /// physics trigger (the frame goes on, as in Unity: one object's bug
+  /// doesn't stop the others). A behaviour added to an object that has
+  /// already appeared loads by itself: when its [Behaviour.onLoad] fails,
+  /// only the behaviour is removed. A [WorldSystem] that throws is
+  /// reported too, and turned off after [WorldSystem.turnOffAfter] frames
+  /// in a row of throwing. With no listener, each is an uncaught error of the current zone (for a load,
   /// the zone the object was added in), as an unawaited future's would
-  /// be; listen to handle them, or rethrow to stop.
+  /// be, so a test with no listener fails; listen to handle them, or
+  /// rethrow to stop.
   Stream<ObjectError> get errors => _errors.stream;
 
   void _report(GameObject? object, Object error, StackTrace stack) {
@@ -341,8 +348,9 @@ final class World implements Finalizable {
   Debug? _debug;
 
   /// The camera the view draws from (Unity's `Camera.main`): of the
-  /// objects with a [Camera], the one with the lowest id; null when there's
-  /// none. Its object is `camera.gameObject`.
+  /// shown objects ([GameObject.activeInHierarchy]) with a [Camera], the
+  /// one with the lowest id; null when there's none. A hidden camera is
+  /// skipped. Its object is `camera.gameObject`.
   Camera? get camera => _cameraObject?.get<Camera>();
 
   GameObject? get _cameraObject {
@@ -649,22 +657,35 @@ final class RayHit {
 /// For package:fynkel's views: sends the transforms the game set since the
 /// last send, before a frame copies the world. Not exported.
 extension SendTransforms on World {
+  /// Sends them; does nothing once the world is disposed.
   void sendTransforms() {
     if (!isDisposed) _sendTransforms();
   }
 }
 
-/// An error no caller could catch, from an object's load or from freeing
-/// what it held: see [World.errors].
+/// An error no caller could catch: anything [World.errors] carries (see
+/// its doc), from an object's load, its own code each frame, or freeing
+/// what it held.
 final class ObjectError {
   ObjectError._(this.gameObject, this.error, this.stackTrace);
 
-  /// The object whose load failed (now destroyed), or that was being
-  /// destroyed; null for an asset the world freed.
+  /// The object whose code threw, whose load failed (now destroyed), or
+  /// that was being destroyed; null for the world's own (a system, a
+  /// freed asset).
   final GameObject? gameObject;
+
+  /// What was thrown.
   final Object error;
+
+  /// Where it was thrown.
   final StackTrace stackTrace;
 
   @override
   String toString() => '${gameObject ?? 'World'}: $error';
+}
+
+/// The engine's world, for package:fynkel's own files; not exported.
+extension WorldPointer on World {
+  /// The engine's world. Throws a StateError once the world is disposed.
+  Pointer<FyWorld> get pointer => _engineWorld;
 }

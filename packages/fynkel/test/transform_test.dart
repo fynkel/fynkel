@@ -9,11 +9,22 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel/src/native.dart';
 import 'package:test/test.dart';
+import 'package:fynkel/src/world.dart' show WorldPointer;
 
-Matcher throwsFynkel(FynkelStatus status, [String? message]) => throwsA(
-  isA<FynkelException>()
-      .having((e) => e.status, 'status', status)
-      .having((e) => e.message, 'message', message ?? anything),
+/// What the engine refusing with [status] throws in Dart: an
+/// [ArgumentError] for a bad value, a [StateError] for something gone or in
+/// use, a [FynkelException] for the engine's own failures.
+Matcher throwsRefusal(FynkelStatus status, [Pattern? message]) => throwsA(
+  switch (status) {
+    FynkelStatus.invalidValue => isA<ArgumentError>(),
+    FynkelStatus.noObject ||
+    FynkelStatus.noComponent ||
+    FynkelStatus.noMesh ||
+    FynkelStatus.noMaterial ||
+    FynkelStatus.noTexture ||
+    FynkelStatus.inUse => isA<StateError>(),
+    _ => isA<FynkelException>().having((e) => e.status, 'status', status),
+  }.having((e) => '$e', 'text', message == null ? anything : contains(message)),
 );
 
 /// The engine's own transform for [object], read past the Dart cache.
@@ -77,7 +88,7 @@ void main() {
       o.transform = Transform(position: Vec3(i.toDouble(), 0, 0));
       o.transform = o.transform.translated(Vec3(0, 1, 0));
     }
-    expect(() => engine(objects.last), throwsFynkel(FynkelStatus.noComponent), reason: 'not even the first one yet');
+    expect(() => engine(objects.last), throwsRefusal(FynkelStatus.noComponent), reason: 'not even the first one yet');
     view.frame();
     for (final (i, o) in objects.indexed) {
       expect(engine(o).$1, Vec3(i.toDouble(), 1, 0));
@@ -117,10 +128,10 @@ void main() {
       Transform(rotation: const Quat(0, 0, 0, 2), scale: Vec3(double.nan, 1, 1)),
     ];
     for (final value in bad) {
-      expect(() => o.transform = value, throwsFynkel(FynkelStatus.invalidValue, engineRefusal(world, value)));
+      expect(() => o.transform = value, throwsRefusal(FynkelStatus.invalidValue, engineRefusal(world, value)));
     }
     expect(o.transform.position, Vec3(1, 2, 3));
-    expect(() => world.add(GameObject(transform: bad.first)), throwsFynkel(FynkelStatus.invalidValue));
+    expect(() => world.add(GameObject(transform: bad.first)), throwsRefusal(FynkelStatus.invalidValue));
     expect(world.all<GameObject>(), [o], reason: 'refused before it is spawned');
     o.transform = Transform(position: Vec3(0, -3.4028235e38, 0));
     expect(o.transform.position.y, -3.4028235e38, reason: 'rounds to the largest 32-bit float, so it is finite');

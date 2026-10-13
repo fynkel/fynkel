@@ -7,6 +7,7 @@ import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:test/test.dart';
+import 'package:fynkel/src/world.dart' show WorldPointer;
 
 /// The engine's own answers, read through its C interface, to compare with
 /// what Dart keeps.
@@ -81,8 +82,7 @@ void main() {
           // Refused, by both, when it would make a loop.
           try {
             o.parent = parent;
-          } on FynkelException catch (e) {
-            expect(e.status, FynkelStatus.invalidValue);
+          } on ArgumentError {
             expect(parent!.isPartOf(o), isTrue);
           }
         case 2:

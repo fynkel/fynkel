@@ -37,6 +37,19 @@ Then run it as any Flutter app: `flutter run -d macos`, or on a phone
 make the app to ship. On Android, Fynkel runs on 64-bit devices, which is
 nearly all since Android 11; a 32-bit one gets an error saying so.
 
+**Android needs Android 11 or later.** Set it in the app before its first
+Android build, or the build stops at "minSdkVersion 24 cannot be smaller
+than version 30 declared in library [:fynkel_flutter]":
+
+```kotlin
+// my_game/android/app/build.gradle.kts
+android {
+    defaultConfig {
+        minSdk = 30
+    }
+}
+```
+
 ## 2. Hello
 
 The whole of `lib/main.dart` for a lit, turning cube:
@@ -285,6 +298,104 @@ of object, it belongs in a behaviour. Keep a class for what an object *is*
 (its state, its parts, its typed fields), and behaviours for what it
 *does* that others could do too, or that comes and goes while it plays.
 
+**A bigger game** keeps the same shape. The root object holds what the
+whole game shares (the score, the lives: `ValueNotifier`s the HUD shows)
+and the managers, each a child. Pass each object what it needs when you
+make it, the root or a manager, rather than searching for it. And let
+data, not subclasses, tell kinds apart: a runner and a tank are one
+`Enemy` class given a different `EnemyKind`. Put everything that belongs
+to one level under one object, so starting over is destroying it and
+adding a new one (§16):
+
+```dart
+// lib/defense.dart
+import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:fynkel/fynkel.dart';
+
+/// What makes one kind of enemy differ from another: data, not a subclass.
+class EnemyKind {
+  const EnemyKind({required this.name, required this.speed, required this.health, required this.color});
+
+  final String name;
+  final double speed;
+  final int health;
+  final Color color;
+
+  static const runner = EnemyKind(name: 'runner', speed: 4, health: 1, color: Color(0xFFE0A030));
+  static const tank = EnemyKind(name: 'tank', speed: 1, health: 10, color: Color(0xFF708090));
+}
+
+/// The root: what the whole game shares, and the level it plays.
+class Defense extends GameObject {
+  final gold = ValueNotifier(100);
+  final lives = ValueNotifier(10);
+  late Level level;
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    level = add(Level(this));
+  }
+
+  /// Starts over in place: the same root and HUD, a new level.
+  void restart() {
+    level.destroy(); // its waves, enemies and routines go with it
+    level = add(Level(this));
+    gold.value = 100;
+    lives.value = 10;
+  }
+}
+
+/// One level: the ground, and the waves that cross it.
+class Level extends GameObject {
+  Level(this.game)
+    : super(
+        name: 'level',
+        components: [MeshRenderer(Mesh.plane(), Material())],
+        transform: Transform(scale: Vec3(20, 1, 20)),
+      );
+
+  final Defense game;
+
+  @override
+  void onStart() {
+    super.onStart();
+    startRoutine(() async {
+      for (var wave = 1; ; wave++) {
+        for (var i = 0; i < 5 + wave; i++) {
+          add(Enemy(i.isEven ? EnemyKind.runner : EnemyKind.tank, game));
+          await wait(0.8);
+        }
+        await wait(5);
+      }
+    });
+  }
+}
+
+class Enemy extends GameObject {
+  Enemy(this.kind, this.game)
+    : super(
+        name: kind.name,
+        transform: Transform(position: Vec3(-10, 0.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), Material(color: kind.color))],
+      );
+
+  final EnemyKind kind;
+  final Defense game;
+  late int health = kind.health;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    translate(Vec3(kind.speed * time.delta, 0, 0), relativeTo: Space.world);
+    if (position.x > 10) {
+      game.lives.value--;
+      destroy();
+    }
+  }
+}
+```
+
 ## 5. The engine's components
 
 `Camera`, `Light` and `MeshRenderer` are components too, found with
@@ -376,6 +487,18 @@ screen; a widget test fails on it. In a release build, or with
 `FynkelView(showErrors: false)`, it's the game's to handle: listen to
 `world.errors`, or it's an uncaught error.
 
+One call is different: **an error in `onLoad`** (an object's, or one of
+its behaviours') **destroys the object**, since it never finished
+loading; it goes to `world.errors` too, and its `loaded` future fails
+with it. A level whose file is missing doesn't appear half-made.
+
+**Your own mistakes throw Dart's errors**, at the line that made them:
+an `ArgumentError` for a bad value (a NaN position, a rotation that isn't
+`.normalized`, a negative radius), a `StateError` for a call at the wrong
+time or on something gone (a destroyed object, a mesh still in use). A
+file that can't be read throws a `FormatException`. `FynkelException` is
+only for the engine's own failures: no GPU, a lost device, a panic.
+
 ## 7. Moving things
 
 On objects and behaviours alike:
@@ -445,8 +568,8 @@ class Door extends GameObject {
 ```
 
 - **Helpers**: `moveTo`, `moveBy`, `rotateTo`, `rotateBy`, `lookAtOver`,
-  `scaleTo`, `colorTo`, `punchScale`, `shake`. Each takes `seconds:` or
-  `speed:`. `moveTo`, `moveBy` and `rotateTo` are in the world, as
+  `scaleTo`, `colorTo`, `punchScale`, `shake`. Each takes `seconds:`;
+  all but `colorTo`, `punchScale` and `shake` take `speed:` instead. `moveTo`, `moveBy` and `rotateTo` are in the world, as
   `position`; `localMoveTo` and `localRotateTo` relative to the parent;
   `scaleTo` sets `localScale`, and `rotateBy` turns about the object's own
   axis. `colorTo` changes the renderer's own `color` (§5), so other
@@ -908,6 +1031,15 @@ body, so sleeping ones fall the new way. `sleep()` and `wakeUp()` do
 nothing for a body not in the world yet, and what can't be done there
 says why (no object yet, not enabled, not shown, destroyed).
 
+**Moving a kinematic body by hand** (a platform, a door, a bullet that's a
+trigger): `movePosition` and `moveRotation` in `onFixedUpdate`. It goes
+there over the next step, so it pushes what's in the way, carries what
+stands on it, and is drawn smoothly when interpolated. Setting `position`
+(or the transform) teleports it, as in Unity: right for a respawn, wrong
+for a move. Either way a trigger sees only what it overlaps at the end
+of each step, so a thing that moves further than its own size in a step
+can pass something by; see bullets below.
+
 **The step runs between frames**, on the physics' own thread: it starts
 when a frame is done, and its results are written at the start of the
 next, before `onFixedUpdate` and the updates. Queries in the updates
@@ -1079,8 +1211,12 @@ a ball in a socket (twisting about its `axis` within `lowTwistLimit` and
 each a `SoftJointLimit`; `180.deg` frees it), and `SpringJoint`
 pulls them back together when they are further apart than `maxDistance`. A joint is a behaviour on
 the object with the rigidbody; `connectedBody` is the other one (none for
-the world), and `anchor` is where it holds, in the object's own space. It
-holds the bodies as they are when it joins them. With a `breakForce` or
+the world), and `anchor` is where it holds, in the object's own space,
+scale included, as in Unity: `Vec3(-0.5, 0, 0)` is the left face of a
+cube however wide the object is scaled (the door below is 1 wide; scaled
+to 3, the hinge would still be on its edge). `connectedAnchor` is the
+same on the other body, or in the world with none. It holds the bodies
+as they are when it joins them, at the scale they have then. With a `breakForce` or
 `breakTorque`, a joint that holds harder than that breaks: `with
 JointBreaks` hears of it in `onJointBreak`, and the joint is taken off.
 
@@ -1116,6 +1252,111 @@ class Door extends GameObject with JointBreaks {
   void onJointBreak(Joint joint, double breakForce) => print('the door came off');
 }
 ```
+
+**Bullets** can be done two ways. A bullet that's an object, with a
+small trigger collider and a kinematic rigidbody moved with
+`movePosition`, hears what it hits in `onTriggerEnter`, and is simple; it
+can pass through something thinner than it moves in a step. Many fast
+bullets are better as plain data in one manager, which casts a ray along
+each one's move every frame and so never misses: no bodies, one query
+each. On a Mac, 500 bullets among 100 targets cost about 0.17 ms a frame
+as bodies and 0.05 ms as rays (a phone takes a few times longer). Draw
+either kind from a `Pool` (§3) so firing makes nothing new:
+
+```dart
+// lib/guns.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// Moves every bullet in one place, as rays: none can skip a thin wall.
+class Bullets extends GameObject {
+  final _at = <Vec3>[], _velocity = <Vec3>[];
+
+  void fire(Vec3 from, Vec3 velocity) {
+    _at.add(from);
+    _velocity.add(velocity);
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    for (var i = _at.length - 1; i >= 0; i--) {
+      final move = _velocity[i] * time.delta;
+      final hit = physics.raycast(Ray(_at[i], move), maxDistance: move.length);
+      if (hit != null || _at[i].length > 100) {
+        if (hit != null) print('hit ${hit.gameObject.name}');
+        _at.removeAt(i);
+        _velocity.removeAt(i);
+      } else {
+        _at[i] += move;
+      }
+    }
+  }
+}
+```
+
+**Dragging a body** with a finger, as Unity's old `DragRigidbody`: a ray
+finds the body, a `SpringJoint` ties it to a kinematic "hand", and the
+hand follows the finger across a plane facing the camera. The spring pulls
+the body along, so it still collides, swings and stays joined:
+
+```dart
+// lib/drag.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// Lets a finger pick up and carry any dynamic body.
+class Dragger extends GameObject {
+  Dragger(this.camera) : super(components: [Rigidbody(isKinematic: true)]);
+
+  final Camera camera;
+  late final Rigidbody hand = get<Rigidbody>()!;
+  SpringJoint? _spring;
+  Plane? _plane;
+
+  @override
+  void onStart() {
+    super.onStart();
+    on(input.onFingerDown, (finger) => _grab(finger.position));
+    on(input.onFingerMove, (finger) => _drag(finger.position));
+    on(input.onFingerUp, (_) => _let());
+  }
+
+  void _grab(ViewPoint point) {
+    final hit = physics.raycast(camera.screenPointToRay(point));
+    final body = hit?.collider.attachedRigidbody;
+    if (hit == null || body == null || body.isKinematic) return;
+    position = hit.point;
+    _plane = Plane(camera.gameObject.forward, hit.point);
+    // Stiff and damped for the body's mass: it follows within centimetres.
+    _spring = body.gameObject.addComponent(
+      SpringJoint(
+        connectedBody: hand,
+        anchor: body.gameObject.inverseTransformPoint(hit.point),
+        connectedAnchor: Vec3.zero,
+        spring: body.mass * 1000,
+        damper: body.mass * 40,
+      ),
+    );
+  }
+
+  void _drag(ViewPoint point) {
+    final plane = _plane;
+    final at = plane == null ? null : camera.screenPointToPlane(point, plane);
+    if (at != null) hand.movePosition(at);
+  }
+
+  void _let() {
+    final spring = _spring;
+    if (spring != null && !spring.gameObject.isDestroyed) spring.gameObject.removeComponent(spring);
+    _spring = null;
+    _plane = null;
+  }
+}
+```
+
+The lab's "Joints: a chain and a weight" scene does this, and works out
+the spring from the weight it lifts.
 
 ## 15. Flutter around the game
 
@@ -1159,6 +1400,11 @@ ScoreHud(game)))`.
 `Listenable` (a `ValueNotifier` the settings page changes) has a
 `changed` signal, from `package:fynkel_flutter`, so an object listens with
 `on(settings.volume.changed, (_) => ...)` and stops when it's destroyed.
+
+**Calling the game from a Flutter callback is safe**: a button's
+`onPressed` can call `game.restart()`, add an object or cast a ray. It
+runs between frames, on the same thread as the game; a physics call made
+then waits for the step running between frames to finish first.
 
 `FynkelApp` is a `MaterialApp` with the game as its page, so the overlay
 can hold any Material widget (a `Slider`, a `TextField`, a button), open a
@@ -1224,6 +1470,13 @@ saving there run, and then the engine's memory is freed.
   true)` makes every hot reload start the game over.
 - **Hot restart** (`R`) starts the whole app again.
 
+**Starting a level over** inside the game (a "try again" button) needs
+no new world: destroy the object the level hangs from and add a new one,
+as `Defense.restart` does in §4. Everything below it goes at once, with
+its `onDestroy`, its routines, tweens and listeners; what the root keeps
+(the score, the HUD's notifiers, the settings) stays. `FynkelGame`'s
+`restart()` is the bigger hammer: a new root in a new world.
+
 ## 17. Testing a game
 
 package:fynkel has no Flutter in it, so a game runs in a plain test, frame
@@ -1251,10 +1504,75 @@ void main() {
 
 `world.input.simulate` also takes `fingerDown`, `fingerMove`, `fingerUp`,
 `resize` and the rest, so taps, drags and swipes can be tested too; it's
-what the view itself calls.
+what the view itself calls. A plain test has no view, so give the input a
+size first, `world.input.simulate.resize(800, 600)`, and then a finger
+lands where you say. To put one on an object, ask the camera where it is
+on screen: `world.camera!.worldToScreenPoint(target.position, width: 800,
+height: 600)`.
 `HeadlessView(world, width:, height:)` renders a frame without a window,
 for a picture of the game. `examples/arena/test` tests a whole game this
 way.
+
+**An error in the game fails the test** by itself, as it would be an
+uncaught error: nothing listens to `world.errors`. To test that something
+throws, listen first: `final errors = <ObjectError>[];
+world.errors.listen(errors.add);`, then look at `errors` after the
+frames. (`world.errors` is a stream, not a list.)
+
+**The whole app works in a widget test too**: the real `FynkelApp`, its
+view and its overlay, real taps. With no GPU plugin in a test, the game
+runs unseen, frame by frame as `tester.pump` moves the clock, and the view
+is the test window's size. Reach the game with `FynkelGame.of`:
+
+```dart
+// test/app_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+import 'package:my_game/game.dart';
+import 'package:my_game/hud.dart';
+
+/// The Score game with a cube to tap, in front of a camera.
+class TapToScore extends Score {
+  @override
+  void onLoad() {
+    super.onLoad();
+    add(GameObject(transform: Transform(position: Vec3(0, 0, 4)), components: [Camera()]));
+    add(Target());
+  }
+}
+
+class Target extends GameObject {
+  Target() : super(components: [MeshRenderer(Mesh.cube(), Material())]);
+
+  @override
+  bool onClick(Finger finger) {
+    (parent! as Score).points.value++;
+    return true;
+  }
+}
+
+void main() {
+  testWidgets('a tap on the cube scores, and the HUD shows it', (tester) async {
+    await tester.pumpWidget(FynkelApp(TapToScore.new, overlay: (context, game) => ScoreHud(game)));
+    await tester.pump(const Duration(milliseconds: 16)); // a frame: the game loads and starts
+    final game = FynkelGame.of<TapToScore>(tester.element(find.byType(FynkelView))).game;
+    final input = game.world.input;
+    final cube = game.world.camera!.worldToScreenPoint(Vec3.zero, width: input.width, height: input.height)!;
+    await tester.tapAt(Offset(cube.x, cube.y));
+    await tester.pump(const Duration(milliseconds: 16)); // the frame that hears it
+    expect(game.points.value, 1);
+    await tester.pump();
+    expect(find.text('★ 1'), findsOneWidget);
+  });
+}
+```
+
+Two things differ from other widget tests. **`pumpAndSettle` never
+settles** while a view is on screen, since the game asks for every frame:
+pump a duration instead, `tester.pump(const Duration(milliseconds: 16))`
+for a frame. And input waits for the next frame, as on a device: a tap
+reaches the game in the `pump` after it.
 
 ## 18. Speed
 
@@ -1356,11 +1674,54 @@ multibody joints).
 | `Debug.DrawLine` | `debug.line` |
 | Scenes, the Inspector | Classes; Flutter for UI |
 
+**What stays different**, on purpose or by the tools underneath:
+
+- **Axes**: right-handed, +Y up, forward is **−Z** (`Vec3.forward`), as
+  glTF and most of Flutter's 3D. Unity is left-handed with forward +Z, so
+  a scene copied number for number comes out mirrored.
+- **Angles are radians** everywhere, joints and `slopeLimit` too; write
+  `90.deg`. `Orbit.pitch` is positive looking down.
+- **Key names are Flutter's**: `KeyCode.arrowUp`, `shiftLeft`, `digit1`,
+  not `UpArrow`, `LeftShift`, `Alpha1`.
+- **`MeshRenderer.material` is shared**, as Unity's `sharedMaterial`: change
+  `renderer.color` for one object, or give it `material.copy()`.
+- **`find('name')` searches everything below**, not only the children
+  (Unity's `Transform.Find`), and takes no paths.
+- **`Mesh.plane()` is 1 × 1**, Unity's Quad facing up; Unity's Plane is
+  10 × 10.
+- **An error in `onLoad` destroys the object** (§6); one in Unity's `Awake`
+  leaves it half-made.
+- **The physics step runs between frames** (§14), so a force shows a
+  frame later; `physics.stepBetweenFrames = false` steps as Unity does.
+- **A new `physics.gravity` wakes every body**; Unity leaves sleeping ones
+  hanging.
+- **Exit callbacks always come**: for a collider disabled, destroyed,
+  hidden or moved to a layer that doesn't meet; Unity skips some.
+- **A `CharacterController` turns with its object**; Unity's stays
+  upright. Keep its object upright and turn a child for the model.
+- **A HUD is Flutter**: widgets over the view, not a Canvas in the scene.
+
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
 
 - **Stage 6** (2026-10-12):
+  - A game's mistakes throw Dart's errors, not `FynkelException`: an
+    `ArgumentError` for a bad value (a NaN or not-unit transform, a
+    parent in another world, a value the engine refuses), a `StateError`
+    for something gone or still in use (a destroyed object, a mesh a
+    renderer uses). `Texture2D.load` and `Model.load` throw a
+    `FormatException` for a file they can't read. `FynkelException` and
+    `PhysicsException` are left for the engine's own failures; catch
+    those types for what you caught before. `PhysicsStatus` is only in
+    `package:fynkel_physics/raw.dart`.
+  - `World.pointer` is gone from `package:fynkel/fynkel.dart`, and a
+    `WorldSystem`'s hooks (`beforeFrame` … `dispose`) are `@protected`:
+    `world.physics.dispose()` is the world's to call.
+  - `FynkelApp`'s overlay is laid out loosely from the top-left corner,
+    so a HUD covers only itself and taps around it reach the game (a
+    `Text` used to cover the screen and take them all). Wrap it in a
+    `SizedBox.expand` if it must fill the screen.
   - For packages (`package:fynkel/extend.dart`): `WorldSystem.componentAdded`
     is also called for the components an object comes with when it's
     added, not only for `addComponent`; `componentRemoved` is new. A

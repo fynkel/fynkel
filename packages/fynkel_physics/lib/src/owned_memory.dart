@@ -10,10 +10,12 @@ import 'package:ffi/ffi.dart';
 /// `dispose` writes into memory it still owns before it finds out and
 /// throws.
 final class OwnedMemory implements Allocator {
+  /// Memory freed with [owner] at the latest.
   OwnedMemory(this.owner);
 
   static final _finalizer = NativeFinalizer(malloc.nativeFree);
 
+  /// What the memory belongs to.
   final Finalizable owner;
 
   // The detach token of each allocation, by address.

@@ -54,6 +54,8 @@ void forgetReset() => _resetSent = false;
 /// What a [FynkelView] did in one stats window (about a second).
 @immutable
 class FynkelViewStats {
+  /// What a view did in a window of [window], as [FynkelView.onStats]
+  /// gives it.
   const FynkelViewStats({required this.window, required this.ticks, required this.view, required this.size});
 
   /// How long the window was, by the frame clock.
@@ -185,6 +187,8 @@ class FynkelView extends StatefulWidget {
   /// its objects.
   final void Function(double dt)? onFrame;
 
+  /// Pixels drawn per physical pixel: above 0 and at most 4, 1 unless
+  /// given. Below 1 is faster and softer.
   final double resolutionScale;
 
   /// Called about once a second with what the view did since the last call.

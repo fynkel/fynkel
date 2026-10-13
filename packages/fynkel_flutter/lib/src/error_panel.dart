@@ -6,11 +6,13 @@ import 'package:fynkel/fynkel.dart' show ObjectError;
 /// game's code, so a failed game is never just a black screen. A tap
 /// hides it until the next error.
 class ErrorPanel extends StatelessWidget {
+  /// A panel showing the latest of [errors]; a tap calls [onDismiss].
   const ErrorPanel({super.key, required this.errors, required this.onDismiss});
 
   /// The errors since the panel was last dismissed, the latest last.
   final List<ObjectError> errors;
 
+  /// Called when the player taps the panel, to hide it.
   final VoidCallback onDismiss;
 
   static const _style = TextStyle(fontSize: 13, height: 1.35, color: Color(0xFFFFFFFF));

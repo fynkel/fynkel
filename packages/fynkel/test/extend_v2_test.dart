@@ -425,12 +425,12 @@ void main() {
       expect([out[0], out[1], out[2]], [11, 2, 3], reason: 'sent with the other moves');
 
       floats[3] = 2; // not a unit rotation
-      expect(() => world.writeTransforms(ids, 2, floats), throwsA(isA<FynkelException>()));
+      expect(() => world.writeTransforms(ids, 2, floats), throwsArgumentError);
       b.destroy();
       floats[3] = 0;
       expect(
         () => world.writeTransforms(ids, 2, floats),
-        throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.noObject)),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'text', contains('not a live object'))),
       );
     });
   });

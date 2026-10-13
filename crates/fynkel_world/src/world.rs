@@ -16,7 +16,7 @@ use crate::{MaterialId, MeshId, ObjectId, TextureId};
 /// Why a world operation was refused. On error, the world is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum WorldError {
-    /// No object has this id: it was despawned, or never existed.
+    /// No object has this id: it was destroyed, or never added.
     NoObject(ObjectId),
     NoComponent {
         object: ObjectId,
@@ -59,7 +59,7 @@ pub enum WorldError {
 impl std::fmt::Display for WorldError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            WorldError::NoObject(id) => write!(f, "{id} does not exist (despawned, or never spawned)"),
+            WorldError::NoObject(id) => write!(f, "{id} does not exist (destroyed, or never added)"),
             WorldError::NoComponent { object, component } => write!(f, "{object} has no {component}"),
             WorldError::NoMesh(id) => write!(f, "{id} does not exist"),
             WorldError::NoMaterial(id) => write!(f, "{id} does not exist"),

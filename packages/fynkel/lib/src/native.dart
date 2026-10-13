@@ -1,5 +1,7 @@
 // What every call into the engine shares: the ABI check, turning a status
 // into an exception, and scratch memory for passing structs.
+// Not exported, so its members need no docs:
+// ignore_for_file: public_member_api_docs
 
 import 'dart:convert';
 import 'dart:ffi';
@@ -31,14 +33,44 @@ final bool _engine = () {
   return true;
 }();
 
-/// Throws a [FynkelException] for any status but OK.
+/// [check] for reading a file: one the engine can't read is a
+/// [FormatException], as Dart's own decoders throw.
+void checkFile(int status) {
+  if (status == FyStatus.FY_STATUS_INVALID_VALUE) {
+    throw FormatException(fy_last_error().cast<Utf8>().toDartString());
+  }
+  check(status);
+}
+
+/// A mesh, material or texture can't go while something uses it.
+final class InUseError extends StateError {
+  InUseError(super.message);
+}
+
+/// Throws for any status but OK: what the caller got wrong as Dart's own
+/// errors, an [ArgumentError] for a bad value and a [StateError] for
+/// something gone or still in use, and the engine's own failures as a
+/// [FynkelException].
 void check(int status) {
   if (status == FyStatus.FY_STATUS_OK) return;
   final message = fy_last_error().cast<Utf8>().toDartString();
   if (status < 0 || status >= FynkelStatus.values.length) {
     throw FynkelException(FynkelStatus.panic, 'unknown status $status: $message');
   }
-  throw FynkelException(FynkelStatus.values[status], message);
+  switch (FynkelStatus.values[status]) {
+    case FynkelStatus.invalidValue:
+      throw ArgumentError(message);
+    case FynkelStatus.noObject ||
+        FynkelStatus.noComponent ||
+        FynkelStatus.noMesh ||
+        FynkelStatus.noMaterial ||
+        FynkelStatus.noTexture:
+      throw StateError(message);
+    case FynkelStatus.inUse:
+      throw InUseError(message);
+    case final other:
+      throw FynkelException(other, message);
+  }
 }
 
 /// One of each struct the calls pass, allocated once per isolate and

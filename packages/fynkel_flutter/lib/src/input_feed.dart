@@ -7,6 +7,8 @@ import 'package:fynkel/fynkel.dart' show FingerKind, Input, KeyCode;
 /// queues them for the world's next frame. The view feeds it from its
 /// `Listener`, `MouseRegion` and `Focus`.
 class InputFeed {
+  /// A feed into the [Input] the given function returns, asked each time,
+  /// as the world the view shows can change.
   InputFeed(this._input);
 
   /// The input of the world the view shows now.
@@ -33,6 +35,7 @@ class InputFeed {
     return range > 0 ? ((e.pressure - e.pressureMin) / range).clamp(0.0, 1.0) : 1.0;
   }
 
+  /// A finger, mouse button or pen touches down.
   void pointerDown(PointerDownEvent e) => _input().simulate.fingerDown(
     _id(e),
     e.localPosition.dx,
@@ -42,6 +45,7 @@ class InputFeed {
     pressure: _pressure(e),
   );
 
+  /// A pressed finger, mouse or pen moves.
   void pointerMove(PointerMoveEvent e) => _input().simulate.fingerMove(
     _id(e),
     e.localPosition.dx,
@@ -50,18 +54,25 @@ class InputFeed {
     pressure: _pressure(e),
   );
 
+  /// A finger, mouse button or pen lifts.
   void pointerUp(PointerUpEvent e) => _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy);
 
+  /// Flutter took a pointer away (a gesture won elsewhere, say): it ends
+  /// without a lift.
   void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e));
 
   /// A mouse or pen over the view with nothing pressed, or coming in.
   void hover(PointerEvent e) =>
       _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind));
 
+  /// A mouse or pen leaves the view.
   void exit(PointerExitEvent e) => _input().simulate.leave(_id(e));
 
+  /// A mouse wheel or trackpad scrolled by [delta], in logical pixels.
   void scrolled(Offset delta) => _input().simulate.scrollBy(delta.dx, delta.dy);
 
+  /// A trackpad's two fingers come down: their pinch and twist count from
+  /// here.
   void panZoomStart(PointerPanZoomStartEvent e) {
     _padScale = 1;
     _padRotation = 0;

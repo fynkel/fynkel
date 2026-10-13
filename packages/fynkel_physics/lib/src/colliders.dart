@@ -9,11 +9,26 @@ part of 'physics.dart';
 /// How two colliders' frictions or bouncinesses make the pair's (Unity's
 /// `PhysicsMaterialCombine`). Where the two differ, the later one here
 /// wins.
-enum PhysicsMaterialCombine { average, minimum, multiply, maximum }
+enum PhysicsMaterialCombine {
+  /// Halfway between the two.
+  average,
+
+  /// The smaller of the two.
+  minimum,
+
+  /// The two multiplied.
+  multiply,
+
+  /// The larger of the two.
+  maximum,
+}
 
 /// What a collider's surface is like (Unity's `PhysicsMaterial`): how it
 /// slides and bounces.
 final class PhysicsMaterial {
+  /// A surface with Unity's defaults unless given: friction 0.6, no bounce,
+  /// each mixed by its average. A collider given a bad one throws an
+  /// [ArgumentError].
   const PhysicsMaterial({
     this.dynamicFriction = 0.6,
     this.bounciness = 0,
@@ -31,7 +46,12 @@ final class PhysicsMaterial {
   /// How much of its speed a body keeps when it bounces off, 0 to 1.
   final double bounciness;
 
+  /// How this friction mixes with the other collider's: average unless
+  /// set.
   final PhysicsMaterialCombine frictionCombine;
+
+  /// How this bounciness mixes with the other collider's: average unless
+  /// set.
   final PhysicsMaterialCombine bounceCombine;
 
   void _check() {
@@ -47,12 +67,15 @@ final class PhysicsMaterial {
 /// is shown, at its object's world position, rotation and scale, and on
 /// its object's layer.
 sealed class Collider extends Behaviour {
+  /// A collider with its middle at [center], a trigger or not, of
+  /// [material]. A bad material throws an [ArgumentError].
   Collider({this._center = Vec3.zero, this._isTrigger = false, PhysicsMaterial material = PhysicsMaterial.standard})
     : _material = material {
     material._check();
   }
 
-  /// Its middle, in its object's space (Unity's `center`).
+  /// Its middle, in its object's space (Unity's `center`): the object's
+  /// scale multiplies it. (0, 0, 0) unless set.
   Vec3 get center => _center;
   set center(Vec3 value) {
     _center = value;
@@ -189,10 +212,14 @@ sealed class Collider extends Behaviour {
 /// A box, [size] across on each axis of its object's space (Unity's
 /// `BoxCollider`); 1 × 1 × 1 unless given, the size of `Mesh.cube()`.
 final class BoxCollider extends Collider {
+  /// A box [size] across. A bad size throws an [ArgumentError].
   BoxCollider({this._size = Vec3.one, super.center, super.isTrigger, super.material}) {
     _checkShape();
   }
 
+  /// How far across it is on each axis, in metres, in its object's space:
+  /// the object's scale multiplies it. (1, 1, 1) unless set; each more than
+  /// 0, or it throws an [ArgumentError].
   Vec3 get size => _size;
   set size(Vec3 value) {
     _size = value;
@@ -219,10 +246,14 @@ final class BoxCollider extends Collider {
 /// unless given, the size of `Mesh.sphere()`. Its object's largest scale
 /// scales it: it stays a sphere.
 final class SphereCollider extends Collider {
+  /// A sphere of [radius]. A bad radius throws an [ArgumentError].
   SphereCollider({this._radius = 0.5, super.center, super.isTrigger, super.material}) {
     _checkShape();
   }
 
+  /// Its radius, in metres, in its object's space: the object's largest
+  /// scale multiplies it. 0.5 unless set; more than 0, or it throws an
+  /// [ArgumentError].
   double get radius => _radius;
   set radius(double value) {
     _radius = value;
@@ -245,7 +276,16 @@ final class SphereCollider extends Collider {
 }
 
 /// The axis a [CapsuleCollider] runs along, in its object's space.
-enum CapsuleDirection { x, y, z }
+enum CapsuleDirection {
+  /// Its object's X axis.
+  x,
+
+  /// Its object's Y axis.
+  y,
+
+  /// Its object's Z axis.
+  z,
+}
 
 /// A capsule: a cylinder with a half-sphere on each end, [height] from end
 /// to end along [direction], of [radius] (Unity's `CapsuleCollider`). Its
@@ -253,6 +293,8 @@ enum CapsuleDirection { x, y, z }
 /// the other two its radius. A height of less than twice the radius makes
 /// it a sphere.
 final class CapsuleCollider extends Collider {
+  /// A capsule of [radius] and [height] along [direction]. A bad radius or
+  /// height throws an [ArgumentError].
   CapsuleCollider({
     this._radius = 0.5,
     this._height = 2,
@@ -264,6 +306,9 @@ final class CapsuleCollider extends Collider {
     _checkShape();
   }
 
+  /// Its radius, in metres, in its object's space: the larger of the
+  /// object's two scales across [direction] multiplies it. 0.5 unless set;
+  /// more than 0, or it throws an [ArgumentError].
   double get radius => _radius;
   set radius(double value) {
     _radius = value;
@@ -272,6 +317,9 @@ final class CapsuleCollider extends Collider {
 
   double _radius;
 
+  /// How long it is from end to end, half-spheres included, in metres, in
+  /// its object's space: the object's scale along [direction] multiplies
+  /// it. 2 unless set; more than 0, or it throws an [ArgumentError].
   double get height => _height;
   set height(double value) {
     _height = value;
@@ -280,6 +328,7 @@ final class CapsuleCollider extends Collider {
 
   double _height;
 
+  /// The axis of its object it runs along: Y unless set.
   CapsuleDirection get direction => _direction;
   set direction(CapsuleDirection value) {
     _direction = value;
@@ -320,6 +369,8 @@ final class CapsuleCollider extends Collider {
 ///
 /// For each part of a model, use [MeshCollider.addToParts].
 final class MeshCollider extends Collider {
+  /// A collider of [mesh], or of its object's [MeshRenderer]'s mesh when
+  /// null; its hull with [convex].
   MeshCollider({this._mesh, this._convex = false, super.center, super.isTrigger, super.material});
 
   /// A [MeshCollider] on [root] and on every object below it that has a

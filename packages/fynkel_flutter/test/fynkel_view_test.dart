@@ -555,6 +555,33 @@ void main() {
       },
     );
 
+    testWidgets("taps around the overlay's text reach the game: a HUD covers only itself", (tester) async {
+      await tester.pumpWidget(
+        FynkelApp(
+          Clickable.new,
+          overlay: (context, game) => SafeArea(
+            child: ValueListenableBuilder(
+              valueListenable: game.clicks,
+              builder: (context, clicks, _) => Text('$clicks'),
+            ),
+          ),
+        ),
+      );
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+      final game = FynkelGame.of<Clickable>(tester.element(find.byType(FynkelView))).game;
+      final world = game.world;
+      final middle = world.camera!.worldToScreenPoint(Vec3.zero, width: world.input.width, height: world.input.height)!;
+      await tester.tapAt(Offset(middle.x, middle.y));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(game.clicks.value, 1);
+      await tester.pump();
+      expect(find.text('1'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
     testWidgets('F5 starts a FynkelGame over: a new root in a new world, and what was built around it again', (
       tester,
     ) async {
@@ -749,4 +776,29 @@ void main() {
     );
     expect(tester.takeException().toString(), contains('FynkelView needs a bounded size'));
   });
+}
+
+/// A cube in front of a camera, counting the taps on it.
+class Clickable extends GameObject {
+  final clicks = ValueNotifier(0);
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
+    add(GameObject(components: [MeshRenderer(Mesh.cube(), Material()), _Counts()]));
+  }
+}
+
+class _Counts extends Behaviour {
+  @override
+  bool onClick(Finger finger) {
+    (gameObject.parent! as Clickable).clicks.value++;
+    return true;
+  }
 }

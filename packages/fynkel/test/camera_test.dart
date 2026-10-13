@@ -54,7 +54,7 @@ void main() {
       expect(o.get<Camera>()!.orthographic, isTrue);
       o.get<Camera>()!.orthographicSize = 2;
       expect(o.get<Camera>()!.orthographicSize, 2);
-      expect(() => o.get<Camera>()!.orthographicSize = 0, throwsA(isA<FynkelException>()));
+      expect(() => o.get<Camera>()!.orthographicSize = 0, throwsArgumentError);
       expect(o.get<Camera>()!.orthographicSize, 2, reason: 'refused, so undone');
       expect(o.get<Camera>().toString(), contains('orthographic, orthographicSize: 2'));
     });

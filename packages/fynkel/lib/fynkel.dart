@@ -6,4 +6,4 @@ export 'src/color.dart';
 export 'src/error.dart';
 export 'src/math.dart';
 export 'src/view.dart' show HeadlessView, ViewStats, WorldView;
-export 'src/world.dart' hide AssetKind, SendTransforms, WorldSystem, WorldSystems;
+export 'src/world.dart' hide AssetKind, GameObjectSystems, SendTransforms, WorldPointer, WorldSystem, WorldSystems;

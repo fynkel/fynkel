@@ -154,8 +154,8 @@ class JointsBridgeScene extends LabScene {
   void setBreakForce(double force) {
     breakForce = force;
     for (final p in planks) {
-      for (var i = 0; i < p.componentCount; i++) {
-        if (p.componentAt(i) case final HingeJoint j when !j.isRemoved) j.breakForce = force;
+      for (final j in p.getAll<HingeJoint>()) {
+        j.breakForce = force;
       }
     }
   }

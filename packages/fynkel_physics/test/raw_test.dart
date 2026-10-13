@@ -87,20 +87,10 @@ void main() {
     physics.removeBody(body);
     expect(
       () => physics.removeBody(body),
-      throwsA(
-        isA<PhysicsException>()
-            .having((e) => e.status, 'status', PhysicsStatus.noBody)
-            .having((e) => e.message, 'message', 'no body $body (removed, or never added)'),
-      ),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', 'no body $body (removed, or never added)')),
     );
-    expect(
-      () => physics.addSphere(0, -1),
-      throwsA(isA<PhysicsException>().having((e) => e.status, 'status', PhysicsStatus.invalidValue)),
-    );
-    expect(
-      () => physics.stepLength = 0,
-      throwsA(isA<PhysicsException>().having((e) => e.status, 'status', PhysicsStatus.invalidValue)),
-    );
+    expect(() => physics.addSphere(0, -1), throwsArgumentError);
+    expect(() => physics.stepLength = 0, throwsArgumentError);
   });
 
   test('the statuses the engine has too have its numbers, and every one is told apart', () {
@@ -136,13 +126,13 @@ void main() {
     for (var i = 0; i < 50; i++) {
       final moved = here.step();
       there.beginStep();
-      expect(() => there.step(), throwsA(isA<PhysicsException>()));
+      expect(() => there.step(), throwsStateError);
       expect(there.endStep(), moved);
       for (var j = 0; j < moved; j++) {
         expect((there.movedKey(j), there.movedPosition(j)), (here.movedKey(j), here.movedPosition(j)));
       }
     }
-    expect(there.endStep, throwsA(isA<PhysicsException>()));
+    expect(there.endStep, throwsStateError);
   });
 
   test('a raw raycast gives how far it went to the first collider, or null', () {

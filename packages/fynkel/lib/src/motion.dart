@@ -19,30 +19,61 @@ typedef EaseFunction = double Function(double t);
 /// DOTween). `in` starts slow, `out` ends slow, `inOut` does both;
 /// `Back` overshoots a little, `Elastic` springs and `Bounce` bounces.
 abstract final class Ease {
+  /// The same speed all the way: t.
   static double linear(double t) => t;
 
+  /// Starts slow and speeds up, on a sine curve, the gentlest.
   static double inSine(double t) => 1 - math.cos(t * math.pi / 2);
+
+  /// Starts fast and slows to the end, on a sine curve, the gentlest.
   static double outSine(double t) => math.sin(t * math.pi / 2);
+
+  /// Slow at both ends, fast in the middle, on a sine curve, the gentlest.
   static double inOutSine(double t) => -(math.cos(math.pi * t) - 1) / 2;
 
+  /// Starts slow and speeds up, on t².
   static double inQuad(double t) => t * t;
+
+  /// Starts fast and slows to the end, on t²: every tween's default.
   static double outQuad(double t) => 1 - (1 - t) * (1 - t);
+
+  /// Slow at both ends, fast in the middle, on t².
   static double inOutQuad(double t) => t < 0.5 ? 2 * t * t : 1 - _pow(-2 * t + 2, 2) / 2;
 
+  /// Starts slow and speeds up, on t³.
   static double inCubic(double t) => t * t * t;
+
+  /// Starts fast and slows to the end, on t³.
   static double outCubic(double t) => 1 - _pow(1 - t, 3);
+
+  /// Slow at both ends, fast in the middle, on t³.
   static double inOutCubic(double t) => t < 0.5 ? 4 * t * t * t : 1 - _pow(-2 * t + 2, 3) / 2;
 
+  /// Starts slow and speeds up, on t⁴.
   static double inQuart(double t) => t * t * t * t;
+
+  /// Starts fast and slows to the end, on t⁴.
   static double outQuart(double t) => 1 - _pow(1 - t, 4);
+
+  /// Slow at both ends, fast in the middle, on t⁴.
   static double inOutQuart(double t) => t < 0.5 ? 8 * _pow(t, 4) : 1 - _pow(-2 * t + 2, 4) / 2;
 
+  /// Starts slow and speeds up, on t⁵, the sharpest of the powers.
   static double inQuint(double t) => _pow(t, 5);
+
+  /// Starts fast and slows to the end, on t⁵, the sharpest of the powers.
   static double outQuint(double t) => 1 - _pow(1 - t, 5);
+
+  /// Slow at both ends, fast in the middle, on t⁵, the sharpest of the powers.
   static double inOutQuint(double t) => t < 0.5 ? 16 * _pow(t, 5) : 1 - _pow(-2 * t + 2, 5) / 2;
 
+  /// Starts slow and speeds up, on 2 to the power of t, very sharp.
   static double inExpo(double t) => t == 0 ? 0 : _pow(2, 10 * t - 10);
+
+  /// Starts fast and slows to the end, on 2 to the power of t, very sharp.
   static double outExpo(double t) => t == 1 ? 1 : 1 - _pow(2, -10 * t);
+
+  /// Slow at both ends, fast in the middle, on 2 to the power of t, very sharp.
   static double inOutExpo(double t) => t == 0
       ? 0
       : t == 1
@@ -51,8 +82,13 @@ abstract final class Ease {
       ? _pow(2, 20 * t - 10) / 2
       : (2 - _pow(2, -20 * t + 10)) / 2;
 
+  /// Starts slow and speeds up, on a quarter circle.
   static double inCirc(double t) => 1 - math.sqrt(1 - t * t);
+
+  /// Starts fast and slows to the end, on a quarter circle.
   static double outCirc(double t) => math.sqrt(1 - (t - 1) * (t - 1));
+
+  /// Slow at both ends, fast in the middle, on a quarter circle.
   static double inOutCirc(double t) =>
       t < 0.5 ? (1 - math.sqrt(1 - 4 * t * t)) / 2 : (math.sqrt(1 - _pow(-2 * t + 2, 2)) + 1) / 2;
 
@@ -60,8 +96,13 @@ abstract final class Ease {
   static const _c2 = _c1 * 1.525;
   static const _c3 = _c1 + 1;
 
+  /// Pulls back a little below 0 first, then speeds to the end.
   static double inBack(double t) => _c3 * t * t * t - _c1 * t * t;
+
+  /// Shoots a little past 1, then comes back to it.
   static double outBack(double t) => 1 + _c3 * _pow(t - 1, 3) + _c1 * _pow(t - 1, 2);
+
+  /// Pulls back below 0 at the start and shoots past 1 at the end.
   static double inOutBack(double t) => t < 0.5
       ? (_pow(2 * t, 2) * ((_c2 + 1) * 2 * t - _c2)) / 2
       : (_pow(2 * t - 2, 2) * ((_c2 + 1) * (t * 2 - 2) + _c2) + 2) / 2;
@@ -69,15 +110,23 @@ abstract final class Ease {
   static const _c4 = 2 * math.pi / 3;
   static const _c5 = 2 * math.pi / 4.5;
 
+  /// Springs back and forth with growing swings, then snaps to the end.
   static double inElastic(double t) => t == 0 || t == 1 ? t : -_pow(2, 10 * t - 10) * math.sin((t * 10 - 10.75) * _c4);
+
+  /// Snaps past the end and springs back and forth until it settles.
   static double outElastic(double t) => t == 0 || t == 1 ? t : _pow(2, -10 * t) * math.sin((t * 10 - 0.75) * _c4) + 1;
+
+  /// Springs at the start and at the end.
   static double inOutElastic(double t) => t == 0 || t == 1
       ? t
       : t < 0.5
       ? -(_pow(2, 20 * t - 10) * math.sin((20 * t - 11.125) * _c5)) / 2
       : (_pow(2, -20 * t + 10) * math.sin((20 * t - 11.125) * _c5)) / 2 + 1;
 
+  /// Bounces at the start, as a ball bouncing in reverse.
   static double inBounce(double t) => 1 - outBounce(1 - t);
+
+  /// Bounces at the end, as a dropped ball.
   static double outBounce(double t) {
     const n = 7.5625, d = 2.75;
     if (t < 1 / d) return n * t * t;
@@ -86,6 +135,7 @@ abstract final class Ease {
     return n * (t -= 2.625 / d) * t + 0.984375;
   }
 
+  /// Bounces at the start and at the end.
   static double inOutBounce(double t) => t < 0.5 ? (1 - outBounce(1 - 2 * t)) / 2 : (1 + outBounce(2 * t - 1)) / 2;
 
   static double _pow(double x, num n) => math.pow(x, n).toDouble();
@@ -363,216 +413,6 @@ sealed class Motion implements Future<void> {
 
   @override
   Stream<void> asStream() => _done.future.asStream();
-}
-
-enum _MotionState { running, completed, stopped }
-
-/// One value going from one end to the other.
-final class _Tween<T> extends Motion {
-  _Tween(
-    super._world,
-    super._owner, {
-    required T Function() from,
-    required T Function(T from) to,
-    required this.lerp,
-    required this.apply,
-    required double? seconds,
-    required double? speed,
-    this.distance,
-    required this.ease,
-    required super.delay,
-    required super.loops,
-    required super.yoyo,
-    required super.unscaled,
-    super.onComplete,
-  }) : _getFrom = from,
-       _getTo = to,
-       _seconds = seconds,
-       _speed = speed,
-       super._() {
-    if ((seconds == null) == (speed == null)) throw ArgumentError('give one of seconds and speed');
-    if (seconds != null && !(seconds >= 0 && seconds.isFinite)) {
-      throw ArgumentError.value(seconds, 'seconds', 'must be finite and 0 or more');
-    }
-    if (speed != null) {
-      if (!(speed > 0 && speed.isFinite)) throw ArgumentError.value(speed, 'speed', 'must be finite and more than 0');
-      if (distance == null) throw ArgumentError('speed works for double, Vec2, Vec3 and Quat values only');
-    }
-  }
-
-  final T Function() _getFrom;
-  final T Function(T from) _getTo;
-  final T Function(T a, T b, double t) lerp;
-  final double Function(T a, T b)? distance;
-  final void Function(T value) apply;
-  final EaseFunction ease;
-  final double? _seconds;
-  final double? _speed;
-  double? _length;
-  late T _from;
-  late T _to;
-
-  @override
-  double? get _pass => _length;
-
-  @override
-  void _begin() {
-    _from = _getFrom();
-    _to = _getTo(_from);
-    _length = _seconds ?? distance!(_from, _to) / _speed!;
-  }
-
-  @override
-  void _seekPass(double into) {
-    final pass = _length!;
-    apply(lerp(_from, _to, ease(pass == 0 ? 1 : into / pass)));
-  }
-
-  @override
-  String toString() => 'tween${_begun ? ' from $_from to $_to' : ''}';
-}
-
-/// Motions played one after another, or all at once.
-final class _Group extends Motion {
-  _Group(
-    super._world,
-    super._owner,
-    Iterable<Motion> parts, {
-    required this.together,
-    required super.delay,
-    required super.loops,
-    required super.yoyo,
-    required super.unscaled,
-    super.onComplete,
-  }) : _parts = parts.toList(),
-       super._() {
-    if (_parts.isEmpty) throw ArgumentError.value(parts, 'parts', 'is empty');
-    for (final part in _parts) {
-      if (!identical(part._world, _world)) throw ArgumentError('$part is in another world');
-      if (part._group != null) throw StateError('$part is in a group already; a motion can be in one');
-      if (!part.isRunning || part._made != _made) {
-        throw StateError('a group takes motions made in the same frame, before they move');
-      }
-      if (part.loops < 0) throw ArgumentError('a motion that loops for ever never ends, so it can\'t be in a group');
-    }
-    for (final part in _parts) {
-      part._group = this;
-    }
-  }
-
-  final List<Motion> _parts;
-  final bool together;
-  double? _length;
-
-  // Where its parts were last put, so it knows which way it goes.
-  double _at = -1;
-
-  @override
-  double? get _pass => _length;
-
-  @override
-  void _begin() {}
-
-  @override
-  void _startOver(double pass) {
-    _seekPass(pass);
-    _restart();
-  }
-
-  void _restart() {
-    _length = null;
-    _at = -1;
-    for (final part in _parts) {
-      part._rewind();
-    }
-  }
-
-  @override
-  void _seekPass(double into) {
-    final backwards = into < _at;
-    _at = into;
-    final n = _parts.length;
-    if (together) {
-      var longest = 0.0;
-      var known = true;
-      // Forwards the later parts win where two move the same thing;
-      // backwards the earlier ones.
-      for (var k = 0; k < n; k++) {
-        final part = _parts[backwards ? n - 1 - k : k];
-        final total = part._total;
-        part._seekPart(total != null && into > total ? total : into);
-        final now = part._total;
-        if (now == null) {
-          known = false;
-        } else if (now > longest) {
-          longest = now;
-        }
-      }
-      if (known) _length ??= longest;
-      return;
-    }
-    if (!backwards) {
-      var offset = 0.0;
-      for (var i = 0; i < n; i++) {
-        final part = _parts[i];
-        final local = into - offset;
-        // The parts after this point wait their turn.
-        if (local < 0) return;
-        final total = part._total;
-        part._seekPart(total != null && local > total ? total : local);
-        final now = part._total;
-        if (now == null) return;
-        offset += now;
-      }
-      _length ??= offset;
-      return;
-    }
-    // Backwards, every part has played, so each one's length is known:
-    // those after this point go back to their starts, the last first.
-    var offset = _length!;
-    for (var i = n - 1; i >= 0; i--) {
-      final part = _parts[i];
-      final total = part._total!;
-      offset -= total;
-      final local = into - offset;
-      if (local >= total) return;
-      part._seekPart(local < 0 ? 0 : local);
-    }
-  }
-
-  @override
-  String toString() => together ? 'together(${_parts.length} motions)' : 'sequence(${_parts.length} motions)';
-}
-
-/// The built-in lerp and distance for [T], or an [ArgumentError].
-(T Function(T a, T b, double t), double Function(T a, T b)?) _builtIn<T>(T sample, String type) {
-  final Object l, d;
-  switch (sample) {
-    case double():
-      l = lerp;
-      d = (double a, double b) => (b - a).abs();
-    case Vec2():
-      l = Vec2.lerp;
-      d = (Vec2 a, Vec2 b) => (b - a).length;
-    case Vec3():
-      l = Vec3.lerp;
-      d = (Vec3 a, Vec3 b) => (b - a).length;
-    case Quat():
-      l = Quat.slerp;
-      d = (Quat a, Quat b) => a.angleTo(b);
-    case Color():
-      l = Color.lerp;
-      d = Object();
-    default:
-      throw ArgumentError(
-        'tween knows double, Vec2, Vec3, Quat and Color; give a lerp for $type'
-        '${sample is int ? ' (or write 0.0, not 0)' : ''}',
-      );
-  }
-  if (l is! T Function(T, T, double)) {
-    throw ArgumentError('tween knows double, Vec2, Vec3, Quat and Color, not $type; give a lerp for it');
-  }
-  return (l, d is double Function(T, T) ? d : null);
 }
 
 /// Motion on objects and behaviours (docs/stage-4.md §3.7): tweens and
@@ -1072,7 +912,8 @@ mixin _Moving {
     onComplete: onComplete,
   );
 
-  /// Takes the object's colour to [color] over [seconds]: see [moveTo].
+  /// Takes the object's colour to [color] over [seconds] (it has no
+  /// `speed:`): see [moveTo].
   /// That's its [MeshRenderer]'s own [MeshRenderer.color], from the
   /// material's if it has none, so the other objects that share the
   /// material keep theirs. Give [material] to change that material
@@ -1127,7 +968,8 @@ mixin _Moving {
 
   /// Swells the object's scale by [punch] and springs it back, [vibrato]
   /// swings that fade over [seconds], ending at the scale it began with:
-  /// a hit, or a pickup. `punchScale(Vec3.one * 0.3, seconds: 0.4)`.
+  /// a hit, or a pickup. `punchScale(Vec3.one * 0.3, seconds: 0.4)`. It
+  /// takes [seconds] only, no `speed:`.
   Motion punchScale(
     Vec3 punch, {
     required double seconds,
@@ -1160,7 +1002,8 @@ mixin _Moving {
 
   /// Shakes the object about where it is, up to [strength] along each
   /// axis, [frequency] times a second, fading over [seconds] and ending
-  /// where it began. [seed] makes the same shake each time.
+  /// where it began. [seed] makes the same shake each time. It takes
+  /// [seconds] only, no `speed:`.
   Motion shake(
     double strength, {
     required double seconds,
@@ -1222,4 +1065,3 @@ mixin _Moving {
 }
 
 double _distance3(Vec3 a, Vec3 b) => (b - a).length;
-double _angle(Quat a, Quat b) => a.angleTo(b);

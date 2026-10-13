@@ -12,8 +12,12 @@ part of 'world.dart';
 /// system whose hooks throw in [turnOffAfter] frames in a row is turned
 /// off ([isTurnedOff]), and that's reported once.
 abstract class WorldSystem {
+  /// A system for [world]. Make it in the function given to
+  /// [World.system] (`world.system(Fog.new)`), which adds it; one made
+  /// any other way is never run.
   WorldSystem(this.world);
 
+  /// The world whose frame it works in.
   final World world;
 
   /// After how many frames in a row with a hook throwing a system is
@@ -38,37 +42,44 @@ abstract class WorldSystem {
   /// Called at the start of each frame, after the time moves on and
   /// before the input and the starts: physics collects the step it ran
   /// between frames here.
+  @protected
   @mustCallSuper
   void beforeFrame() {}
 
   /// Called at the start of each fixed step, before any
   /// [GameObject.onFixedUpdate].
+  @protected
   @mustCallSuper
   void beforeFixedUpdate() {}
 
   /// Called at the end of each fixed step, after every
   /// [GameObject.onFixedUpdate] and before the routines waiting for
   /// [fixedStep]: physics steps here.
+  @protected
   @mustCallSuper
   void afterFixedUpdate() {}
 
   /// Called every frame after the fixed steps, before any
   /// [GameObject.onUpdate]: physics puts interpolated bodies here.
+  @protected
   @mustCallSuper
   void beforeUpdate() {}
 
   /// Called every frame after every [GameObject.onUpdate], the motions and
   /// the routines, before any [GameObject.onLateUpdate]: where an animator
   /// poses what the updates moved, as Unity's does.
+  @protected
   @mustCallSuper
   void afterUpdate() {}
 
   /// Called every frame after the late updates, before the cameras move.
+  @protected
   @mustCallSuper
   void afterLateUpdate() {}
 
   /// Called at the end of each frame, after everything else: physics
   /// starts the step it runs between frames here.
+  @protected
   @mustCallSuper
   void afterFrame() {}
 
@@ -76,6 +87,7 @@ abstract class WorldSystem {
   /// while it's in the world, or with it when it's added (each of an added
   /// tree's components, parents first). After the engine has it, before a
   /// behaviour loads. Not for a model's parts, read from the model.
+  @protected
   @mustCallSuper
   void componentAdded(GameObject object, Component component) {}
 
@@ -84,6 +96,7 @@ abstract class WorldSystem {
   /// [GameObject.isDestroyed] is true, and it's called for each of its
   /// components, after every `onDestroy`). The component is
   /// [Component.isRemoved] by then.
+  @protected
   @mustCallSuper
   void componentRemoved(GameObject object, Component component) {}
 
@@ -95,6 +108,7 @@ abstract class WorldSystem {
 
   /// Called when [World.applicationPaused] changes, before the objects'
   /// [GameObject.onApplicationPause]: audio stops while the app is away.
+  @protected
   @mustCallSuper
   void applicationPause(bool paused) {}
 
@@ -106,6 +120,7 @@ abstract class WorldSystem {
   /// writes into first must still be there: free it with a
   /// `NativeFinalizer` (when the system is collected, or the isolate ends
   /// on a hot restart), not here.
+  @protected
   @mustCallSuper
   void dispose() {}
 }
@@ -204,15 +219,19 @@ extension WorldSystems on World {
   /// the rotation (x, y, z, w) and the scale (x, y, z), as the engine
   /// works them out (from its matrices: [GameObject.worldTransform]'s, but
   /// for a rotation under an uneven scale). One call however many there
-  /// are; the moves set since the last send are sent first. Throws a
-  /// [FynkelException] if an id isn't a live object.
+  /// are; the moves set since the last send are sent first. Throws an
+  /// [ArgumentError] if an id isn't a live object.
   void readWorldTransforms(Pointer<Uint64> ids, int count, Pointer<Float> out) {
     if (count == 0) return;
     _sendTransforms();
     // The same buffer each time, as a rule: its cast is kept, since making
     // one each call allocates.
     if (out.address != _manyOut.address) _manyOut = out.cast();
-    check(fy_world_transform_get_many(pointer, ids, count, _manyOut));
+    final status = fy_world_transform_get_many(pointer, ids, count, _manyOut);
+    if (status == FyStatus.FY_STATUS_NO_OBJECT) {
+      throw ArgumentError.value(ids, 'ids', fy_last_error().cast<Utf8>().toDartString());
+    }
+    check(status);
   }
 
   /// Sets the transforms of [count] objects, by their [GameObject.id]s at
@@ -220,8 +239,8 @@ extension WorldSystems on World {
   /// [readWorldTransforms] writes them, but each relative to its object's
   /// parent, as [GameObject.transform] is. For a package that works out
   /// many poses natively (an animator, particles): one call however many
-  /// there are, each sent with the frame's other moves. Throws a
-  /// [FynkelException] if an id isn't a live object or a transform isn't
+  /// there are, each sent with the frame's other moves. Throws an
+  /// [ArgumentError] if an id isn't a live object or a transform isn't
   /// valid; those before it are set.
   void writeTransforms(Pointer<Uint64> ids, int count, Pointer<Float> transforms) {
     pointer;
@@ -229,7 +248,7 @@ extension WorldSystems on World {
       final id = ids[i];
       final object = _objects[id];
       if (object == null || object._destroyed) {
-        throw FynkelException(FynkelStatus.noObject, 'object#$id is not a live object of this world');
+        throw ArgumentError.value(id, 'ids[$i]', 'not a live object of this world');
       }
       final f = transforms + i * 10;
       object.transform = Transform._(Vec3(f[0], f[1], f[2]), Quat(f[3], f[4], f[5], f[6]), Vec3(f[7], f[8], f[9]));

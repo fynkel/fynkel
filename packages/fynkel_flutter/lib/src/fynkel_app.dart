@@ -17,6 +17,7 @@ import 'fynkel_view.dart';
 /// over in a debug build. A game with menus around it puts a [FynkelGame]
 /// in its own app instead.
 class FynkelApp<T extends GameObject> extends StatelessWidget {
+  /// An app that shows the root [make] makes, with [overlay] over it.
   const FynkelApp(
     this.make, {
     super.key,
@@ -39,6 +40,8 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
   /// transparent [Material], so Material widgets work in it.
   final Widget Function(BuildContext context, T game)? overlay;
 
+  /// Where assets load from: the app's bundle under `assets/`
+  /// ([bundleSource]) unless given.
   final AssetSource? source;
 
   /// The app's name for the system, such as the task switcher's.
@@ -87,7 +90,14 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
                   view,
                   Material(
                     type: MaterialType.transparency,
-                    child: Builder(builder: (context) => over(context, game)),
+                    // Loose, from the top-left corner: a HUD's text covers
+                    // only itself, not the screen, so taps around it reach
+                    // the game. Layouts that fill (Center, Column, Align)
+                    // still do.
+                    child: Align(
+                      alignment: AlignmentDirectional.topStart,
+                      child: Builder(builder: (context) => over(context, game)),
+                    ),
                   ),
                 ],
               );

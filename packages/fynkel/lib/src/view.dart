@@ -9,6 +9,7 @@ import 'world.dart';
 
 /// What a view did since it was made (`fy_view_stats`).
 final class ViewStats {
+  /// All zeros unless given: a start to subtract from, and for tests.
   const ViewStats({
     this.posted = 0,
     this.rendered = 0,
@@ -93,10 +94,15 @@ abstract base class WorldView implements Finalizable {
   int _width, _height;
   Pointer<FyView> _pointer;
 
-  /// The size the frames from the next [frame] on are drawn at, in pixels.
+  /// The width the frames from the next [frame] on are drawn at, in pixels.
   int get width => _width;
+
+  /// The height the frames from the next [frame] on are drawn at, in
+  /// pixels.
   int get height => _height;
 
+  /// Whether [dispose] was called; then [frame], [resize], [stats] and
+  /// the rest of its calls throw a StateError.
   bool get isDisposed => _pointer == nullptr;
 
   /// The native view, for the platform plugins' calls. A plugin must stop
@@ -127,6 +133,8 @@ abstract base class WorldView implements Finalizable {
     _height = height;
   }
 
+  /// What the view did since it was made, and the GPU memory it holds
+  /// now. Subtract an earlier one for the counts in between.
   ViewStats get stats {
     final s = scratch.viewStats;
     check(fy_view_stats(_live, s));
@@ -157,6 +165,10 @@ abstract base class WorldView implements Finalizable {
 /// tests and tools, not for showing on screen (package:fynkel_flutter's
 /// `FynkelView` does that).
 final class HeadlessView extends WorldView {
+  /// A view of [world] drawing [width] × [height] pixel frames, with its
+  /// own GPU device and render worker. Throws an [ArgumentError] for a
+  /// size of 0, and a [FynkelException] when there's no GPU or the worker
+  /// won't start. Dispose of it when done.
   HeadlessView(World world, {required int width, required int height})
     : super._(
         world,

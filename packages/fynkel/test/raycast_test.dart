@@ -42,10 +42,7 @@ void main() {
   test('a ray needs a direction, and a raycast a reach that is not negative', () {
     expect(() => Ray(Vec3.zero, Vec3.zero), throwsArgumentError);
     expect(Ray(Vec3.zero, Vec3(0, 3, 0)).direction, Vec3.up);
-    expect(
-      () => world.raycast(Ray(Vec3.zero, Vec3.up), maxDistance: -1),
-      throwsA(isA<FynkelException>().having((e) => e.status, 'status', FynkelStatus.invalidValue)),
-    );
+    expect(() => world.raycast(Ray(Vec3.zero, Vec3.up), maxDistance: -1), throwsArgumentError);
   });
 
   test('a hit on a model is part of it, and names the node', () async {

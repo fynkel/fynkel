@@ -29,6 +29,8 @@ final class Mesh implements Finalizable {
     return _pointer;
   }
 
+  /// Whether [dispose] was called; a disposed mesh can't be used in a
+  /// world (a StateError).
   bool get isDisposed => _pointer == nullptr;
 
   /// A 1×1×1 cube around the origin. Each face shows the whole texture,
@@ -49,7 +51,8 @@ final class Mesh implements Finalizable {
   factory Mesh.cylinder() => _cylinder;
 
   /// A 1×1 plane facing +Y. Seen from above, the texture's top is towards
-  /// -Z.
+  /// -Z. Unity's Plane primitive is 10×10: this one is Unity's Quad,
+  /// lying face up. Scale it for a ground.
   factory Mesh.plane() => _plane;
 
   /// A 1×1 square standing in XY, facing +Z: a camera looking along its
@@ -84,8 +87,7 @@ final class Mesh implements Finalizable {
   ///   MikkTSpace, as glTF does. That can add a vertex where a texture is
   ///   mirrored. Give your own with [Mesh.raw].
   ///
-  /// Throws a [FynkelException] ([FynkelStatus.invalidValue]) for a broken
-  /// mesh, saying what's wrong. The lists are copied.
+  /// Throws an [ArgumentError] for a broken mesh, saying what's wrong. The lists are copied.
   factory Mesh.custom({
     required List<Vec3> positions,
     List<Vec3>? normals,
@@ -215,8 +217,8 @@ final class Mesh implements Finalizable {
   }
 
   /// Frees the mesh: every world that has it lets it go, and each view
-  /// frees its GPU copy on its next frame. Throws a [FynkelException]
-  /// ([FynkelStatus.inUse]) while an object's [MeshRenderer] uses it, and
+  /// frees its GPU copy on its next frame. Throws a [StateError] while an
+  /// object's [MeshRenderer] uses it, and also
   /// a [StateError] for a built-in shape, which lives as long as the
   /// program. Calling it again does nothing.
   void dispose() {
@@ -257,8 +259,8 @@ final class Texture2D implements Finalizable {
   /// waits for it: a big image takes tens of milliseconds. Any PNG layout
   /// (grey, palette, 16-bit) becomes 8-bit RGBA.
   ///
-  /// Throws a [FynkelException] ([FynkelStatus.invalidValue]) saying what's
-  /// wrong for a broken or unsupported file, or one over 8192 pixels on a
+  /// Throws a [FormatException] saying what's wrong for a broken or
+  /// unsupported file, or one over 8192 pixels on a
   /// side. [bytes] is copied.
   static Future<Texture2D> load(Uint8List bytes) async {
     ensureEngine();
@@ -279,7 +281,7 @@ final class Texture2D implements Finalizable {
   /// it returns holds just two numbers.
   static (int, int, int) Function() _decodeAt(int address, int length) => () {
     ensureEngine();
-    check(fy_texture_decode(Pointer<Uint8>.fromAddress(address), length, scratch.texture));
+    checkFile(fy_texture_decode(Pointer<Uint8>.fromAddress(address), length, scratch.texture));
     final texture = Texture2D._sized(scratch.texture.value);
     // This isolate ends next; the texture now belongs to the caller's.
     _finalizer.detach(texture);
@@ -287,8 +289,8 @@ final class Texture2D implements Finalizable {
   };
 
   /// A texture from [pixels]: 8-bit RGBA, `width × height × 4` bytes, rows
-  /// from the top. Throws a [FynkelException]
-  /// ([FynkelStatus.invalidValue]) when the length doesn't match or a side
+  /// from the top. Throws an [ArgumentError] when the length doesn't match
+  /// or a side
   /// is 0 or over 8192. [pixels] is copied.
   factory Texture2D.rgba(int width, int height, Uint8List pixels) {
     ensureEngine();
@@ -319,11 +321,13 @@ final class Texture2D implements Finalizable {
     return _pointer;
   }
 
+  /// Whether [dispose] was called; a disposed texture can't be used in a
+  /// material (a StateError).
   bool get isDisposed => _pointer == nullptr;
 
   /// Frees the texture: every world that has it lets it go, and each view
-  /// frees its GPU copy on its next frame. Throws a [FynkelException]
-  /// ([FynkelStatus.inUse]) while a material in a world uses it: set that
+  /// frees its GPU copy on its next frame. Throws a [StateError] while a
+  /// material in a world uses it: set that
   /// slot to null first. Calling it again does nothing.
   void dispose() {
     if (_pointer == nullptr) return;
@@ -349,6 +353,11 @@ final class Texture2D implements Finalizable {
 /// [metallicRoughnessTexture] the [metallic] (blue) and [roughness]
 /// (green), [emissiveTexture] the [emissive] light.
 final class Material {
+  /// A material, white, not metallic, half rough unless given. [metallic],
+  /// [roughness] and [alphaCutoff] are 0 to 1, [emissiveIntensity] 0 to
+  /// 1,000,000, [uvScale] and [uvOffset] -10,000 to 10,000 each way: out
+  /// of range or NaN throws a [RangeError]. A disposed texture throws a
+  /// [StateError].
   Material({
     this.name,
     this._color = Color.white,
@@ -402,12 +411,13 @@ final class Material {
 
   bool _disposed = false;
 
+  /// Whether [dispose] was called; a disposed material can't be used in a
+  /// world (a StateError).
   bool get isDisposed => _disposed;
 
   /// Takes the material out of every world that has it, so the textures
   /// it uses can be disposed too. It can't be used in a world after this
-  /// (a [StateError]). Throws a [FynkelException] ([FynkelStatus.inUse])
-  /// while an object's [MeshRenderer] uses it: despawn the object or give
+  /// (a [StateError]). Throws a [StateError] too while an object's [MeshRenderer] uses it: destroy the object or give
   /// it another material first. Calling it again does nothing.
   void dispose() {
     if (_disposed) return;

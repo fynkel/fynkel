@@ -49,8 +49,10 @@ final class Input {
 
   double _width = 0, _height = 0;
 
-  /// The view's size, in logical pixels.
+  /// The view's width, in logical pixels: 0 until a view gives it.
   double get width => _width;
+
+  /// The view's height, in logical pixels: 0 until a view gives it.
   double get height => _height;
 
   // The unscaled seconds since the first frame, and frames so far.
@@ -232,7 +234,9 @@ final class Input {
   /// 1: x to the right, y up. `'move'` reads W, A, S, D and the arrow
   /// keys; [bindAxis2] adds others, and [setAxis2] adds a Flutter stick's
   /// value to the keys'. Throws an [ArgumentError] for a name that isn't
-  /// bound or set. Zero while the world is paused.
+  /// bound or set. Zero while the world is paused. It's the "2D Vector
+  /// composite" of Unity's Input System; there's no one-way axis, so for
+  /// Unity's `GetAxis("Horizontal")` read `axis2('move').x`.
   Vec2 axis2(String name) {
     final axis = _axes[name] ?? (throw ArgumentError.value(name, 'name', 'is no axis (bound: ${_axes.keys})'));
     if (_paused) return Vec2.zero;
@@ -730,15 +734,29 @@ final class InputSettings {
 }
 
 /// What a [Finger] is.
-enum FingerKind { touch, mouse, pen }
+enum FingerKind {
+  /// A finger on a touch screen.
+  touch,
+
+  /// The mouse, or a trackpad's pointer.
+  mouse,
+
+  /// A stylus.
+  pen,
+}
 
 /// A key or a mouse button: what [Input.isPressed] and the others take.
 sealed class InputButton {}
 
 /// A mouse button. A touch counts as [left] in [Input.isPressed].
 enum MouseButton implements InputButton {
+  /// The main button; a touch or a pen counts as it.
   left(1),
+
+  /// The second button: a right click.
   right(2),
+
+  /// The wheel's button.
   middle(4);
 
   const MouseButton(this.bit);
@@ -759,6 +777,7 @@ final class Finger {
   /// The pointer's id: one per touch, and one that stays for the mouse.
   final int id;
 
+  /// A touch, the mouse or a pen.
   final FingerKind kind;
 
   double _x = 0, _y = 0;
@@ -889,10 +908,12 @@ final class Finger {
   /// For a tap: 1, or 2 for a double tap's second, and so on.
   int get tapCount => _tapCount;
 
+  /// Whether it's down: a touch until it lifts, the mouse while a button
+  /// is held.
   bool get isPressed => _down;
 
-  /// Whether it may still tap (it's within the tap's slop and time, and
-  /// wasn't long pressed), or, once up, whether it tapped.
+  /// While down: whether it may still tap (it's within the tap's slop and
+  /// time, and wasn't long pressed). After up: whether it tapped.
   bool get isTap => _tapping;
 
   /// Whether it moved further than the tap's slop while down.
@@ -934,6 +955,7 @@ final class Finger {
 final class Swipe {
   Swipe._(this.finger, this.direction, this.speed, this.distance);
 
+  /// The finger that swiped, now up.
   final Finger finger;
 
   /// Which way it was going as it let go, unit length (+y is down the
@@ -955,7 +977,20 @@ final class Swipe {
   String toString() => 'Swipe(${side.name}, $speed px/s, $distance px)';
 }
 
-enum SwipeSide { left, right, up, down }
+/// Which of the four ways a [Swipe] went: [Swipe.side].
+enum SwipeSide {
+  /// Towards the view's left.
+  left,
+
+  /// Towards the view's right.
+  right,
+
+  /// Towards the view's top.
+  up,
+
+  /// Towards the view's bottom.
+  down,
+}
 
 /// A frame's pinch and twist: [Input.onPinch], [Input.onTwist].
 final class Pinch {
@@ -987,9 +1022,16 @@ final class KeyPress {
       alt = held.contains(KeyCode.altLeft) || held.contains(KeyCode.altRight),
       meta = held.contains(KeyCode.metaLeft) || held.contains(KeyCode.metaRight);
 
+  /// The key that went down or up.
   final KeyCode key;
+
+  /// Whether either shift key was held.
   final bool shift;
+
+  /// Whether either control key was held.
   final bool control;
+
+  /// Whether either alt key (option on a Mac) was held.
   final bool alt;
 
   /// Command on a Mac, the Windows key elsewhere.
@@ -1006,7 +1048,11 @@ final class InputAction {
   InputAction._(this._input, this.name, this.buttons);
 
   final Input _input;
+
+  /// The name it was made with, as [Input.action] takes it.
   final String name;
+
+  /// The keys and mouse buttons that hold it; any one of them does.
   final List<InputButton> buttons;
 
   // Held from outside, and the input frames that pressed and let go of it.
@@ -1023,6 +1069,7 @@ final class InputAction {
   /// Lets go of what [press] held.
   void release() => _input._queue.add(_Raw(_RawKind.actionUp, 0, 0, 0, action: this));
 
+  /// Whether it's held now: by any of its [buttons], or by [press].
   bool get isPressed => _held || _input._anyDown(buttons);
 
   /// Whether it went down this frame: one of its buttons did, or [press],

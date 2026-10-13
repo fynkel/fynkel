@@ -388,6 +388,7 @@ void main() {
     final world = newWorld();
     floor(world);
     final body = Rigidbody();
+    expect(body.isSleeping, isFalse, reason: 'not in a world yet: asking is safe');
     cube(world, const Vec3(0, 0.5, 0), body: body);
     frames(world, 150);
     expect(body.isSleeping, isTrue);

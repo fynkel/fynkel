@@ -20,6 +20,7 @@ enum QueryTriggers {
 final class RaycastHit {
   RaycastHit._(this.collider, this.point, this.normal, this.distance);
 
+  /// The collider hit.
   final Collider collider;
 
   /// In the world. Zero for a cast's hit at distance 0 (one the shape

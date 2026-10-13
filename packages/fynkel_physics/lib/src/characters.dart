@@ -24,6 +24,7 @@ extension type const CollisionFlags._(int value) {
   /// Whether every one of [flags] is in these.
   bool has(CollisionFlags flags) => value & flags.value == flags.value;
 
+  /// Both: every flag in these or in [other].
   CollisionFlags operator |(CollisionFlags other) => CollisionFlags._(value | other.value);
 }
 
@@ -45,6 +46,12 @@ extension type const CollisionFlags._(int value) {
 /// [ControllerHits] into its object or a behaviour on it to hear what each
 /// move hits.
 final class CharacterController extends Collider {
+  /// A controller with Unity's defaults unless given: 2 m tall, 0.5 m
+  /// round, slopes up to 45.deg, steps up to 0.3 m. A bad value throws an
+  /// [ArgumentError].
+  ///
+  /// Its capsule turns with its object, all ways, where Unity's always
+  /// stands up: keep its object upright, and turn a child for the model.
   CharacterController({
     this._height = 2,
     this._radius = 0.5,
@@ -58,7 +65,9 @@ final class CharacterController extends Collider {
     _checkMoving();
   }
 
-  /// Its height, end to end (Unity's 2 unless given).
+  /// Its height, end to end, in metres, in its object's space: the
+  /// object's scale multiplies it, as a [CapsuleCollider]'s. Unity's 2
+  /// unless given; more than 0, or it throws an [ArgumentError].
   double get height => _height;
   set height(double value) {
     _height = value;
@@ -67,6 +76,9 @@ final class CharacterController extends Collider {
 
   double _height;
 
+  /// Its radius, in metres, in its object's space: the object's scale
+  /// multiplies it, as a [CapsuleCollider]'s. 0.5 unless given; more than
+  /// 0, or it throws an [ArgumentError].
   double get radius => _radius;
   set radius(double value) {
     _radius = value;
@@ -300,8 +312,10 @@ final class ControllerColliderHit {
   /// The hit surface's normal there, out of it.
   final Vec3 normal;
 
-  /// Which way the move went, and how far it was asked to go.
+  /// Which way the move went, unit length, in the world: zero for no move.
   final Vec3 moveDirection;
+
+  /// How far the move was asked to go, in metres.
   final double moveLength;
 
   /// The object hit.

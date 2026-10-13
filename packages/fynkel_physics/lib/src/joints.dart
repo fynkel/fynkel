@@ -10,17 +10,26 @@ part of 'physics.dart';
 /// A hinge's limits, in radians from where it was joined, -pi to pi
 /// (Unity's `JointLimits`): `JointLimits(min: -45.deg, max: 90.deg)`.
 final class JointLimits {
+  /// Limits from [min] to [max]; a hinge given a bad pair throws an
+  /// [ArgumentError].
   const JointLimits({this.min = 0, this.max = 0});
 
+  /// How far it turns back, in radians, -pi to [max]: 0 unless given.
   final double min;
+
+  /// How far it turns on, in radians, [min] to pi: 0 unless given.
   final double max;
 }
 
 /// One of a [CharacterJoint]'s limits, in radians (Unity's
 /// `SoftJointLimit`; its bounciness and contact distance aren't here).
 final class SoftJointLimit {
+  /// A limit at [limit]; a joint given a bad one throws an
+  /// [ArgumentError].
   const SoftJointLimit({this.limit = 0});
 
+  /// How far it turns, in radians: 0 unless given. Each of a
+  /// [CharacterJoint]'s limits says its range.
   final double limit;
 }
 
@@ -28,9 +37,16 @@ final class SoftJointLimit {
 /// [targetVelocity] radians a second, with no more than [force] newton
 /// metres.
 final class JointMotor {
+  /// A motor turning at [targetVelocity] with up to [force]; a hinge given
+  /// a bad one throws an [ArgumentError].
   const JointMotor({this.targetVelocity = 0, this.force = 0});
 
+  /// How fast it turns the hinge, in radians a second: 0 unless given;
+  /// finite.
   final double targetVelocity;
+
+  /// The most it turns it with, in newton metres: 0 unless given; finite
+  /// and 0 or more.
   final double force;
 }
 
@@ -38,10 +54,20 @@ final class JointMotor {
 /// [targetPosition] radians with [spring] newton metres a radian, slowed
 /// by [damper] per radian a second.
 final class JointSpring {
+  /// A spring of [spring] and [damper] pulling to [targetPosition]; a hinge
+  /// given a bad one throws an [ArgumentError].
   const JointSpring({this.spring = 0, this.damper = 0, this.targetPosition = 0});
 
+  /// How strong it is, in newton metres a radian: 0 unless given; finite
+  /// and 0 or more.
   final double spring;
+
+  /// How much it slows the hinge, in newton metres per radian a second: 0
+  /// unless given; finite and 0 or more.
   final double damper;
+
+  /// The angle it pulls to, in radians from where the hinge was joined: 0
+  /// unless given; finite.
   final double targetPosition;
 }
 
@@ -71,14 +97,18 @@ sealed class Joint extends Behaviour {
   set connectedBody(Rigidbody? value) => _rejoin(() => _connectedBody = value);
   Rigidbody? _connectedBody;
 
-  /// Where it holds, in its object's space.
+  /// Where it holds, in its object's space, scale included: (0.5, 0, 0) is
+  /// the +X face of a unit cube however the object is scaled. The scale is
+  /// the one its object has when it joins. (0, 0, 0) unless set.
   Vec3 get anchor => _anchor;
   set anchor(Vec3 value) => _rejoin(() => _anchor = value);
   Vec3 _anchor;
 
-  /// Where it holds on the connected body, in that body's object's space
-  /// (in the world's with none): as set, or where [anchor] was when it
-  /// joined, while [autoConfigureConnectedAnchor].
+  /// Where it holds on the connected body, in that body's object's space,
+  /// scale included as for [anchor] (in the world's with none): as set, or
+  /// where [anchor] was when it joined, while
+  /// [autoConfigureConnectedAnchor]. Before it joins, one not set reads
+  /// (0, 0, 0).
   Vec3 get connectedAnchor {
     if (_connectedAnchor case final set?) return set;
     if (_id == 0) return Vec3.zero;
@@ -209,6 +239,8 @@ sealed class Joint extends Behaviour {
 /// Holds its rigidbody to the connected one (or the world) as the two
 /// were when it joined them, so they move as one (Unity's `FixedJoint`).
 final class FixedJoint extends Joint {
+  /// A fixed joint to [connectedBody], or to the world when null. A break
+  /// force or torque of 0 or less throws an [ArgumentError].
   FixedJoint({
     super.connectedBody,
     super.anchor,
@@ -227,6 +259,8 @@ final class FixedJoint extends Joint {
 /// [limits], be turned by a [motor], or be pulled to an angle by a
 /// [spring]; the motor turns it in place of the spring when both are on.
 final class HingeJoint extends Joint {
+  /// A hinge to [connectedBody], or to the world when null, about [axis]
+  /// (X unless given). A bad value throws an [ArgumentError].
   HingeJoint({
     super.connectedBody,
     super.anchor,
@@ -259,6 +293,8 @@ final class HingeJoint extends Joint {
   set useLimits(bool value) => _respec(() => _useLimits = value);
   bool _useLimits;
 
+  /// Where it stops, while [useLimits]: -pi to pi radians, the min no more
+  /// than the max, or it throws an [ArgumentError]. 0 to 0 unless set.
   JointLimits get limits => _limits;
   set limits(JointLimits value) => _respec(() => _limits = value);
   JointLimits _limits;
@@ -268,6 +304,8 @@ final class HingeJoint extends Joint {
   set useMotor(bool value) => _respec(() => _useMotor = value);
   bool _useMotor;
 
+  /// What turns it, while [useMotor]. A bad one throws an
+  /// [ArgumentError]. Turns at 0 with no force unless set.
   JointMotor get motor => _motor;
   set motor(JointMotor value) => _respec(() => _motor = value);
   JointMotor _motor;
@@ -277,6 +315,8 @@ final class HingeJoint extends Joint {
   set useSpring(bool value) => _respec(() => _useSpring = value);
   bool _useSpring;
 
+  /// What pulls it to an angle, while [useSpring]. A bad one throws an
+  /// [ArgumentError]. No strength unless set.
   JointSpring get spring => _spring;
   set spring(JointSpring value) => _respec(() => _spring = value);
   JointSpring _spring;
@@ -334,6 +374,9 @@ final class HingeJoint extends Joint {
 /// anchor where the anchor was (Unity's default), it keeps the two as far
 /// apart as they were, springily.
 final class SpringJoint extends Joint {
+  /// A spring to [connectedBody], or to the world when null: Unity's 10
+  /// newtons a metre and 0.2 damper unless given. A bad value throws an
+  /// [ArgumentError].
   SpringJoint({
     super.connectedBody,
     super.anchor,
@@ -349,22 +392,28 @@ final class SpringJoint extends Joint {
     _check();
   }
 
-  /// How strong it is, in newtons a metre.
+  /// How strong it is, in newtons a metre: finite and 0 or more, or it
+  /// throws an [ArgumentError].
   double get spring => _spring;
   set spring(double value) => _respec(() => _spring = value);
   double _spring;
 
-  /// How much it slows the two, in newtons per metre a second.
+  /// How much it slows the two, in newtons per metre a second: finite and
+  /// 0 or more, or it throws an [ArgumentError].
   double get damper => _damper;
   set damper(double value) => _respec(() => _damper = value);
   double _damper;
 
-  /// The distances between the anchors, in metres, between which it
-  /// doesn't pull.
+  /// Nearer than this, in metres, it pushes the anchors apart: 0 or more,
+  /// and no more than [maxDistance], or it throws an [ArgumentError]. 0
+  /// unless set.
   double get minDistance => _minDistance;
   set minDistance(double value) => _respec(() => _minDistance = value);
   double _minDistance;
 
+  /// Further apart than this, in metres, it pulls the anchors together:
+  /// finite, and no less than [minDistance], or it throws an
+  /// [ArgumentError]. 0 unless set.
   double get maxDistance => _maxDistance;
   set maxDistance(double value) => _respec(() => _maxDistance = value);
   double _maxDistance;
@@ -405,6 +454,8 @@ final class SpringJoint extends Joint {
 /// (-pi for the low twist) frees it that way: all four there make a free
 /// ball joint. Unity's defaults: twist -20.deg to 70.deg, swing 40.deg.
 final class CharacterJoint extends Joint {
+  /// A ball joint to [connectedBody], or to the world when null, with
+  /// Unity's limits unless given. A bad value throws an [ArgumentError].
   CharacterJoint({
     super.connectedBody,
     super.anchor,
@@ -441,22 +492,26 @@ final class CharacterJoint extends Joint {
 
   Vec3 _swingAxis;
 
-  /// How far it twists each way, from where it was joined, in radians: -pi
-  /// to pi.
+  /// How far it twists back about [axis], from where it was joined, in
+  /// radians: -pi to [highTwistLimit] (-20.deg unless set).
   SoftJointLimit get lowTwistLimit => _lowTwistLimit;
   set lowTwistLimit(SoftJointLimit value) => _respec(() => _lowTwistLimit = value);
   SoftJointLimit _lowTwistLimit;
 
+  /// How far it twists on about [axis], from where it was joined, in
+  /// radians: [lowTwistLimit] to pi (70.deg unless set).
   SoftJointLimit get highTwistLimit => _highTwistLimit;
   set highTwistLimit(SoftJointLimit value) => _respec(() => _highTwistLimit = value);
   SoftJointLimit _highTwistLimit;
 
-  /// How far it swings each way about [swingAxis], and about the third
-  /// axis, in radians: 0 to pi.
+  /// How far it swings each way about [swingAxis], in radians: 0 to pi
+  /// (40.deg unless set).
   SoftJointLimit get swing1Limit => _swing1Limit;
   set swing1Limit(SoftJointLimit value) => _respec(() => _swing1Limit = value);
   SoftJointLimit _swing1Limit;
 
+  /// How far it swings each way about the axis square to [axis] and
+  /// [swingAxis], in radians: 0 to pi (40.deg unless set).
   SoftJointLimit get swing2Limit => _swing2Limit;
   set swing2Limit(SoftJointLimit value) => _respec(() => _swing2Limit = value);
   SoftJointLimit _swing2Limit;
@@ -514,9 +569,10 @@ void _checkSpring(double spring, double damper) {
 
 /// The callback for a joint breaking (Unity's `OnJointBreak`), for its
 /// [GameObject] or a [Behaviour] on it: `class Lamp extends GameObject
-/// with JointBreaks`. It comes once, at the next point contacts are told,
-/// after the joint is taken off its object. What it throws goes to
-/// [World.errors].
+/// with JointBreaks`. It comes once, at the next point contacts are told:
+/// the joint is out of the physics then ([Joint.isJoined] is false) but
+/// still on its object, and it's taken off right after, as Unity does.
+/// What it throws goes to [World.errors].
 mixin JointBreaks {
   /// [joint] broke, holding with [breakForce] newtons.
   void onJointBreak(Joint joint, double breakForce) {}

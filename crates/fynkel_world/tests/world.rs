@@ -55,7 +55,7 @@ fn a_despawned_id_is_a_clear_error() {
     assert_eq!(world.has::<Transform>(id), Err(WorldError::NoObject(id)));
     assert_eq!(
         world.get::<Transform>(id).unwrap_err().to_string(),
-        "object#1 does not exist (despawned, or never spawned)"
+        "object#1 does not exist (destroyed, or never added)"
     );
 }
 
