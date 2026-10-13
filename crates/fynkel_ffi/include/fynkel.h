@@ -461,11 +461,14 @@ FyStatus fy_find(const struct FyWorld *world,
                  size_t len,
                  uint64_t *out);
 
-// The object's transform in the world: its own after its parents'. The
-// position and rotation are exact; the scale is approximate when a parent
-// with an uneven scale has a rotated child, because the result is skewed
-// and no position, rotation and scale can say that. An object without a
-// `Transform` counts as not moved from its parent.
+// The object's transform in the world: its own after its parents', as
+// Dart's `worldTransform` works it out. The position is exact; the
+// rotation is the rotations multiplied, and the scale the scales (Unity's
+// lossy scale), which is approximate when a parent with an uneven scale
+// has a rotated child, because the result is skewed and no position,
+// rotation and scale can say that. A parent scaled to 0 still gives a
+// rotation. An object without a `Transform` counts as not moved from its
+// parent.
 //
 // # Safety
 //

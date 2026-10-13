@@ -277,7 +277,11 @@ extension WorldSystems on World {
 /// should read now and then; an object waits in it once however often it
 /// moves meanwhile.
 final class MovedReader {
-  MovedReader._(this._world) : _cursor = _world._movedBase + _world._movedLog.length;
+  MovedReader._(this._world) : _cursor = _world._movedBase + _world._movedLog.length {
+    // What's in the log is behind this reader: an object there moving
+    // again must be put in it again, for this one.
+    if (_cursor > _world._movedReadTo) _world._movedReadTo = _cursor;
+  }
 
   final World _world;
   int _cursor;

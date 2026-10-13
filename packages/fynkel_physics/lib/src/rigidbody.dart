@@ -126,31 +126,31 @@ final class Rigidbody extends Behaviour {
   /// In kilograms, shared out over its colliders by their volumes: 1
   /// unless set; finite and more than 0, or it throws an [ArgumentError].
   double get mass => _mass;
-  set mass(double value) => _set(() => _mass = value);
+  set mass(double value) => _setOrUndo(_mass, value, (v) => _mass = v, _apply);
   double _mass;
 
   /// Whether gravity ([Physics.gravity]) pulls it.
   bool get useGravity => _useGravity;
-  set useGravity(bool value) => _set(() => _useGravity = value);
+  set useGravity(bool value) => _setOrUndo(_useGravity, value, (v) => _useGravity = v, _apply);
   bool _useGravity;
 
   /// Whether the game moves it ([movePosition], [moveRotation], or its
   /// object's transform), not forces and contacts. It still pushes the
   /// bodies it moves into.
   bool get isKinematic => _isKinematic;
-  set isKinematic(bool value) => _set(() => _isKinematic = value);
+  set isKinematic(bool value) => _setOrUndo(_isKinematic, value, (v) => _isKinematic = v, _apply);
   bool _isKinematic;
 
   /// How fast it slows down as it moves, per second: 0 (unless set) for
   /// not at all. Finite and 0 or more, or it throws an [ArgumentError].
   double get linearDamping => _linearDamping;
-  set linearDamping(double value) => _set(() => _linearDamping = value);
+  set linearDamping(double value) => _setOrUndo(_linearDamping, value, (v) => _linearDamping = v, _apply);
   double _linearDamping;
 
   /// How fast it slows down as it turns, per second: 0.05 unless set.
   /// Finite and 0 or more, or it throws an [ArgumentError].
   double get angularDamping => _angularDamping;
-  set angularDamping(double value) => _set(() => _angularDamping = value);
+  set angularDamping(double value) => _setOrUndo(_angularDamping, value, (v) => _angularDamping = v, _apply);
   double _angularDamping;
 
   /// The fastest it turns, in radians a second. Rapier also turns a body
@@ -159,23 +159,26 @@ final class Rigidbody extends Behaviour {
   /// past 4 m/s) skids and slows. Take more steps ([Time.fixedDelta]) for
   /// such a game.
   double get maxAngularVelocity => _maxAngularVelocity;
-  set maxAngularVelocity(double value) => _set(() => _maxAngularVelocity = value);
+  set maxAngularVelocity(double value) =>
+      _setOrUndo(_maxAngularVelocity, value, (v) => _maxAngularVelocity = v, _apply);
   double _maxAngularVelocity;
 
   /// The axes physics doesn't move or turn it on.
   RigidbodyConstraints get constraints => _constraints;
-  set constraints(RigidbodyConstraints value) => _set(() => _constraints = value);
+  set constraints(RigidbodyConstraints value) => _setOrUndo(_constraints, value, (v) => _constraints = v, _apply);
   RigidbodyConstraints _constraints;
 
   /// How its object is drawn between steps.
   RigidbodyInterpolation get interpolation => _interpolation;
-  set interpolation(RigidbodyInterpolation value) => _set(() => _interpolation = value);
+  set interpolation(RigidbodyInterpolation value) =>
+      _setOrUndo(_interpolation, value, (v) => _interpolation = v, _apply);
   RigidbodyInterpolation _interpolation;
 
   /// How it finds what it hits: anything but discrete for a fast, small
   /// body that mustn't pass through thin things.
   CollisionDetectionMode get collisionDetectionMode => _collisionDetectionMode;
-  set collisionDetectionMode(CollisionDetectionMode value) => _set(() => _collisionDetectionMode = value);
+  set collisionDetectionMode(CollisionDetectionMode value) =>
+      _setOrUndo(_collisionDetectionMode, value, (v) => _collisionDetectionMode = v, _apply);
   CollisionDetectionMode _collisionDetectionMode;
 
   /// Its center of mass in its object's space: where it was set, or where
@@ -189,11 +192,11 @@ final class Rigidbody extends Behaviour {
     return s.pose.rotation.get().inverse.rotate(s.center_of_mass.get() - p);
   }
 
-  set centerOfMass(Vec3 value) => _set(() => _centerOfMass = value);
+  set centerOfMass(Vec3 value) => _setOrUndo(_centerOfMass, value, (v) => _centerOfMass = v, _apply);
   Vec3? _centerOfMass;
 
   /// Lets its colliders put its center of mass again.
-  void resetCenterOfMass() => _set(() => _centerOfMass = null);
+  void resetCenterOfMass() => _setOrUndo(_centerOfMass, null, (v) => _centerOfMass = v, _apply);
 
   /// Its center of mass, in the world. Throws a [StateError] while it isn't
   /// in the world.
@@ -365,8 +368,7 @@ final class Rigidbody extends Behaviour {
     _physics = null;
   }
 
-  void _set(void Function() change) {
-    change();
+  void _apply() {
     _check();
     _physics?._respecBody(this);
   }

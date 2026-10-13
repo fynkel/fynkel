@@ -357,12 +357,16 @@ extension _Loop on World {
   }
 
   // Depth first, as Unity's, and with no list: hiding and showing pooled
-  // objects allocates nothing.
+  // objects allocates nothing. A child's onEnable or onDisable may move it
+  // (or a sibling) out: the walk goes on from the same place then, so the
+  // sibling that took its place isn't skipped.
   void _refreshTree(GameObject object) {
     _refreshObject(object);
     final children = object._children;
-    for (var i = 0; children != null && i < children.length; i++) {
-      _refreshTree(children[i]);
+    for (var i = 0; children != null && i < children.length;) {
+      final child = children[i];
+      _refreshTree(child);
+      if (i < children.length && identical(children[i], child)) i++;
     }
   }
 

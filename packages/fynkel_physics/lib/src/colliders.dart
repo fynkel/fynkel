@@ -77,10 +77,7 @@ sealed class Collider extends Behaviour {
   /// Its middle, in its object's space (Unity's `center`): the object's
   /// scale multiplies it. (0, 0, 0) unless set.
   Vec3 get center => _center;
-  set center(Vec3 value) {
-    _center = value;
-    _changed();
-  }
+  set center(Vec3 value) => _setOrUndo(_center, value, (v) => _center = v, _changed);
 
   Vec3 _center;
 
@@ -88,10 +85,7 @@ sealed class Collider extends Behaviour {
   /// ([QueryTriggers]), and it reports what enters it ([Triggers]) rather
   /// than stopping it.
   bool get isTrigger => _isTrigger;
-  set isTrigger(bool value) {
-    _isTrigger = value;
-    _changed();
-  }
+  set isTrigger(bool value) => _setOrUndo(_isTrigger, value, (v) => _isTrigger = v, _changed);
 
   bool _isTrigger;
 
@@ -99,8 +93,7 @@ sealed class Collider extends Behaviour {
   PhysicsMaterial get material => _material;
   set material(PhysicsMaterial value) {
     value._check();
-    _material = value;
-    _changed();
+    _setOrUndo(_material, value, (v) => _material = v, _changed);
   }
 
   PhysicsMaterial _material;
@@ -221,10 +214,7 @@ final class BoxCollider extends Collider {
   /// the object's scale multiplies it. (1, 1, 1) unless set; each more than
   /// 0, or it throws an [ArgumentError].
   Vec3 get size => _size;
-  set size(Vec3 value) {
-    _size = value;
-    _changed();
-  }
+  set size(Vec3 value) => _setOrUndo(_size, value, (v) => _size = v, _changed);
 
   Vec3 _size;
 
@@ -255,10 +245,7 @@ final class SphereCollider extends Collider {
   /// scale multiplies it. 0.5 unless set; more than 0, or it throws an
   /// [ArgumentError].
   double get radius => _radius;
-  set radius(double value) {
-    _radius = value;
-    _changed();
-  }
+  set radius(double value) => _setOrUndo(_radius, value, (v) => _radius = v, _changed);
 
   double _radius;
 
@@ -310,10 +297,7 @@ final class CapsuleCollider extends Collider {
   /// object's two scales across [direction] multiplies it. 0.5 unless set;
   /// more than 0, or it throws an [ArgumentError].
   double get radius => _radius;
-  set radius(double value) {
-    _radius = value;
-    _changed();
-  }
+  set radius(double value) => _setOrUndo(_radius, value, (v) => _radius = v, _changed);
 
   double _radius;
 
@@ -321,19 +305,13 @@ final class CapsuleCollider extends Collider {
   /// its object's space: the object's scale along [direction] multiplies
   /// it. 2 unless set; more than 0, or it throws an [ArgumentError].
   double get height => _height;
-  set height(double value) {
-    _height = value;
-    _changed();
-  }
+  set height(double value) => _setOrUndo(_height, value, (v) => _height = v, _changed);
 
   double _height;
 
   /// The axis of its object it runs along: Y unless set.
   CapsuleDirection get direction => _direction;
-  set direction(CapsuleDirection value) {
-    _direction = value;
-    _changed();
-  }
+  set direction(CapsuleDirection value) => _setOrUndo(_direction, value, (v) => _direction = v, _changed);
 
   CapsuleDirection _direction;
 
@@ -396,19 +374,13 @@ final class MeshCollider extends Collider {
 
   /// The mesh given, or null to use its object's [MeshRenderer]'s.
   Mesh? get mesh => _mesh;
-  set mesh(Mesh? value) {
-    _mesh = value;
-    _changed();
-  }
+  set mesh(Mesh? value) => _setOrUndo(_mesh, value, (v) => _mesh = v, _changed);
 
   Mesh? _mesh;
 
   /// Whether it's the mesh's hull rather than its triangles.
   bool get convex => _convex;
-  set convex(bool value) {
-    _convex = value;
-    _changed();
-  }
+  set convex(bool value) => _setOrUndo(_convex, value, (v) => _convex = v, _changed);
 
   bool _convex;
 

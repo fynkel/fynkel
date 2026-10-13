@@ -1276,10 +1276,12 @@ import 'package:fynkel_physics/fynkel_physics.dart';
 
 /// Moves every bullet in one place, as rays: none can skip a thin wall.
 class Bullets extends GameObject {
-  final _at = <Vec3>[], _velocity = <Vec3>[];
+  final hit = Signal<RaycastHit>();
+  final _at = <Vec3>[], _was = <Vec3>[], _velocity = <Vec3>[];
 
   void fire(Vec3 from, Vec3 velocity) {
     _at.add(from);
+    _was.add(from);
     _velocity.add(velocity);
   }
 
@@ -1287,17 +1289,51 @@ class Bullets extends GameObject {
   void onUpdate() {
     super.onUpdate();
     for (var i = _at.length - 1; i >= 0; i--) {
-      final move = _velocity[i] * time.delta;
-      final hit = physics.raycast(Ray(_at[i], move), maxDistance: move.length);
-      if (hit != null || _at[i].length > 100) {
-        if (hit != null) print('hit ${hit.gameObject.name}');
+      final to = _at[i] + _velocity[i] * time.delta;
+      final path = to - _was[i];
+      final struck = physics.raycast(Ray(_was[i], path), maxDistance: path.length);
+      if (struck != null || to.length > 100) {
+        if (struck != null) hit.emit(struck);
         _at.removeAt(i);
+        _was.removeAt(i);
         _velocity.removeAt(i);
       } else {
-        _at[i] += move;
+        _was[i] = _at[i];
+        _at[i] = to;
       }
     }
   }
+}
+```
+
+Each ray starts where the bullet was a frame ago, not where it is, so it
+goes over the last move again. A ray doesn't hit what it starts inside:
+started where the bullet is, it would miss a target that walked onto the
+bullet since the last frame, and miss more often the longer the frames.
+A test of just that:
+
+```dart
+// test/bullets_test.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+import 'package:my_game/guns.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+void main() {
+  test('a target that walks onto a bullet is hit', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final bullets = world.add(Bullets());
+    final target = world.add(GameObject(components: [BoxCollider()]))
+      ..position = Vec3(0, 0, 10);
+    final hits = <GameObject>[];
+    bullets.hit.listen((hit) => hits.add(hit.gameObject));
+    bullets.fire(Vec3.zero, Vec3(0, 0, -30));
+    world.update(1 / 60); // the bullet is at z = -0.5
+    target.position = Vec3(0, 0, -0.7); // and now inside the target
+    world.update(1 / 60);
+    expect(hits, [target]);
+  });
 }
 ```
 
@@ -1745,6 +1781,16 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 6, the review's bugs** (2026-10-13):
+  - Changing the parent of an object that's being destroyed, or putting
+    something under one, throws a `StateError` (Unity's "can't change
+    the hierarchy while deactivating"). It used to split what Dart and
+    the engine knew. To keep a child, move it out before `destroy()`.
+  - A behaviour that's being taken off or destroyed can't `on(...)` or
+    `startRoutine(...)` any more: both throw a `StateError`.
+  - A physics setter that throws for a bad value (`body.mass = 0`) keeps
+    the value it had.
 
 - **Stage 6** (2026-10-12):
   - A game's mistakes throw Dart's errors, not `FynkelException`: an

@@ -499,6 +499,10 @@ abstract class Behaviour extends Component with _Moving {
   bool _started = false;
   bool _enabledNow = false;
 
+  // Its onDestroy is running, or has run: it listens and starts no more.
+  bool get _going => _ending || _removed || gameObject._destroyed;
+  bool _ending = false;
+
   /// The world its object is in. Throws a [StateError] before the object
   /// is added.
   World get world => gameObject.world;
@@ -520,7 +524,10 @@ abstract class Behaviour extends Component with _Moving {
   /// Starts a routine, as [GameObject.startRoutine] does; it stops when this
   /// behaviour is removed or its object destroyed, and is paused while
   /// the behaviour isn't enabled.
-  Routine<T> startRoutine<T>(Future<T> Function() body) => gameObject.world._start(this, gameObject, body);
+  Routine<T> startRoutine<T>(Future<T> Function() body) {
+    if (_going) throw StateError('$this was removed, so it can\'t start a routine');
+    return gameObject.world._start(this, gameObject, body);
+  }
 
   /// Stops every routine this behaviour started (Unity's
   /// `StopAllCoroutines`).
@@ -529,7 +536,7 @@ abstract class Behaviour extends Component with _Moving {
   /// Listens to [signal], as [GameObject.on] does, until this behaviour
   /// is removed or its object destroyed.
   SignalSubscription<T> on<T>(Signal<T> signal, void Function(T value) handler) {
-    if (_removed) throw StateError('$this was removed, so it can\'t listen');
+    if (_going) throw StateError('$this was removed, so it can\'t listen');
     return _on(this, signal, handler);
   }
 

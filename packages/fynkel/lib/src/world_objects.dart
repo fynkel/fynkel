@@ -32,6 +32,12 @@ extension _Objects on World {
     if (parent != null && !identical(parent._world, this)) {
       throw ArgumentError.value(parent, 'parent', 'in another world, so it can\'t be the parent of $child');
     }
+    // As Unity's "can't change the hierarchy while deactivating": what's
+    // being destroyed goes with everything below it, and takes nothing in.
+    if (child._destroyed) throw StateError('$child is being destroyed, so its parent can\'t change');
+    if (parent != null && parent._destroyed) {
+      throw StateError('$parent is being destroyed, so $child can\'t be put under it');
+    }
     // The engine refuses a cycle, or a destroyed parent, before anything
     // changes here.
     check(fy_parent_set(pointer, child._id, parent?._id ?? 0));

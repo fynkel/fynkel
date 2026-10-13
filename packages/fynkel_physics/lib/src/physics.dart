@@ -145,8 +145,9 @@ final class Physics extends WorldSystem implements Finalizable {
   bool drawColliders = false;
 
   // The colliders by the key they were added to the native world with, and
-  // the keys that are free again; the same for the rigidbodies.
-  final _byKey = <Collider?>[];
+  // the keys that are free again; the same for the rigidbodies. Key 0 is
+  // never given out: the native side says 0 for "no collider".
+  final _byKey = <Collider?>[null];
   final _freeKeys = <int>[];
   final _bodiesByKey = <Rigidbody?>[];
   final _freeBodyKeys = <int>[];
@@ -1165,4 +1166,16 @@ final class _HeldMesh {
 
   final int id;
   var users = 0;
+}
+
+/// Sets a field to [value] with [put], then [apply]s it; when that throws,
+/// puts [old] back, so a value that's refused changes nothing.
+void _setOrUndo<T>(T old, T value, void Function(T) put, void Function() apply) {
+  put(value);
+  try {
+    apply();
+  } catch (_) {
+    put(old);
+    rethrow;
+  }
 }

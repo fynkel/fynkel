@@ -450,6 +450,11 @@ void main() {
     world.update(0);
     expect(body.linearVelocity, near(const Vec3(1, 0, 0)), reason: 'it started at it');
     expect(() => body.mass = double.nan, throwsArgumentError);
+    expect(body.mass, 1, reason: 'a value refused changes nothing');
+    final collider = object.get<SphereCollider>()!;
+    expect(() => collider.radius = -1, throwsArgumentError);
+    expect(collider.radius, 0.5);
+    world.update(1 / 60);
     object.destroy();
     world.update(0);
     expect(

@@ -47,7 +47,8 @@ pub struct CharacterMove {
     /// The collider it stands on after the move, if it's grounded: what it
     /// hit below it, or else what's just under it.
     pub ground: Option<u64>,
-    /// The key that collider was added with (0 with none).
+    /// The key that collider was added with (0 with none: keys given
+    /// out are never 0).
     pub ground_key: u64,
 }
 

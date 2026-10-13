@@ -417,6 +417,20 @@ impl<'a> Reader<'a> {
             error,
         };
         let blob = self.blob;
+        // A sparse accessor needs no bytes for the values it leaves at 0,
+        // so a small file can claim billions of them. Every real one has a
+        // byte or more each in the file: more than that, the file is
+        // damaged.
+        let accessors = primitive.attributes().map(|(_, a)| a).chain(primitive.indices());
+        for accessor in accessors {
+            if accessor.count() > blob.len() {
+                return Err(fail(format!(
+                    "accessor {} claims {} values, more than the file has bytes",
+                    accessor.index(),
+                    accessor.count()
+                )));
+            }
+        }
         let reader = primitive.reader(|buffer| match buffer.source() {
             gltf::buffer::Source::Bin => Some(blob),
             gltf::buffer::Source::Uri(_) => None,

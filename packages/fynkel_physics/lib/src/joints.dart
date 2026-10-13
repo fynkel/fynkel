@@ -130,17 +130,17 @@ sealed class Joint extends Behaviour {
 
   /// Whether its body and the connected one collide (false unless set).
   bool get enableCollision => _enableCollision;
-  set enableCollision(bool value) => _respec(() => _enableCollision = value);
+  set enableCollision(bool value) => _setOrUndo(_enableCollision, value, (v) => _enableCollision = v, _apply);
   bool _enableCollision;
 
   /// The force, in newtons, it breaks at: infinity for never.
   double get breakForce => _breakForce;
-  set breakForce(double value) => _respec(() => _breakForce = value);
+  set breakForce(double value) => _setOrUndo(_breakForce, value, (v) => _breakForce = v, _apply);
   double _breakForce;
 
   /// The torque, in newton metres, it breaks at: infinity for never.
   double get breakTorque => _breakTorque;
-  set breakTorque(double value) => _respec(() => _breakTorque = value);
+  set breakTorque(double value) => _setOrUndo(_breakTorque, value, (v) => _breakTorque = v, _apply);
   double _breakTorque;
 
   /// The force it held its body with in the last step, in the world;
@@ -187,9 +187,8 @@ sealed class Joint extends Behaviour {
 
   void _check() {}
 
-  /// Changes what can change on the joint as it is.
-  void _respec(void Function() change) {
-    change();
+  /// Checks and applies a change to what can change on the joint as it is.
+  void _apply() {
     _checkBreak();
     _check();
     _physics?._respecJoint(this);
@@ -290,35 +289,35 @@ final class HingeJoint extends Joint {
 
   /// Whether it stops at [limits].
   bool get useLimits => _useLimits;
-  set useLimits(bool value) => _respec(() => _useLimits = value);
+  set useLimits(bool value) => _setOrUndo(_useLimits, value, (v) => _useLimits = v, _apply);
   bool _useLimits;
 
   /// Where it stops, while [useLimits]: -pi to pi radians, the min no more
   /// than the max, or it throws an [ArgumentError]. 0 to 0 unless set.
   JointLimits get limits => _limits;
-  set limits(JointLimits value) => _respec(() => _limits = value);
+  set limits(JointLimits value) => _setOrUndo(_limits, value, (v) => _limits = v, _apply);
   JointLimits _limits;
 
   /// Whether [motor] turns it.
   bool get useMotor => _useMotor;
-  set useMotor(bool value) => _respec(() => _useMotor = value);
+  set useMotor(bool value) => _setOrUndo(_useMotor, value, (v) => _useMotor = v, _apply);
   bool _useMotor;
 
   /// What turns it, while [useMotor]. A bad one throws an
   /// [ArgumentError]. Turns at 0 with no force unless set.
   JointMotor get motor => _motor;
-  set motor(JointMotor value) => _respec(() => _motor = value);
+  set motor(JointMotor value) => _setOrUndo(_motor, value, (v) => _motor = v, _apply);
   JointMotor _motor;
 
   /// Whether [spring] pulls it.
   bool get useSpring => _useSpring;
-  set useSpring(bool value) => _respec(() => _useSpring = value);
+  set useSpring(bool value) => _setOrUndo(_useSpring, value, (v) => _useSpring = v, _apply);
   bool _useSpring;
 
   /// What pulls it to an angle, while [useSpring]. A bad one throws an
   /// [ArgumentError]. No strength unless set.
   JointSpring get spring => _spring;
-  set spring(JointSpring value) => _respec(() => _spring = value);
+  set spring(JointSpring value) => _setOrUndo(_spring, value, (v) => _spring = v, _apply);
   JointSpring _spring;
 
   /// How far it's turned from where it was joined, in radians, -pi to pi:
@@ -395,27 +394,27 @@ final class SpringJoint extends Joint {
   /// How strong it is, in newtons a metre: finite and 0 or more, or it
   /// throws an [ArgumentError].
   double get spring => _spring;
-  set spring(double value) => _respec(() => _spring = value);
+  set spring(double value) => _setOrUndo(_spring, value, (v) => _spring = v, _apply);
   double _spring;
 
   /// How much it slows the two, in newtons per metre a second: finite and
   /// 0 or more, or it throws an [ArgumentError].
   double get damper => _damper;
-  set damper(double value) => _respec(() => _damper = value);
+  set damper(double value) => _setOrUndo(_damper, value, (v) => _damper = v, _apply);
   double _damper;
 
   /// Nearer than this, in metres, it pushes the anchors apart: 0 or more,
   /// and no more than [maxDistance], or it throws an [ArgumentError]. 0
   /// unless set.
   double get minDistance => _minDistance;
-  set minDistance(double value) => _respec(() => _minDistance = value);
+  set minDistance(double value) => _setOrUndo(_minDistance, value, (v) => _minDistance = v, _apply);
   double _minDistance;
 
   /// Further apart than this, in metres, it pulls the anchors together:
   /// finite, and no less than [minDistance], or it throws an
   /// [ArgumentError]. 0 unless set.
   double get maxDistance => _maxDistance;
-  set maxDistance(double value) => _respec(() => _maxDistance = value);
+  set maxDistance(double value) => _setOrUndo(_maxDistance, value, (v) => _maxDistance = v, _apply);
   double _maxDistance;
 
   @override
@@ -495,25 +494,25 @@ final class CharacterJoint extends Joint {
   /// How far it twists back about [axis], from where it was joined, in
   /// radians: -pi to [highTwistLimit] (-20.deg unless set).
   SoftJointLimit get lowTwistLimit => _lowTwistLimit;
-  set lowTwistLimit(SoftJointLimit value) => _respec(() => _lowTwistLimit = value);
+  set lowTwistLimit(SoftJointLimit value) => _setOrUndo(_lowTwistLimit, value, (v) => _lowTwistLimit = v, _apply);
   SoftJointLimit _lowTwistLimit;
 
   /// How far it twists on about [axis], from where it was joined, in
   /// radians: [lowTwistLimit] to pi (70.deg unless set).
   SoftJointLimit get highTwistLimit => _highTwistLimit;
-  set highTwistLimit(SoftJointLimit value) => _respec(() => _highTwistLimit = value);
+  set highTwistLimit(SoftJointLimit value) => _setOrUndo(_highTwistLimit, value, (v) => _highTwistLimit = v, _apply);
   SoftJointLimit _highTwistLimit;
 
   /// How far it swings each way about [swingAxis], in radians: 0 to pi
   /// (40.deg unless set).
   SoftJointLimit get swing1Limit => _swing1Limit;
-  set swing1Limit(SoftJointLimit value) => _respec(() => _swing1Limit = value);
+  set swing1Limit(SoftJointLimit value) => _setOrUndo(_swing1Limit, value, (v) => _swing1Limit = v, _apply);
   SoftJointLimit _swing1Limit;
 
   /// How far it swings each way about the axis square to [axis] and
   /// [swingAxis], in radians: 0 to pi (40.deg unless set).
   SoftJointLimit get swing2Limit => _swing2Limit;
-  set swing2Limit(SoftJointLimit value) => _respec(() => _swing2Limit = value);
+  set swing2Limit(SoftJointLimit value) => _setOrUndo(_swing2Limit, value, (v) => _swing2Limit = v, _apply);
   SoftJointLimit _swing2Limit;
 
   @override

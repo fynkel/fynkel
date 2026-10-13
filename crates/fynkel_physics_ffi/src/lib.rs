@@ -369,7 +369,8 @@ pub struct FpCharacterMove {
     pub flags: u32,
     pub hit_count: u32,
     /// The key of the collider it stands on after the move: 0 when it isn't
-    /// grounded, or what holds it up wasn't found.
+    /// grounded, or what holds it up wasn't found (so keys given out must
+    /// never be 0).
     pub ground_key: u64,
 }
 

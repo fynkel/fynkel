@@ -446,7 +446,8 @@ typedef struct FpCharacterMove {
   uint32_t flags;
   uint32_t hit_count;
   // The key of the collider it stands on after the move: 0 when it isn't
-  // grounded, or what holds it up wasn't found.
+  // grounded, or what holds it up wasn't found (so keys given out must
+  // never be 0).
   uint64_t ground_key;
 } FpCharacterMove;
 
