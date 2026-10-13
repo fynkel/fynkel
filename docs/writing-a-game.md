@@ -6,14 +6,17 @@ it). If you know Unity, most of it will look familiar: Fynkel works the
 way Unity works, in Dart, and §20 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
-`garden`, `coins` and `arena` (a small game using everything here).
-`examples/lab` has a scene for each feature, to try by hand.
+`garden` (models and an orbit camera), `coins` (triggers and a HUD),
+`arena` (a small game using most of what's here) and `bowling` (a game on
+physics). `examples/lab` has a scene for each feature, to try by hand.
 
 ## 1. A new game
 
 You need Flutter 3.47 or later and Rust ([rustup](https://rustup.rs)); the
 repository's `rust-toolchain.toml` picks the version. The engine is built
 from source the first time you run a game, and again only when it changes.
+That first build takes a few minutes and prints nothing while it runs, the
+first `flutter test` too: it isn't stuck.
 
 Make a Flutter app and add Fynkel to it:
 
@@ -101,7 +104,9 @@ class Cube extends GameObject {
 - **`onLoad`** is where an object adds what it's made of. **`onUpdate`**
   runs every frame. `time.delta` is the frame's time in seconds, so the
   cube turns one radian a second whatever the frame rate.
-- **Always call `super`** in the `on…` methods.
+- **Always call `super`** in the `on…` methods. Fynkel's own do nothing
+  today, but a class you extend may do something in its own, and the
+  analyzer warns when a call is missing.
 
 Y is up, and a camera looks down its −Z. Lengths are metres and angles
 radians everywhere, the camera's and the joints' too: `90.deg` writes
@@ -176,7 +181,8 @@ class Yard extends GameObject {
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
-  names or tags. As Unity's, they leave out objects that are turned off
+  names or tags (the `name` checks in §14 are there to keep the examples
+  short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
   (and the components on them) unless `includeInactive: true`.
 
 **Pooling.** A game that makes and destroys many short-lived objects
@@ -1127,7 +1133,7 @@ class Coin extends GameObject with Triggers {
 
   @override
   void onTriggerEnter(Collider other) {
-    if (other.gameObject.name == 'player') destroy();
+    if (other.gameObject.has<CharacterController>()) destroy(); // the player walked into it
   }
 }
 
@@ -1515,9 +1521,44 @@ way.
 
 **An error in the game fails the test** by itself, as it would be an
 uncaught error: nothing listens to `world.errors`. To test that something
-throws, listen first: `final errors = <ObjectError>[];
-world.errors.listen(errors.add);`, then look at `errors` after the
-frames. (`world.errors` is a stream, not a list.)
+throws, listen first, and let the stream deliver before you look:
+`world.errors` is a stream, so what the frames put in it arrives after
+them, not during them. Without the `await`, the list is still empty and
+the test passes whatever happened:
+
+```dart
+// test/errors_test.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:flutter_test/flutter_test.dart';
+
+class Fragile extends GameObject {
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    throw StateError('broke');
+  }
+}
+
+void main() {
+  test('a fragile object reports its error every frame', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final errors = <ObjectError>[];
+    world.errors.listen(errors.add);
+    world.add(Fragile());
+    for (var i = 0; i < 3; i++) {
+      world.update(1 / 60);
+    }
+    await pumpEventQueue(); // let the stream deliver what the frames sent
+    expect(errors, hasLength(3));
+  });
+}
+```
+
+**Compare positions with a tolerance.** `Vec3` and `Quat` have
+`closeTo(other)`, so `expect(a.position.closeTo(Vec3(1, 0, 0)), isTrue)`.
+An object with a rigidbody needs it most: physics keeps poses in 32-bit
+floats, so after a step its position reads `0.20000000298`, not `0.2`.
 
 **The whole app works in a widget test too**: the real `FynkelApp`, its
 view and its overlay, real taps. With no GPU plugin in a test, the game

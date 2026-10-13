@@ -7,7 +7,7 @@
 //   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0]
 //     [--dart-define=TUMBLE_THREAD=1|2] [--dart-define=TUMBLE_RAYS=10]
 //
-// With --dart-define=TUMBLE_RIGIDBODIES=1 it runs lib/rigid.dart's RigidTumble.
+// With --dart-define=TUMBLE_RIGIDBODIES=true it runs lib/rigid.dart's RigidTumble.
 
 import 'dart:math' as math;
 
@@ -21,7 +21,7 @@ import 'rigid.dart';
 
 void main() => runApp(FynkelApp(rigidbodies ? RigidTumble.new : Tumble.new));
 
-/// `--dart-define=TUMBLE_RIGIDBODIES=1` makes the cubes Rigidbodies and
+/// `--dart-define=TUMBLE_RIGIDBODIES=true` makes the cubes Rigidbodies and
 /// BoxColliders (lib/rigid.dart) in place of the raw world's bodies.
 const rigidbodies = bool.fromEnvironment('TUMBLE_RIGIDBODIES');
 

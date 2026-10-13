@@ -1,9 +1,9 @@
 # garden
 
-The stage 2 acceptance app ([docs/stage-2.md](../../docs/stage-2.md)),
-rewritten as objects in stage 3: a character in a garden. Drag to go
-around it, scroll (or two fingers on a trackpad) to zoom, and tap the
-character to turn its head. The models are Kenney's
+A character in a garden, loaded from models, with an orbit camera (made in
+stage 2, [docs/stage-2.md](../../docs/stage-2.md)). Drag to go around it,
+scroll (or two fingers on a trackpad) to zoom, and tap the character to
+turn its head. The models are Kenney's
 ([assets/CREDITS.md](assets/CREDITS.md)).
 
 The game is `lib/garden.dart`: `Garden`, the root, adds an `OrbitCamera` (an `Orbit` rig),

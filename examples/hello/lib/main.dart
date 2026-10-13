@@ -1,10 +1,10 @@
-// The stage 1 program (docs/stage-1.md), as a game: a camera, a sun and a
-// turning cube. lib/measured.dart runs the same game for the tool.
+// The smallest game: a camera, a sun and a turning cube, as in
+// docs/writing-a-game.md §2. lib/measured.dart runs the same game for the
+// tool.
 
 import 'package:flutter/widgets.dart' show runApp;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:hello/sphere.dart';
 
 void main() => runApp(FynkelApp(Hello.new));
 
@@ -25,16 +25,11 @@ class Hello extends GameObject {
       ),
     );
     add(Cube());
-    add(Sphere());
   }
 }
 
 class Cube extends GameObject {
-  @override
-  void onLoad() {
-    super.onLoad();
-    addComponent(MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A))));
-  }
+  Cube() : super(components: [MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A)))]);
 
   @override
   void onUpdate() {
