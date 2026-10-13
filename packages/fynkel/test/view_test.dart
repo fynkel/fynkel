@@ -38,7 +38,10 @@ void main() {
     final main = corner();
 
     final red = Camera(clearColor: const Color.rgb(1, 0, 0));
-    final behind = GameObject(transform: Transform(position: Vec3(0, 0, -4)), components: [red]);
+    final behind = GameObject(
+      transform: Transform(position: Vec3(0, 0, -4)),
+      components: [red],
+    );
     // Not in the world yet: black, not the main camera's picture.
     view.camera = red;
     expect(corner(), [0, 0, 0, 255]);
