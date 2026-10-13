@@ -183,17 +183,41 @@ Done (PR #97):
 Done so far (PR #98):
 
 - **Sheepdog** (`examples/sheepdog`): herd eight sheep into the pen
-  before the wolves take them. It has a title screen; a game page with a
+  before the clock runs out, keeping the wolves off them. It has a title screen; a game page with a
   HUD, a Bark button and a minimap; a pause menu (button, Escape, P,
   back); and settings for light/dark/system, the minimap, and every key
-  rebound. Each sheep has a name tag and each wolf a health bar
-  (`WorldWidget`s), and a pop-up ends the round. Its colours come from
-  one palette: the light theme is a day in the field, the dark one a
-  night. 20 tests: 13 that play the game frame by frame, 7 that click
-  through the app.
+  rebound. Each sheep has a name tag and each wolf a bar for its nerve
+  (`WorldWidget`s), and a pop-up ends the round with its stars. Its
+  colours come from one palette: the light theme is a day in the field,
+  the dark one a night. 29 tests: 20 that play the game frame by frame,
+  9 that click through the app.
+- **Your first play** found it worked but wasn't fun: hard and unfair.
+  The sheep bolted alone from the dog, the wolves were faster than the
+  sheep (made so for a test), took three barks, didn't fear the dog, and
+  came in endless waves, the first after 4 s. Reworked:
+  - The flock keeps together and follows its neighbours. Near the dog it
+    walks away at a pace set by how near the dog is, and settles when it
+    backs off. A wider gate (9 m), and sheep at it are drawn in.
+  - Wolves are slower than a running sheep but lunge when close, and a
+    frightened flock scatters (otherwise the wolves herded it home). A
+    wolf keeps away from the dog and goes round it; near the dog its
+    nerve wears down. One bark sends it off.
+  - Rounds have levels: level 1 has no wolves; level n has 2(n−1), up to
+    8, one at a time. The first comes after 15 quiet seconds, and each
+    is announced by a red mark (seen on the minimap too) 3 s before it
+    arrives. A clock (90 s, then 120 s) ends the round, and stars count
+    the sheep home: one for 4, two for 6, three for 8. A star opens the
+    next level.
+  - Two tests check that it's fun, or at least fair. A scripted dog that
+    only walks behind the flock brings all eight home in every round
+    tried (levels 1–5, 8 seeds each); the test asks for six or more,
+    levels 1–4. With no dog, the wolves take sheep in every round, and
+    most level-3 rounds end with no star.
 - Measured with its HUD and minimap, 60 s, nobody playing: **Mac 120 fps**
   (min 119, no slow frame); **iPhone 120 fps** (min 114, no slow frame,
-  267 MB). **Owed:** the Note10+.
+  267 MB). After the rework, at level 3 with its wolves: **Mac 120 fps**
+  (min 90.2 in one window, no slow frame, 401 MB); **iPhone 120 fps**
+  (min 119, no slow frame, 268 MB). **Owed:** the Note10+.
 - What it found: a second `FynkelView(root:)` of a root another view had
   added threw "already added" outside a `FynkelGame`. Now it shows that
   world and leaves it to the view that made it (a test). The first
@@ -208,7 +232,7 @@ Done so far (PR #98):
   "the §15 snippets composed into the whole brief almost line for line".
   Its log is kept outside the repository, in
   `~/Documents/fynkel-s7/menus-LOG.md`.
-- **Next:** you play Sheepdog; then the report.
+- **Next:** you play Sheepdog again; then the report.
 
 ## 3. Decisions (2026-10-13)
 

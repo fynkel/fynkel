@@ -1,8 +1,9 @@
 // The game: a dog, a flock and a pen. Move with W, A, S, D (or the arrow
 // keys; the settings page changes the letters), or drag anywhere as a
-// stick. Space, a tap or the Bark button barks: the sheep near the dog
-// run from it, and the wolves near it are hurt and pushed back. Bring the
-// sheep into the pen, through its gate, before the wolves take them.
+// stick. The flock keeps together and walks away from the dog, faster the
+// nearer it is: walk behind it to drive it. Space, a tap or the Bark
+// button barks: the sheep near the dog run, and a wolf near it runs off.
+// Bring the flock into the pen, through its gate, before the time is up.
 
 import 'dart:math' as math;
 
@@ -20,7 +21,7 @@ const size = 12.0;
 
 /// The pen is the field's back middle: x between -penHalf and penHalf,
 /// z behind penFront, with its gate the whole front.
-const penHalf = 3.0, penFront = -5.0;
+const penHalf = 4.5, penFront = -5.0;
 
 /// The layer of what's only for show, the bark's ring: the minimap leaves
 /// it out.
@@ -28,6 +29,25 @@ const effects = 1;
 
 /// The flock's names, one per sheep.
 const names = ['Dolly', 'Shaun', 'Timmy', 'Flossie', 'Larry', 'Nuts', 'Hazel', 'Pidsley'];
+
+/// The quiet seconds at the start of a round before the first wolf, and
+/// how long before each wolf comes its mark shows where.
+const calm = 15.0, warning = 3.0;
+
+/// A round at [level]: how many seconds it lasts, and how many wolves come
+/// in it, one at a time. Level 1 has none.
+({double seconds, int wolves}) levelOf(int level) =>
+    (seconds: level == 1 ? 90 : 120, wolves: math.min(2 * (level - 1), 8));
+
+/// The stars for bringing [home] sheep home: one for half the flock, two
+/// for six, three for all of it.
+int starsFor(int home) => home == names.length
+    ? 3
+    : home >= 6
+    ? 2
+    : home >= 4
+    ? 1
+    : 0;
 
 /// Whether [p] is in the pen.
 bool inPen(Vec3 p) => p.x.abs() < penHalf && p.z < penFront;
@@ -105,18 +125,27 @@ class Controls extends ChangeNotifier {
 /// The root: the lights, the cameras, what the HUD shows, and the round
 /// being played. Its colours are the app's theme's.
 class SheepdogGame extends GameObject {
-  /// [seed] makes every round the same, for tests.
-  SheepdogGame({this.seed, Controls? controls}) : controls = controls ?? Controls();
+  /// [seed] makes every round the same, for tests; the first round is at
+  /// [level].
+  SheepdogGame({this.seed, Controls? controls, int level = 1})
+    : controls = controls ?? Controls(),
+      level = ValueNotifier(level),
+      clock = ValueNotifier(levelOf(level).seconds.ceil());
 
   final int? seed;
   final Controls controls;
 
   /// Sheep in the pen, and taken by wolves.
   final home = ValueNotifier(0), lost = ValueNotifier(0);
-  final wave = ValueNotifier(0);
+
+  /// The level being played, and the seconds left in its round.
+  final ValueNotifier<int> level, clock;
+
+  /// Whether a wolf's mark is out: one comes in a moment.
+  final coming = ValueNotifier(false);
 
   /// How many sheep came home, once the round is over (every sheep home
-  /// or taken); null while it's played.
+  /// or taken, or the time up); null while it's played.
   final result = ValueNotifier<int?>(null);
 
   /// The floor and the fences, coloured by [wear].
@@ -178,28 +207,37 @@ class SheepdogGame extends GameObject {
       ..color = light;
   }
 
-  /// A new round: the flock back in the field, no wolves.
-  Future<void> restart() async {
+  /// A new round, at [level] (this one's if not given): the flock back in
+  /// the field, no wolves, the clock full.
+  Future<void> restart({int? level}) async {
+    this.level.value = level ?? this.level.value;
     round.destroy();
     round = add(Round(this, math.Random(seed)));
     camera.follow(round.dog);
     home.value = 0;
     lost.value = 0;
-    wave.value = 0;
+    clock.value = round.rules.seconds.ceil();
+    coming.value = false;
     result.value = null;
     await round.loaded;
   }
 }
 
-/// One go: the field, the pen, the dog, the flock, and the wolves.
+/// One go: the field, the pen, the dog, the flock, the clock, and the
+/// wolves of its level.
 class Round extends GameObject {
-  Round(this.game, this._random);
+  Round(this.game, this._random) : rules = levelOf(game.level.value), _left = levelOf(game.level.value).seconds;
 
   final SheepdogGame game;
+  final ({double seconds, int wolves}) rules;
   final math.Random _random;
   final dog = Dog();
   final flock = <Sheep>[];
-  Routine<void>? _wolves;
+  double _left;
+  Routine<void>? _pack;
+
+  /// Over: every sheep home or taken, or the time up.
+  bool get isOver => game.result.value != null;
 
   @override
   void onLoad() {
@@ -228,8 +266,11 @@ class Round extends GameObject {
       );
     }
     add(dog);
+    // The flock together, in the middle of the field, the dog behind it.
+    final centre = Vec3(_random.nextDouble() * 8 - 4, 0, 3);
     for (final name in names) {
-      final at = Vec3(_random.nextDouble() * 16 - 8, 0, 1 + _random.nextDouble() * 8);
+      final angle = _random.nextDouble() * 2 * math.pi, far = 0.8 + _random.nextDouble() * 1.7;
+      final at = centre + Vec3(math.cos(angle), 0, math.sin(angle)) * far;
       flock.add(add(Sheep(name, at: at, random: _random)));
     }
   }
@@ -248,42 +289,63 @@ class Round extends GameObject {
         _maybeOver();
       });
     }
-    _wolves = startRoutine(_waves);
+    _pack = startRoutine(_wolves);
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (isOver) return;
+    _left -= time.delta;
+    game.clock.value = math.max(0, _left.ceil());
+    if (_left <= 0) _over();
   }
 
   /// The round is over once no sheep is left in the field.
   void _maybeOver() {
-    if (game.home.value + game.lost.value < flock.length) return;
-    _wolves?.stop();
+    if (game.home.value + game.lost.value == flock.length) _over();
+  }
+
+  void _over() {
+    if (isOver) return;
+    _pack?.stop();
+    for (final mark in world.all<WolfMark>()) {
+      mark.destroy();
+    }
+    game.coming.value = false;
     for (final wolf in world.all<Wolf>()) {
       wolf.runOff();
     }
     game.result.value = game.home.value;
   }
 
-  /// Wave after wave: a pause, then one wolf more than the last time, one
-  /// by one, then wait until they're all gone. It stops when the round is
-  /// over, or destroyed.
-  Future<void> _waves() async {
-    await wait(4);
-    for (var n = 1; ; n++) {
-      game.wave.value = n;
-      for (var i = 0; i < n; i++) {
-        add(Wolf(this, at: _edge()));
-        await wait(1.2);
-      }
-      await waitUntil(() => world.all<Wolf>().isEmpty);
-      await wait(3);
+  /// The level's wolves, one at a time: the first after the calm, the
+  /// rest spread over the round. Each one's mark shows where it comes in
+  /// for a few seconds first. It stops when the round is over, or
+  /// destroyed.
+  Future<void> _wolves() async {
+    final apart = math.min(18.0, 85 / math.max(1, rules.wolves));
+    for (var i = 0; i < rules.wolves; i++) {
+      await wait((i == 0 ? calm : apart) - warning);
+      final at = _edge();
+      final mark = add(WolfMark(at));
+      game.coming.value = true;
+      await wait(warning);
+      mark.destroy();
+      game.coming.value = false;
+      add(Wolf(this, at: at));
     }
   }
 
-  /// Somewhere along the field's front or sides, away from the pen.
+  /// Somewhere along the field's edge, but the pen's: its front, its
+  /// sides, or the back beside the pen.
   Vec3 _edge() {
     final along = _random.nextDouble() * 2 - 1;
-    return switch (_random.nextInt(3)) {
+    return switch (_random.nextInt(4)) {
       0 => Vec3(along * (size - 1), 0, size - 1),
-      1 => Vec3(-size + 1, 0, 2 + along * 8),
-      _ => Vec3(size - 1, 0, 2 + along * 8),
+      1 => Vec3(-size + 1, 0, along * (size - 1)),
+      2 => Vec3(size - 1, 0, along * (size - 1)),
+      _ => Vec3(along.sign * (penHalf + 1.5 + along.abs() * (size - penHalf - 2.5)), 0, -size + 1),
     };
   }
 
@@ -291,15 +353,12 @@ class Round extends GameObject {
   Iterable<Sheep> get free => flock.where((s) => s.isFree);
 }
 
-/// Hit points, for the wolves. After a hit it does nothing for [guard]
-/// seconds.
+/// Hit points: a wolf's nerve.
 class Health extends Behaviour {
-  Health(this.max, {this.guard = 0}) : _left = max;
+  Health(this.max) : _left = max;
 
   final int max;
-  final double guard;
   int _left;
-  double _guarded = 0;
 
   /// What's left after each hit.
   final hurt = Signal<int>();
@@ -311,17 +370,10 @@ class Health extends Behaviour {
   bool get isDead => _left == 0;
 
   void damage(int amount) {
-    if (isDead || _guarded > 0) return;
+    if (isDead) return;
     _left = math.max(0, _left - amount);
-    _guarded = guard;
     hurt.emit(_left);
     if (isDead) died.emit(gameObject);
-  }
-
-  @override
-  void onUpdate() {
-    super.onUpdate();
-    _guarded -= time.delta;
   }
 }
 
@@ -330,13 +382,14 @@ class Dog extends GameObject {
   Dog()
     : super(
         name: 'dog',
-        transform: Transform(position: Vec3(0, 0.35, 7)),
+        transform: Transform(position: Vec3(0, 0.35, 9.5)),
       );
 
   static const speed = 6.5;
 
-  /// How far a bark reaches: the wolves it hurts, and the sheep it moves.
-  static const barkReach = 4.5, scareReach = 6.0;
+  /// How far a bark reaches: the wolves it sends off, and the sheep it
+  /// moves.
+  static const barkReach = 5.0, scareReach = 6.0;
 
   static final _coat = Material(color: Color(0xFF8A5A3B));
   static final _white = Material(color: Color.white);
@@ -391,15 +444,15 @@ class Dog extends GameObject {
     return v.length > 1 ? v.normalized : v;
   }
 
-  /// Barks, at most twice a second: the wolves within [barkReach] are hurt
-  /// and pushed back, the sheep within [scareReach] run from it.
+  /// Barks, at most twice a second: the wolves within [barkReach] run off,
+  /// the sheep within [scareReach] run from it.
   void bark() {
     if (_sinceBark < 0.5 || world.paused) return;
     _sinceBark = 0;
     barked.emit(null);
     final round = parent! as Round;
     for (final wolf in world.all<Wolf>()) {
-      if (flat(wolf.position - position).length < barkReach) wolf.hit(from: position);
+      if (flat(wolf.position - position).length < barkReach) wolf.scare();
     }
     for (final sheep in round.free) {
       if (flat(sheep.position - position).length < scareReach) sheep.startle(from: position);
@@ -417,8 +470,9 @@ class Dog extends GameObject {
   }
 }
 
-/// A sheep: it grazes, runs from the dog and the wolves, and once in the
-/// pen it's home for good.
+/// A sheep: it keeps to the flock, walks away from the dog (faster the
+/// nearer it comes) and runs from the wolves, and once in the pen it's
+/// home for good.
 class Sheep extends GameObject {
   Sheep(String name, {required Vec3 at, required this._random})
     : super(
@@ -426,7 +480,12 @@ class Sheep extends GameObject {
         transform: Transform(position: Vec3(at.x, 0.4, at.z)),
       );
 
+  /// Its top speed, running; and grazing, alone.
   static const speed = 3.4, grazing = 0.6;
+
+  /// How near the dog and a wolf move it, and how near its neighbours are.
+  static const dogReach = 5.0, wolfReach = 4.0, neighbours = 4.0;
+
   static final _wool = Material(color: Color(0xFFF2EFE6), roughness: 1);
   static final _face = Material(color: Color(0xFF2B2B2E));
 
@@ -438,11 +497,14 @@ class Sheep extends GameObject {
   /// Once, when a wolf takes it.
   final taken = Signal<Sheep>();
 
+  /// How it's moving, in metres a second.
+  Vec3 velocity = Vec3.zero;
+
   bool _home = false, _taken = false;
   Vec3 _wander = Vec3.zero;
   double _nextTurn = 0;
   Vec3? _startledFrom;
-  double _startled = 0;
+  double _startled = 0, _panic = 0, _veer = 1;
 
   bool get isHome => _home;
   bool get isTaken => _taken;
@@ -475,32 +537,74 @@ class Sheep extends GameObject {
     super.onUpdate();
     if (!isFree) return;
     final round = parent! as Round;
+
+    // Away from the dog and a bark, at a pace by how near: a walk at the
+    // edge of its reach, a run close.
     var away = Vec3.zero;
-    void runFrom(Vec3 from, double reach, double weight) {
-      final d = flat(position - from);
+    var pace = 0.0;
+    void from(Vec3 at, double reach) {
+      final d = flat(position - at);
       final far = d.length;
-      if (far < reach && far > 1e-6) away += d * (weight * (1 - far / reach) / far);
+      if (far >= reach || far < 1e-6) return;
+      final near = 1 - far / reach;
+      away += d * (near / far);
+      pace = math.max(pace, math.min(1, 0.2 + near));
     }
 
-    runFrom(round.dog.position, 3.5, 1);
-    for (final wolf in world.all<Wolf>()) {
-      if (wolf.isHunting) runFrom(wolf.position, 4, 1.5);
-    }
-    if (_startledFrom case final from? when _startled > 0) {
+    from(round.dog.position, dogReach);
+    if (_startledFrom case final at? when _startled > 0) {
       _startled -= time.delta;
-      runFrom(from, Dog.scareReach + 1, 2);
+      from(at, Dog.scareReach + 1);
+      pace = 1;
+    }
+    // From a hunting wolf it panics: the flock scatters, each sheep its own
+    // way, at a run.
+    _panic -= time.delta;
+    for (final wolf in world.all<Wolf>()) {
+      if (!wolf.isHunting) continue;
+      final d = flat(position - wolf.position);
+      final far = d.length;
+      if (far >= wolfReach || far < 1e-6) continue;
+      if (_panic <= 0) _veer = _random.nextBool() ? 1 : -1;
+      _panic = 1.5;
+      away += (d + Vec3(-d.z, 0, d.x) * (0.6 * _veer)) * (2 / far);
+      pace = 1;
+    }
+    var want = away.length > 1e-6 ? away.normalized * (speed * pace) : Vec3.zero;
+
+    // The flock: towards the neighbours, the way they go, not too close.
+    // Not in a panic.
+    var towards = Vec3.zero, heading = Vec3.zero, apart = Vec3.zero;
+    var n = 0;
+    for (final other in round.free) {
+      final d = flat(other.position - position);
+      final far = d.length;
+      if (other == this || far > neighbours) continue;
+      n++;
+      towards += d;
+      heading += other.velocity;
+      if (far < 1 && far > 1e-6) apart -= d * ((1 - far) / far);
+    }
+    if (n > 0 && _panic <= 0) want += towards * (0.3 / n) + heading * (0.6 / n);
+    want += apart * 2;
+
+    // At the gate, drawn gently in.
+    if (_panic <= 0 && position.x.abs() < penHalf - 0.5 && position.z > penFront && position.z < penFront + 2.5) {
+      want += Vec3(0, 0, -1.5);
     }
 
-    final Vec3 step;
-    if (away.length > 0.02) {
-      step = away.normalized * (speed * math.min(1, 0.4 + away.length));
-    } else {
+    if (away.length < 1e-6) {
       _graze();
-      step = _wander * grazing;
+      want += _wander * grazing;
     }
-    if (step.length > 0) {
-      rotation = Quat.lookRotation(step.normalized);
-      position = walk(position, position + step * time.delta);
+    if (want.length > speed) want = want.normalized * speed;
+
+    // It turns and speeds up or slows down over a moment, not at once: when
+    // the dog backs off, it settles.
+    velocity += (want - velocity) * math.min(1, 4 * time.delta);
+    if (velocity.length > 0.05) {
+      rotation = Quat.lookRotation(velocity.normalized);
+      position = walk(position, position + velocity * time.delta);
     }
     if (inPen(position)) _comeHome();
   }
@@ -517,11 +621,12 @@ class Sheep extends GameObject {
   /// Runs from [from] for a moment, as from a bark.
   void startle({required Vec3 from}) {
     _startledFrom = from;
-    _startled = 0.8;
+    _startled = 0.6;
   }
 
   void _comeHome() {
     _home = true;
+    velocity = Vec3.zero;
     removeComponent(get<WorldWidget>()!);
     cameHome.emit(this);
     // Further in, out of the gate, with a hop.
@@ -534,32 +639,66 @@ class Sheep extends GameObject {
   void take() {
     if (!isFree) return;
     _taken = true;
+    velocity = Vec3.zero;
     removeComponent(get<WorldWidget>()!);
     taken.emit(this);
     scaleTo(Vec3.zero, seconds: 0.25, ease: Ease.inBack).then((_) => destroy());
   }
 }
 
-/// A wolf: it comes in from the edge, goes for the nearest sheep in the
-/// field and takes it, then runs off with it. Three barks send it off
-/// with nothing.
+/// Where a wolf is about to come in: a red mark on the ground, pulsing,
+/// seen on the minimap too.
+class WolfMark extends GameObject {
+  WolfMark(Vec3 at)
+    : super(
+        name: 'wolf mark',
+        transform: Transform(position: Vec3(at.x, 0.06, at.z)),
+        components: [MeshRenderer(Mesh.cylinder(), _red)],
+      );
+
+  static final _red = Material(color: Color(0xFFE53935), emissive: Color(0xFFE53935), emissiveIntensity: 1);
+  double _age = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    _age += time.delta;
+    final across = 2.5 + 0.6 * math.sin(_age * 8);
+    localScale = Vec3(across, 0.02, across);
+  }
+}
+
+/// A wolf: it comes in at its mark, stalks the nearest sheep in the field
+/// (slower than a sheep runs, with a short lunge when close) and takes it,
+/// then runs off with it. It keeps away from the dog and goes round it;
+/// near the dog its nerve wears down, and when it's gone, or at a bark, it
+/// runs off with nothing.
 class Wolf extends GameObject {
   Wolf(this.round, {required Vec3 at})
     : super(
         name: 'wolf',
         transform: Transform(position: Vec3(at.x, 0.45, at.z), scale: Vec3.zero),
-        components: [Health(3, guard: 0.25)],
+        components: [Health(3)],
       );
 
-  /// A little faster than a sheep runs: it catches one unless the dog
-  /// comes between.
-  static const speed = 3.8, fleeing = 6.0;
+  /// Its stalk (slower than a running sheep), its lunge, and its run off.
+  static const speed = 2.6, lunge = 5.0, fleeing = 6.0;
+
+  /// How near the dog it won't come; within a little more, its nerve wears
+  /// down a point a second.
+  static const fear = 3.5;
+
+  /// How near a sheep it lunges, and for how long; then it rests.
+  static const lungeFrom = 2.2, lungeFor = 0.6, rest = 1.5;
+
   static final _coat = Material(color: Color(0xFF5A5F6B), roughness: 0.9);
   static final _eyes = Material(color: Color(0xFFFFD040), emissive: Color(0xFFFFB000), emissiveIntensity: 2);
 
   final Round round;
   bool _ready = false, _leaving = false;
+  double _lunging = 0, _resting = 0, _worn = 0;
 
+  /// Its nerve.
   Health get health => get<Health>()!;
 
   /// Out for a sheep: grown in, and not running off.
@@ -589,7 +728,7 @@ class Wolf extends GameObject {
     super.onStart();
     scaleTo(Vec3.one, seconds: 0.4, ease: Ease.outBack).then((_) => _ready = true);
     on(health.died, (_) => runOff());
-    // Its health over it (labels.dart).
+    // Its nerve over it (labels.dart).
     addComponent(
       WorldWidget((context) => HealthBar(health), offset: Vec3(0, 0.9, 0), alignment: Alignment.bottomCenter),
     );
@@ -614,18 +753,44 @@ class Wolf extends GameObject {
       nearest.take();
       return runOff();
     }
-    final to = flat(nearest.position - position).normalized;
+    final toSheep = flat(nearest.position - position) / best;
+    var to = toSheep, pace = speed;
+
+    final fromDog = flat(position - round.dog.position);
+    final dogFar = fromDog.length;
+    _resting -= time.delta;
+    if (dogFar < fear + 1.5 && dogFar > 1e-6) {
+      // Afraid: out from the dog and round it, the sheep's way.
+      _lunging = 0;
+      final out = fromDog / dogFar;
+      var side = Vec3(-out.z, 0, out.x);
+      if (side.dot(toSheep) < 0) side = -side;
+      final push = (fear + 1.5 - dogFar) / 1.5;
+      final steer = toSheep + side * push + out * (2 * push);
+      if (steer.length > 1e-6) to = steer.normalized;
+      _worn += time.delta;
+      if (_worn >= 1) {
+        _worn -= 1;
+        health.damage(1);
+      }
+    } else if (_lunging > 0) {
+      _lunging -= time.delta;
+      pace = lunge;
+      if (_lunging <= 0) _resting = rest;
+    } else if (_resting > 0) {
+      pace = speed / 2;
+    } else if (best < lungeFrom) {
+      _lunging = lungeFor;
+    }
     rotation = Quat.lookRotation(to);
-    position = walk(position, position + to * (speed * time.delta), intoPen: false);
+    position = walk(position, position + to * (pace * time.delta), intoPen: false);
   }
 
-  /// Hurt by a bark from [from], and pushed away from it.
-  void hit({required Vec3 from}) {
+  /// Scared off by a bark: its nerve gone at once.
+  void scare() {
     if (_leaving) return;
-    health.damage(1);
     punchScale(Vec3.one * 0.3, seconds: 0.25);
-    final away = flat(position - from);
-    if (away.length > 1e-6) position = walk(position, position + away.normalized * 1.5, intoPen: false);
+    health.damage(health.left);
   }
 
   /// Leaves the field, the nearest way out, and is gone.

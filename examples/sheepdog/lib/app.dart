@@ -58,7 +58,7 @@ class TitleScreen extends StatelessWidget {
           children: [
             Text('Sheepdog', style: text.displayMedium),
             const SizedBox(height: 8),
-            Text('Bring the flock home before the wolves come.', style: text.bodyLarge),
+            Text('Bring the flock home before the time is up.', style: text.bodyLarge),
             const SizedBox(height: 32),
             FilledButton(
               autofocus: true,
@@ -159,10 +159,13 @@ class _RoundEndState extends State<_RoundEnd> {
 }
 
 /// The pop-up at the end of a round, over the game's page at [context]:
-/// how many sheep came [home], and what next.
+/// how many sheep came [home], its stars, and what next: the same level
+/// again, or the next one for a star or more.
 Future<void> showRoundEnd(BuildContext context, SheepdogGame game, int home) {
   final navigator = Navigator.of(context);
   final all = home == names.length;
+  final stars = starsFor(home), lost = game.lost.value, out = names.length - home - lost;
+  final scheme = Theme.of(context).colorScheme;
   return showDialog<void>(
     context: context,
     barrierDismissible: false,
@@ -173,10 +176,32 @@ Future<void> showRoundEnd(BuildContext context, SheepdogGame game, int home) {
           all
               ? 'All home!'
               : home == 0
-              ? 'The wolves got them all'
+              ? 'None home'
               : '$home of ${names.length} home',
         ),
-        content: Text(all ? 'Not one sheep lost. Good dog.' : 'The wolves took ${names.length - home}.'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Semantics(
+              label: '$stars of 3 stars',
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  for (var i = 0; i < 3; i++)
+                    Icon(i < stars ? Icons.star : Icons.star_border, size: 40, color: scheme.primary),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              [
+                if (all) 'Not one sheep lost. Good dog.',
+                if (lost > 0) 'The wolves took $lost.',
+                if (out > 0) '$out still out in the field.',
+              ].join(' '),
+            ),
+          ],
+        ),
         actions: [
           TextButton(
             onPressed: () => navigator
@@ -184,14 +209,23 @@ Future<void> showRoundEnd(BuildContext context, SheepdogGame game, int home) {
               ..pop(), // The game.
             child: const Text('Quit to title'),
           ),
-          FilledButton(
-            autofocus: true,
+          TextButton(
+            autofocus: stars == 0,
             onPressed: () {
               navigator.pop();
               game.restart();
             },
             child: const Text('Play again'),
           ),
+          if (stars > 0)
+            FilledButton(
+              autofocus: true,
+              onPressed: () {
+                navigator.pop();
+                game.restart(level: game.level.value + 1);
+              },
+              child: Text('Level ${game.level.value + 1}'),
+            ),
         ],
       ),
     ),

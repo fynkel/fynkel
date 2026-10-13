@@ -125,7 +125,9 @@ void main() {
     expect(barks, 1);
   });
 
-  testWidgets('the end of a round pops up, paused; Play again is a new round, playing', (tester) async {
+  testWidgets('the end of a round pops up, paused, with its stars; Play again is the same level, playing', (
+    tester,
+  ) async {
     await play(tester, Settings());
     final sheepdog = game(tester);
     final world = sheepdog.world;
@@ -138,13 +140,49 @@ void main() {
     }
     await wait(tester);
     expect(find.text('6 of 8 home'), findsOneWidget);
+    expect(find.bySemanticsLabel('2 of 3 stars'), findsOneWidget);
+    expect(find.text('The wolves took 2.'), findsOneWidget);
     expect(world.paused, isTrue);
     await tester.tap(find.text('Play again'));
     await wait(tester);
     expect(find.text('6 of 8 home'), findsNothing);
     expect(world.paused, isFalse);
     expect(find.text('home 0 of 8'), findsOneWidget);
+    expect(find.textContaining('level 1'), findsOneWidget);
     expect(sheepdog.round.free, hasLength(8));
+  });
+
+  testWidgets('a star or more opens the next level; none, only Play again', (tester) async {
+    await play(tester, Settings());
+    final sheepdog = game(tester);
+    for (final sheep in sheepdog.round.flock.take(4)) {
+      sheep.position = Vec3(0, 0.4, penFront - 1);
+    }
+    for (final sheep in sheepdog.round.flock.skip(4)) {
+      sheep.take();
+    }
+    await wait(tester);
+    await tester.tap(find.text('Level 2'));
+    await wait(tester);
+    expect(sheepdog.level.value, 2);
+    expect(find.textContaining('level 2   2:00'), findsOneWidget);
+    for (final sheep in sheepdog.round.flock) {
+      sheep.take();
+    }
+    await wait(tester);
+    expect(find.text('None home'), findsOneWidget);
+    expect(find.bySemanticsLabel('0 of 3 stars'), findsOneWidget);
+    expect(find.text('Level 3'), findsNothing);
+  });
+
+  testWidgets('a wolf coming shows on the HUD while its mark is out', (tester) async {
+    await play(tester, Settings());
+    final sheepdog = game(tester);
+    await sheepdog.restart(level: 2);
+    await wait(tester, calm - warning + 0.5);
+    expect(find.text('A wolf is coming'), findsOneWidget);
+    await wait(tester, warning);
+    expect(find.text('A wolf is coming'), findsNothing);
   });
 
   testWidgets('every sheep home is "All home!"; Quit to title leaves the game', (tester) async {
@@ -155,6 +193,7 @@ void main() {
     }
     await wait(tester);
     expect(find.text('All home!'), findsOneWidget);
+    expect(find.bySemanticsLabel('3 of 3 stars'), findsOneWidget);
     await tester.tap(find.text('Quit to title'));
     await wait(tester);
     expect(find.text('Play'), findsOneWidget);

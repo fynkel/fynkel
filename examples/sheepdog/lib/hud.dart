@@ -1,6 +1,7 @@
 // What the game shows over the view, in plain Flutter and the app's theme:
-// the flock's count and the wave, a pause button, a bark button for touch,
-// and the minimap, a second view of the same world.
+// the flock's count, the level and the clock, a warning when a wolf is
+// coming, a pause button, a bark button for touch, and the minimap, a
+// second view of the same world.
 
 import 'package:flutter/material.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
@@ -24,21 +25,31 @@ class Hud extends StatelessWidget {
           children: [
             Align(
               alignment: Alignment.topLeft,
-              child: _Panel(
-                child: ListenableBuilder(
-                  listenable: Listenable.merge([game.home, game.lost, game.wave]),
-                  builder: (context, _) => Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text('home ${game.home.value} of ${names.length}', style: text.titleLarge),
-                      Text(
-                        'lost ${game.lost.value}   ${game.wave.value == 0 ? 'no wolves yet' : 'wave ${game.wave.value}'}',
-                        style: text.bodyMedium,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _Panel(
+                    child: ListenableBuilder(
+                      listenable: Listenable.merge([game.home, game.lost, game.level, game.clock]),
+                      builder: (context, _) => Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text('home ${game.home.value} of ${names.length}', style: text.titleLarge),
+                          Text(
+                            'lost ${game.lost.value}   level ${game.level.value}   ${clock(game.clock.value)}',
+                            style: text.bodyMedium,
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
-                ),
+                  const SizedBox(height: 8),
+                  ValueListenableBuilder(
+                    valueListenable: game.coming,
+                    builder: (context, coming, _) => coming ? const _Coming() : const SizedBox.shrink(),
+                  ),
+                ],
               ),
             ),
             Align(
@@ -57,6 +68,25 @@ class Hud extends StatelessWidget {
           ],
         ),
       ),
+    );
+  }
+}
+
+/// [seconds] as minutes and seconds: 1:05.
+String clock(int seconds) => '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+
+/// A wolf is coming: its red mark is out on the field and the minimap.
+class _Coming extends StatelessWidget {
+  const _Coming();
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return Chip(
+      avatar: Icon(Icons.warning_amber, color: scheme.onErrorContainer),
+      label: Text('A wolf is coming', style: TextStyle(color: scheme.onErrorContainer)),
+      backgroundColor: scheme.errorContainer,
+      side: BorderSide.none,
     );
   }
 }

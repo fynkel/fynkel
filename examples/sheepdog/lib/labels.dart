@@ -1,5 +1,5 @@
 // The widgets in the world, over the things they're about: each sheep's
-// name, and each wolf's health. The game gives them to WorldWidgets; they
+// name, and each wolf's nerve. The game gives them to WorldWidgets; they
 // are plain Flutter, in the app's theme.
 
 import 'package:flutter/material.dart';
@@ -23,7 +23,7 @@ class NameTag extends StatelessWidget {
   }
 }
 
-/// A wolf's health, over it: a bar that empties as it's hit.
+/// A wolf's nerve, over it: a bar that empties as the dog stays near it.
 class HealthBar extends StatelessWidget {
   const HealthBar(this.health, {super.key});
 
