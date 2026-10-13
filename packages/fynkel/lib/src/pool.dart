@@ -43,10 +43,27 @@ final class Pool<T extends GameObject> {
   // keeps its storage, as `removeLast` doesn't.
   final _free = <T?>[];
   var _freeCount = 0;
+
+  // The objects handed out, the first [_active] of [_out], each knowing
+  // its place there (_poolIndex).
+  final _out = <T?>[];
   var _active = 0;
 
   /// The objects handed out and not released.
   int get countActive => _active;
+
+  /// The handed-out object at [index], 0 to one less than [countActive],
+  /// to walk them with nothing made: `for (var i = shots.countActive - 1;
+  /// i >= 0; i--) shots.activeAt(i).fly()`. Walk from the end to release
+  /// as you go: a release moves the last one into its place.
+  T activeAt(int index) {
+    RangeError.checkValidIndex(index, this, 'index', _active);
+    return _out[index]!;
+  }
+
+  /// The objects handed out, as a new list: one that stays as it is
+  /// whatever is released while it's walked.
+  List<T> get active => [for (var i = 0; i < _active; i++) _out[i]!];
 
   /// The hidden objects waiting for [get].
   int get countInactive => _freeCount;
@@ -68,7 +85,7 @@ final class Pool<T extends GameObject> {
       _adopt(object);
       object._pooled = _PoolState.out;
     }
-    _active++;
+    _putOut(object);
     reset?.call(object);
     object.active = true;
     return object;
@@ -83,7 +100,7 @@ final class Pool<T extends GameObject> {
     if (object._destroyed) return;
     if (!identical(object._pool, this)) throw ArgumentError.value(object, 'object', 'isn\'t from this pool');
     if (object._pooled != _PoolState.out) throw StateError('$object was released already');
-    _active--;
+    _takeOut(object);
     object._generation++;
     if (maxSize case final max? when _freeCount >= max) {
       object._pooled = _PoolState.none;
@@ -98,6 +115,23 @@ final class Pool<T extends GameObject> {
       if (!identical(object._parent, parent) && !parent._destroyed) object.parent = parent;
     }
     _push(object);
+  }
+
+  void _putOut(T object) {
+    object._poolIndex = _active;
+    if (_active < _out.length) {
+      _out[_active] = object;
+    } else {
+      _out.add(object);
+    }
+    _active++;
+  }
+
+  void _takeOut(GameObject object) {
+    final last = _out[--_active]!;
+    _out[object._poolIndex] = last;
+    last._poolIndex = object._poolIndex;
+    _out[_active] = null;
   }
 
   void _push(T object) {
@@ -164,7 +198,7 @@ final class Pool<T extends GameObject> {
   void _lost(GameObject object) {
     switch (object._pooled) {
       case _PoolState.out:
-        _active--;
+        _takeOut(object);
       case _PoolState.free when parent._destroyed:
         // The parent goes with all the waiting ones: let go of them at
         // once, not one search each.

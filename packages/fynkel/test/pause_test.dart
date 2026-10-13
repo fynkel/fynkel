@@ -98,4 +98,14 @@ void main() {
     world.update(0.1);
     expect(jump.wasPressed, isTrue);
   });
+
+  test('onPausedChanged tells each change, at once, and nothing when it stays', () {
+    final heard = <bool>[];
+    world.onPausedChanged.listen(heard.add);
+    world.paused = true;
+    expect(heard, [true]);
+    world.paused = true;
+    world.paused = false;
+    expect(heard, [true, false]);
+  });
 }

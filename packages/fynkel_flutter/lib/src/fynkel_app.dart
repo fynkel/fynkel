@@ -78,9 +78,10 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
     debugShowCheckedModeBanner: false,
     home: FynkelGame(
       make: make,
+      source: source,
       restartOnReload: restartOnReload,
       builder: (context, game) {
-        final view = FynkelView(root: game, source: source);
+        final view = FynkelView(root: game);
         final over = overlay;
         final page = over == null
             ? view

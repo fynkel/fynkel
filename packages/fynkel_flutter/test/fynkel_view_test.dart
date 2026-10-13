@@ -591,9 +591,10 @@ void main() {
         sized(
           FynkelGame(
             make: () => (made..add(Tiny())).last,
+            source: source,
             builder: (context, game) => Stack(
               children: [
-                FynkelView(root: game, source: source),
+                FynkelView(root: game),
                 Text('game ${made.indexOf(game)}'),
               ],
             ),
@@ -627,9 +628,10 @@ void main() {
               outside = context;
               return FynkelGame(
                 make: Tiny.new,
+                source: source,
                 builder: (context, game) {
                   inside = context;
-                  return FynkelView(root: game, source: source);
+                  return FynkelView(root: game);
                 },
               );
             },
@@ -660,7 +662,8 @@ void main() {
         FynkelGame(
           make: () => (made..add(Tiny())).last,
           restartOnReload: restart,
-          builder: (context, game) => FynkelView(root: game, source: source),
+          source: source,
+          builder: (context, game) => FynkelView(root: game),
         ),
       );
       await tester.pumpWidget(game(restart: false));
@@ -672,6 +675,108 @@ void main() {
       expect(made, hasLength(2));
       expect(made.first.isAlive, isFalse);
       await finish(tester, made.last.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("game.world is there in a FynkelGame's builder, so a widget beside the view takes its input", (
+      tester,
+    ) async {
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      Input? taken;
+      await tester.pumpWidget(
+        sized(
+          FynkelGame(
+            make: Tiny.new,
+            source: source,
+            builder: (context, game) {
+              taken = game.world.input;
+              return FynkelView(root: game);
+            },
+          ),
+        ),
+      );
+      final game = FynkelGame.of<Tiny>(tester.element(find.byType(FynkelView))).game;
+      final world = game.world;
+      expect(taken, same(world.input));
+      expect(tester.state<FynkelViewState>(find.byType(FynkelView)).world, same(world), reason: 'the view shows it');
+      await finish(tester, game.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(world.isDisposed, isTrue, reason: 'the game takes its world with it');
+    });
+
+    testWidgets("what a FynkelGame's root throws in onLoad shows over its view, or is reported without one", (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        sized(
+          FynkelGame(
+            make: LooksAtAPoint.new,
+            builder: (context, game) => FynkelView(root: game),
+          ),
+          width: 800,
+          height: 600,
+        ),
+      );
+      expect('${tester.takeException()}', contains('give it target - eye'));
+      await tester.pump();
+      expect(find.textContaining('give it target - eye'), findsOneWidget, reason: 'heard before the view was');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+
+      await tester.pumpWidget(sized(FynkelGame(make: LooksAtAPoint.new, builder: (context, game) => const SizedBox())));
+      expect('${tester.takeException()}', contains('give it target - eye'), reason: 'no view took it');
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets("a source given to a FynkelGame's view, not the game, is a clear error", (tester) async {
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      late Tiny game;
+      await tester.pumpWidget(
+        sized(
+          FynkelGame(
+            make: Tiny.new,
+            source: source,
+            builder: (context, made) => FynkelView(root: game = made, source: source),
+          ),
+        ),
+      );
+      expect('${tester.takeException()}', contains('give source: to the FynkelGame'));
+      await finish(tester, game.loaded);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets('a pause panel beside the view shows itself from world.pausedListenable', (tester) async {
+      final source = bundleSource(Bundle({'assets/grid.png': png}));
+      late Tiny game;
+      await tester.pumpWidget(
+        sized(
+          FynkelGame(
+            make: Tiny.new,
+            source: source,
+            builder: (context, made) => Stack(
+              children: [
+                FynkelView(root: game = made),
+                ValueListenableBuilder(
+                  valueListenable: made.world.pausedListenable,
+                  builder: (context, paused, _) => Text(paused ? 'paused' : 'playing'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('playing'), findsOneWidget);
+      expect(game.world.pausedListenable, same(game.world.pausedListenable));
+      game.world.paused = true;
+      await tester.pump();
+      expect(find.text('paused'), findsOneWidget);
+      game.world.paused = false;
+      await tester.pump();
+      expect(find.text('playing'), findsOneWidget);
+      await finish(tester, game.loaded);
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));
     });

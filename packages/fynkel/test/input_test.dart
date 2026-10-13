@@ -632,6 +632,24 @@ void main() {
       expect(input.axis2('steer'), Vec2(-1, 0), reason: 'a new axis, with no keys');
     });
 
+    test('an axis or action only Flutter feeds is bound with no keys, and can be asked about (finding 40)', () {
+      expect(input.hasAxis2('aim'), isFalse);
+      expect(() => input.axis2('aim'), throwsArgumentError, reason: 'a name never bound is a typo, most likely');
+      input.bindAxis2('aim');
+      expect(input.hasAxis2('aim'), isTrue);
+      expect(input.axis2('aim'), Vec2.zero, reason: 'zero until the stick sets it');
+      input.bindAxis2('strafe', left: const [KeyCode.q], right: const [KeyCode.e]);
+      input.simulate.keyDown(KeyCode.e);
+      step();
+      expect(input.axis2('strafe'), Vec2(1, 0));
+      expect((input.hasAction('jump'), input.hasAction('fire')), (true, false));
+      final fire = input.bindAction('fire');
+      expect(fire.buttons, isEmpty);
+      fire.press();
+      step();
+      expect(fire.wasPressed, isTrue);
+    });
+
     test('the game uses the keys it binds or asks about; the view claims only those', () {
       expect(input.usesKey(KeyCode.w), isTrue, reason: "'move' binds it");
       expect(input.usesKey(KeyCode.space), isTrue, reason: "'jump' binds it");

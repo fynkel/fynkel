@@ -210,4 +210,21 @@ void main() {
     expect(a.active, isFalse);
     expect(identical(pool.get(), a), isTrue);
   });
+
+  test('the objects out can be walked, and released as they are, from the end (finding 39)', () {
+    final made = [for (var i = 0; i < 5; i++) shots.get((shot) => shot.hits = i)];
+    world.update(0);
+    expect(shots.active, made);
+    shots.release(made[1]);
+    expect(shots.active, unorderedEquals([made[0], made[2], made[3], made[4]]));
+    for (var i = shots.countActive - 1; i >= 0; i--) {
+      final shot = shots.activeAt(i);
+      if (shot.hits.isEven) shots.release(shot);
+    }
+    expect(shots.active, unorderedEquals([made[3]]));
+    final copy = shots.active;
+    made[3].destroy();
+    expect((copy.length, shots.countActive), (1, 0), reason: 'a destroyed one leaves; the copy stays');
+    expect(() => shots.activeAt(0), throwsRangeError);
+  });
 }

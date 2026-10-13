@@ -79,18 +79,25 @@ class _ScenePageState extends State<ScenePage> {
       body: wide
           ? Row(
               children: [
-                Expanded(child: FynkelView(root: scene)),
+                Expanded(child: _game(context, scene)),
                 if (_open) SizedBox(width: 380, child: panel),
               ],
             )
           : Column(
               children: [
-                Expanded(child: FynkelView(root: scene)),
+                Expanded(child: _game(context, scene)),
                 if (_open) SizedBox(height: MediaQuery.sizeOf(context).height * 0.42, child: panel),
               ],
             ),
     );
   }
+}
+
+/// The scene's view, with its own widgets over it if it has any.
+Widget _game(BuildContext context, lab.LabScene scene) {
+  final view = FynkelView(root: scene);
+  final over = scene.overlay(context);
+  return over == null ? view : Stack(fit: StackFit.expand, children: [view, over]);
 }
 
 class _Panel extends StatelessWidget {

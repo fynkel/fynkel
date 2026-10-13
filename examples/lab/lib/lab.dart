@@ -2,6 +2,7 @@
 // controls the page shows for it, a readout and a log of what happened.
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/widgets.dart' show BuildContext, Widget;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 
@@ -20,6 +21,11 @@ abstract class LabScene extends GameObject {
 
   /// What the page shows as buttons, switches and sliders.
   List<Control> get controls;
+
+  /// What the page puts over the game, or null: Flutter widgets of the
+  /// scene's own. Built with the page, when the scene is in its world
+  /// already, so it can use [world].
+  Widget? overlay(BuildContext context) => null;
 
   /// What happened, newest last: the scene's own events, and what goes to
   /// [World.errors].
