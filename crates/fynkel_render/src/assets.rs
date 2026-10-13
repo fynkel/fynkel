@@ -46,12 +46,7 @@ impl Kit {
                 count: None,
             }],
         });
-        Arc::new(Self {
-            gpu: gpu.clone(),
-            frame_layout,
-            textures: TextureKit::new(gpu),
-            pipelines: Mutex::default(),
-        })
+        Arc::new(Self { gpu: gpu.clone(), frame_layout, textures: TextureKit::new(gpu), pipelines: Mutex::default() })
     }
 
     /// The device this kit is for.

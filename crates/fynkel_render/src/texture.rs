@@ -205,7 +205,6 @@ impl TextureKit {
 }
 
 impl Textures {
-
     /// Uploads RGBA8 pixels under `key` for use in `space`, with a full
     /// mip chain, replacing any texture already there. Submits its own GPU
     /// work.

@@ -191,7 +191,12 @@ impl Renderer {
         let kit = assets::lock(&assets).kit.clone();
         Self {
             pipelines: kit.pipelines(format),
-            frame_data: FrameRing::new(&kit.gpu.device, kit.frame_layout.clone(), FRAME_UNIFORMS_SIZE, 64 * INSTANCE_SIZE),
+            frame_data: FrameRing::new(
+                &kit.gpu.device,
+                kit.frame_layout.clone(),
+                FRAME_UNIFORMS_SIZE,
+                64 * INSTANCE_SIZE,
+            ),
             kit,
             format,
             assets,
@@ -409,8 +414,7 @@ impl Renderer {
         let mut last: Option<&Batch> = None;
         for batch in &self.batches {
             // Freed since prepare, by another view's render worker.
-            let (Some(mesh), Some(bind_group)) = (meshes.get(&batch.mesh), textures.bind_group(&batch.textures))
-            else {
+            let (Some(mesh), Some(bind_group)) = (meshes.get(&batch.mesh), textures.bind_group(&batch.textures)) else {
                 continue;
             };
             if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {

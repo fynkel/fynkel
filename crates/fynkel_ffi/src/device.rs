@@ -123,11 +123,7 @@ pub(crate) struct WorldGpu {
 
 impl WorldGpu {
     pub(crate) fn new(device: &Arc<Device>) -> Arc<Self> {
-        Arc::new(Self {
-            device: device.clone(),
-            assets: Assets::shared(&device.kit),
-            ledger: Mutex::default(),
-        })
+        Arc::new(Self { device: device.clone(), assets: Assets::shared(&device.kit), ledger: Mutex::default() })
     }
 
     /// Shares `assets` (made on `device`'s kit) rather than new ones.
