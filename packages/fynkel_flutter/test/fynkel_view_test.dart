@@ -1031,6 +1031,33 @@ void main() {
       expect(world.time.sinceStart, closeTo(0.18, 1e-6), reason: 'time moves once, not twice');
     });
 
+    testWidgets("a second view of a root another view made a world for shows that world, and doesn't free it", (
+      tester,
+    ) async {
+      final root = GameObject();
+      Widget views({bool minimap = true}) => Directionality(
+        textDirection: TextDirection.ltr,
+        child: Stack(
+          children: [
+            Positioned.fill(child: FynkelView(root: root)),
+            if (minimap)
+              Positioned(left: 0, top: 0, width: 50, height: 50, child: FynkelView(root: root, input: false)),
+          ],
+        ),
+      );
+      await tester.pumpWidget(views());
+      await frames(tester);
+      expect(tester.takeException(), isNull);
+      final made = root.world;
+      final states = tester.stateList<FynkelViewState>(find.byType(FynkelView)).toList();
+      expect(states.map((s) => s.world), everyElement(same(made)));
+      await tester.pumpWidget(views(minimap: false));
+      await frames(tester);
+      expect(made.isDisposed, isFalse, reason: 'the minimap only showed it');
+      await tester.pumpWidget(const SizedBox());
+      expect(made.isDisposed, isTrue, reason: 'the view that made it frees it');
+    });
+
     testWidgets("a view joining another's world doesn't restart its time", (tester) async {
       await tester.pumpWidget(sized(FynkelView.world(world)));
       for (var i = 0; i < 5; i++) {

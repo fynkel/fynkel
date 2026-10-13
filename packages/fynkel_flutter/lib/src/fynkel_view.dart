@@ -107,9 +107,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// on top of it.
 ///
 /// A [FynkelGame]'s root is shown in the game's world, which the game
-/// makes and disposes; any other root, the view adds to a world of its
-/// own, which wears the theme around the view (`world.theme`) from before
-/// the root is added. The root is used once, when the view is first
+/// makes and disposes, and so is a root already in a world (another
+/// view's: a minimap beside it), which its maker disposes. Any other root,
+/// the view adds to a world of its own, which wears the theme around the
+/// view (`world.theme`) from before the root is added. The root is used once, when the view is first
 /// built: to change level,
 /// destroy the old root and add another to its world (`root.world`); to
 /// start over, make the root in a [FynkelGame] (as [FynkelApp] does) and
@@ -194,8 +195,9 @@ class FynkelView extends StatefulWidget {
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
-  /// The game: shown in its [FynkelGame]'s world, or else added to the
-  /// view's own world when the view is first built.
+  /// The game: shown in its [FynkelGame]'s world, or in the world it's in
+  /// already, or else added to the view's own world when the view is first
+  /// built.
   final GameObject? root;
 
   /// Where the view's own world loads assets from; the app's bundle
@@ -446,6 +448,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         hearGameErrors(game, widget.showErrors ? _heard : null);
       }
       return game.world;
+    }
+    // In a world already, as another view's root (a minimap beside the
+    // game): shown there, and left to whoever made that world.
+    if (root.isAlive) {
+      _listen(root.world);
+      return root.world;
     }
     final world = World(source: widget.source ?? bundleSource())..theme = Theme.of(context);
     _owns = true;
