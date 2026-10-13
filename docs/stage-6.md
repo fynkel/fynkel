@@ -99,7 +99,8 @@ do.
    reason you agree with.
 7. **Again, with fresh eyes**: two new agents write briefs 1 and 2 again
    on the fixed framework. *Done when* their logs are shorter, and the
-   stumbles left are understood.
+   stumbles left are understood. Done: findings 36–43 (section H of the
+   findings); none of step 1's came back.
 8. **The report**, with the findings before and after, and what goes to
    stage 7. *Done when* you have read it.
 
