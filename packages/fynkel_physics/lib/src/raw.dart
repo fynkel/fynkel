@@ -14,6 +14,7 @@ import 'owned_memory.dart';
 /// crates/fynkel_physics_ffi/include/fynkel_physics.h, by its [code]. The
 /// ones the engine has too have its numbers.
 enum PhysicsStatus {
+  /// It worked.
   ok(FpStatus.FP_STATUS_OK),
 
   /// No body has this id: it was removed, or never added.
@@ -48,11 +49,19 @@ enum PhysicsStatus {
   final int code;
 }
 
-/// A call into the physics failed.
+/// The physics itself failed: a panic, or a world a panic left in doubt.
+/// A game's own mistakes throw Dart's errors instead: an [ArgumentError]
+/// for a bad value, a [StateError] for a call at the wrong time or on
+/// something gone. [status] says which failure; [message] is the
+/// physics' own explanation.
 final class PhysicsException implements Exception {
+  /// The physics failed with [status], saying [message].
   PhysicsException(this.status, this.message);
 
+  /// Which failure it was.
   final PhysicsStatus status;
+
+  /// What the physics says happened.
   final String message;
 
   @override
@@ -87,11 +96,27 @@ final bool _library = () {
   return true;
 }();
 
+/// [_check] for the step calls, which take no values: the only thing they
+/// refuse is a call at the wrong time (a step while one runs, an end with
+/// none begun), a [StateError].
+void _checkTime(int status) {
+  if (status == FpStatus.FP_STATUS_INVALID_VALUE) throw StateError(fp_last_error().cast<Utf8>().toDartString());
+  _check(status);
+}
+
 void _check(int status) {
   if (status == FpStatus.FP_STATUS_OK) return;
   final message = fp_last_error().cast<Utf8>().toDartString();
   for (final known in PhysicsStatus.values) {
-    if (known.code == status) throw PhysicsException(known, message);
+    if (known.code != status) continue;
+    switch (known) {
+      case PhysicsStatus.invalidValue:
+        throw ArgumentError(message);
+      case PhysicsStatus.noBody || PhysicsStatus.noCollider || PhysicsStatus.noJoint:
+        throw StateError(message);
+      default:
+        throw PhysicsException(known, message);
+    }
   }
   throw PhysicsException(PhysicsStatus.panic, 'unknown status $status: $message');
 }
@@ -103,6 +128,7 @@ void _check(int status) {
 ///
 /// Its memory is freed by [dispose], or when nothing reaches it any more.
 final class RawPhysics implements Finalizable {
+  /// A new, empty world, with Unity's gravity, (0, -9.81, 0).
   RawPhysics() {
     _library;
     _world = fp_world_new();
@@ -202,6 +228,8 @@ final class RawPhysics implements Finalizable {
     return _id.value;
   }
 
+  /// Removes a collider. Throws a [StateError] when no collider has this
+  /// id.
   void removeCollider(int collider) => _check(fp_collider_remove(_live, collider));
 
   /// Where a body is now.
@@ -217,8 +245,8 @@ final class RawPhysics implements Finalizable {
     _check(fp_body_pose_set(_live, body, _pose.ref));
   }
 
-  /// How long each [step] is, in seconds: 1/50 at first. Throws a
-  /// [PhysicsException] unless it's more than 0 and finite.
+  /// How long each [step] is, in seconds: 1/50 at first. Throws an
+  /// [ArgumentError] unless it's more than 0 and finite.
   double get stepLength => _stepLength;
   set stepLength(double seconds) {
     _check(fp_step_length_set(_live, seconds));
@@ -233,7 +261,7 @@ final class RawPhysics implements Finalizable {
   /// step moved: their keys and poses are [movedKey], [movedPosition] and
   /// [movedRotation] from 0 to one less, until the next step.
   int step() {
-    _check(fp_step(_live, _count));
+    _checkTime(fp_step(_live, _count));
     return _readMoved();
   }
 
@@ -259,11 +287,11 @@ final class RawPhysics implements Finalizable {
   /// returns at once: nothing else may be asked of this world until
   /// [endStep], which waits for it and returns what [step] does. (An
   /// experiment, docs/stage-5.md §6.)
-  void beginStep() => _check(fp_step_begin(_live));
+  void beginStep() => _checkTime(fp_step_begin(_live));
 
   /// Waits for the step [beginStep] started; returns as [step] does.
   int endStep() {
-    _check(fp_step_end(_live, _count));
+    _checkTime(fp_step_end(_live, _count));
     return _readMoved();
   }
 
@@ -282,11 +310,13 @@ final class RawPhysics implements Finalizable {
   /// The key of the [i]th body the last step moved.
   int movedKey(int i) => _movedAt(i).key;
 
+  /// Where the [i]th body the last step moved is, in the world.
   Vec3 movedPosition(int i) {
     final p = _movedAt(i).pose.position;
     return Vec3(p.x, p.y, p.z);
   }
 
+  /// How the [i]th body the last step moved is turned, in the world.
   Quat movedRotation(int i) {
     final r = _movedAt(i).pose.rotation;
     return Quat(r.x, r.y, r.z, r.w);
@@ -326,9 +356,10 @@ final class RawPhysics implements Finalizable {
 /// For the rest of the package: the native world under a [RawPhysics]. Not
 /// exported.
 extension RawWorld on RawPhysics {
+  /// The native world. Throws a [StateError] once it's disposed.
   Pointer<FpWorld> get pointer => _live;
 }
 
-/// For the rest of the package: throws the [PhysicsException] a status
-/// other than ok means. Not exported.
+/// For the rest of the package: throws what a status other than ok means,
+/// as [_check] does. Not exported.
 void checkPhysics(int status) => _check(status);

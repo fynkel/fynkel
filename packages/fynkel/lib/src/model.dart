@@ -41,11 +41,16 @@ final class Model implements Finalizable {
 
   /// Reads a `.glb` on a helper isolate, so the UI thread never waits for
   /// it: decoding a model's images and preparing its meshes takes tens of
-  /// milliseconds or more. Load a file shipped with the app with
-  /// `rootBundle.load('assets/ship.glb')`.
+  /// milliseconds or more.
   ///
-  /// Throws a [FynkelException] ([FynkelStatus.invalidValue]) saying
-  /// what's wrong for a file that can't be read: a `.gltf` (JSON) file, a
+  /// Most games want `world.assets.instantiate('ship.glb')` instead
+  /// ([Assets.instantiate]): it loads the model once, shares it, and frees
+  /// it when the last copy is destroyed. This is the way by hand: read the
+  /// bytes yourself (`rootBundle.load('assets/ship.glb')`), and [dispose]
+  /// the model yourself.
+  ///
+  /// Throws a [FormatException] saying what's wrong for a file that can't
+  /// be read: a `.gltf` (JSON) file, a
   /// broken one, one that refers to other files, or one that needs a glTF
   /// extension the engine doesn't know. [bytes] is copied.
   static Future<Model> load(Uint8List bytes) async {
@@ -66,7 +71,7 @@ final class Model implements Finalizable {
   /// model's parts are made on the caller's isolate, which owns them.
   static int Function() _loadAt(int address, int length) => () {
     ensureEngine();
-    check(fy_model_load(Pointer<Uint8>.fromAddress(address), length, scratch.model));
+    checkFile(fy_model_load(Pointer<Uint8>.fromAddress(address), length, scratch.model));
     return scratch.model.value.address;
   };
 
@@ -92,6 +97,8 @@ final class Model implements Finalizable {
     return _pointer;
   }
 
+  /// Whether [dispose] was called; a disposed Model can't be
+  /// [instantiate]d.
   bool get isDisposed => _pointer == nullptr;
 
   /// The model's material [index]: its values, its name, and its

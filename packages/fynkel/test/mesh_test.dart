@@ -7,11 +7,25 @@ import 'package:test/test.dart';
 import 'golden.dart';
 import 'render_test.dart' show stage1;
 
-Matcher throwsFynkel(FynkelStatus status, [Pattern? message]) => throwsA(
-  isA<FynkelException>()
-      .having((e) => e.status, 'status', status)
-      .having((e) => e.message, 'message', message == null ? anything : contains(message)),
+/// What the engine refusing with [status] throws in Dart: an
+/// [ArgumentError] for a bad value, a [StateError] for something gone or in
+/// use, a [FynkelException] for the engine's own failures.
+Matcher throwsRefusal(FynkelStatus status, [Pattern? message]) => throwsA(
+  switch (status) {
+    FynkelStatus.invalidValue => isA<ArgumentError>(),
+    FynkelStatus.noObject ||
+    FynkelStatus.noComponent ||
+    FynkelStatus.noMesh ||
+    FynkelStatus.noMaterial ||
+    FynkelStatus.noTexture ||
+    FynkelStatus.inUse => isA<StateError>(),
+    _ => isA<FynkelException>().having((e) => e.status, 'status', status),
+  }.having((e) => '$e', 'text', message == null ? anything : contains(message)),
 );
+
+/// A file the engine can't read: a [FormatException] saying why.
+Matcher throwsFormat(String message) =>
+    throwsA(isA<FormatException>().having((e) => e.message, 'message', contains(message)));
 
 /// A pyramid with a vertex per face corner, so its faces are flat.
 Mesh pyramid() {
@@ -61,15 +75,15 @@ void main() {
     const triangle = [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)];
     expect(
       () => Mesh.custom(positions: triangle, indices: [0, 1, 9]),
-      throwsFynkel(FynkelStatus.invalidValue, 'index 2 is 9, but there are only 3 vertices'),
+      throwsRefusal(FynkelStatus.invalidValue, 'index 2 is 9, but there are only 3 vertices'),
     );
     expect(
       () => Mesh.custom(positions: triangle, indices: [0, 1]),
-      throwsFynkel(FynkelStatus.invalidValue, 'in threes'),
+      throwsRefusal(FynkelStatus.invalidValue, 'in threes'),
     );
     expect(
       () => Mesh.custom(positions: [...triangle.take(2), Vec3(double.nan, 0, 0)], indices: [0, 1, 2]),
-      throwsFynkel(FynkelStatus.invalidValue, "position 2 isn't finite"),
+      throwsRefusal(FynkelStatus.invalidValue, "position 2 isn't finite"),
     );
     expect(() => Mesh.raw(Float32List(4), indices: Uint32List(3)), throwsArgumentError);
     expect(() => Mesh.raw(Float32List(9), uvs: Float32List(4), indices: Uint32List(3)), throwsArgumentError);

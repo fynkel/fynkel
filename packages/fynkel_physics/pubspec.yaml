@@ -8,6 +8,7 @@ environment:
 
 dependencies:
   ffi: ^2.2.0
+  meta: ^1.16.0
   fynkel:
     path: ../fynkel
   # hook/build.dart builds crates/fynkel_physics_ffi as a code asset.

@@ -10,8 +10,10 @@ final class FrameList<T extends Object> {
   /// How many there are.
   int get length => _length;
 
+  /// Whether there are none.
   bool get isEmpty => _length == 0;
 
+  /// Whether there is at least one.
   bool get isNotEmpty => _length != 0;
 
   /// The one at [index], 0 to one less than [length].

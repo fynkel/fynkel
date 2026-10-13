@@ -3,21 +3,40 @@ import 'dart:math' as math;
 /// A point or direction in 2D, such as a texture coordinate: (0, 0) is the
 /// image's top-left corner, with y growing downwards.
 final class Vec2 {
+  /// The point ([x], [y]).
   const Vec2(this.x, this.y);
 
+  /// The x component.
   final double x;
+
+  /// The y component.
   final double y;
 
+  /// (0, 0).
   static const zero = Vec2(0, 0);
+
+  /// (1, 1).
   static const one = Vec2(1, 1);
 
+  /// This plus [o], component by component.
   Vec2 operator +(Vec2 o) => Vec2(x + o.x, y + o.y);
+
+  /// This minus [o], component by component.
   Vec2 operator -(Vec2 o) => Vec2(x - o.x, y - o.y);
+
+  /// This times [s]: as long, [s] times.
   Vec2 operator *(double s) => Vec2(x * s, y * s);
+
+  /// This divided by [s].
   Vec2 operator /(double s) => Vec2(x / s, y / s);
+
+  /// This the other way round.
   Vec2 operator -() => Vec2(-x, -y);
 
+  /// The dot product with [o].
   double dot(Vec2 o) => x * o.x + y * o.y;
+
+  /// How long it is (Unity's `magnitude`).
   double get length => math.sqrt(x * x + y * y);
 
   /// The point [t] of the way from [a] to [b]: [a] at 0, [b] at 1, and
@@ -45,34 +64,69 @@ final class Vec2 {
 /// A point or direction in 3D. Fynkel is right-handed with +Y up, and an
 /// object looks along its -Z ([Vec3.forward]).
 final class Vec3 {
+  /// The point ([x], [y], [z]).
   const Vec3(this.x, this.y, this.z);
 
+  /// The x component: +X is right.
   final double x;
+
+  /// The y component: +Y is up.
   final double y;
+
+  /// The z component: +Z is back, towards a camera that isn't rotated.
   final double z;
 
+  /// (0, 0, 0).
   static const zero = Vec3(0, 0, 0);
+
+  /// (1, 1, 1): the scale that leaves things as they are.
   static const one = Vec3(1, 1, 1);
+
+  /// +Y.
   static const up = Vec3(0, 1, 0);
+
+  /// -Y.
   static const down = Vec3(0, -1, 0);
+
+  /// +X.
   static const right = Vec3(1, 0, 0);
+
+  /// -X.
   static const left = Vec3(-1, 0, 0);
 
   /// -Z: the way an object (and a camera) looks when it isn't rotated.
   static const forward = Vec3(0, 0, -1);
+
+  /// +Z: the opposite of [forward].
   static const back = Vec3(0, 0, 1);
 
+  /// This plus [o], component by component.
   Vec3 operator +(Vec3 o) => Vec3(x + o.x, y + o.y, z + o.z);
+
+  /// This minus [o], component by component.
   Vec3 operator -(Vec3 o) => Vec3(x - o.x, y - o.y, z - o.z);
+
+  /// This the other way round.
   Vec3 operator -() => Vec3(-x, -y, -z);
+
+  /// This times [s]: as long, [s] times.
   Vec3 operator *(double s) => Vec3(x * s, y * s, z * s);
+
+  /// This divided by [s].
   Vec3 operator /(double s) => Vec3(x / s, y / s, z / s);
 
   /// Each component times [o]'s: a scale applied to a point.
   Vec3 scaledBy(Vec3 o) => Vec3(x * o.x, y * o.y, z * o.z);
 
+  /// The dot product with [o]: the lengths multiplied by the cosine of
+  /// the angle between them, so 0 when they're at right angles.
   double dot(Vec3 o) => x * o.x + y * o.y + z * o.z;
+
+  /// The cross product with [o]: at right angles to both, right-handed
+  /// (`Vec3.right.cross(Vec3.up)` is [back]).
   Vec3 cross(Vec3 o) => Vec3(y * o.z - z * o.y, z * o.x - x * o.z, x * o.y - y * o.x);
+
+  /// How long it is (Unity's `magnitude`).
   double get length => math.sqrt(dot(this));
 
   /// This direction with length 1. Throws for a zero vector, which has no
@@ -116,11 +170,20 @@ final class Quat {
   /// the engine refuses a quaternion whose length isn't 1.
   const Quat(this.x, this.y, this.z, this.w);
 
+  /// The x component of the axis part: the axis times the sine of half
+  /// the angle turned.
   final double x;
+
+  /// The y component of the axis part.
   final double y;
+
+  /// The z component of the axis part.
   final double z;
+
+  /// The angle part: the cosine of half the angle turned.
   final double w;
 
+  /// No rotation.
   static const identity = Quat(0, 0, 0, 1);
 
   /// Turns [angle] radians around [axis] (counter-clockwise looking down
@@ -134,7 +197,8 @@ final class Quat {
   /// Turns by angles, in radians, each counter-clockwise around its axis
   /// as [Quat.axisAngle] does: [roll] around Z first, then [pitch] around
   /// X (positive looks up), then [yaw] around Y (positive turns left), the
-  /// order of Unity's `Quaternion.Euler`.
+  /// order of Unity's `Quaternion.Euler`. Radians, unlike Unity's, which
+  /// takes degrees: write `Quat.euler(0, 90.deg, 0)`.
   factory Quat.euler(double pitch, double yaw, double roll) =>
       (Quat.axisAngle(Vec3.up, yaw) * Quat.axisAngle(Vec3.right, pitch) * Quat.axisAngle(Vec3.back, roll)).normalized;
 
@@ -198,6 +262,8 @@ final class Quat {
   /// The opposite rotation.
   Quat get inverse => Quat(-x, -y, -z, w);
 
+  /// The dot product with [o], component by component: near 1 or -1 when
+  /// the rotations are nearly the same.
   double dot(Quat o) => x * o.x + y * o.y + z * o.z + w * o.w;
 
   /// The angle between this rotation and [o], in radians: 0 to pi.
@@ -225,6 +291,7 @@ final class Quat {
     return Quat(a.x * ka + b.x * kb, a.y * ka + b.y * kb, a.z * ka + b.z * kb, a.w * ka + b.w * kb).normalized;
   }
 
+  /// 1 for a rotation; see [normalized].
   double get length => math.sqrt(x * x + y * y + z * z + w * w);
 
   /// This rotation with length exactly 1 again. Many multiplied rotations
@@ -263,6 +330,7 @@ final class Ray {
 
   const Ray._(this.origin, this.direction);
 
+  /// Where it starts, in world space.
   final Vec3 origin;
 
   /// Unit length.
@@ -326,15 +394,23 @@ final class Plane {
 
 /// A point in a view, in logical pixels from its top-left corner, with
 /// the view's size: what [Camera.screenPointToRay] needs to aim a ray.
-/// package:fynkel_flutter's `FrameInput` gives pointer positions as these.
+/// [Finger.position] and [Input.mousePosition] give pointer positions as
+/// these.
 final class ViewPoint {
+  /// The point ([x], [y]) in a view [width] by [height], all in logical
+  /// pixels.
   const ViewPoint(this.x, this.y, {required this.width, required this.height});
 
+  /// Logical pixels from the view's left edge.
   final double x;
+
+  /// Logical pixels from the view's top edge, growing downwards.
   final double y;
 
-  /// The view's size, in the same logical pixels.
+  /// The view's width, in the same logical pixels.
   final double width;
+
+  /// The view's height, in the same logical pixels.
   final double height;
 
   @override
@@ -416,6 +492,8 @@ Vec2 randomOnCircle([math.Random? random]) {
 /// height = follow.step(height, target, time.delta);
 /// ```
 final class SmoothDamp {
+  /// A follower that takes about [smoothTime] seconds to arrive, never
+  /// faster than [maxSpeed] units a second (no limit unless given).
   SmoothDamp({required this.smoothTime, this.maxSpeed = double.infinity});
 
   /// About how long it takes to reach the target, in seconds.
@@ -453,6 +531,8 @@ final class SmoothDamp {
 
 /// [SmoothDamp] for a point: follows a moving target in 3D.
 final class SmoothDamp3 {
+  /// A follower that takes about [smoothTime] seconds to arrive, never
+  /// faster than `maxSpeed` units a second (no limit unless given).
   SmoothDamp3({required double smoothTime, this._maxSpeed = double.infinity})
     : _x = SmoothDamp(smoothTime: smoothTime),
       _y = SmoothDamp(smoothTime: smoothTime),

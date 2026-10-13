@@ -118,6 +118,7 @@ final class Assets {
 /// it by its extension too. One instance per kind is the rule (a `const`,
 /// or a `static final`): a name is loaded as one kind only.
 abstract class AssetKind<T extends Object> {
+  /// A kind; `const`, so one instance can be shared.
   const AssetKind();
 
   /// What the kind is called in errors: `sound`.

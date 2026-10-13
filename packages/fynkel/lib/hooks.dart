@@ -25,7 +25,7 @@ Future<void> buildRustCrate(
   final code = input.config.code;
   final os = code.targetOS;
   final arch = code.targetArchitecture;
-  final triple = rustTriple(os, arch, iosSdk: os == OS.iOS ? code.iOS.targetSdk : null);
+  final triple = _rustTriple(os, arch, iosSdk: os == OS.iOS ? code.iOS.targetSdk : null);
   if (triple == null) {
     // `flutter build apk` builds 32-bit Android too (armeabi-v7a, x86):
     // leave the library out there, so the build goes on. Fynkel runs on
@@ -84,7 +84,7 @@ Future<void> buildRustCrate(
 }
 
 /// The Rust target triple, or null for a target Fynkel doesn't build.
-String? rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
+String? _rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
   final a = switch (arch) {
     Architecture.arm64 => 'aarch64',
     Architecture.x64 => 'x86_64',
@@ -136,7 +136,10 @@ String? _findCargo() {
 
 /// What a build hook throws when it can't build.
 class HookException implements Exception {
+  /// The build failed for the reason in [message].
   HookException(this.message);
+
+  /// What went wrong, in a sentence.
   final String message;
   @override
   String toString() => 'fynkel build hook: $message';

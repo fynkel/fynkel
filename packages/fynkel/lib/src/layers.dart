@@ -39,6 +39,8 @@ final class LayerMask {
   /// One bit per layer: bit n for layer n.
   final int value;
 
+  /// Whether [layer] is in it. Throws a [RangeError] for a layer outside
+  /// 0–31.
   bool contains(int layer) => (value >> _checkLayer(layer)) & 1 == 1;
 
   /// This with [layer] too.

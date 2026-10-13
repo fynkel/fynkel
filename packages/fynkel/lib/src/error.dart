@@ -1,14 +1,19 @@
 /// Why a call into the engine failed. The same codes, in the same order,
 /// as `FyStatus` in crates/fynkel_ffi/include/fynkel.h.
 enum FynkelStatus {
+  /// It worked. A [FynkelException] never has it.
   ok,
 
-  /// No object has this id: it was despawned, or never spawned.
+  /// No object has this id: it was destroyed, or never added.
   noObject,
 
   /// The object doesn't have that component.
   noComponent,
+
+  /// The world has no such mesh: it was disposed, or never added.
   noMesh,
+
+  /// The world has no such material: it was disposed, or never added.
   noMaterial,
 
   /// A mesh or material can't be removed while an object uses it, or a
@@ -44,6 +49,8 @@ enum FynkelStatus {
 
   /// Not available on this platform, or not for this kind of view.
   unsupported,
+
+  /// The world has no such texture: it was disposed, or never added.
   noTexture,
 
   /// The view's GPU device was lost, or the GPU reported an error, and the
@@ -52,13 +59,18 @@ enum FynkelStatus {
   deviceLost,
 }
 
-/// A call into the engine failed. [message] is the engine's own
-/// explanation, such as "object#5 does not exist (despawned, or never
-/// spawned)".
+/// The engine itself failed: no GPU, a frame that didn't finish, a lost
+/// device, a panic. A game's own mistakes throw Dart's errors instead: an
+/// [ArgumentError] for a bad value, a [StateError] for a call at the wrong
+/// time or on something gone. [message] is the engine's own explanation.
 final class FynkelException implements Exception {
+  /// The failure [status], with the engine's [message].
   FynkelException(this.status, this.message);
 
+  /// What kind of failure it was.
   final FynkelStatus status;
+
+  /// The engine's own explanation of what happened.
   final String message;
 
   @override

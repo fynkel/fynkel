@@ -20,7 +20,12 @@ import 'package:fynkel/fynkel.dart' show GameObject;
 /// methods of objects already made). In debug builds F5 restarts, and
 /// with [restartOnReload] every hot reload does too: for phones, which
 /// have no F5. [FynkelApp] uses one.
+///
+/// A widget below it, or a widget test, reaches the game with
+/// `FynkelGame.of<ArenaGame>(context).game`; calling the game from a
+/// Flutter callback is safe, as it runs between frames.
 class FynkelGame<T extends GameObject> extends StatefulWidget {
+  /// A game whose root [make] makes, shown by what [builder] builds.
   const FynkelGame({super.key, required this.make, required this.builder, this.restartOnReload = false});
 
   /// Makes a new root, as `ArenaGame.new` does.

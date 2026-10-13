@@ -16,6 +16,7 @@ import 'dart:math' as math;
 import 'package:ffi/ffi.dart';
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:meta/meta.dart';
 
 import 'bindings.g.dart';
 import 'owned_memory.dart';
@@ -53,6 +54,9 @@ StateError _notInWorld(Behaviour component, String what) {
 /// rest) and the settings. Every object and behaviour reaches it as
 /// `physics`, and the world as `world.physics`; it's made the first time
 /// it's asked for, so a game never sets it up.
+///
+/// Safe from Flutter callbacks too (a button's `onPressed`): a call made
+/// between frames waits for the step running then to finish.
 final class Physics extends WorldSystem implements Finalizable {
   Physics._(super.world) : _moved = world.movedReader() {
     _pointer = _raw.pointer;
@@ -273,6 +277,7 @@ final class Physics extends WorldSystem implements Finalizable {
   int get jointCount => _joints.length;
 
   @override
+  @protected
   void beforeFrame() {
     super.beforeFrame();
     if (_stepping) _collect();
@@ -283,12 +288,14 @@ final class Physics extends WorldSystem implements Finalizable {
   // so each fixed step's onFixedUpdate sees the step before it done, as in
   // Unity; only the frame's last step runs between frames.
   @override
+  @protected
   void beforeFixedUpdate() {
     super.beforeFixedUpdate();
     if (_due) _stepNow();
   }
 
   @override
+  @protected
   void afterFixedUpdate() {
     super.afterFixedUpdate();
     if (stepBetweenFrames) {
@@ -320,6 +327,7 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   @override
+  @protected
   void beforeUpdate() {
     super.beforeUpdate();
     if (_interpolated.isNotEmpty) _interpolate();
@@ -333,12 +341,14 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   @override
+  @protected
   void afterLateUpdate() {
     super.afterLateUpdate();
     if (drawColliders && world.debug.enabled) _draw();
   }
 
   @override
+  @protected
   void afterFrame() {
     super.afterFrame();
     if (!_due) return;
@@ -352,6 +362,7 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   @override
+  @protected
   void dispose() {
     super.dispose();
     _disposed = true;
@@ -383,6 +394,7 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   @override
+  @protected
   void componentAdded(GameObject object, Component component) {
     super.componentAdded(object, component);
     if (component is! Triggers && component is! Collisions) return;

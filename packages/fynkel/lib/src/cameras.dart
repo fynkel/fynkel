@@ -10,12 +10,18 @@ part of 'world.dart';
 /// How the view's camera goes from one virtual camera to the next: over
 /// [seconds], with [ease]. [Blend.cut] goes straight there.
 final class Blend {
+  /// A blend over [seconds], in-out-quad unless [ease] is given. 0 or
+  /// less is a cut.
   const Blend(this.seconds, {this.ease = Ease.inOutQuad});
 
   /// Straight to the next camera, in one frame.
   static const cut = Blend(0);
 
+  /// How long it takes, in seconds of game time (real time when
+  /// [Cameras.unscaled]); 0 or less is a cut.
   final double seconds;
+
+  /// How it goes from the one camera to the other: see [Ease].
   final EaseFunction ease;
 
   /// Whether it goes straight there.
@@ -45,6 +51,8 @@ final class _Pose {
 /// close.get<VirtualCamera>()!.priority = 20; // the view blends to it
 /// ```
 final class VirtualCamera extends Behaviour {
+  /// A virtual camera of [priority] 0 unless given, with a 60° [fovY] and
+  /// an [orthographicSize] of 5.
   VirtualCamera({this._priority = 0, this.fovY = 60 * (math.pi / 180), this.orthographicSize = 5});
 
   int _priority;
@@ -63,7 +71,7 @@ final class VirtualCamera extends Behaviour {
   double fovY;
 
   /// Half the view's height, while this is live and the camera is
-  /// orthographic ([Camera.orthographicSize]).
+  /// orthographic ([Camera.orthographicSize]), in metres: 5 unless set.
   double orthographicSize;
 
   /// Whether the view's camera follows this one now (or is blending to it).
@@ -144,6 +152,8 @@ enum FollowSpace {
 /// stays behind the player however it turns. It moves the object, and
 /// doesn't turn it: add a [LookAt], or turn it once.
 final class Follow extends _Rig {
+  /// Keeps its object at [offset] from [target]: (0, 3, 6), above and
+  /// towards +Z, unless given. See the fields for the rest.
   Follow(
     this.target, {
     this.offset = const Vec3(0, 3, 6),
@@ -152,6 +162,8 @@ final class Follow extends _Rig {
     this.lookAhead = 0,
   });
 
+  /// The object it follows. Set it to follow another. Once the target is
+  /// destroyed, the rig holds still.
   GameObject target;
 
   /// From [target] to where the object is kept, in [space]'s directions.
@@ -213,8 +225,11 @@ final class Follow extends _Rig {
 /// Turns its object to look at [target] (plus [offset], in the world),
 /// with its up as close to the world's as it can be.
 final class LookAt extends _Rig {
+  /// Looks at [target], right on it unless [damping] is given.
   LookAt(this.target, {this.offset = Vec3.zero, this.damping = 0});
 
+  /// The object it looks at. Set it to look at another. Once the target
+  /// is destroyed, the rig holds still.
   GameObject target;
 
   /// From [target]'s position to the point looked at, in the world.
@@ -253,6 +268,8 @@ final class LookAt extends _Rig {
 /// With [controls] the player turns it by dragging (where no object took
 /// the drag), and zooms with a pinch or the mouse wheel, within the limits.
 final class Orbit extends _Rig {
+  /// Circles [target] 8 m away, a little above it (0.4 radians), on its
+  /// +Z side, with [controls] on. See the fields for the rest.
   Orbit(
     this.target, {
     this.distance = 8,
@@ -268,6 +285,8 @@ final class Orbit extends _Rig {
     this.scrollSpeed = 0.002,
   });
 
+  /// The object it circles. Set it to circle another. Once the target is
+  /// destroyed, the rig holds still.
   GameObject target;
 
   /// From [target], in metres.
@@ -277,12 +296,28 @@ final class Orbit extends _Rig {
   double yaw;
 
   /// Above [target], in radians: 0 level, π/2 straight down on it.
+  /// Positive is above, looking down, which is a *negative* pitch in
+  /// [Quat.euler] (there, positive looks up).
   double pitch;
 
   /// From [target]'s position to the point circled, in the world.
   Vec3 offset;
 
-  double minPitch, maxPitch, minDistance, maxDistance;
+  /// The lowest [pitch], in radians: -0.2 unless set. [pitch] is clamped
+  /// to it each frame.
+  double minPitch;
+
+  /// The highest [pitch], in radians: 1.45 unless set (just short of
+  /// straight down). [pitch] is clamped to it each frame.
+  double maxPitch;
+
+  /// The nearest [distance], in metres: 1 unless set. [distance] is
+  /// clamped to it each frame.
+  double minDistance;
+
+  /// The furthest [distance], in metres: 100 unless set. [distance] is
+  /// clamped to it each frame.
+  double maxDistance;
 
   /// Whether dragging, pinching and the mouse wheel move it.
   bool controls;

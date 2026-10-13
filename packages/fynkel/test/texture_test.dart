@@ -8,7 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:test/test.dart';
 
 import 'golden.dart';
-import 'mesh_test.dart' show throwsFynkel;
+import 'mesh_test.dart' show throwsFormat, throwsRefusal;
 import 'render_test.dart' show stage1;
 
 final _assets = Directory.current.uri.resolve('../../tests/assets/');
@@ -55,19 +55,19 @@ void main() {
     expect((texture.width, texture.height), (2, 1));
     expect(texture.toString(), 'Texture2D(2 × 1)');
 
-    expect(() => Texture2D.rgba(2, 2, pixels), throwsFynkel(FynkelStatus.invalidValue, 'a 2 × 2 image has 16 bytes'));
-    expect(() => Texture2D.rgba(0, 4, Uint8List(0)), throwsFynkel(FynkelStatus.invalidValue, 'it needs at least one'));
+    expect(() => Texture2D.rgba(2, 2, pixels), throwsRefusal(FynkelStatus.invalidValue, 'a 2 × 2 image has 16 bytes'));
+    expect(() => Texture2D.rgba(0, 4, Uint8List(0)), throwsRefusal(FynkelStatus.invalidValue, 'it needs at least one'));
     await expectLater(
       Texture2D.load(Uint8List.fromList('not an image'.codeUnits)),
-      throwsFynkel(FynkelStatus.invalidValue, "the image isn't a PNG or JPEG"),
+      throwsFormat("the image isn't a PNG or JPEG"),
     );
     await expectLater(
       Texture2D.load(Uint8List.sublistView(asset('grid.png'), 0, 100)),
-      throwsFynkel(FynkelStatus.invalidValue, "the PNG couldn't be decoded"),
+      throwsFormat("the PNG couldn't be decoded"),
     );
-    await expectLater(Texture2D.load(Uint8List(0)), throwsFynkel(FynkelStatus.invalidValue, 'the image is empty'));
+    await expectLater(Texture2D.load(Uint8List(0)), throwsFormat('the image is empty'));
     final gif = Uint8List.fromList(img.encodeGif(img.Image(width: 1, height: 1)));
-    await expectLater(Texture2D.load(gif), throwsFynkel(FynkelStatus.invalidValue, 'only PNG and JPEG'));
+    await expectLater(Texture2D.load(gif), throwsFormat('only PNG and JPEG'));
   });
 
   test('a texture in use cannot be disposed; once free of materials it can', () {
@@ -80,7 +80,7 @@ void main() {
     view.read(view.frame());
     expect(view.stats.textureBytes, 4);
 
-    expect(red.dispose, throwsFynkel(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material('));
+    expect(red.dispose, throwsRefusal(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material('));
     expect(red.isDisposed, isFalse);
     scene.orange.baseColorTexture = null;
     view.read(view.frame());
@@ -99,7 +99,7 @@ void main() {
     addTearDown(world.dispose);
     final mesh = Mesh.custom(positions: const [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)], indices: const [0, 1, 2]);
     final object = world.add(GameObject(components: [MeshRenderer(mesh, Material())]));
-    expect(mesh.dispose, throwsFynkel(FynkelStatus.inUse));
+    expect(mesh.dispose, throwsRefusal(FynkelStatus.inUse));
     expect(mesh.vertexCount, 3, reason: 'still usable');
 
     object.destroy();
@@ -120,12 +120,12 @@ void main() {
     addTearDown(other.dispose);
     final object = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
     final elsewhere = other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
-    expect(material.dispose, throwsFynkel(FynkelStatus.inUse));
+    expect(material.dispose, throwsRefusal(FynkelStatus.inUse));
     expect(material.isDisposed, isFalse);
 
     object.destroy();
     elsewhere.destroy();
-    expect(red.dispose, throwsFynkel(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material(\'paint\''));
+    expect(red.dispose, throwsRefusal(FynkelStatus.inUse, 'Texture2D(1 × 1) is still used by Material(\'paint\''));
     material.dispose();
     material.dispose();
     expect(material.isDisposed, isTrue);

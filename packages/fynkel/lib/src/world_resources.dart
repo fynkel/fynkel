@@ -26,7 +26,7 @@ extension _Resources on World {
           }
         } catch (error, stack) {
           // Something still using it is freed with what uses it.
-          if (error is FynkelException && error.status == FynkelStatus.inUse) continue;
+          if (error is InUseError) continue;
           if (!isDisposed) _report(object, error, stack);
         }
       }
@@ -72,7 +72,7 @@ extension _Resources on World {
     if (id == null || isDisposed) return;
     for (final material in _materials.values.map((m) => m.target).nonNulls) {
       if (material._uses(texture)) {
-        throw FynkelException(FynkelStatus.inUse, '$texture is still used by $material');
+        throw InUseError('$texture is still used by $material');
       }
     }
     check(fy_texture_remove(_pointer, id));

@@ -132,7 +132,10 @@ final class ContactPoint {
   /// in each other.
   final double separation;
 
+  /// This side's collider.
   final Collider thisCollider;
+
+  /// The other side's collider.
   final Collider otherCollider;
 
   @override

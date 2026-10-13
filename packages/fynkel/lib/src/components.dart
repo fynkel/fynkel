@@ -92,8 +92,21 @@ final class Transform {
 
   const Transform._(this.position, this.rotation, this.scale);
 
+  /// Where it is, in metres, from its parent's origin and along its
+  /// parent's axes (the world's for a root): Unity's `localPosition`.
+  /// NaN or infinity is refused with an ArgumentError when it's set on an
+  /// object.
   final Vec3 position;
+
+  /// Which way it's turned, relative to its parent (Unity's
+  /// `localRotation`). A unit quaternion: one that isn't (within 0.001)
+  /// is refused with an ArgumentError when it's set on an object; use
+  /// [Quat.normalized].
   final Quat rotation;
+
+  /// How big it is along its own axes, times its parent's: 1 is its size
+  /// as made (Unity's `localScale`). NaN or infinity is refused with an
+  /// ArgumentError when it's set on an object.
   final Vec3 scale;
 
   /// Turned [angle] radians around [axis], where [axis] is in the object's
@@ -104,6 +117,7 @@ final class Transform {
   /// Moved by [offset], in the parent's space (the world's for a root).
   Transform translated(Vec3 offset) => Transform._(position + offset, rotation, scale);
 
+  /// This transform with the parts given changed.
   Transform copyWith({Vec3? position, Quat? rotation, Vec3? scale}) =>
       Transform._(position ?? this.position, rotation ?? this.rotation, scale ?? this.scale);
 
@@ -155,10 +169,16 @@ enum Space {
   world,
 }
 
-/// Makes the object a camera. The view is drawn from the camera with the
-/// lowest id that also has a [Transform] ([World.camera]). Change it in
-/// place: `get<Camera>()!.fovY = 40`.
+/// Makes the object a camera. The view is drawn from the shown object
+/// with a camera and the lowest id ([World.camera]). Change it in place:
+/// `get<Camera>()!.fovY = 40.deg`.
+///
+/// A value the engine refuses (out of its range, NaN) throws an
+/// [ArgumentError] from the setter and leaves the old value in place.
 final class Camera extends Component {
+  /// A perspective camera with a 60° [fovY], [near] 0.1 m, [far] 1,000 m,
+  /// a dark grey [clearColor], drawing every layer. Pass [orthographic]
+  /// for a parallel one, [orthographicSize] 5 unless given.
   Camera({
     this._fovY = 60 * (math.pi / 180),
     this._near = 0.1,
@@ -178,13 +198,19 @@ final class Camera extends Component {
   double get fovY => _fovY;
   set fovY(double value) => _change(() => _fovY = value);
 
+  /// How near to the camera things are drawn, in metres (Unity's
+  /// `nearClipPlane`): 0.1 unless set, 0.0001 to 1,000,000. Keep it below
+  /// [far]; nothing checks that.
   double get near => _near;
   set near(double value) => _change(() => _near = value);
 
+  /// How far from the camera things are drawn, in metres (Unity's
+  /// `farClipPlane`): 1,000 unless set, 0.001 to 1,000,000,000.
   double get far => _far;
   set far(double value) => _change(() => _far = value);
 
-  /// What the view shows where nothing is drawn.
+  /// What the view shows where nothing is drawn (Unity's
+  /// `backgroundColor`).
   Color get clearColor => _clearColor;
   set clearColor(Color value) => _change(() => _clearColor = value);
 
@@ -302,13 +328,15 @@ final class Camera extends Component {
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'})';
 }
 
+/// What kind of light a [Light] is.
 enum LightKind {
   /// Light from far away, like the sun, shining along the object's forward
-  /// (its [GameObject.forward]). Only the one with the lowest id is used.
+  /// (its [GameObject.forward]): Unity's `LightType.Directional`. Only the
+  /// one with the lowest id is used.
   sun,
 
-  /// Light from every direction, adding to every surface. All ambient
-  /// lights add up.
+  /// Light from every direction, adding to every surface, as Unity's
+  /// `RenderSettings.ambientLight`. All ambient lights add up.
   ambient,
 }
 
@@ -318,6 +346,9 @@ final class Light extends Component {
   /// `Transform(rotation: Quat.lookRotation(direction))`.
   Light.sun({Color color = Color.white, double intensity = 1}) : this._(LightKind.sun, color, intensity);
 
+  /// Light from every direction: see [LightKind.ambient]. A dim one, say
+  /// `Light.ambient(intensity: 0.25)`, keeps the sides the sun misses from
+  /// going black.
   Light.ambient({Color color = Color.white, double intensity = 1}) : this._(LightKind.ambient, color, intensity);
 
   Light._(this._kind, this._color, this._intensity) : super._();
@@ -326,12 +357,18 @@ final class Light extends Component {
   Color _color;
   double _intensity;
 
+  /// A sun or an ambient light; it can change while it's on.
   LightKind get kind => _kind;
   set kind(LightKind value) => _change(() => _kind = value);
 
+  /// The light's colour: white unless set.
   Color get color => _color;
   set color(Color value) => _change(() => _color = value);
 
+  /// How bright it is, 0 to 1,000,000; 1 unless set. A sun of 1 lights a
+  /// white, rough surface that faces it to exactly its material's colour.
+  /// Out of range or NaN throws an [ArgumentError] and keeps the old
+  /// value.
   double get intensity => _intensity;
   set intensity(double value) => _change(() => _intensity = value);
 
@@ -360,15 +397,24 @@ final class Light extends Component {
 /// For one object alone, set [color] (a hit flash, a team colour), or give
 /// it its own material with [Material.copy].
 final class MeshRenderer extends Component {
+  /// Draws [mesh] with [material]: both are optional, and can be set
+  /// later, but nothing is drawn until it has both.
   MeshRenderer([this._mesh, this._material]) : super._();
 
   Mesh? _mesh;
   Material? _material;
   Color? _color;
 
+  /// The shape it draws; null draws nothing. A mesh can be on any number
+  /// of renderers.
   Mesh? get mesh => _mesh;
   set mesh(Mesh? value) => _change(() => _mesh = value);
 
+  /// How its surface looks; null draws nothing. Shared: changing the
+  /// material changes every object that uses it (as Unity's
+  /// `sharedMaterial`, not its `material`, which Unity copies per
+  /// renderer). For this object alone, set [color] or give it a
+  /// [Material.copy].
   Material? get material => _material;
   set material(Material? value) => _change(() => _material = value);
 
@@ -421,6 +467,8 @@ final class MeshRenderer extends Component {
 /// object is destroyed. While [enabled] is false it gets none of them but
 /// [onLoad] and [onDestroy], and it starts when it's next enabled.
 abstract class Behaviour extends Component with _Moving {
+  /// A behaviour on no object yet: give it to [GameObject] or
+  /// [GameObject.addComponent].
   Behaviour() : super._();
 
   @override

@@ -8,14 +8,26 @@ final class Color {
       g = ((argb >> 8) & 0xFF) / 255,
       b = (argb & 0xFF) / 255;
 
+  /// From channels, each 0–1 sRGB: `Color.rgb(1, 0.5, 0)` is orange.
+  /// [a] is 1, opaque, unless given.
   const Color.rgb(this.r, this.g, this.b, [this.a = 1]);
 
+  /// Red, 0–1 sRGB.
   final double r;
+
+  /// Green, 0–1 sRGB.
   final double g;
+
+  /// Blue, 0–1 sRGB.
   final double b;
+
+  /// Alpha, 0–1: 1 is opaque, 0 is fully see-through.
   final double a;
 
+  /// Opaque white.
   static const white = Color.rgb(1, 1, 1);
+
+  /// Opaque black.
   static const black = Color.rgb(0, 0, 0);
 
   /// The colour [t] of the way from [a] to [b], channel by channel as

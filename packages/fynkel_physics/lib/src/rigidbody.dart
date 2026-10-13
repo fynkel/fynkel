@@ -39,24 +39,58 @@ enum RigidbodyInterpolation {
 
 /// How a rigidbody finds what it hits (Unity's `CollisionDetectionMode`).
 /// Every mode but [discrete] stops a fast body at thin things it would
-/// otherwise pass between two steps.
-enum CollisionDetectionMode { discrete, continuous, continuousDynamic, continuousSpeculative }
+/// otherwise pass between two steps. The three continuous modes do the
+/// same here, Rapier's continuous detection against everything; they're
+/// kept so code from Unity reads the same.
+enum CollisionDetectionMode {
+  /// Checked once a step: a fast, small body can pass through thin things.
+  discrete,
+
+  /// Swept between steps, so it stops at what it would pass through.
+  continuous,
+
+  /// As [continuous].
+  continuousDynamic,
+
+  /// As [continuous].
+  continuousSpeculative,
+}
 
 /// The axes physics doesn't move or turn a rigidbody on, in the world's
 /// axes (Unity's `RigidbodyConstraints`, with its values). Join them with
 /// `|`: `RigidbodyConstraints.freezePositionY | RigidbodyConstraints.freezeRotation`.
 extension type const RigidbodyConstraints(int value) {
+  /// Nothing frozen.
   static const none = RigidbodyConstraints(0);
+
+  /// It doesn't move along the world's X axis.
   static const freezePositionX = RigidbodyConstraints(2);
+
+  /// It doesn't move along the world's Y axis.
   static const freezePositionY = RigidbodyConstraints(4);
+
+  /// It doesn't move along the world's Z axis.
   static const freezePositionZ = RigidbodyConstraints(8);
+
+  /// It doesn't turn about the world's X axis.
   static const freezeRotationX = RigidbodyConstraints(16);
+
+  /// It doesn't turn about the world's Y axis.
   static const freezeRotationY = RigidbodyConstraints(32);
+
+  /// It doesn't turn about the world's Z axis.
   static const freezeRotationZ = RigidbodyConstraints(64);
+
+  /// It doesn't move at all, but it turns.
   static const freezePosition = RigidbodyConstraints(14);
+
+  /// It doesn't turn at all, but it moves.
   static const freezeRotation = RigidbodyConstraints(112);
+
+  /// It neither moves nor turns.
   static const freezeAll = RigidbodyConstraints(126);
 
+  /// Both: every axis frozen in this or in [other].
   RigidbodyConstraints operator |(RigidbodyConstraints other) => RigidbodyConstraints(value | other.value);
 
   /// Whether every axis [other] freezes is frozen here.
@@ -71,6 +105,9 @@ extension type const RigidbodyConstraints(int value) {
 ///
 /// It's in the world while it's enabled and its object is shown.
 final class Rigidbody extends Behaviour {
+  /// A rigidbody with Unity's defaults: 1 kg, pulled by gravity, dynamic,
+  /// no linear and 0.05 angular damping. A bad value throws an
+  /// [ArgumentError].
   Rigidbody({
     this._mass = 1,
     this._useGravity = true,
@@ -86,7 +123,8 @@ final class Rigidbody extends Behaviour {
     _check();
   }
 
-  /// In kilograms, shared out over its colliders by their volumes.
+  /// In kilograms, shared out over its colliders by their volumes: 1
+  /// unless set; finite and more than 0, or it throws an [ArgumentError].
   double get mass => _mass;
   set mass(double value) => _set(() => _mass = value);
   double _mass;
@@ -103,12 +141,14 @@ final class Rigidbody extends Behaviour {
   set isKinematic(bool value) => _set(() => _isKinematic = value);
   bool _isKinematic;
 
-  /// How fast it slows down as it moves, 0 for not at all.
+  /// How fast it slows down as it moves, per second: 0 (unless set) for
+  /// not at all. Finite and 0 or more, or it throws an [ArgumentError].
   double get linearDamping => _linearDamping;
   set linearDamping(double value) => _set(() => _linearDamping = value);
   double _linearDamping;
 
-  /// How fast it slows down as it turns.
+  /// How fast it slows down as it turns, per second: 0.05 unless set.
+  /// Finite and 0 or more, or it throws an [ArgumentError].
   double get angularDamping => _angularDamping;
   set angularDamping(double value) => _set(() => _angularDamping = value);
   double _angularDamping;
@@ -140,7 +180,8 @@ final class Rigidbody extends Behaviour {
 
   /// Its center of mass in its object's space: where it was set, or where
   /// its colliders put it. Setting it keeps it there until
-  /// [resetCenterOfMass].
+  /// [resetCenterOfMass]. Reading the one its colliders put throws a
+  /// [StateError] while it isn't in the world.
   Vec3 get centerOfMass {
     if (_centerOfMass case final set?) return set;
     final s = _readState('centerOfMass');
@@ -154,7 +195,8 @@ final class Rigidbody extends Behaviour {
   /// Lets its colliders put its center of mass again.
   void resetCenterOfMass() => _set(() => _centerOfMass = null);
 
-  /// Its center of mass, in the world.
+  /// Its center of mass, in the world. Throws a [StateError] while it isn't
+  /// in the world.
   Vec3 get worldCenterOfMass => _readState('worldCenterOfMass').center_of_mass.get();
 
   /// How fast it moves, in metres a second, in the world. Set before it's
@@ -184,24 +226,29 @@ final class Rigidbody extends Behaviour {
     checkPhysics(fp_rigidbody_velocities_set(physics._world, _id, physics._vec, physics._vec2));
   }
 
-  /// Where the body is, in the world: where the last step left it, which
-  /// its object shows unless it's interpolated. Setting it puts it there at
-  /// once, and its object. (Not its object's [Transform.position], as
-  /// a behaviour's `position` is elsewhere.)
+  /// Where the body is, in the world (Unity's `Rigidbody.position`): where
+  /// the last step left it. Its object is there too, unless the body is
+  /// interpolated or extrapolated: then the object's position (as
+  /// `gameObject.position`) is drawn between steps. Setting it puts the
+  /// body and its object there at once. Throws a [StateError] while it
+  /// isn't in the world.
   @override
   Vec3 get position => _readState('position').pose.position.get();
   @override
   set position(Vec3 value) => _teleport(value, rotation);
 
-  /// How the body is turned, in the world. Setting it turns it at once.
+  /// How the body is turned, in the world: where the last step left it, as
+  /// [position]. Setting it turns the body and its object at once. Throws
+  /// a [StateError] while it isn't in the world.
   @override
   Quat get rotation => _readState('rotation').pose.rotation.get();
   @override
   set rotation(Quat value) => _teleport(position, value);
 
   /// Whether it's asleep: still for a while, so the step skips it until
-  /// something touches it or the game pushes it.
-  bool get isSleeping => _readState('isSleeping').sleeping == 1;
+  /// something touches it or the game pushes it. False while it isn't in
+  /// the world.
+  bool get isSleeping => _physics != null && _id != 0 && _readState('isSleeping').sleeping == 1;
 
   /// Puts it to sleep. Does nothing while it isn't in the world, as
   /// Unity's.
@@ -217,6 +264,12 @@ final class Rigidbody extends Behaviour {
   }
 
   /// Pushes it with [force] through its center of mass, in the world.
+  ///
+  /// A [ForceMode.force] or [ForceMode.acceleration] push lasts one step,
+  /// so call it in `onFixedUpdate`, once a step: from `onUpdate` it acts
+  /// on some steps twice and on others not at all. An impulse or velocity
+  /// change acts once, so call it anywhere. Throws a [StateError] while it
+  /// isn't in the world, as the other pushes do.
   void addForce(Vec3 force, {ForceMode mode = ForceMode.force}) =>
       _pushWith('addForce', FpPushKind.FP_PUSH_KIND_FORCE, force, Vec3.zero, mode);
 
@@ -256,7 +309,9 @@ final class Rigidbody extends Behaviour {
   }
 
   /// Moves a kinematic body to [position] through the next step, pushing
-  /// what it meets on the way; a dynamic one goes there at once.
+  /// what it meets on the way; a dynamic one goes there at once, as if set
+  /// there: it doesn't push what's on the way. Throws a [StateError] while
+  /// it isn't in the world.
   void movePosition(Vec3 position) {
     final physics = _inWorld('movePosition');
     final rotation = _movedAt == physics._steps ? _moveRotation : this.rotation;

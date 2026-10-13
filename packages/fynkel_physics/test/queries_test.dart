@@ -100,7 +100,7 @@ void main() {
     expect(physics.raycast(ray, maxDistance: 9.1), isNotNull);
     expect(physics.sphereCast(ray, 0.5, maxDistance: 8.4), isNull);
     expect(physics.sphereCast(ray, 0.5, maxDistance: 8.6), isNotNull);
-    expect(() => physics.raycast(ray, maxDistance: -1), throwsA(isA<PhysicsException>()));
+    expect(() => physics.raycast(ray, maxDistance: -1), throwsArgumentError);
   });
 
   test('layers: a query finds only the layers in its mask, and follows a layer set later', () {

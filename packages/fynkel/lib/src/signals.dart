@@ -84,7 +84,9 @@ final class Signal<T> {
   /// one it started waiting in, at the earliest), it holds while the
   /// routine is paused, and stopping the routine unwinds it from here,
   /// through its `finally` blocks. `race([died.next, wait(5)])` waits for
-  /// at most 5 seconds.
+  /// at most 5 seconds. Outside a routine it's a plain future that
+  /// listens until the next emit: one that never comes keeps the listener
+  /// for ever.
   Future<T> get next {
     final routine = _currentRoutine;
     if (routine == null) {

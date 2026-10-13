@@ -136,6 +136,6 @@ void main() {
 
     child.destroy();
     world.update(1 / 60);
-    expect(() => world.readWorldTransforms(ids, 3, out), throwsA(isA<FynkelException>()));
+    expect(() => world.readWorldTransforms(ids, 3, out), throwsArgumentError);
   });
 }

@@ -6,7 +6,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
 import 'golden.dart';
-import 'mesh_test.dart' show throwsFynkel;
+import 'mesh_test.dart' show throwsFormat;
 
 final _models = Directory.current.uri.resolve('../../tests/assets/gltf/');
 Uint8List glb(String name) => File.fromUri(_models.resolve(name)).readAsBytesSync();
@@ -139,18 +139,12 @@ void main() {
   });
 
   test('a file that cannot be read is refused, saying why', () async {
-    await expectLater(
-      Model.load(Uint8List(0)),
-      throwsFynkel(FynkelStatus.invalidValue, 'the model is empty (0 bytes)'),
-    );
+    await expectLater(Model.load(Uint8List(0)), throwsFormat('the model is empty (0 bytes)'));
     await expectLater(
       Model.load(Uint8List.fromList('{"asset": {"version": "2.0"}}'.codeUnits)),
-      throwsFynkel(FynkelStatus.invalidValue, 'this is a .gltf (JSON) file'),
+      throwsFormat('this is a .gltf (JSON) file'),
     );
     final box = glb('Box.glb');
-    await expectLater(
-      Model.load(Uint8List.sublistView(box, 0, box.length ~/ 2)),
-      throwsFynkel(FynkelStatus.invalidValue, 'the .glb is broken'),
-    );
+    await expectLater(Model.load(Uint8List.sublistView(box, 0, box.length ~/ 2)), throwsFormat('the .glb is broken'));
   });
 }

@@ -8,7 +8,7 @@ import 'package:test/test.dart';
 
 import 'tapping.dart';
 
-import 'mesh_test.dart' show throwsFynkel;
+import 'mesh_test.dart' show throwsRefusal;
 
 /// Every call any object or behaviour gets, in order.
 final log = <String>[];
@@ -232,7 +232,7 @@ void main() {
     final camera = eye.get<Camera>()!;
     camera.fovY = 70.deg;
     expect(camera.fovY, 70.deg);
-    expect(() => camera.fovY = 500.deg, throwsFynkel(FynkelStatus.invalidValue));
+    expect(() => camera.fovY = 500.deg, throwsRefusal(FynkelStatus.invalidValue));
     expect(camera.fovY, 70.deg, reason: 'a refused change is undone');
 
     final box = world.add(
@@ -398,7 +398,7 @@ void main() {
   test('a component the engine refuses on a live object is not put on, and can go elsewhere', () {
     final object = world.add(GameObject());
     final camera = Camera(fovY: 500.deg);
-    expect(() => object.addComponent(camera), throwsFynkel(FynkelStatus.invalidValue));
+    expect(() => object.addComponent(camera), throwsRefusal(FynkelStatus.invalidValue));
     expect(object.has<Camera>(), isFalse);
     camera.fovY = 60.deg;
     world.add(GameObject(components: [camera]));

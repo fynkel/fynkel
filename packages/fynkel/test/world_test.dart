@@ -6,13 +6,24 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel/src/native.dart';
 import 'package:test/test.dart';
+import 'package:fynkel/src/world.dart' show WorldPointer;
 
 Matcher throwsBadState(String message) => throwsA(isA<StateError>().having((e) => e.message, 'message', message));
 
-Matcher throwsFynkel(FynkelStatus status, [Pattern? message]) => throwsA(
-  isA<FynkelException>()
-      .having((e) => e.status, 'status', status)
-      .having((e) => e.message, 'message', message == null ? anything : contains(message)),
+/// What the engine refusing with [status] throws in Dart: an
+/// [ArgumentError] for a bad value, a [StateError] for something gone or in
+/// use, a [FynkelException] for the engine's own failures.
+Matcher throwsRefusal(FynkelStatus status, [Pattern? message]) => throwsA(
+  switch (status) {
+    FynkelStatus.invalidValue => isA<ArgumentError>(),
+    FynkelStatus.noObject ||
+    FynkelStatus.noComponent ||
+    FynkelStatus.noMesh ||
+    FynkelStatus.noMaterial ||
+    FynkelStatus.noTexture ||
+    FynkelStatus.inUse => isA<StateError>(),
+    _ => isA<FynkelException>().having((e) => e.status, 'status', status),
+  }.having((e) => '$e', 'text', message == null ? anything : contains(message)),
 );
 
 void main() {
@@ -79,7 +90,7 @@ void main() {
           components: [Camera(fovY: 500.deg)],
         ),
       ),
-      throwsFynkel(FynkelStatus.invalidValue, 'fov_y'),
+      throwsRefusal(FynkelStatus.invalidValue, 'fov_y'),
     );
     final after = world.add(GameObject());
     for (var id = before.id + 1; id < after.id; id++) {
@@ -89,8 +100,8 @@ void main() {
 
   test('the engine refuses values that are not finite or not unit rotations', () {
     final o = world.add(GameObject());
-    expect(() => o.transform = Transform(position: Vec3(double.nan, 0, 0)), throwsFynkel(FynkelStatus.invalidValue));
-    expect(() => o.transform = Transform(rotation: Quat(0, 0, 0, 2)), throwsFynkel(FynkelStatus.invalidValue, 'unit'));
+    expect(() => o.transform = Transform(position: Vec3(double.nan, 0, 0)), throwsRefusal(FynkelStatus.invalidValue));
+    expect(() => o.transform = Transform(rotation: Quat(0, 0, 0, 2)), throwsRefusal(FynkelStatus.invalidValue, 'unit'));
     expect(() => Material(roughness: 1.5), throwsRangeError);
     expect(() => Material().metallic = double.nan, throwsRangeError);
   });
@@ -226,15 +237,15 @@ void main() {
       final a = world.add(GameObject());
       final b = world.add(GameObject())..parent = a;
       final c = world.add(GameObject())..parent = b;
-      expect(() => a.parent = c, throwsFynkel(FynkelStatus.invalidValue, "can't be the parent"));
-      expect(() => a.parent = a, throwsFynkel(FynkelStatus.invalidValue));
+      expect(() => a.parent = c, throwsRefusal(FynkelStatus.invalidValue, "can't be the parent"));
+      expect(() => a.parent = a, throwsRefusal(FynkelStatus.invalidValue));
       expect(a.parent, isNull);
       expect(c.parent, b);
 
       final elsewhere = World();
       addTearDown(elsewhere.dispose);
       final stranger = elsewhere.add(GameObject());
-      expect(() => a.parent = stranger, throwsFynkel(FynkelStatus.invalidValue, 'another world'));
+      expect(() => a.parent = stranger, throwsRefusal(FynkelStatus.invalidValue, 'another world'));
       expect(a.isPartOf(stranger), isFalse);
     });
 

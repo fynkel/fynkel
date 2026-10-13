@@ -478,8 +478,7 @@ class GameObject with _Moving {
   /// it stays where it is in the world, turned and sized as it was, so its
   /// [transform] changes; without, its [transform] stays, now counted from
   /// the new parent, so it moves with it. A parent that is this object or
-  /// below it throws [FynkelStatus.invalidValue], as does one from another
-  /// world.
+  /// below it throws an [ArgumentError], as does one from another world.
   void setParent(GameObject? parent, {bool worldPositionStays = true}) {
     _engine('its parent can\'t be set');
     if (!worldPositionStays) {
@@ -498,7 +497,8 @@ class GameObject with _Moving {
     return List.unmodifiable(_children ?? const <GameObject>[]);
   }
 
-  /// Whether this object is [other] or below it.
+  /// Whether this object is [other] or below it (Unity's
+  /// `Transform.IsChildOf`, which is also true for itself).
   bool isPartOf(GameObject other) {
     _engine('isPartOf can\'t tell');
     for (GameObject? o = this; o != null; o = o._parent) {
@@ -588,6 +588,8 @@ class GameObject with _Moving {
 
   /// The first object below this one named [name], searching depth first
   /// in [children] order, or null. This object itself isn't searched.
+  /// Unlike Unity's `Transform.Find`, which looks only at the direct
+  /// children and takes `'a/b'` paths, this searches every descendant.
   GameObject? find(String name) {
     final w = _engine('nothing can be found below it');
     final length = scratch.utf8(name);
@@ -824,7 +826,7 @@ class GameObject with _Moving {
     }
     final w = _engine('its transform can\'t be set');
     if (_transform == null && !fy_exists(w, _id)) {
-      throw FynkelException(FynkelStatus.noObject, 'object#$_id does not exist (despawned, or never spawned)');
+      throw StateError('$this was destroyed, or never added');
     }
     _check(value);
     _setTransform(value);
@@ -839,8 +841,7 @@ class GameObject with _Moving {
     world._unsent.add(this);
   }
 
-  /// Throws a [FynkelException] with the engine's message when the engine
-  /// would refuse [value]: checked here, so the error comes from the line
+  /// Throws an [ArgumentError] when the engine would refuse [value]: checked here, so the error comes from the line
   /// that set it, not from the frame that sends it.
   static void _check(Transform value) {
     // In the engine's order: each field's finiteness as 32-bit floats,
@@ -849,7 +850,7 @@ class GameObject with _Moving {
     if (!_fits(p)) _refuse('position: NaN or infinity');
     if (!_fits4(r)) _refuse('rotation: NaN or infinity');
     if ((math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w) - 1).abs() > 1e-3) {
-      _refuse('rotation: rotation is not a unit quaternion');
+      _refuse('rotation: rotation is not a unit quaternion (use .normalized)');
     }
     if (!_fits(s)) _refuse('scale: NaN or infinity');
   }
@@ -877,7 +878,7 @@ class GameObject with _Moving {
             ..[3] = q.w)
           .every((x) => x.isFinite));
 
-  static Never _refuse(String what) => throw FynkelException(FynkelStatus.invalidValue, 'Transform.$what');
+  static Never _refuse(String what) => throw ArgumentError('Transform.$what');
 
   void _writeCamera(Camera value) {
     final c = scratch.camera.ref;
