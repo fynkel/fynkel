@@ -54,8 +54,10 @@ The small things the other phases stand on.
   (34).
 - `world.paused` to listen to, as a `Listenable` (38), so a pause panel
   rebuilds by itself.
-- A `Pool`'s objects to walk (39); an axis or action that isn't bound
-  reads 0 rather than throwing, and `bindAxis2` as the guide says (40);
+- A `Pool`'s objects to walk (39); `bindAxis2('aim')` and
+  `bindAction('fire')` with no keys, for one only Flutter controls feed,
+  and `hasAxis2`/`hasAction` to ask (40; a name never bound still throws,
+  so a typo is loud);
   a picture out of `HeadlessView` (41); the guide's papercuts (42, 43).
 
 *Done when* a pause panel and a HUD beside the view (not only in the
