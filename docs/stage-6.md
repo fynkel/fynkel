@@ -102,7 +102,8 @@ do.
    stumbles left are understood. Done: findings 36–43 (section H of the
    findings); none of step 1's came back.
 8. **The report**, with the findings before and after, and what goes to
-   stage 7. *Done when* you have read it.
+   stage 7. *Done when* you have read it:
+   [stage-6-report.md](stage-6-report.md).
 
 ## 3. Decisions (2026-10-12)
 
