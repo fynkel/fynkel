@@ -117,6 +117,26 @@ workaround, and its widget tests drive it.
 *Done when* the lab shows a minimap over a game and a split screen,
 holding stage 6's frame rates on the three devices.
 
+Done so far (PRs #95, #96):
+
+- One device for the app, one set of meshes and textures per world.
+  Creating a view on the iPhone: 54–64 ms → 34–54 ms on screen; the Mac
+  and the first view unchanged.
+- `FynkelView(camera:, input:, worldWidgets:)`. The world updates once
+  a frame however many views show it, and pointers aim from the camera
+  of the view that takes input (`Input.camera`).
+- Physics read by a widget: **the rule stays as documented**. Views and
+  world widgets read the objects' transforms, which never wait for the
+  step (a lab test checks that the step is still running after each
+  frame with both). A widget that reads a body as it builds does wait,
+  so the guide says to read it in `onUpdate` and hand the widget the
+  number. A copy that never waits would be a step old, and give a
+  second answer to "where is it".
+- The lab's minimap and split screen: 120 fps in every view on the Mac.
+  On the iPhone, the minimap holds 120 and the split screen holds 120
+  with short dips to 107–118.
+- **Owed:** the Note10+, for this phase and phase 3.
+
 ### Phase 6: the leftovers
 
 - Camera shake that doesn't drift a camera moved during it: the shake
@@ -154,6 +174,6 @@ holding stage 6's frame rates on the three devices.
 - [x] Phase 2: one look for the app and the game (PR #91)
 - [ ] Phase 3: widgets in the world (PR #92; the Note10+ measure is owed)
 - [x] Phase 4: menus, pop-ups and navigation (PRs #93, #94)
-- [ ] Phase 5: several views
+- [ ] Phase 5: several views (PRs #95, #96; the Note10+ measure is owed)
 - [ ] Phase 6: the leftovers
 - [ ] Phase 7: a real game, and the report

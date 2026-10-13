@@ -3,3 +3,4 @@
 library;
 
 export 'src/view.dart' show AndroidSurfaceView, AppleView;
+export 'src/world.dart' show cameraObjectId;

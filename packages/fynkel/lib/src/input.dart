@@ -49,6 +49,13 @@ final class Input {
 
   double _width = 0, _height = 0;
 
+  /// The camera pointers aim from (what's under a finger, the objects'
+  /// pointer handlers): the world's main one ([World.camera]) when null.
+  /// A view that draws from a camera of its own and takes input sets it
+  /// to that one; while it isn't a shown object's in the world, a finger
+  /// is over nothing.
+  Camera? camera;
+
   /// The view's width, in logical pixels: 0 until a view gives it.
   double get width => _width;
 

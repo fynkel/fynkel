@@ -1,7 +1,8 @@
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show Behaviour, Vec3, World;
+import 'package:fynkel/fynkel.dart' show Behaviour, Camera, Vec3, World;
+import 'package:fynkel/platform.dart' show cameraObjectId;
 
 /// A Flutter widget at its object's place in the world: a health bar over
 /// an enemy, a name tag, a damage number, a "press E" hint. Every
@@ -87,14 +88,18 @@ class FrameTicks extends ChangeNotifier {
 /// Shows [world]'s world widgets over a view of it, placed by its camera
 /// at each of [frames]. A view puts one over its game.
 class WorldWidgetLayer extends StatefulWidget {
-  /// The layer of [world]'s widgets, moved at each of [frames].
-  const WorldWidgetLayer({super.key, required this.world, required this.frames});
+  /// The layer of [world]'s widgets, moved at each of [frames], placed by
+  /// [camera] (the world's main one when null).
+  const WorldWidgetLayer({super.key, required this.world, required this.frames, this.camera});
 
   /// The world whose widgets it shows.
   final World world;
 
   /// Ticks after each update of [world].
   final Listenable frames;
+
+  /// The view's own camera, or null for the world's main one.
+  final Camera? camera;
 
   @override
   State<WorldWidgetLayer> createState() => _WorldWidgetLayerState();
@@ -147,6 +152,7 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
       world: widget.world,
       widgets: _built,
       frames: widget.frames,
+      camera: widget.camera,
       children: [
         // Each painted once, and only moved after.
         for (final w in _built)
@@ -163,20 +169,28 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
 /// its size, and paints it where the camera sees its point, nearest last.
 /// Not a Flow: that makes a transform layer for each child each frame.
 class _Placed extends MultiChildRenderObjectWidget {
-  const _Placed({required this.world, required this.widgets, required this.frames, required super.children});
+  const _Placed({
+    required this.world,
+    required this.widgets,
+    required this.frames,
+    required this.camera,
+    required super.children,
+  });
 
   final World world;
+  final Camera? camera;
   // One for each child, in order.
   final List<WorldWidget> widgets;
   final Listenable frames;
 
   @override
-  _RenderPlaced createRenderObject(BuildContext context) => _RenderPlaced(world, widgets, frames);
+  _RenderPlaced createRenderObject(BuildContext context) => _RenderPlaced(world, widgets, frames)..camera = camera;
 
   @override
   void updateRenderObject(BuildContext context, _RenderPlaced placed) {
     placed
       ..world = world
+      ..camera = camera
       ..widgets = widgets
       ..frames = frames;
     placed.markNeedsPaint();
@@ -195,6 +209,7 @@ class _RenderPlaced extends RenderBox
   _RenderPlaced(this.world, this.widgets, this._frames);
 
   World world;
+  Camera? camera;
   List<WorldWidget> widgets;
   Listenable _frames;
   set frames(Listenable value) {
@@ -253,7 +268,9 @@ class _RenderPlaced extends RenderBox
       (child.parentData! as _Place).shown = false;
     }
     if (world.isDisposed) return;
-    final camera = world.camera;
+    final own = this.camera;
+    if (own != null && cameraObjectId(own, world) == -1) return;
+    final camera = own ?? world.camera;
     if (camera == null || !camera.gameObject.activeInHierarchy) return;
     if (!(size.width > 0 && size.height > 0)) return;
     final eye = camera.gameObject.worldTransform.position;

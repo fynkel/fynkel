@@ -10,7 +10,8 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, forgetReset;
-import 'package:fynkel_flutter/src/world_widget.dart' show worldWidgetsOf;
+import 'package:fynkel_flutter/src/error_panel.dart' show ErrorPanel;
+import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer, worldWidgetsOf;
 
 /// Whether the engine view at [address] is still alive and answering.
 bool alive(int address) {
@@ -972,6 +973,114 @@ void main() {
     });
   });
 
+  group('several views', () {
+    Future<void> frames(WidgetTester tester) async {
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    // A main view, and a small one over its top-left corner.
+    Widget both({Camera? camera, bool input = false, bool worldWidgets = true}) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: Center(
+        child: SizedBox(
+          width: 200,
+          height: 100,
+          child: Stack(
+            children: [
+              Positioned.fill(child: FynkelView.world(world)),
+              Positioned(
+                left: 0,
+                top: 0,
+                width: 50,
+                height: 50,
+                child: FynkelView.world(world, camera: camera, input: input, worldWidgets: worldWidgets),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+
+    testWidgets('two views of one world update it once a frame', (tester) async {
+      final counter = Counter();
+      world.add(GameObject(components: [counter]));
+      await tester.pumpWidget(both());
+      for (var i = 0; i < 10; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      // As for one view: an update each frame, the first of 0 seconds.
+      expect(counter.updates, 10, reason: 'once each frame, not twice');
+      expect(world.time.sinceStart, closeTo(0.18, 1e-6), reason: 'time moves once, not twice');
+    });
+
+    testWidgets("a view joining another's world doesn't restart its time", (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      await tester.pumpWidget(both());
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 20));
+      }
+      // Ten frames 20 ms apart, the first of 0 seconds; a restart would
+      // lose another 20 ms.
+      expect(world.time.sinceStart, closeTo(0.18, 1e-6));
+    });
+
+    testWidgets('a view without input keeps taps on it from the game', (tester) async {
+      await tester.pumpWidget(both());
+      await frames(tester);
+      final view = tester.getRect(find.byType(FynkelView).last);
+      final on = await tester.startGesture(view.center);
+      await frames(tester);
+      expect(world.input.fingers, isEmpty);
+      await on.up();
+      final beside = await tester.startGesture(view.center + const Offset(100, 0));
+      await frames(tester);
+      expect(world.input.fingers, hasLength(1), reason: 'the main view takes them');
+      await beside.up();
+      await frames(tester);
+    });
+
+    testWidgets("a view that takes input aims fingers from its camera", (tester) async {
+      final own = Camera();
+      world.add(
+        GameObject(
+          transform: Transform(position: Vec3(0, 5, 0)),
+          components: [own],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world, camera: own)));
+      await frames(tester);
+      expect(world.input.camera, same(own));
+    });
+
+    testWidgets("the game's errors show once, in the view that takes input", (tester) async {
+      world.add(GameObject(components: [Thrower()]));
+      final reported = <FlutterErrorDetails>[];
+      final before = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      addTearDown(() => FlutterError.onError = before);
+      await tester.pumpWidget(both());
+      await frames(tester);
+      FlutterError.onError = before;
+      expect(reported.where((e) => e.exception is StateError), hasLength(1));
+      expect(find.byType(ErrorPanel), findsOneWidget);
+    });
+
+    testWidgets('world widgets show over the views that want them', (tester) async {
+      world.add(GameObject(components: [WorldWidget((_) => const SizedBox(width: 4, height: 4))]));
+      await tester.pumpWidget(both(worldWidgets: false));
+      await frames(tester);
+      expect(find.byType(WorldWidgetLayer), findsOneWidget);
+      await tester.pumpWidget(both());
+      await frames(tester);
+      expect(find.byType(WorldWidgetLayer), findsNWidgets(2));
+    });
+  });
+
   group('covered', () {
     late BuildContext page;
 
@@ -1165,5 +1274,29 @@ class _Counts extends Behaviour {
   bool onClick(Finger finger) {
     (gameObject.parent! as Clickable).clicks.value++;
     return true;
+  }
+}
+
+/// Counts its updates.
+class Counter extends Behaviour {
+  int updates = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    updates++;
+  }
+}
+
+/// Throws once, in its first update.
+class Thrower extends Behaviour {
+  bool _threw = false;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (_threw) return;
+    _threw = true;
+    throw StateError('thrown');
   }
 }

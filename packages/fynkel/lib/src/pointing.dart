@@ -15,12 +15,18 @@ final class _Pointing implements _Targets {
   RayHit? hitTest(double x, double y) {
     final input = world.input;
     if (!(input._width > 0 && input._height > 0)) return null;
-    final w = world.pointer;
-    world._sendTransforms();
-    check(fy_camera_active(w, scratch.id));
-    final camera = scratch.id.value;
-    if (camera == 0) return null;
-    final lens = world._object(camera).get<Camera>()!;
+    final Camera lens;
+    if (input.camera case final own?) {
+      if (cameraObjectId(own, world) == -1 || !own.gameObject.activeInHierarchy) return null;
+      lens = own;
+    } else {
+      final w = world.pointer;
+      world._sendTransforms();
+      check(fy_camera_active(w, scratch.id));
+      final camera = scratch.id.value;
+      if (camera == 0) return null;
+      lens = world._object(camera).get<Camera>()!;
+    }
     // What the camera doesn't draw can't be touched through it.
     final drawn = lens.cullingMask;
     final ray = lens.screenPointToRay(ViewPoint(x, y, width: input._width, height: input._height));

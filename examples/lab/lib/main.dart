@@ -10,6 +10,10 @@ import 'scenes.dart';
 
 void main() => runApp(const LabApp());
 
+/// `--dart-define=LAB_SCENE=Minimap` opens the first scene whose title
+/// starts with it, for measuring on a device without tapping through.
+const _opened = String.fromEnvironment('LAB_SCENE');
+
 class LabApp extends StatelessWidget {
   const LabApp({super.key});
 
@@ -22,7 +26,9 @@ class LabApp extends StatelessWidget {
       theme: palette.labTheme(Brightness.light),
       darkTheme: palette.labTheme(Brightness.dark),
       themeMode: mode,
-      home: const SceneList(),
+      home: _opened.isEmpty
+          ? const SceneList()
+          : ScenePage(scenes.firstWhere((make) => make().title.startsWith(_opened))),
     ),
   );
 }
@@ -101,7 +107,7 @@ class _ScenePageState extends State<ScenePage> {
 
 /// The scene's view, with its own widgets over it if it has any.
 Widget _game(BuildContext context, lab.LabScene scene) {
-  final view = FynkelView(root: scene);
+  final view = scene.view(context);
   final over = scene.overlay(context);
   return over == null ? view : Stack(fit: StackFit.expand, children: [view, over]);
 }

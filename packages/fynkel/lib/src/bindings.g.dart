@@ -301,6 +301,9 @@ external int fy_transform_set_many(
   int count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Uint64)>(isLeaf: true)
+external int fy_view_camera_set(ffi.Pointer<FyView> view, int camera);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out_number);
 
@@ -373,7 +376,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 18;
+const int FY_ABI_VERSION = 19;
 
 const int FY_APPLE_MORE = 2;
 

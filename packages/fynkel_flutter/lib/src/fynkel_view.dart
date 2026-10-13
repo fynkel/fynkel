@@ -10,6 +10,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart'
     show
         AssetSource,
+        Camera,
         FynkelException,
         FynkelStatus,
         GameObject,
@@ -143,6 +144,15 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
 /// speed; the view never lowers it by itself.
 ///
+/// **Several views of one world** (a minimap over the game, split screen)
+/// each draw it from their own [camera], or from the world's main one
+/// ([World.camera]) when it's null, and the world is updated once a frame
+/// however many show it. Each draws its frames at its own size and
+/// cost; the world's meshes and textures are on the GPU once. A view that
+/// doesn't take [input] keeps the taps on it from the game and from the
+/// views under it; one that does aims what's under a finger from its
+/// camera ([Input.camera]).
+///
 /// macOS, iOS and Android.
 class FynkelView extends StatefulWidget {
   /// Shows [root] in a world of the view's own, loading assets from
@@ -159,6 +169,9 @@ class FynkelView extends StatefulWidget {
     this.autofocus = true,
     this.showErrors = kDebugMode,
     this.pauseWhenCovered = true,
+    this.camera,
+    this.input = true,
+    this.worldWidgets = true,
   }) : world = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
@@ -174,6 +187,9 @@ class FynkelView extends StatefulWidget {
     this.autofocus = true,
     this.showErrors = kDebugMode,
     this.pauseWhenCovered = true,
+    this.camera,
+    this.input = true,
+    this.worldWidgets = true,
   }) : root = null,
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -228,6 +244,23 @@ class FynkelView extends StatefulWidget {
   /// the last one goes on, unless the game was paused already, or paused
   /// itself meanwhile. Covered, the view gets no taps or keys either.
   final bool pauseWhenCovered;
+
+  /// The camera the view draws from, read each frame; the world's main
+  /// one ([World.camera]) when null. While it isn't a shown object's in
+  /// the world (not added yet, destroyed, inactive) the view is black: a
+  /// minimap whose camera goes doesn't show the main picture instead.
+  final Camera? camera;
+
+  /// Whether the view gives the world the player's taps and keys (and
+  /// takes focus for them), and shows what the game's code throws
+  /// ([showErrors]). Off for a minimap or the second half of a split
+  /// screen: one view takes input, and the errors show once.
+  final bool input;
+
+  /// Whether the world's [WorldWidget]s show over the view, placed by its
+  /// camera: health bars on each half of a split screen. Off for a
+  /// minimap.
+  final bool worldWidgets;
 
   @override
   State<FynkelView> createState() => FynkelViewState();
@@ -294,6 +327,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     WidgetsBinding.instance.addObserver(this);
   }
 
+  // The world whose clock counts this view.
+  World? _clocked;
+
+  /// Counts the view on its world's clock, and off the last one's.
+  void _clock() {
+    final world = this.world;
+    if (identical(world, _clocked)) return;
+    if (_clocked case final old?) _WorldClock.of(old).views--;
+    _WorldClock.of(world).views++;
+    _clocked = world;
+  }
+
   var _started = false;
 
   @override
@@ -304,6 +349,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _started = true;
       _rootWorld = _worldOfRoot();
       if (widget.world case final world?) _listen(world);
+      _clock();
     }
     _wearTheme();
     _cover();
@@ -394,8 +440,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       // The game hears its world's errors from the start (what onLoad
       // threw, before this view was made), and passes them on.
       _listen(null);
-      _game = game;
-      hearGameErrors(game, widget.showErrors ? _heard : null);
+      // A view without input leaves the game's errors to the one with it.
+      if (widget.input) {
+        _game = game;
+        hearGameErrors(game, widget.showErrors ? _heard : null);
+      }
       return game.world;
     }
     final world = World(source: widget.source ?? bundleSource())..theme = Theme.of(context);
@@ -410,7 +459,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     _gameErrors.clear();
     if (_game case final game?) stopHearingGameErrors(game, _heard);
     _game = null;
-    if (widget.showErrors && world != null) _errorsHeard = world.errors.listen(_heard);
+    if (widget.showErrors && widget.input && world != null) _errorsHeard = world.errors.listen(_heard);
   }
 
   void _heard(ObjectError error) {
@@ -448,6 +497,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (_owns) _rootWorld?.dispose();
       _rootWorld = _worldOfRoot();
       if (widget.world case final world?) _listen(world);
+      _clock();
       _wearTheme();
     }
     _cover();
@@ -456,6 +506,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_clocked case final world?) _WorldClock.of(world).views--;
     _letGo(world);
     _listen(null);
     _ticker.dispose();
@@ -494,7 +545,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
     widget.onFrame?.call(dt);
     final world = this.world;
-    if (!world.isDisposed) world.update(dt);
+    if (!world.isDisposed) _WorldClock.of(world).update(world);
     _ticks.tick();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
@@ -503,6 +554,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final view = _view ?? _open();
     if (view == null) return;
     try {
+      view.camera = widget.camera;
       if (!_android) view.resize(_width, _height);
       final texture = _texture;
       if (texture == null) return;
@@ -681,45 +733,54 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           );
         }
         final size = constraints.biggest;
-        if (!world.isDisposed) _input.resize(size);
+        if (widget.input && !world.isDisposed) {
+          _input.resize(size);
+          world.input.camera = widget.camera;
+        }
         _width = (size.width * ratio).round().clamp(0, 16384);
         _height = (size.height * ratio).round().clamp(0, 16384);
         final texture = _texture;
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },
     );
-    final game = Focus(
-      focusNode: _focus,
-      autofocus: widget.autofocus,
-      onKeyEvent: (_, event) {
-        // A debug build's restart key goes up to the game's FynkelGame.
-        if (kDebugMode && event.logicalKey == LogicalKeyboardKey.f5 && FynkelGame.maybeOf(context) != null) {
-          return KeyEventResult.ignored;
-        }
-        return _input.key(event);
-      },
-      onFocusChange: (focused) {
-        if (!focused) _input.releaseKeys();
-      },
-      child: Listener(
-        behavior: HitTestBehavior.opaque,
-        onPointerDown: (event) {
-          _focus.requestFocus();
-          _input.pointerDown(event);
-        },
-        onPointerMove: _input.pointerMove,
-        onPointerUp: _input.pointerUp,
-        onPointerCancel: _input.pointerCancel,
-        onPointerSignal: (event) {
-          if (event is PointerScrollEvent) {
-            GestureBinding.instance.pointerSignalResolver.register(event, (_) => _input.scrolled(event.scrollDelta));
-          }
-        },
-        onPointerPanZoomStart: _input.panZoomStart,
-        onPointerPanZoomUpdate: _input.panZoomUpdate,
-        child: MouseRegion(onEnter: _input.hover, onHover: _input.hover, onExit: _input.exit, child: view),
-      ),
-    );
+    // Without input it keeps the taps on it from what's under it.
+    final game = !widget.input
+        ? Listener(behavior: HitTestBehavior.opaque, child: view)
+        : Focus(
+            focusNode: _focus,
+            autofocus: widget.autofocus,
+            onKeyEvent: (_, event) {
+              // A debug build's restart key goes up to the game's FynkelGame.
+              if (kDebugMode && event.logicalKey == LogicalKeyboardKey.f5 && FynkelGame.maybeOf(context) != null) {
+                return KeyEventResult.ignored;
+              }
+              return _input.key(event);
+            },
+            onFocusChange: (focused) {
+              if (!focused) _input.releaseKeys();
+            },
+            child: Listener(
+              behavior: HitTestBehavior.opaque,
+              onPointerDown: (event) {
+                _focus.requestFocus();
+                _input.pointerDown(event);
+              },
+              onPointerMove: _input.pointerMove,
+              onPointerUp: _input.pointerUp,
+              onPointerCancel: _input.pointerCancel,
+              onPointerSignal: (event) {
+                if (event is PointerScrollEvent) {
+                  GestureBinding.instance.pointerSignalResolver.register(
+                    event,
+                    (_) => _input.scrolled(event.scrollDelta),
+                  );
+                }
+              },
+              onPointerPanZoomStart: _input.panZoomStart,
+              onPointerPanZoomUpdate: _input.panZoomUpdate,
+              child: MouseRegion(onEnter: _input.hover, onHover: _input.hover, onExit: _input.exit, child: view),
+            ),
+          );
     // Passthrough: an unbounded size still reaches the view's own check.
     return Stack(
       fit: StackFit.passthrough,
@@ -727,15 +788,45 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         game,
         // On a see-through Material, as FynkelApp's overlay: text has its
         // style, and buttons have what they paint on.
-        Positioned.fill(
-          child: Material(
-            type: MaterialType.transparency,
-            child: WorldWidgetLayer(world: world, frames: _ticks),
+        if (widget.worldWidgets)
+          Positioned.fill(
+            child: Material(
+              type: MaterialType.transparency,
+              child: WorldWidgetLayer(world: world, frames: _ticks, camera: widget.camera),
+            ),
           ),
-        ),
         if (_gameErrors.isNotEmpty)
           ErrorPanel(errors: List.of(_gameErrors), onDismiss: () => setState(_gameErrors.clear)),
       ],
     );
+  }
+}
+
+/// A world's frames, shared by the views that show it: the first of them
+/// to tick in a display frame updates the world, the rest draw what that
+/// made. The seconds between updates start from 0 when its first view
+/// comes, as they did for a view alone.
+class _WorldClock {
+  static final _clocks = Expando<_WorldClock>('FynkelView clock');
+
+  static _WorldClock of(World world) => _clocks[world] ??= _WorldClock();
+
+  // The display frame the world was last updated in; null before the
+  // first, and again when its last view goes.
+  Duration? _updated;
+  int _views = 0;
+
+  int get views => _views;
+  set views(int value) {
+    _views = value;
+    if (value == 0) _updated = null;
+  }
+
+  void update(World world) {
+    final now = SchedulerBinding.instance.currentFrameTimeStamp;
+    final last = _updated;
+    if (now == last) return;
+    _updated = now;
+    world.update(last == null ? 0 : (now - last).inMicroseconds / 1e6);
   }
 }
