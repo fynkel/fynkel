@@ -370,8 +370,9 @@ final class Orbit extends _Rig {
 /// The world's cameras ([World.cameras]): each frame after the late
 /// updates, it puts the camera the view draws from ([World.camera]) where
 /// the live [VirtualCamera] is, with its lens, blending when the live one
-/// changes, and adds the shakes on top. With no virtual camera it leaves
-/// the camera where it is (still shaking it).
+/// changes, and shakes it. A shake moves the camera only where it's drawn
+/// ([shakeOf]), never its transform. With no virtual camera it leaves the
+/// camera where it is (still shaking it).
 final class Cameras {
   Cameras._(this._world);
 
@@ -424,16 +425,20 @@ final class Cameras {
   // --- Shake ---
 
   final _shakes = <_Shake>[];
+  // The camera the engine was last told to shake, and by how much.
   GameObject? _shaken;
-  Transform? _wrote;
-  Vec3 _base = Vec3.zero;
+  Vec3 _offset = Vec3.zero;
 
   /// Shakes the view's camera by up to [strength] metres, across the view,
   /// fading out over [seconds]; [frequency] is about how many times a second
-  /// it goes to and fro. On top of wherever it is: a virtual camera, a
-  /// rig, a tween or the game's own code moving it, and it ends there.
-  /// Shakes at once add up. [unscaled] keeps it going while the game is
-  /// paused; [seed] makes it the same each time.
+  /// it goes to and fro. Shakes at once add up. [unscaled] keeps it going
+  /// while the game is paused; [seed] makes it the same each time.
+  ///
+  /// The shake is added when the frame is drawn, never written into the
+  /// camera's transform: whatever moves the camera meanwhile (a virtual
+  /// camera, a rig, a tween, the game's own `camera.position += step`)
+  /// moves it from where it really is, and the shake ends exactly there.
+  /// [shakeOf] says how far it's moved now; world widgets move with it.
   void shake(double strength, {double seconds = 0.4, double frequency = 20, bool unscaled = false, int? seed}) {
     if (!(seconds > 0)) return;
     final random = math.Random(seed);
@@ -448,6 +453,11 @@ final class Cameras {
       ),
     );
   }
+
+  /// How far the shake moves [camera] this frame, in the world: zero for
+  /// a camera that isn't the view's, and when nothing shakes. Not in its
+  /// transform: what the camera sees is drawn from its position plus this.
+  Vec3 shakeOf(Camera camera) => _shaken != null && identical(camera._owner, _shaken) ? _offset : Vec3.zero;
 
   /// Whether a shake is going on.
   bool get isShaking => _shakes.isNotEmpty;
@@ -561,21 +571,8 @@ final class Cameras {
   }
 
   void _shake(GameObject? camera, double dt, double unscaledDt) {
-    final shaken = _shaken;
-    if (camera == null || (shaken != null && shaken != camera)) {
-      // The view has another camera now: the old one goes back.
-      if (shaken != null && _present(shaken)) shaken.transform = shaken.transform.copyWith(position: _base);
-      _shaken = _wrote = null;
-      if (camera == null) {
-        _shakes.clear();
-        return;
-      }
-    }
+    if (camera == null) _shakes.clear();
     if (_shakes.isEmpty && _shaken == null) return;
-    final t = camera.transform;
-    // Moved since it was shaken (by a virtual camera, a rig or the game):
-    // that's where it shakes about now.
-    if (_shaken == null || t != _wrote) _base = t.position;
     var x = 0.0, y = 0.0;
     for (var i = _shakes.length - 1; i >= 0; i--) {
       final s = _shakes[i];
@@ -591,15 +588,27 @@ final class Cameras {
       x += math.sin(turns + s.phaseX) * fade;
       y += math.sin(turns * 1.13 + s.phaseY) * fade;
     }
-    if (_shakes.isEmpty) {
-      camera.transform = t.copyWith(position: _base);
-      _shaken = _wrote = null;
+    if (_shakes.isEmpty || camera == null) {
+      _tell(null, Vec3.zero);
+    } else {
+      _tell(camera, camera.worldTransform.rotation.rotate(Vec3(x, y, 0)));
+    }
+  }
+
+  /// Tells the engine to draw [camera] moved by [offset]; none when null.
+  void _tell(GameObject? camera, Vec3 offset) {
+    if (identical(camera, _shaken) && offset == _offset) return;
+    _shaken = camera;
+    _offset = offset;
+    if (camera == null) {
+      check(fy_camera_shake_set(_world.pointer, 0, nullptr));
       return;
     }
-    final moved = t.copyWith(position: _base + t.rotation.rotate(Vec3(x, y, 0)));
-    camera.transform = moved;
-    _wrote = moved;
-    _shaken = camera;
+    scratch.vec3.ref
+      ..x = offset.x
+      ..y = offset.y
+      ..z = offset.z;
+    check(fy_camera_shake_set(_world.pointer, camera._id, scratch.vec3));
   }
 }
 

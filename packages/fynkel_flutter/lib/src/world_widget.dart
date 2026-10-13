@@ -274,12 +274,15 @@ class _RenderPlaced extends RenderBox
     if (camera == null || !camera.gameObject.activeInHierarchy) return;
     if (!(size.width > 0 && size.height > 0)) return;
     final eye = camera.gameObject.worldTransform.position;
+    // The camera draws moved by its shake: moving each point back instead
+    // keeps the widgets on what they mark.
+    final shake = world.cameras.shakeOf(camera);
     var i = 0;
     for (var child = firstChild; child != null; child = childAfter(child), i++) {
       final place = child.parentData! as _Place;
       final w = i < widgets.length ? widgets[i] : null;
       if (w == null || w.isRemoved) continue;
-      final point = w.point;
+      final point = w.point - shake;
       final at = camera.worldToScreenPoint(point, width: size.width, height: size.height);
       if (at == null) continue; // Behind the camera.
       final distance = (point - eye).length;

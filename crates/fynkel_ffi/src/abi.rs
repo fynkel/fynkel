@@ -11,7 +11,7 @@
 //! behaviour; `package:fynkel` makes that impossible from Dart.
 
 use std::ffi::{c_char, c_void};
-use std::sync::{Arc, Mutex, MutexGuard, Weak};
+use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 19;
+pub const FY_ABI_VERSION: u32 = 20;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -392,6 +392,8 @@ pub struct FyWorld {
     /// device its views draw on, made by the first. Held by the views, so
     /// they're freed with the last one, as a view's own were.
     gpu: Mutex<Weak<WorldGpu>>,
+    /// The camera shake: which camera, and how far it's moved when drawn.
+    shake: Mutex<Option<(ObjectId, Vec3)>>,
 }
 
 impl FyWorld {
@@ -516,7 +518,12 @@ pub extern "C" fn fy_last_error() -> *const c_char {
 /// A new, empty world. Free it with `fy_world_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn fy_world_new() -> *mut FyWorld {
-    let world = FyWorld { world: Mutex::new(World::new()), raycaster: Mutex::default(), gpu: Mutex::default() };
+    let world = FyWorld {
+        world: Mutex::new(World::new()),
+        raycaster: Mutex::default(),
+        gpu: Mutex::default(),
+        shake: Mutex::default(),
+    };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
 
@@ -808,6 +815,36 @@ pub unsafe extern "C" fn fy_camera_active(world: *const FyWorld, out: *mut u64) 
         let camera = world.lock()?.active_camera();
         // SAFETY: per this function's contract.
         unsafe { write(out, camera.map_or(0, ObjectId::raw), "out") }
+    })
+}
+
+/// Shakes camera `camera` by `offset` (in the world, in metres) when a view
+/// draws from it, without moving the object: what the world's camera
+/// shake is. 0 for `camera` (or a null `offset`) stops it. Taken by each
+/// `fy_view_frame` after.
+///
+/// # Safety
+///
+/// `world` is null or live; `offset` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64, offset: *const FyVec3) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        // SAFETY: per this function's contract: null or readable.
+        let offset = unsafe { offset.as_ref() }.copied();
+        let shake = match (ObjectId::from_raw(camera), offset) {
+            (Some(id), Some(by)) => {
+                let by = Vec3::from(by);
+                if !by.is_finite() {
+                    return Err(Error::new(FyStatus::InvalidValue, format!("a shake of {by} isn't finite")));
+                }
+                Some((id, by))
+            }
+            _ => None,
+        };
+        *world.shake.lock().unwrap_or_else(PoisonError::into_inner) = shake;
+        Ok(())
     })
 }
 
@@ -2143,7 +2180,11 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let mut clock = view.clock.lock().map_err(|_| Error::new(FyStatus::Poisoned, "the view's clock panicked"))?;
         let clock = &mut *clock;
         let mut scene = view.worker.scene();
-        clock.extract.run_shared(&*view.world.lock()?, &mut scene, &mut view.gpu.ledger());
+        clock.extract.shake = *view.world.shake.lock().unwrap_or_else(PoisonError::into_inner);
+        clock
+            .extract
+            .run_shared(&*view.world.lock()?, &mut scene, &mut view.gpu.ledger())
+            .map_err(|message| Error::new(FyStatus::InvalidValue, message))?;
         let number = clock.last_number + 1;
         view.worker.post(number, scene, &mut Vec::new())?;
         clock.last_number = number;

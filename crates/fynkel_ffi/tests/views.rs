@@ -167,3 +167,59 @@ fn a_view_whose_camera_is_gone_draws_black() {
     let image = view.read(view.frame(), 64, 64);
     assert_eq!((colours(&image), image.pixel(0, 0)), (1, [0, 0, 0, 255]), "not the main camera's picture");
 }
+
+fn shake(world: &World, camera: u64, by: Vec3) {
+    let offset = FyVec3 { x: by.x, y: by.y, z: by.z };
+    // SAFETY: a live world and a pointer to a local.
+    ok(unsafe { fy_camera_shake_set(world.0, camera, &offset) });
+}
+
+#[test]
+fn a_shake_moves_the_shaken_camera_when_drawn_and_only_it() {
+    let world = World::new();
+    stage1(&world);
+    let mut main = 0;
+    // SAFETY: a live world and a local out-value.
+    ok(unsafe { fy_camera_active(world.0, &mut main) });
+    let other = add_camera(&world, Vec3::new(0.0, 1.5, 4.0), srgb(0.1, 0.1, 0.12));
+    let (a, b) = (View::headless(&world, 256, 256), View::headless(&world, 256, 256));
+    set_camera(&b, other);
+    let still = b.read(b.frame(), 256, 256);
+
+    shake(&world, main, Vec3::new(0.5, 0.0, 0.0));
+    let shaken = a.read(a.frame(), 256, 256);
+    assert_ne!(shaken.rgba, still.rgba, "drawn half a metre to the side");
+    assert_eq!(b.read(b.frame(), 256, 256).rgba, still.rgba, "the other camera isn't shaken");
+    let mut moved = FyTransform::default();
+    // SAFETY: a live world and a pointer to a local.
+    ok(unsafe { fy_transform_get(world.0, main, &mut moved) });
+    assert_eq!(moved.position, FyVec3 { x: 0.0, y: 1.5, z: 4.0 }, "the object stays where it was");
+
+    // SAFETY: a live world; a null offset stops it.
+    ok(unsafe { fy_camera_shake_set(world.0, 0, std::ptr::null()) });
+    assert_golden("cube", &a.read(a.frame(), 256, 256));
+}
+
+#[test]
+fn a_camera_whose_near_is_not_below_its_far_is_refused_saying_so() {
+    let world = World::new();
+    stage1(&world);
+    let mut main = 0;
+    let mut lens = FyCamera::default();
+    // SAFETY: a live world and local out-values.
+    unsafe {
+        ok(fy_camera_active(world.0, &mut main));
+        ok(fy_camera_get(world.0, main, &mut lens));
+        ok(fy_camera_set(world.0, main, &FyCamera { near_clip: 50.0, far_clip: 10.0, ..lens }));
+    }
+    let view = View::headless(&world, 256, 256);
+    let mut number = 0;
+    // SAFETY: a live view and a local out-value.
+    assert_eq!(unsafe { fy_view_frame(view.0, &mut number) }, FyStatus::InvalidValue);
+    let message = last_error();
+    assert!(message.contains("near 50") && message.contains("far 10"), "{message}");
+    // Setting far after near, as a game may: the next frame draws.
+    // SAFETY: a live world.
+    ok(unsafe { fy_camera_set(world.0, main, &lens) });
+    assert_golden("cube", &view.read(view.frame(), 256, 256));
+}

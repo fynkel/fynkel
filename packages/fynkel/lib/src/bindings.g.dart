@@ -49,6 +49,9 @@ external int fy_camera_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> value);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyVec3>)>(isLeaf: true)
+external int fy_camera_shake_set(ffi.Pointer<FyWorld> world, int camera, ffi.Pointer<FyVec3> offset);
+
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size, ffi.Pointer<ffi.Size>)
 >(isLeaf: true)
@@ -376,7 +379,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 19;
+const int FY_ABI_VERSION = 20;
 
 const int FY_APPLE_MORE = 2;
 

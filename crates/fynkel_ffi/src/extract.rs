@@ -6,7 +6,10 @@
 //! - The camera is the view's own when it has one ([`Extract::camera`]):
 //!   drawn from while it's shown and has a `Camera` and a `Transform`, and
 //!   nothing is drawn otherwise. Else it's the one on the object with the
-//!   lowest id that has both. Its transform's scale is ignored.
+//!   lowest id that has both. Its transform's scale is ignored. A shake
+//!   ([`Extract::shake`]) moves it when it's drawn, not in the world. One
+//!   whose near clip isn't below its far draws nothing, so the frame is
+//!   refused with a message instead.
 //! - The sun is the directional light with the lowest id that has a
 //!   `Transform`; it shines along its world forward (-Z). A
 //!   directional light without a transform has no direction and is
@@ -75,6 +78,9 @@ pub(crate) struct Extract {
     matrices: WorldMatrices,
     /// The view's own camera, or `None` for the world's main one.
     pub(crate) camera: Option<ObjectId>,
+    /// The world's camera shake: how far its camera is moved, in the
+    /// world, when this view draws from it.
+    pub(crate) shake: Option<(ObjectId, Vec3)>,
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
     materials: HashMap<MaterialId, PbrMaterial>,
@@ -108,19 +114,32 @@ impl Extract {
     #[cfg(test)]
     pub(crate) fn run(&mut self, world: &World, scene: &mut RenderScene, ops: &mut Vec<ResourceOp>) {
         let mut own = std::mem::take(&mut self.own);
-        self.fill(world, scene, &mut own, ops);
+        let filled = self.fill(world, scene, &mut own, ops);
         self.own = own;
+        filled.expect("a camera that can draw");
     }
 
     /// [`Extract::run`] for a view that shares its world's meshes and
     /// textures: the changes go to the world's `ledger`, once for all its
-    /// views.
-    pub(crate) fn run_shared(&mut self, world: &World, scene: &mut RenderScene, ledger: &mut Ledger) {
+    /// views. Fails, saying why, when the camera can't draw (near ≥ far):
+    /// `scene` is then not to be drawn.
+    pub(crate) fn run_shared(
+        &mut self,
+        world: &World,
+        scene: &mut RenderScene,
+        ledger: &mut Ledger,
+    ) -> Result<(), String> {
         let Ledger { uploaded, ops } = ledger;
-        self.fill(world, scene, uploaded, ops);
+        self.fill(world, scene, uploaded, ops)
     }
 
-    fn fill(&mut self, world: &World, scene: &mut RenderScene, uploaded: &mut Uploaded, ops: &mut Vec<ResourceOp>) {
+    fn fill(
+        &mut self,
+        world: &World,
+        scene: &mut RenderScene,
+        uploaded: &mut Uploaded,
+        ops: &mut Vec<ResourceOp>,
+    ) -> Result<(), String> {
         scene.clear();
 
         uploaded.meshes.retain(|&id| {
@@ -177,6 +196,20 @@ impl Extract {
             {
                 camera = Some((id, *c, rotation, position));
             }
+        });
+        if let Some((id, c, ..)) = camera
+            && c.near >= c.far
+        {
+            let name = world.name(id).ok().flatten().map_or_else(|| format!("{id:?}"), |n| format!("'{n}'"));
+            return Err(format!(
+                "the camera on {name} has near {} and far {}: near must be below far, or it draws nothing",
+                c.near, c.far
+            ));
+        }
+        let shake = self.shake;
+        let camera = camera.map(|(id, c, rotation, position)| match shake {
+            Some((shaken, by)) if shaken == id => (id, c, rotation, position + by),
+            _ => (id, c, rotation, position),
         });
         // The layers drawn: all without a camera, which draws nothing anyway.
         let mask = camera.map_or(u32::MAX, |(_, c, ..)| c.culling_mask);
@@ -237,6 +270,7 @@ impl Extract {
         });
 
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));
+        Ok(())
     }
 }
 

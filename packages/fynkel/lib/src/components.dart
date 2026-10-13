@@ -209,7 +209,9 @@ final class Camera extends Component {
 
   /// How near to the camera things are drawn, in metres (Unity's
   /// `nearClipPlane`): 0.1 unless set, 0.0001 to 1,000,000. Keep it below
-  /// [far]; nothing checks that.
+  /// [far]: a camera whose isn't draws nothing, so a view drawing from it
+  /// throws an [ArgumentError] from its frame, naming it. Checked only
+  /// then, so setting one and then the other is fine.
   double get near => _near;
   set near(double value) => _change(() => _near = value);
 

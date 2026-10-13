@@ -458,6 +458,22 @@ void main() {
       expect(worldWidgetsOf(world), isEmpty);
     });
 
+    testWidgets('a WorldWidget shakes with the camera, though the camera itself never moves', (tester) async {
+      world.add(GameObject(components: [WorldWidget((_) => const SizedBox(key: tag, width: 20, height: 10))]));
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      final still = tester.getCenter(find.byKey(tag));
+      // Paused, the shake holds where it is, to measure against.
+      world.time.scale = 0;
+      world.cameras.shake(0.3, seconds: 1);
+      await frames(tester, 2);
+      final shake = world.cameras.shakeOf(world.camera!);
+      expect(shake, isNot(Vec3.zero));
+      expect(world.camera!.gameObject.position, Vec3(0, 0, 4));
+      expect(tester.getCenter(find.byKey(tag)), isNot(offsetMoreOrLessEquals(still)));
+      expect(tester.getCenter(find.byKey(tag)), offsetMoreOrLessEquals(seen(tester, -shake)));
+    });
+
     testWidgets('a tap on a world widget reaches it, not the game; beside it, the game', (tester) async {
       var taps = 0;
       world.add(
@@ -1158,6 +1174,24 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
       expect(world.paused, isFalse);
     });
+  });
+
+  testWidgets('a camera whose near is not below its far is reported, and the game goes on', (tester) async {
+    world.camera!
+      ..gameObject.name = 'eye'
+      ..near = 2000;
+    var frames = 0;
+    await tester.pumpWidget(sized(FynkelView.world(world, onFrame: (_) => frames++)));
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(tester.takeException(), isA<ArgumentError>().having((e) => e.message, 'message', contains("'eye'")));
+    expect(frames, 10, reason: 'every frame came');
+    world.camera!.far = 5000;
+    for (var i = 0; i < 130; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(tester.takeException(), isNull, reason: 'it draws once far is past near');
   });
 
   testWidgets('a throw from onFrame is reported, once a second at most, and the frames go on', (tester) async {
