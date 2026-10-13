@@ -128,6 +128,11 @@ It starts with:
   views; and **two views of one world** updating it once.
 - **A UI reading physics waits for its step**: now documented; stage 7
   decides whether a widget gets a copy that never waits.
+- **The review's 9 and the extract**, each a choice more than a fix:
+  camera shake drifting a camera moved during it (a shake can't tell
+  "moved to" from "moved by"), a held `InputAction` on rebind, near ≥
+  far (checking it would refuse setting `near` then `far`), and the
+  extract's work for every object before culling.
 - The small ones from step 7 that stage 7's work touches: a `Pool`'s
   objects to walk (39), unbound axes (40), a picture out of
   `HeadlessView` (41).
@@ -154,8 +159,9 @@ performance hints.
 
 Step 8 is done when you have read this.
 
-- [ ] Read
-- [ ] The review's bugs: one more PR in stage 6, or carried to stage 7
+- [x] Read
+- [x] The review's bugs: one more PR in stage 6 ([#87](https://github.com/mooumari/fynkel/pull/87):
+  1–8, 10, finding 36, the transient targets; 9 and the extract to stage 7)
 - [ ] PR 15's numbers in
 
 Then **stage 6 is done**.
