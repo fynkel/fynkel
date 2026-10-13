@@ -180,6 +180,36 @@ Done (PR #97):
 - You play it.
 - The stage 7 report.
 
+Done so far (PR #98):
+
+- **Sheepdog** (`examples/sheepdog`): herd eight sheep into the pen
+  before the wolves take them. It has a title screen; a game page with a
+  HUD, a Bark button and a minimap; a pause menu (button, Escape, P,
+  back); and settings for light/dark/system, the minimap, and every key
+  rebound. Each sheep has a name tag and each wolf a health bar
+  (`WorldWidget`s), and a pop-up ends the round. Its colours come from
+  one palette: the light theme is a day in the field, the dark one a
+  night. 20 tests: 13 that play the game frame by frame, 7 that click
+  through the app.
+- Measured with its HUD and minimap, 60 s, nobody playing: **Mac 120 fps**
+  (min 119, no slow frame); **iPhone 120 fps** (min 114, no slow frame,
+  267 MB). **Owed:** the Note10+.
+- What it found: a second `FynkelView(root:)` of a root another view had
+  added threw "already added" outside a `FynkelGame`. Now it shows that
+  world and leaves it to the view that made it (a test). The first
+  measure missed the minimap because of it, and was taken again.
+- **The fresh agent** wrote the menus brief again from the guide alone
+  (Starfall, 672 / 190 lines, 6 tests, analyzes, tests and builds). It hit
+  no blocker, one confusing thing and five minor ones (mostly its own
+  slips). The confusing one: the guide sent it to the arena for the "press
+  a key" dialog, which it couldn't read. The guide now has that dialog and
+  a controls row (§15). Pause under every page, the theme in the game,
+  the minimap and the world widgets all worked first time, it says, and
+  "the §15 snippets composed into the whole brief almost line for line".
+  Its log is kept outside the repository, in
+  `~/Documents/fynkel-s7/menus-LOG.md`.
+- **Next:** you play Sheepdog; then the report.
+
 ## 3. Decisions (2026-10-13)
 
 1. **The name clash.** Fynkel keeps `Color`, `Material` and

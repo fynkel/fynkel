@@ -7,8 +7,10 @@ way Unity works, in Dart, and §20 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
 `garden` (models and an orbit camera), `coins` (triggers and a HUD),
-`arena` (a small game using most of what's here) and `bowling` (a game on
-physics). `examples/lab` has a scene for each feature, to try by hand.
+`arena` (a small game using most of what's here), `bowling` (a game on
+physics) and `sheepdog` (a game that feels like an app: a title screen,
+settings, pause, a HUD, labels in the world, a minimap and the app's
+theme). `examples/lab` has a scene for each feature, to try by hand.
 
 ## 1. A new game
 
@@ -799,8 +801,8 @@ class Button3D extends GameObject {
   next frame); a `press()` goes on holding. On a controls page,
   `keyCodeOf(event)` (from `package:fynkel_flutter`) turns the key pressed
   in a "press a key" dialog into the game's, and `key.label` names it for
-  the player (`Space`, `W`, `↑`). The arena's settings page does it all
-  (`examples/arena/lib/menus.dart`).
+  the player (`Space`, `W`, `↑`). §15 has that dialog and a row of a
+  controls page.
 - A Flutter widget over the game (a HUD button) takes its own taps; they
   don't reach the game.
 
@@ -1724,6 +1726,67 @@ menu that leaves the game on back, as the arena's does, maps Escape to
 closing itself with a `CallbackShortcuts` (`examples/arena/lib/menus.dart`,
 which has a title screen, this menu and a settings page, and tests that
 click through them).
+
+**A controls page** rebinds with a "press a key" dialog. Its `Focus`
+takes every key before the app's shortcuts do, and Escape closes it
+keeping the key there was:
+
+```dart
+// lib/controls.dart
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:fynkel/fynkel.dart' show Input, KeyCode;
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+/// Waits for the player to press a key for [what], and gives it; null for
+/// Escape.
+Future<KeyCode?> askForKey(BuildContext context, String what) => showDialog<KeyCode>(
+  context: context,
+  builder: (context) => Focus(
+    autofocus: true,
+    onKeyEvent: (node, event) {
+      if (event is KeyDownEvent) {
+        Navigator.of(context).pop(event.logicalKey == LogicalKeyboardKey.escape ? null : keyCodeOf(event));
+      }
+      return KeyEventResult.handled;
+    },
+    child: AlertDialog(title: Text('Press a key for $what')),
+  ),
+);
+
+/// The controls page's row for jumping: the key, and a tap to change it.
+class JumpKey extends StatefulWidget {
+  const JumpKey(this.input, {super.key});
+
+  final Input input;
+
+  @override
+  State<JumpKey> createState() => _JumpKeyState();
+}
+
+class _JumpKeyState extends State<JumpKey> {
+  var _key = KeyCode.space;
+
+  @override
+  Widget build(BuildContext context) => ListTile(
+    title: const Text('Jump'),
+    trailing: OutlinedButton(
+      onPressed: () async {
+        final key = await askForKey(context, 'Jump');
+        if (key == null) return;
+        widget.input.bindAction('jump', [key]);
+        setState(() => _key = key);
+      },
+      child: Text(_key.label),
+    ),
+  );
+}
+```
+
+A real game keeps its keys in a `ChangeNotifier` the settings page and
+the game share, and the game binds them again when it changes:
+`on(controls.changed, (_) => controls.bindTo(input))`
+(`examples/sheepdog/lib/game.dart`).
 
 **Several views of one world**: a minimap, split screen. Each is a
 `FynkelView` of the same game, with a `camera:` of its own; without one,
