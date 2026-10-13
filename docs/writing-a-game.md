@@ -1630,6 +1630,79 @@ Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
 saving there run, and then the engine's memory is freed.
 
+**Menus, pop-ups and pages** are Flutter's own: `showDialog`,
+`Navigator.push`, `PopScope`. Whatever covers the view's page pauses the
+game (`world.paused`), so it hears no taps or keys, and closing the last
+one goes on. The game stays alive behind it: its objects, routines and
+score wait where they were. A game that was paused already stays paused.
+For a game that runs on under a see-through pop-up, give
+`FynkelView(pauseWhenCovered: false)`.
+
+```dart
+// lib/menus.dart
+import 'package:flutter/material.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+import 'game.dart';
+import 'hud.dart';
+
+/// The game's page: back (Android's button) opens the pause menu.
+class GamePage extends StatelessWidget {
+  const GamePage({super.key});
+
+  @override
+  Widget build(BuildContext context) => FynkelGame(
+    make: Score.new,
+    builder: (context, game) => PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) {
+        if (!didPop) showPauseMenu(context);
+      },
+      child: Stack(fit: StackFit.expand, children: [FynkelView(root: game), ScoreHud(game)]),
+    ),
+  );
+}
+
+/// The pause menu, over the game's page at [context].
+Future<void> showPauseMenu(BuildContext context) {
+  final navigator = Navigator.of(context);
+  return showDialog<void>(
+    context: context,
+    builder: (context) => SimpleDialog(
+      title: const Text('Paused'),
+      children: [
+        SimpleDialogOption(onPressed: navigator.pop, child: const Text('Resume')),
+        SimpleDialogOption(
+          onPressed: () => navigator.push(MaterialPageRoute<void>(builder: (_) => const SettingsPage())),
+          child: const Text('Settings'),
+        ),
+        SimpleDialogOption(
+          onPressed: () => navigator
+            ..pop() // the menu
+            ..pop(), // and the game's page
+          child: const Text('Leave'),
+        ),
+      ],
+    ),
+  );
+}
+
+class SettingsPage extends StatelessWidget {
+  const SettingsPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => Scaffold(appBar: AppBar(title: const Text('Settings')));
+}
+```
+
+The settings page goes over the menu, and the game stays paused under
+both until the menu closes. `PopScope(canPop: false)` turns Android's
+back button into "open the menu". In a dialog, Escape is a back too: a
+menu that leaves the game on back, as the arena's does, maps Escape to
+closing itself with a `CallbackShortcuts` (`examples/arena/lib/menus.dart`,
+which has a title screen, this menu and a settings page, and tests that
+click through them).
+
 ## 16. Hot reload and starting over
 
 - **Hot reload** (`r`) changes methods at once, in objects and behaviours
@@ -1915,6 +1988,10 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 7** (2026-10-13):
+  - A `FynkelView` pauses its world while a page or dialog covers it
+    (`pauseWhenCovered`, on by default), and goes on when it's closed. A
+    game that kept running under its own menus pauses there now; give
+    `pauseWhenCovered: false` to keep it running.
   - A `FynkelView` that makes its own world (given a `root:` outside a
     `FynkelGame`) adds the root in `didChangeDependencies`, after
     `initState`, so the world has the app's theme first.

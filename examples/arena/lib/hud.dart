@@ -1,15 +1,17 @@
 // What the game shows over the view, in plain Flutter: the score and the
-// wave, the hearts, a pause button, and what to do when paused or over;
-// and the health bars over the enemies, in the world.
+// wave, the hearts, a pause button, and what to do when it's over; and the
+// health bars over the enemies, in the world.
 
 import 'package:flutter/widgets.dart';
 
 import 'arena.dart';
 
 class Hud extends StatelessWidget {
-  const Hud(this.game, {super.key});
+  /// The HUD of [game]; its pause button calls [onPause], if given.
+  const Hud(this.game, {super.key, this.onPause});
 
   final ArenaGame game;
+  final VoidCallback? onPause;
 
   static const _text = TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Color(0xFFFFFFFF));
 
@@ -38,26 +40,23 @@ class Hud extends StatelessWidget {
                     style: _text.copyWith(color: const Color(0xFFFF6FA0)),
                   ),
                 ),
-                const SizedBox(width: 20),
-                _Button(listenable: game.paused, label: () => game.paused.value ? '▶' : 'II', onTap: game.togglePause),
+                if (onPause case final onPause?) ...[const SizedBox(width: 20), _Button(label: 'II', onTap: onPause)],
               ],
             ),
           ),
           Center(
-            child: ListenableBuilder(
-              listenable: Listenable.merge([game.paused, game.over]),
-              builder: (context, _) => switch ((game.paused.value, game.over.value)) {
-                (_, true) => Column(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text('game over', style: _text.copyWith(fontSize: 40)),
-                    const SizedBox(height: 16),
-                    _Button(listenable: game.over, label: () => 'again', onTap: game.restart),
-                  ],
-                ),
-                (true, _) => Text('paused', style: _text.copyWith(fontSize: 40)),
-                _ => const SizedBox.shrink(),
-              },
+            child: ValueListenableBuilder(
+              valueListenable: game.over,
+              builder: (context, over, _) => over
+                  ? Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text('game over', style: _text.copyWith(fontSize: 40)),
+                        const SizedBox(height: 16),
+                        _Button(label: 'again', onTap: game.restart),
+                      ],
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
         ],
@@ -67,10 +66,9 @@ class Hud extends StatelessWidget {
 }
 
 class _Button extends StatelessWidget {
-  const _Button({required this.listenable, required this.label, required this.onTap});
+  const _Button({required this.label, required this.onTap});
 
-  final Listenable listenable;
-  final String Function() label;
+  final String label;
   final VoidCallback onTap;
 
   @override
@@ -79,10 +77,7 @@ class _Button extends StatelessWidget {
     child: Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(color: const Color(0x66000000), borderRadius: BorderRadius.circular(8)),
-      child: ListenableBuilder(
-        listenable: listenable,
-        builder: (context, _) => Text(label(), style: Hud._text),
-      ),
+      child: Text(label, style: Hud._text),
     ),
   );
 }

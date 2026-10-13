@@ -158,6 +158,7 @@ class FynkelView extends StatefulWidget {
     this.focusNode,
     this.autofocus = true,
     this.showErrors = kDebugMode,
+    this.pauseWhenCovered = true,
   }) : world = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
@@ -172,6 +173,7 @@ class FynkelView extends StatefulWidget {
     this.focusNode,
     this.autofocus = true,
     this.showErrors = kDebugMode,
+    this.pauseWhenCovered = true,
   }) : root = null,
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -220,6 +222,12 @@ class FynkelView extends StatefulWidget {
   /// over the game and reported to Flutter (the console, and a failing
   /// widget test), rather than left to the game. On in debug builds.
   final bool showErrors;
+
+  /// Whether a page or dialog over the view pauses the game
+  /// ([World.paused]): a pause menu, a settings page, a pop-up. Closing
+  /// the last one goes on, unless the game was paused already, or paused
+  /// itself meanwhile. Covered, the view gets no taps or keys either.
+  final bool pauseWhenCovered;
 
   @override
   State<FynkelView> createState() => FynkelViewState();
@@ -298,6 +306,40 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (widget.world case final world?) _listen(world);
     }
     _wearTheme();
+    _cover();
+  }
+
+  // Whether a route is over the view's, and whether that paused the world.
+  bool _covered = false, _pausedIt = false;
+
+  /// Pauses the world when a route covers the view's, and goes on when
+  /// it's uncovered.
+  void _cover() {
+    final covered = !(ModalRoute.of(context)?.isCurrent ?? true) && widget.pauseWhenCovered;
+    if (covered == _covered) return;
+    _covered = covered;
+    // After this frame: pausing tells widgets, which can't build again in
+    // the middle of this build.
+    SchedulerBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || covered != _covered) return;
+      final world = this.world;
+      if (world.isDisposed) return;
+      if (covered) {
+        if (!world.paused) {
+          world.paused = true;
+          _pausedIt = true;
+        }
+      } else {
+        _letGo(world);
+      }
+    });
+  }
+
+  /// Goes on, if covering paused [world].
+  void _letGo(World world) {
+    if (!_pausedIt) return;
+    _pausedIt = false;
+    if (world.paused && !world.isDisposed) world.paused = false;
   }
 
   /// Gives the world the app's theme, unless a [FynkelGame] does: the view
@@ -400,17 +442,21 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     // A new root alone changes nothing (see FynkelView); a new world, or
     // from a root to a world or back, starts the view over.
     if (oldWidget.world != widget.world) {
+      _letGo(oldWidget.world ?? _rootWorld!);
+      _covered = false;
       _release();
       if (_owns) _rootWorld?.dispose();
       _rootWorld = _worldOfRoot();
       if (widget.world case final world?) _listen(world);
       _wearTheme();
     }
+    _cover();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _letGo(world);
     _listen(null);
     _ticker.dispose();
     _ticks.dispose();

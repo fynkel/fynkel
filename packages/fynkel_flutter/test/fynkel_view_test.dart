@@ -783,7 +783,13 @@ void main() {
       expect(FynkelGame.maybeOf<LooksAtAPoint>(inside), isNull, reason: 'its game is a Tiny');
       expect(
         () => FynkelGame.of<LooksAtAPoint>(inside),
-        throwsA(isA<FlutterError>().having((e) => e.message, 'message', contains('not a LooksAtAPoint'))),
+        throwsA(
+          isA<FlutterError>().having(
+            (e) => e.message,
+            'message',
+            allOf(contains('made for Tiny, which is not a LooksAtAPoint'), contains('ask for Tiny')),
+          ),
+        ),
       );
       await finish(tester, game.loaded);
       await tester.pumpWidget(const SizedBox());
@@ -963,6 +969,85 @@ void main() {
       world.update(1 / 60);
       expect(world.input.isPressed(KeyCode.f5), isTrue);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.f5);
+    });
+  });
+
+  group('covered', () {
+    late BuildContext page;
+
+    Widget app({bool pauseWhenCovered = true}) => MaterialApp(
+      home: Builder(
+        builder: (context) {
+          page = context;
+          return Center(child: sized(FynkelView.world(world, pauseWhenCovered: pauseWhenCovered)));
+        },
+      ),
+    );
+
+    Future<void> settle(WidgetTester tester) async {
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+    }
+
+    testWidgets('a dialog or a page over the view pauses the game; closing it goes on', (tester) async {
+      await tester.pumpWidget(app());
+      expect(world.paused, isFalse);
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isFalse);
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (_) => const Text('settings'))));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isFalse);
+    });
+
+    testWidgets('a page over a dialog over the view: the game goes on once both are closed', (tester) async {
+      await tester.pumpWidget(app());
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (_) => const Text('settings'))));
+      await settle(tester);
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isTrue, reason: 'the dialog is still over it');
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isFalse);
+    });
+
+    testWidgets('a game paused before it was covered stays paused', (tester) async {
+      await tester.pumpWidget(app());
+      world.paused = true;
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isTrue);
+    });
+
+    testWidgets('with pauseWhenCovered off, the game runs on under a dialog', (tester) async {
+      await tester.pumpWidget(app(pauseWhenCovered: false));
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isFalse);
+      Navigator.of(page).pop();
+      await settle(tester);
+    });
+
+    testWidgets('a view freed while covered lets the game go on', (tester) async {
+      await tester.pumpWidget(app());
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+      expect(world.paused, isFalse);
     });
   });
 

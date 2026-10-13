@@ -37,7 +37,6 @@ class ArenaGame extends GameObject {
   final score = ValueNotifier(0);
   final wave = ValueNotifier(0);
   final health = ValueNotifier(Player.hearts);
-  final paused = ValueNotifier(false);
   final over = ValueNotifier(false);
 
   late final ArenaCamera camera;
@@ -56,14 +55,6 @@ class ArenaGame extends GameObject {
     round = add(Round(math.Random(seed)));
     camera = add(ArenaCamera(round.player));
     input.layers = LayerMask.except([effects]);
-  }
-
-  /// Stops the game's time and input, or starts them again. Escape and P
-  /// are the app's shortcuts (main.dart), so they work while paused too.
-  void togglePause() {
-    if (over.value) return;
-    paused.value = !paused.value;
-    world.paused = paused.value;
   }
 
   /// A new round, from wave 1.
