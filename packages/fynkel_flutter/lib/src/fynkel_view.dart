@@ -3,7 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
-import 'package:flutter/material.dart' show Theme;
+import 'package:flutter/material.dart' show Material, MaterialType, Theme;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -25,6 +25,7 @@ import 'error_panel.dart';
 import 'fynkel_game.dart';
 import 'input_feed.dart';
 import 'world_listenables.dart' show WorldTheme;
+import 'world_widget.dart' show FrameTicks, WorldWidgetLayer;
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
 /// android/…/FynkelFlutterPlugin.kt).
@@ -238,6 +239,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   World get world => widget.world ?? _rootWorld!;
 
   late final Ticker _ticker = createTicker(_tick)..start();
+  // Moves the world widgets, after each update.
+  final _ticks = FrameTicks();
   int? _lastMicros;
   late final _input = InputFeed(() => world.input);
   FocusNode? _ownFocus;
@@ -410,6 +413,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     WidgetsBinding.instance.removeObserver(this);
     _listen(null);
     _ticker.dispose();
+    _ticks.dispose();
     _ownFocus?.dispose();
     _release();
     // A view still drawing keeps what it last had until it's freed.
@@ -445,6 +449,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     widget.onFrame?.call(dt);
     final world = this.world;
     if (!world.isDisposed) world.update(dt);
+    _ticks.tick();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_noPicture || _width == 0 || _height == 0) return;
@@ -674,6 +679,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       fit: StackFit.passthrough,
       children: [
         game,
+        // On a see-through Material, as FynkelApp's overlay: text has its
+        // style, and buttons have what they paint on.
+        Positioned.fill(
+          child: Material(
+            type: MaterialType.transparency,
+            child: WorldWidgetLayer(world: world, frames: _ticks),
+          ),
+        ),
         if (_gameErrors.isNotEmpty)
           ErrorPanel(errors: List.of(_gameErrors), onDismiss: () => setState(_gameErrors.clear)),
       ],

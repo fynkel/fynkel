@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:arena/arena.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldWidget;
 
 const width = 320.0, height = 200.0;
 
@@ -49,6 +50,7 @@ void main() {
     expect(world.all<Enemy>(), hasLength(1));
     run(1);
     expect(world.all<Enemy>(), hasLength(3));
+    expect(world.all<Enemy>().every((e) => e.has<WorldWidget>()), isTrue, reason: 'each with its health bar');
     final shot = Platform.environment['ARENA_SHOT'];
     if (shot != null) {
       run(1);
@@ -93,6 +95,7 @@ void main() {
     expect(player().dashing, isFalse);
     expect(player().position.z, closeTo(-5, 1e-6));
     expect(enemy.health.isDead, isTrue);
+    expect(enemy.has<WorldWidget>(), isFalse, reason: 'its health bar goes as it dies');
     expect(game.score.value, 1);
     expect(world.all<Sparks>(), hasLength(1));
     run(0.6);

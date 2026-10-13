@@ -6,13 +6,24 @@
 import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/widgets.dart' show Alignment;
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldWidget;
+
+import 'hud.dart' show HealthBar;
 
 /// The layer of what's only for show, the sparks: taps go through it.
 const effects = 1;
 
 /// Half the floor's width: the arena goes from -size to size on x and z.
 const size = 10.0;
+
+/// For measuring: this many enemies come at once in the first wave, and
+/// they don't hurt the player (`--dart-define=ENEMIES=100`). 0 to play.
+const crowd = int.fromEnvironment('ENEMIES');
+
+/// For measuring: false leaves the health bars off (`--dart-define=BARS=false`).
+const bars = bool.fromEnvironment('BARS', defaultValue: true);
 
 /// [point] moved inside the walls, on the floor.
 Vec3 inside(Vec3 point) => Vec3(point.x.clamp(-size + 0.5, size - 0.5), 0, point.z.clamp(-size + 0.5, size - 0.5));
@@ -124,13 +135,13 @@ class Round extends GameObject {
     for (var n = 1; ; n++) {
       game.wave.value = n;
       await wait(1.5);
-      for (var i = 0; i < n + 2; i++) {
+      for (var i = 0; i < (crowd > 0 && n == 1 ? crowd : n + 2); i++) {
         final enemy = add(Enemy(player, at: _edge(), speed: 2 + 0.25 * n, hits: n >= 3 && i.isEven ? 2 : 1));
         on(enemy.health.died, (_) {
           game.score.value++;
           if (_random.nextDouble() < 0.25) add(Heart(player, enemy.position));
         });
-        await wait(0.5);
+        if (crowd == 0) await wait(0.5);
       }
       await waitUntil(() => world.all<Enemy>().isEmpty);
     }
@@ -326,6 +337,13 @@ class Enemy extends GameObject {
     super.onStart();
     scaleTo(Vec3.one * _size, seconds: 0.4, ease: Ease.outBack).then((_) => _ready = true);
     on(health.died, (_) => _die());
+    // Its health over it: a Flutter widget, placed where the camera sees
+    // it (hud.dart).
+    if (bars) {
+      addComponent(
+        WorldWidget((context) => HealthBar(health), offset: Vec3(0, 1.1, 0), alignment: Alignment.bottomCenter),
+      );
+    }
   }
 
   @override
@@ -335,7 +353,7 @@ class Enemy extends GameObject {
     final to = player.position - position;
     final flat = Vec3(to.x, 0, to.z);
     if (flat.length < 0.9) {
-      if (!player.dashing) player.health.damage(1);
+      if (!player.dashing && crowd == 0) player.health.damage(1);
       return;
     }
     position += flat.normalized * (speed * time.delta);
@@ -343,6 +361,7 @@ class Enemy extends GameObject {
   }
 
   void _die() {
+    if (get<WorldWidget>() case final bar?) removeComponent(bar);
     final at = position;
     parent!.add(Sparks(at));
     scaleTo(Vec3.zero, seconds: 0.2, ease: Ease.inBack).then((_) => destroy());

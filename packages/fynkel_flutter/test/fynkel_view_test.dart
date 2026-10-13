@@ -10,6 +10,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, forgetReset;
+import 'package:fynkel_flutter/src/world_widget.dart' show worldWidgetsOf;
 
 /// Whether the engine view at [address] is still alive and answering.
 bool alive(int address) {
@@ -390,6 +391,127 @@ void main() {
       await tester.pump();
       expect(tester.takeException().toString(), contains('no RGBA8 format'));
       expect(find.byType(ErrorWidget), findsOneWidget);
+    });
+  });
+
+  group('world widgets', () {
+    Future<void> frames(WidgetTester tester, [int n = 1]) async {
+      for (var i = 0; i < n; i++) {
+        await tester.pump(const Duration(milliseconds: 16));
+      }
+    }
+
+    /// Where the camera sees [point] in the 200 × 100 view, on the screen.
+    Offset seen(WidgetTester tester, Vec3 point) {
+      final at = world.camera!.worldToScreenPoint(point, width: 200, height: 100)!;
+      return tester.getTopLeft(find.byType(FynkelView)) + Offset(at.x, at.y);
+    }
+
+    const tag = ValueKey('tag');
+
+    testWidgets('a WorldWidget sits where the camera sees its object, follows it, and hides behind the camera', (
+      tester,
+    ) async {
+      final thing = world.add(
+        GameObject(
+          components: [
+            WorldWidget(
+              (_) => const ColoredBox(key: tag, color: Colors.green, child: SizedBox(width: 20, height: 10)),
+              offset: Vec3(0, 0.5, 0),
+              alignment: Alignment.bottomCenter,
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      expect(
+        tester.getBottomLeft(find.byKey(tag)) + const Offset(10, 0),
+        offsetMoreOrLessEquals(seen(tester, Vec3(0, 0.5, 0))),
+      );
+      thing.position = Vec3(1, -0.5, 0);
+      await frames(tester);
+      expect(
+        tester.getBottomLeft(find.byKey(tag)) + const Offset(10, 0),
+        offsetMoreOrLessEquals(seen(tester, Vec3(1, 0, 0))),
+      );
+      thing.position = Vec3(0, 0, 10);
+      await frames(tester);
+      expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'behind the camera');
+      thing.position = Vec3(30, 0, 0);
+      await frames(tester);
+      expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'off the view');
+      thing.position = Vec3.zero;
+      await frames(tester);
+      expect(find.byKey(tag).hitTestable(), findsOneWidget);
+      thing.active = false;
+      await frames(tester);
+      expect(find.byKey(tag), findsNothing, reason: 'its object is inactive');
+      expect(worldWidgetsOf(world), isEmpty);
+      thing.active = true;
+      await frames(tester);
+      expect(find.byKey(tag), findsOneWidget);
+      thing.destroy();
+      await frames(tester);
+      expect(find.byKey(tag), findsNothing);
+      expect(worldWidgetsOf(world), isEmpty);
+    });
+
+    testWidgets('a tap on a world widget reaches it, not the game; beside it, the game', (tester) async {
+      var taps = 0;
+      world.add(
+        GameObject(
+          components: [
+            WorldWidget(
+              (_) => GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onTap: () => taps++,
+                child: const SizedBox(key: tag, width: 40, height: 20),
+              ),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      final on = await tester.startGesture(tester.getCenter(find.byKey(tag)));
+      await frames(tester);
+      expect(world.input.fingers, isEmpty, reason: 'the game has no finger down');
+      await on.up();
+      await frames(tester);
+      expect(taps, 1);
+      final beside = await tester.startGesture(tester.getCenter(find.byKey(tag)) + const Offset(60, 0));
+      await frames(tester);
+      expect(world.input.fingers, hasLength(1));
+      await beside.up();
+      await frames(tester);
+    });
+
+    testWidgets('nearer world widgets are over farther ones, and shrink beyond a distance', (tester) async {
+      final hits = <String>[];
+      Widget box(String name) => GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: () => hits.add(name),
+        child: SizedBox(key: ValueKey(name), width: 40, height: 20),
+      );
+      // Added near first: the order they came in doesn't decide.
+      world.add(GameObject(components: [WorldWidget((_) => box('near'))]));
+      final far = world.add(
+        GameObject(
+          transform: Transform(position: Vec3(0, 0, -4)),
+          components: [WorldWidget((_) => box('far'), shrinkBeyond: 4)],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      await tester.tapAt(seen(tester, Vec3.zero));
+      expect(hits, ['near']);
+      expect(tester.getSize(find.byKey(const ValueKey('near'))), const Size(40, 20));
+      // 8 from the camera, shrunk beyond 4: half as big.
+      final rect = tester.getRect(find.byKey(const ValueKey('far')));
+      expect(rect.width, moreOrLessEquals(20));
+      expect(rect.height, moreOrLessEquals(10));
+      expect(rect.center, offsetMoreOrLessEquals(seen(tester, far.position)));
     });
   });
 

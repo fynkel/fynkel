@@ -38,6 +38,7 @@ import 'package:lab/scenes/riding_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
 import 'package:lab/scenes/theme_basics.dart';
+import 'package:lab/scenes/world_widgets_basics.dart';
 
 /// The lab's assets, from its folder, as the app has them.
 Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
@@ -245,6 +246,34 @@ void main() {
     expect(scene.floor.color, light.outlineVariant.toFynkel());
     expect(scene.cubes[2].color, light.tertiary.toFynkel());
     expect(scene.readout.value, startsWith('light'));
+  });
+
+  test('Widgets in the world: the basics: every cube has its tag; hidden, its tag goes; a click pops a +1', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(WorldWidgetsBasicsScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    expect(scene.cubes.every((c) => c.has<WorldWidget>()), isTrue);
+    final [hide] = scene.controls.cast<Toggle>();
+    hide.onChanged(true);
+    world.update(1 / 60);
+    expect(scene.cubes[0].get<WorldWidget>()!.enabled, isTrue, reason: 'on, but its object is inactive');
+    expect(scene.cubes[0].activeInHierarchy, isFalse);
+    hide.onChanged(false);
+    world.input.simulate.resize(400, 300);
+    world.update(1 / 60);
+    final on = world.camera!.worldToScreenPoint(scene.cubes[1].position)!;
+    world.input.simulate
+      ..fingerDown(1, on.x, on.y)
+      ..fingerUp(1, on.x, on.y);
+    world.update(1 / 60);
+    final pop = world.all<Pop>().single;
+    expect(pop.has<WorldWidget>(), isTrue);
+    for (var i = 0; i < 60; i++) {
+      world.update(1 / 60);
+    }
+    expect(pop.isDestroyed, isTrue, reason: 'risen, and gone');
   });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
