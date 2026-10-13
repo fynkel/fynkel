@@ -4,7 +4,7 @@
 // to their objects. lib/measured.dart runs the same for the tool, with the
 // step's timings.
 //
-//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=0]
+//   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=false]
 //     [--dart-define=TUMBLE_THREAD=1|2] [--dart-define=TUMBLE_RAYS=10]
 //
 // With --dart-define=TUMBLE_RIGIDBODIES=true it runs lib/rigid.dart's RigidTumble.
@@ -27,7 +27,7 @@ const rigidbodies = bool.fromEnvironment('TUMBLE_RIGIDBODIES');
 
 const cubeCount = int.fromEnvironment('TUMBLE_CUBES', defaultValue: 1000);
 
-/// `--dart-define=TUMBLE_PHYSICS=0` leaves the cubes where they're dropped:
+/// `--dart-define=TUMBLE_PHYSICS=false` leaves the cubes where they're dropped:
 /// the same scene without the physics, to tell its cost from drawing's.
 const stepping = bool.fromEnvironment('TUMBLE_PHYSICS', defaultValue: true);
 

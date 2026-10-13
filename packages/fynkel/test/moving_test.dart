@@ -128,12 +128,38 @@ void main() {
       expectVec(o.position, const Vec3(1, 0, -6), 1e-6);
     });
 
-    test('worldTransform is kept until something moves', () {
+    test('worldTransform is kept until it or a parent moves', () {
       final child = parent().add(GameObject(transform: Transform(position: const Vec3(0, 0, -1))));
       final a = child.worldTransform;
       expect(identical(child.worldTransform, a), isTrue);
       child.parent!.position = Vec3.zero;
       expectVec(child.worldTransform.position, const Vec3(-2, 0, 0));
+    });
+
+    test('one object moving leaves the others\' worldTransform as it was', () {
+      // Stage 6 step 6, PR 15: with one count for the whole world, 9,000
+      // parts bobbing worked out every part's parents again at each move,
+      // 11 MB of Dart a frame.
+      final p = parent();
+      final a = p.add(GameObject(transform: Transform(position: const Vec3(0, 0, -1))));
+      final b = p.add(GameObject());
+      final kept = a.worldTransform;
+      for (var i = 0; i < 3; i++) {
+        b.position = Vec3(i.toDouble(), 0, 0);
+        b.rotate(Vec3.up, 0.1);
+      }
+      expect(identical(a.worldTransform, kept), isTrue);
+      // A world position set reads back as it was set, and is where the
+      // parent puts the local one.
+      a.position = const Vec3(5, 1, 2);
+      final known = a.worldTransform;
+      expect(a.position, const Vec3(5, 1, 2));
+      expect(identical(a.worldTransform, known), isTrue);
+      expectVec(p.transformPoint(a.localPosition), const Vec3(5, 1, 2), 1e-6);
+      expect(a.rotation.closeTo(kept.rotation), isTrue, reason: 'turned as it was');
+      // Its parent moving moves it.
+      p.position = p.position + Vec3.up;
+      expectVec(a.position, const Vec3(5, 2, 2), 1e-6);
     });
 
     test('forward, right and up are its -Z, +X and +Y in the world', () {

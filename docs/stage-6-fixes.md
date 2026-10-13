@@ -29,8 +29,8 @@ A PR's line gets its number when it opens, and **done** when it's merged.
 | 11 | #79, **done**: **Look, physics and motion**: a per-object tint and `Material.copy`; gravity wakes bodies, `wakeUp` before the world does nothing, errors name the real reason; moving platforms; `Follow(space:)`; B's renames and small fixes; `FynkelGame.of`, `FynkelView` split | F12, F14, F15, F18, F20, F22, B |
 | 12 | #80 and #81, **done**: 12b (the C base, the duplicated loops, the release profile) and 12a (`extend.dart` version 2): **Seams**: `extend.dart` version 2; one base for the two C interfaces; the duplicated loops; a release profile | R10, R11, R17, R18 |
 | 13 | #82, **done**: **Tests and CI**: the alloc-test flake (the counting moved to an isolate of its own; what it then found fixed: lists that gave their storage back, a double per physics step); a soak test, decoder fuzzing (the gltf crate's panics made errors), Miri (all clean); tumble run in CI | R20, R21 |
-| 14 | **Docs**: every public member documented and the lint on; one error type for one mistake; plumbing out of the public API; the guide's recipes and §20 | C, F10, F16, F17, F19, F23, F24, F26, F27, F28, F31, F34, F35 |
-| 15 | **Measured again**: the step 5 checks after 7 and 8; a Note10+ profile with Dart symbols; the Mac's GPU memory; Android performance hints | S |
+| 14 | #83, **done**: **Docs**: every public member documented and the lint on; one error type for one mistake; plumbing out of the public API; the guide's recipes and §20 | C, F10, F16, F17, F19, F23, F24, F26, F27, F28, F31, F34, F35 |
+| 15 | #88, **done**: **Measured again**: the step 5 checks after 7 and 8; a Note10+ profile with Dart symbols; the Mac's GPU memory; Android performance hints | S |
 
 **Left for stage 7**, as the plans say: themes and colours shared with the
 game (F6), a widget at a world point (F33), the app's pause (R10's part),

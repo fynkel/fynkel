@@ -2,9 +2,9 @@
 // each cube a BoxCollider and a Rigidbody, as a game would make them,
 // where lib/main.dart's Tumble drives the raw world itself.
 //
-//   flutter run --dart-define=TUMBLE_RIGIDBODIES=1 --dart-define=TUMBLE_CUBES=500
-//     [--dart-define=TUMBLE_THREAD=0] [--dart-define=TUMBLE_INTERPOLATE=1]
-//     [--dart-define=TUMBLE_RAYS=10] [--dart-define=TUMBLE_LISTEN=1]
+//   flutter run --dart-define=TUMBLE_RIGIDBODIES=true --dart-define=TUMBLE_CUBES=500
+//     [--dart-define=TUMBLE_THREAD=0] [--dart-define=TUMBLE_INTERPOLATE=true]
+//     [--dart-define=TUMBLE_RAYS=10] [--dart-define=TUMBLE_LISTEN=true]
 
 import 'dart:math' as math;
 
@@ -13,11 +13,11 @@ import 'package:fynkel_physics/fynkel_physics.dart';
 
 import 'main.dart' show cubeCount, rayCount, size, threadMode;
 
-/// `--dart-define=TUMBLE_INTERPOLATE=1` draws each cube between its last
+/// `--dart-define=TUMBLE_INTERPOLATE=true` draws each cube between its last
 /// two steps.
 const interpolated = bool.fromEnvironment('TUMBLE_INTERPOLATE');
 
-/// `--dart-define=TUMBLE_LISTEN=1` gives each cube a behaviour with
+/// `--dart-define=TUMBLE_LISTEN=true` gives each cube a behaviour with
 /// collision callbacks (stage 5 step 5), so every contact it has is told.
 const listening = bool.fromEnvironment('TUMBLE_LISTEN');
 

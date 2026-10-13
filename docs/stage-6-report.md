@@ -1,8 +1,7 @@
 # Stage 6 report: the review
 
-Step 8 of [the stage 6 plan](stage-6.md). Steps 1 to 7 are merged; step
-6's last fix, PR 15 (measured again), is still running and adds its
-numbers here when it lands.
+Step 8 of [the stage 6 plan](stage-6.md). Steps 1 to 7 are merged, with
+step 6's last fix, PR 15 (measured again).
 
 ## The result
 
@@ -31,7 +30,7 @@ brief".
 | 3 | The architecture: 21 items (R1–R21), and an audio package sketched | [stage-6-architecture.md](stage-6-architecture.md) |
 | 4 | Outpost, a 41-file tower defense, written the same way | [findings](stage-6-findings.md) G |
 | 5 | 10,000 objects, 30 minutes on each phone, errors everywhere, hot reload under physics | [stage-6-scale.md](stage-6-scale.md) |
-| 6 | The fixes, 15 PRs (#69–#83, and PR 15) | [stage-6-fixes.md](stage-6-fixes.md) |
+| 6 | The fixes, 15 PRs (#69–#83 and #88) | [stage-6-fixes.md](stage-6-fixes.md) |
 | 7 | Two new agents, briefs 1 and 2 again | [findings](stage-6-findings.md) H |
 
 ## Before and after
@@ -146,14 +145,36 @@ It starts with:
   finds the crates at `../../`), or prebuilt binaries; a licence and the
   Rust dependencies' notices; versions and a changelog; Android builds
   from a non-Mac host; a CI runner that isn't this Mac.
-- **Speed on the Note10+ at 10,000 objects** (34.9 fps, the UI thread):
-  PR 15 profiles it.
+- **Speed on the Note10+ at 10,000 objects**: 27–36 fps after PR 15, its
+  GPU the limit. The UI thread's next places to look are the loop that
+  calls lifecycle methods objects don't use, and the world-pointer
+  getters. Step 5's dense sphere at 10,000 swings between 17 and 36 fps
+  on its Mali GPU: for a GPU profiler.
 
 ## Measured again
 
-PR 15 fills this in: the step 5 checks after PRs 7 and 8, a Note10+
-profile with Dart symbols, the Mac's GPU memory per object, Android's
-performance hints.
+PR 15 ran the step 5 checks again after the fixes. In full:
+[stage-6-scale.md, step 6](stage-6-scale.md#step-6-measured-again).
+
+| 10,000 objects | Step 5 | After stage 6 |
+| --- | --- | --- |
+| Mac | 120 fps | 120 fps |
+| iPhone | 44 fps | **120 fps** |
+| Note10+ | 34.9 fps | 27–36 fps shown, the game updating 52–56 times a second |
+
+- It found two slowdowns the fixes had brought in, and fixed them. Each
+  object's world position was worked out again whenever anything in the
+  world moved (11 MB of Dart garbage a frame with 9,000 parts bobbing;
+  now 1.15 MB). And on Android the game's update waited for the GPU,
+  because Flutter waits for each frame on the thread Dart runs on; our
+  render thread now waits first. That took the Note10+ from 12.7 fps to
+  27–36 at 10,000 objects, and from 23 to 54.9 at 1,000.
+- The Note10+'s UI thread, profiled with Dart names: half of it is
+  `World.update`, mostly the loop calling each object's lifecycle
+  methods; a third is the view's frame, mostly the engine's extract.
+- The Mac's memory per object isn't the GPU's part, which stays flat.
+  What grows follows what is drawn, not time: no leak.
+- Android's performance hints aren't supported on the Note10+.
 
 ## Read
 
@@ -162,6 +183,6 @@ Step 8 is done when you have read this.
 - [x] Read
 - [x] The review's bugs: one more PR in stage 6 ([#87](https://github.com/mooumari/fynkel/pull/87):
   1–8, 10, finding 36, the transient targets; 9 and the extract to stage 7)
-- [ ] PR 15's numbers in
+- [x] PR 15's numbers in
 
 Then **stage 6 is done**.

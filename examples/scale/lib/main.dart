@@ -12,8 +12,8 @@
 //   pool does.
 //
 // Its settings are `--dart-define`s: OBJECTS (10,000); CHURN, how many
-// groups a second are destroyed and made anew (0), for the long runs; and
-// ONLY, one behaviour for every kind.
+// groups a second are destroyed and made anew (0), for the long runs; ONLY,
+// one behaviour for every kind; and SHAPE and AWAY, below.
 
 import 'dart:math' as math;
 
@@ -30,13 +30,14 @@ const _churn = int.fromEnvironment('CHURN', defaultValue: 0);
 // to time each alone.
 const _only = String.fromEnvironment('ONLY');
 
-// SHAPE=cube draws every kind as a cube, to see what the spheres cost; SHAPE=low
-// draws the spheres with 720 triangles (as Unity's 768) in place of the
-// built-in one's 2,208.
+// SHAPE=cube draws every kind as a cube, to see what the spheres cost;
+// SHAPE=low draws the spheres with a 720-triangle sphere made in Dart (as the
+// built-in one is since stage 6 step 6), SHAPE=dense with the 2,208 triangles
+// the built-in one had in step 5.
 const _shape = String.fromEnvironment('SHAPE');
 
-// AWAY=true turns the camera to look away: everything is still drawn (there is
-// no culling), but no pixel is filled.
+// AWAY=true turns the camera to look away: everything is culled, so the frame
+// is the update and the copy to the renderer alone.
 const _away = bool.fromEnvironment('AWAY');
 
 /// How many kinds there are, and how a kind behaves.
@@ -52,6 +53,8 @@ class Kind {
           ? Mesh.cube()
           : _shape == 'low'
           ? _lowSphere
+          : _shape == 'dense'
+          ? _sphere(48, 24)
           : Mesh.sphere(),
       material = Material(color: _hue(index / kinds));
 
@@ -72,8 +75,12 @@ class Kind {
 }
 
 /// A sphere of radius 0.5 with 24 segments and 16 rings.
-final Mesh _lowSphere = () {
-  const segments = 24, rings = 16;
+final Mesh _lowSphere = _sphere(24, 16);
+
+final _spheres = <int, Mesh>{};
+
+/// A sphere of radius 0.5, made once for each size.
+Mesh _sphere(int segments, int rings) => _spheres[segments * 1000 + rings] ??= () {
   final positions = <Vec3>[];
   for (var r = 0; r <= rings; r++) {
     final v = r / rings * math.pi;
