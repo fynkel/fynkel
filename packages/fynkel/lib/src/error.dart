@@ -53,9 +53,9 @@ enum FynkelStatus {
   /// The world has no such texture: it was disposed, or never added.
   noTexture,
 
-  /// The view's GPU device was lost, or the GPU reported an error, and the
-  /// view stopped drawing. A new view gets a new device and uploads
-  /// everything again; `FynkelView` makes one by itself.
+  /// The GPU device was lost, or the GPU reported an error, and the view
+  /// stopped drawing, with every other view (they share the device). A new
+  /// view gets a new device and uploads everything again; `FynkelView` makes one by itself.
   deviceLost,
 }
 

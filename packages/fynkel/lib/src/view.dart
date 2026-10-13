@@ -41,12 +41,13 @@ final class ViewStats {
   /// waiting.
   final int dropped;
 
-  /// GPU memory the view's textures hold, in bytes: every mipmap level, as
-  /// stored. As of the last frame drawn.
+  /// GPU memory the world's textures hold, in bytes: every mipmap level, as
+  /// stored. Shared by all the world's views, so not added up across them.
+  /// As of the last frame drawn.
   final int textureBytes;
 
-  /// GPU memory the view's meshes hold, in bytes. As of the last frame
-  /// drawn.
+  /// GPU memory the world's meshes hold, in bytes. Shared by all the
+  /// world's views, like [textureBytes]. As of the last frame drawn.
   final int meshBytes;
 
   /// The counts since [earlier]. The memory is the newer one's.
@@ -67,8 +68,10 @@ final class ViewStats {
       'textureBytes=$textureBytes meshBytes=$meshBytes';
 }
 
-/// A view of a [World]: a render worker on its own thread and GPU device
-/// that draws the world each time [frame] is called. [HeadlessView] reads
+/// A view of a [World]: a render worker on its own thread that draws the
+/// world each time [frame] is called. Every view shares one GPU device, and
+/// a world's views share its meshes and textures, so a second view of a
+/// world costs only its own frames. [HeadlessView] reads
 /// the pixels back; [AppleView] and [AndroidSurfaceView] draw for Flutter to
 /// show.
 abstract base class WorldView implements Finalizable {
@@ -167,7 +170,7 @@ abstract base class WorldView implements Finalizable {
 /// `FynkelView` does that).
 final class HeadlessView extends WorldView {
   /// A view of [world] drawing [width] × [height] pixel frames, with its
-  /// own GPU device and render worker. Throws an [ArgumentError] for a
+  /// own render worker. Throws an [ArgumentError] for a
   /// size of 0, and a [FynkelException] when there's no GPU or the worker
   /// won't start. Dispose of it when done.
   HeadlessView(World world, {required int width, required int height})

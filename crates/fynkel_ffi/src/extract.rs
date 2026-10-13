@@ -16,7 +16,8 @@
 //! - The world's debug lines are drawn over the scene as they are.
 //! - A texture is uploaded once for each colour space a material reads it
 //!   in, the first frame a material uses it that way, and freed when the
-//!   world removes it.
+//!   world removes it. Once for the world, however many views it has: what
+//!   the GPU has is the world's [`Ledger`].
 //! - Only shown objects count, for all of the above: an inactive object and
 //!   everything below it are left out (stage 3 plan §3.3).
 //! - Everything is placed by its world transform: its own after its
@@ -47,13 +48,28 @@ pub(crate) enum ResourceOp {
     RemoveTexture(TextureKey),
 }
 
-/// One view's extract. It remembers which meshes and textures the view's
-/// renderer has, so each is uploaded once and freed when the world removes
-/// it.
+/// Which meshes and textures the GPU has, or is about to: those uploaded,
+/// so each goes up once and is freed when the world removes it.
+#[derive(Debug, Default)]
+pub(crate) struct Uploaded {
+    meshes: HashSet<MeshId>,
+    textures: HashSet<(TextureId, ColorSpace)>,
+}
+
+/// A world's [`Uploaded`], shared by its views, and the changes still to
+/// be made on the GPU, oldest first.
+#[derive(Debug, Default)]
+pub(crate) struct Ledger {
+    pub(crate) uploaded: Uploaded,
+    pub(crate) ops: Vec<ResourceOp>,
+}
+
+/// One view's extract.
 #[derive(Debug, Default)]
 pub(crate) struct Extract {
-    uploaded: HashSet<MeshId>,
-    uploaded_textures: HashSet<(TextureId, ColorSpace)>,
+    /// What its own renderer has, when it shares nothing ([`Extract::run`]).
+    #[cfg(test)]
+    own: Uploaded,
     matrices: WorldMatrices,
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
@@ -82,12 +98,28 @@ fn texture_keys(m: &Material) -> MaterialTextures {
 
 impl Extract {
     /// Fills `scene` from `world` (emptying it first) and adds the mesh
-    /// changes since the last run to `ops`. Allocates nothing once `scene`
-    /// and `ops` have grown to size and the meshes are unchanged.
+    /// changes since the last run to `ops`, for a renderer of its own.
+    /// Allocates nothing once `scene` and `ops` have grown to size and the
+    /// meshes are unchanged.
+    #[cfg(test)]
     pub(crate) fn run(&mut self, world: &World, scene: &mut RenderScene, ops: &mut Vec<ResourceOp>) {
+        let mut own = std::mem::take(&mut self.own);
+        self.fill(world, scene, &mut own, ops);
+        self.own = own;
+    }
+
+    /// [`Extract::run`] for a view that shares its world's meshes and
+    /// textures: the changes go to the world's `ledger`, once for all its
+    /// views.
+    pub(crate) fn run_shared(&mut self, world: &World, scene: &mut RenderScene, ledger: &mut Ledger) {
+        let Ledger { uploaded, ops } = ledger;
+        self.fill(world, scene, uploaded, ops);
+    }
+
+    fn fill(&mut self, world: &World, scene: &mut RenderScene, uploaded: &mut Uploaded, ops: &mut Vec<ResourceOp>) {
         scene.clear();
 
-        self.uploaded.retain(|&id| {
+        uploaded.meshes.retain(|&id| {
             let kept = world.mesh(id).is_ok();
             if !kept {
                 ops.push(ResourceOp::RemoveMesh(mesh_key(id)));
@@ -95,13 +127,13 @@ impl Extract {
             kept
         });
         for (id, mesh) in world.meshes() {
-            if self.uploaded.insert(id) {
+            if uploaded.meshes.insert(id) {
                 ops.push(ResourceOp::UploadMesh(mesh_key(id), Arc::clone(mesh)));
             }
         }
 
         // Removals first, so a key is never freed after its new upload.
-        self.uploaded_textures.retain(|&(id, _)| {
+        uploaded.textures.retain(|&(id, _)| {
             let kept = world.texture(id).is_ok();
             if !kept {
                 ops.push(ResourceOp::RemoveTexture(texture_key(id)));
@@ -116,7 +148,7 @@ impl Extract {
             for (key, space) in texture_keys(material).slots() {
                 let Some(key) = key else { continue };
                 let id = TextureId::from_raw(key.0).expect("made from a TextureId");
-                if self.uploaded_textures.insert((id, space)) {
+                if uploaded.textures.insert((id, space)) {
                     let image = world.texture(id).expect("the world refuses a material with a missing texture");
                     ops.push(ResourceOp::UploadTexture(key, space, Arc::clone(image)));
                 }

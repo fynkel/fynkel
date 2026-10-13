@@ -11,18 +11,20 @@
 //! behaviour; `package:fynkel` makes that impossible from Dart.
 
 use std::ffi::{c_char, c_void};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard, Weak};
 use std::time::Duration;
 
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
 use fynkel_render::{Gpu, Renderer};
+
+use crate::device::{Device, WorldGpu};
 use fynkel_world::{
     Camera, Color, Component, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
     MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId, Transform, Vec2, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
-use crate::extract::{Extract, ResourceOp};
+use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
@@ -386,6 +388,10 @@ pub struct FyWorld {
     /// Kept between `fy_raycast` calls so they don't allocate. Locked
     /// only while `world` is.
     raycaster: Mutex<Raycaster>,
+    /// Its meshes and textures on the GPU, shared by its views: on the
+    /// device its views draw on, made by the first. Held by the views, so
+    /// they're freed with the last one, as a view's own were.
+    gpu: Mutex<Weak<WorldGpu>>,
 }
 
 impl FyWorld {
@@ -400,11 +406,13 @@ impl FyWorld {
     }
 }
 
-/// A view: a world drawn into a target by its own render worker. Opaque to
-/// C.
+/// A view: a world drawn into a target by its own render worker, on the
+/// process's GPU device, with the meshes and textures the world's other
+/// views have too. Opaque to C.
 #[derive(Debug)]
 pub struct FyView {
     world: Arc<FyWorld>,
+    gpu: Arc<WorldGpu>,
     /// The frame clock's side: the extract and the frame numbers.
     clock: Mutex<Clock>,
     worker: Worker,
@@ -436,7 +444,6 @@ impl FyView {
 struct Clock {
     extract: Extract,
     last_number: u64,
-    ops: Vec<ResourceOp>,
 }
 
 /// `p` as a reference, or an error when it's null.
@@ -509,7 +516,7 @@ pub extern "C" fn fy_last_error() -> *const c_char {
 /// A new, empty world. Free it with `fy_world_free`.
 #[unsafe(no_mangle)]
 pub extern "C" fn fy_world_new() -> *mut FyWorld {
-    let world = FyWorld { world: Mutex::new(World::new()), raycaster: Mutex::default() };
+    let world = FyWorld { world: Mutex::new(World::new()), raycaster: Mutex::default(), gpu: Mutex::default() };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
 
@@ -1948,8 +1955,9 @@ pub unsafe extern "C" fn fy_model_spawn(
 
 // --- Views -------------------------------------------------------------------
 
-/// Starts a view of the world behind `world`: a GPU device, the target
-/// `make` builds on it, a renderer and the render worker.
+/// Starts a view of the world behind `world`: the target `make` builds on
+/// the process's GPU device, a renderer sharing the world's meshes and
+/// textures, and the render worker.
 ///
 /// # Safety
 ///
@@ -1976,12 +1984,25 @@ unsafe fn new_view<T: fynkel_present::Target + 'static>(
     if width == 0 || height == 0 {
         return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
     }
-    let gpu = Gpu::headless().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
-    let (target, output) = make(&gpu, width, height)?;
-    let renderer = Renderer::new(&gpu, fynkel_present::Target::format(&target));
-    let worker = Worker::start(gpu, renderer, target)
+    let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+    let gpu = {
+        let mut held = world.gpu.lock().map_err(|_| Error::new(FyStatus::Poisoned, "a view of this world panicked"))?;
+        match held.upgrade() {
+            Some(gpu) if Arc::ptr_eq(&gpu.device, &device) => gpu,
+            // No view now, or the views were on a device that was lost:
+            // what's uploaded starts over.
+            _ => {
+                let gpu = WorldGpu::new(&device);
+                *held = Arc::downgrade(&gpu);
+                gpu
+            }
+        }
+    };
+    let (target, output) = make(&device.gpu, width, height)?;
+    let renderer = Renderer::sharing(gpu.assets.clone(), fynkel_present::Target::format(&target));
+    let worker = Worker::start_for(gpu.clone(), renderer, target)
         .map_err(|e| Error::new(FyStatus::WorkerFailed, format!("couldn't start the render worker: {e}")))?;
-    let view = FyView { world, clock: Mutex::default(), worker, output };
+    let view = FyView { world, gpu, clock: Mutex::default(), worker, output };
     // SAFETY: checked non-null above; the caller promises it's writable.
     unsafe { out.write(Box::into_raw(Box::new(view))) };
     Ok(())
@@ -2122,9 +2143,9 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let mut clock = view.clock.lock().map_err(|_| Error::new(FyStatus::Poisoned, "the view's clock panicked"))?;
         let clock = &mut *clock;
         let mut scene = view.worker.scene();
-        clock.extract.run(&*view.world.lock()?, &mut scene, &mut clock.ops);
+        clock.extract.run_shared(&*view.world.lock()?, &mut scene, &mut view.gpu.ledger());
         let number = clock.last_number + 1;
-        view.worker.post(number, scene, &mut clock.ops)?;
+        view.worker.post(number, scene, &mut Vec::new())?;
         clock.last_number = number;
         // SAFETY: checked non-null above; the caller promises it's writable.
         unsafe { out_number.write(number) };
@@ -2201,8 +2222,9 @@ pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height:
     })
 }
 
-/// For tests: destroys the view's GPU device, as a driver reset would.
-/// Soon after, `fy_view_frame` returns `FY_STATUS_DEVICE_LOST`.
+/// For tests: destroys the GPU device, as a driver reset would. Every view
+/// shares it, so soon after, `fy_view_frame` returns
+/// `FY_STATUS_DEVICE_LOST` for each; a view made after has a new one.
 ///
 /// # Safety
 ///
@@ -2235,10 +2257,11 @@ pub struct FyViewStats {
     /// Apple: frames finished but never shown, because newer ones were
     /// waiting. 0 for other views (Android's queue is the OS's).
     pub dropped: u64,
-    /// GPU memory the view's textures hold, in bytes: every mip level, as
-    /// stored. Up to date as of the last frame drawn.
+    /// GPU memory the world's textures hold, in bytes: every mip level, as
+    /// stored, once however many views the world has. Up to date as of the
+    /// view's last frame drawn.
     pub texture_bytes: u64,
-    /// GPU memory the view's meshes hold, in bytes.
+    /// GPU memory the world's meshes hold, in bytes.
     pub mesh_bytes: u64,
 }
 

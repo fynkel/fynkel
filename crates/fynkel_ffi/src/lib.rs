@@ -7,6 +7,7 @@
 #![allow(unsafe_code)]
 
 mod abi;
+mod device;
 mod error;
 mod extract;
 #[cfg(target_os = "android")]
