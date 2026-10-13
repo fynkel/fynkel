@@ -125,10 +125,11 @@ impl Extract {
 
         self.matrices.update(world);
         let matrices = &self.matrices;
-        // Where a shown object is and which way it faces, scale left out.
+        // Where a shown object is and which way it faces, scale left out:
+        // the rotation as Dart's, which a parent scaled to 0 doesn't spoil.
         let placed = |id: ObjectId, t: &Transform| -> Option<(Quat, Vec3)> {
-            let (_, rotation, position) = matrices.world(world, id, t)?.to_scale_rotation_translation();
-            Some((rotation.normalize(), position))
+            let position = matrices.world(world, id, t)?.w_axis.truncate();
+            Some((world.world_transform(id).ok()?.rotation, position))
         };
 
         let mut camera: Option<(ObjectId, Camera, Quat, Vec3)> = None;

@@ -164,4 +164,116 @@ void main() {
     engine.agrees(parts);
     expect(wheel.activeInHierarchy, isTrue);
   });
+
+  group('the hierarchy while objects go', () {
+    test("an object being destroyed can't leave its parent in onDestroy: it goes with it", () async {
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      final player = world.add(_LetsGoOfWeapon());
+      final weapon = player.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())]));
+      player.destroy();
+      world.update(1 / 60);
+      await pumpEventQueue();
+      expect(errors.single.error, isA<StateError>());
+      expect(weapon.isDestroyed, isTrue);
+      // The engine let it go too: a ray through where it was finds nothing.
+      expect(world.raycast(Ray(Vec3(0, 0, 5), Vec3(0, 0, -1))), isNull);
+    });
+
+    test("nothing can be put under an object being destroyed, in onDestroy: it stays where it was", () async {
+      final engine = Engine(world);
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      final grabber = world.add(GameObject());
+      final dying = world.add(_Grabs(grabber));
+      dying.destroy();
+      world.update(1 / 60);
+      await pumpEventQueue();
+      expect(errors.single.error, isA<StateError>());
+      expect(grabber.isDestroyed, isFalse);
+      expect(grabber.isAlive, isTrue);
+      grabber.position = Vec3(1, 0, 0);
+      world.update(1 / 60);
+      engine.agrees([grabber]);
+    });
+
+    test('a child that moves itself out as it hides leaves its next sibling hidden too', () {
+      final parent = world.add(GameObject());
+      final leaves = parent.add(_LeavesOnDisable());
+      final stays = parent.add(_CountsUpdates());
+      world.update(1 / 60);
+      parent.active = false;
+      expect(leaves.parent, isNull);
+      expect(stays.activeInHierarchy, isFalse);
+      expect(stays.disabled, 1);
+      final before = stays.updates;
+      world.update(1 / 60);
+      expect(stays.updates, before);
+    });
+
+    test("a parent scaled to 0 on one side still gives its children a rotation, Dart's", () {
+      final parent = world.add(
+        GameObject(
+          transform: Transform(rotation: Quat.axisAngle(Vec3.up, 0.5), scale: Vec3(0, 1, 1)),
+        ),
+      );
+      final child = parent.add(
+        GameObject(
+          transform: Transform(position: Vec3(1, 2, 3), rotation: Quat.axisAngle(Vec3.right, 0.3)),
+        ),
+      );
+      world.update(1 / 60);
+      final theirs = Engine(world).worldOf(child);
+      expect(theirs.rotation.closeTo(child.worldTransform.rotation, 1e-4), isTrue, reason: '${theirs.rotation}');
+      expect(theirs.position.closeTo(child.worldTransform.position, 1e-4), isTrue, reason: '${theirs.position}');
+      expect(theirs.scale.closeTo(child.worldTransform.scale, 1e-4), isTrue, reason: '${theirs.scale}');
+    });
+  });
+}
+
+class _LetsGoOfWeapon extends GameObject {
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    children.single.parent = null;
+  }
+}
+
+class _Grabs extends GameObject {
+  _Grabs(this.other);
+  final GameObject other;
+
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    other.parent = this;
+  }
+}
+
+class _LeavesOnDisable extends GameObject {
+  var _left = false;
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    if (_left) return;
+    _left = true;
+    parent = null;
+  }
+}
+
+class _CountsUpdates extends GameObject {
+  var updates = 0, disabled = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    updates++;
+  }
+
+  @override
+  void onDisable() {
+    super.onDisable();
+    disabled++;
+  }
 }

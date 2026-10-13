@@ -187,4 +187,13 @@ void main() {
     other.dispose();
     expect(other.isDisposed, isTrue);
   });
+
+  test("drawing in a disposed world throws, and doesn't write into freed memory", () {
+    final other = World();
+    other.debug.line(Vec3.zero, Vec3.up);
+    other.update(1 / 60);
+    other.dispose();
+    expect(() => other.debug.line(Vec3.zero, Vec3.up), throwsStateError);
+    expect(other.debug.count, 0);
+  });
 }

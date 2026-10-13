@@ -207,6 +207,11 @@ void main() {
     frames(world, 10);
     expect(hanging.position.y, closeTo(3 - 9.81 / 100, 0.01));
     expect(spring.currentForce, near(const Vec3(0, 9.81, 0), 0.5));
+    expect(() => spring.spring = -1, throwsArgumentError);
+    expect(() => spring.breakForce = 0, throwsArgumentError);
+    expect((spring.spring, spring.breakForce), (100, double.infinity), reason: 'a value refused changes nothing');
+    frames(world, 1);
+    expect(spring.isJoined, isTrue);
   });
 
   test("a spring joint doesn't pull within its distances", () {

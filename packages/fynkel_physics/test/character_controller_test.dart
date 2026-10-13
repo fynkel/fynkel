@@ -132,6 +132,13 @@ void main() {
     expect(controller.velocity.y, closeTo(0, 0.5), reason: 'on the ground, it doesn\'t fall');
   });
 
+  test('it says it stands on the first collider added, too', () {
+    final world = newWorld();
+    final controller = player(world).get<CharacterController>()!;
+    run(world, 0.5);
+    expect(controller.ground?.gameObject.name, 'floor');
+  });
+
   test('simpleMove walks it along the ground and lets it fall off a ledge', () {
     final world = newWorld();
     // A ledge 2 m up, ending at x = 2.

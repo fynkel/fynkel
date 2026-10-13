@@ -69,10 +69,7 @@ final class CharacterController extends Collider {
   /// object's scale multiplies it, as a [CapsuleCollider]'s. Unity's 2
   /// unless given; more than 0, or it throws an [ArgumentError].
   double get height => _height;
-  set height(double value) {
-    _height = value;
-    _changed();
-  }
+  set height(double value) => _setOrUndo(_height, value, (v) => _height = v, _changed);
 
   double _height;
 
@@ -80,50 +77,35 @@ final class CharacterController extends Collider {
   /// multiplies it, as a [CapsuleCollider]'s. 0.5 unless given; more than
   /// 0, or it throws an [ArgumentError].
   double get radius => _radius;
-  set radius(double value) {
-    _radius = value;
-    _changed();
-  }
+  set radius(double value) => _setOrUndo(_radius, value, (v) => _radius = v, _changed);
 
   double _radius;
 
   /// The steepest slope it walks up, in radians from flat (45.deg unless
   /// given).
   double get slopeLimit => _slopeLimit;
-  set slopeLimit(double value) {
-    _slopeLimit = value;
-    _checkMoving();
-  }
+  set slopeLimit(double value) => _setOrUndo(_slopeLimit, value, (v) => _slopeLimit = v, _checkMoving);
 
   double _slopeLimit;
 
   /// The highest step it walks up, in metres (0.3 unless given). It also
   /// keeps to the ground going down one this high.
   double get stepOffset => _stepOffset;
-  set stepOffset(double value) {
-    _stepOffset = value;
-    _checkMoving();
-  }
+  set stepOffset(double value) => _setOrUndo(_stepOffset, value, (v) => _stepOffset = v, _checkMoving);
 
   double _stepOffset;
 
   /// The gap it keeps from what it meets, in metres (0.08 unless given):
   /// big enough not to get stuck, small enough not to be seen.
   double get skinWidth => _skinWidth;
-  set skinWidth(double value) {
-    _skinWidth = value;
-    _checkMoving();
-  }
+  set skinWidth(double value) => _setOrUndo(_skinWidth, value, (v) => _skinWidth = v, _checkMoving);
 
   double _skinWidth;
 
   /// How heavy it is, in kilograms, when it pushes the rigidbodies it walks
   /// into (70 unless given): 0 pushes none, and it stops at them.
   double get mass => _mass;
-  set mass(double value) {
-    _mass = value;
-    _checkMoving();
-  }
+  set mass(double value) => _setOrUndo(_mass, value, (v) => _mass = v, _checkMoving);
 
   double _mass;
 

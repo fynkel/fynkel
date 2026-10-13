@@ -870,11 +870,14 @@ pub unsafe extern "C" fn fy_find(
     })
 }
 
-/// The object's transform in the world: its own after its parents'. The
-/// position and rotation are exact; the scale is approximate when a parent
-/// with an uneven scale has a rotated child, because the result is skewed
-/// and no position, rotation and scale can say that. An object without a
-/// `Transform` counts as not moved from its parent.
+/// The object's transform in the world: its own after its parents', as
+/// Dart's `worldTransform` works it out. The position is exact; the
+/// rotation is the rotations multiplied, and the scale the scales (Unity's
+/// lossy scale), which is approximate when a parent with an uneven scale
+/// has a rotated child, because the result is skewed and no position,
+/// rotation and scale can say that. A parent scaled to 0 still gives a
+/// rotation. An object without a `Transform` counts as not moved from its
+/// parent.
 ///
 /// # Safety
 ///
@@ -884,9 +887,7 @@ pub unsafe extern "C" fn fy_world_transform_get(world: *const FyWorld, id: u64, 
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        let matrix = world.lock()?.world_matrix(object(id)?)?;
-        let (scale, rotation, position) = matrix.to_scale_rotation_translation();
-        let t = Transform { position, rotation: rotation.normalize(), scale };
+        let t = world.lock()?.world_transform(object(id)?)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, FyTransform::from_component(t), "out") }
     })
@@ -925,8 +926,7 @@ pub unsafe extern "C" fn fy_world_transform_get_many(
             unsafe { (std::slice::from_raw_parts(ids, count), std::slice::from_raw_parts_mut(out, count)) };
         let world = world.lock()?;
         for (&id, out) in ids.iter().zip(out) {
-            let (scale, rotation, position) = world.world_matrix(object(id)?)?.to_scale_rotation_translation();
-            *out = FyTransform::from_component(Transform { position, rotation: rotation.normalize(), scale });
+            *out = FyTransform::from_component(world.world_transform(object(id)?)?);
         }
         Ok(())
     })

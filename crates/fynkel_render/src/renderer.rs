@@ -608,7 +608,9 @@ impl Renderer {
                     sample_count: Self::SAMPLES,
                     dimension: wgpu::TextureDimension::D2,
                     format,
-                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+                    // Cleared and thrown away in the one pass: on tiled
+                    // GPUs (phones, Apple) they need no memory at all.
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TRANSIENT_ATTACHMENT,
                     view_formats: &[],
                 })
                 .create_view(&Default::default())

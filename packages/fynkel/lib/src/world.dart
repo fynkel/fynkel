@@ -141,7 +141,7 @@ final class World implements Finalizable {
       }
     }
     _finalizer.detach(this);
-    _debug?._release();
+    _debug?._dispose();
     fy_world_free(_pointer);
     _pointer = nullptr;
     _meshIds = Expando();

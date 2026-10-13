@@ -112,6 +112,7 @@ final class Debug implements Finalizable {
       seconds > 0 ? _world.time._unscaledSinceStart + seconds : double.negativeInfinity;
 
   void _add(Vec3 a, Vec3 b, Color color, double until) {
+    if (_world.isDisposed) throw StateError('this Debug belongs to a disposed World, so it can\'t draw');
     if (_count == _capacity) _grow();
     final f = _lines;
     final at = _count * 10;
@@ -148,6 +149,13 @@ final class Debug implements Finalizable {
     _free.detach(this);
     malloc.free(_lines);
     _lines = nullptr;
+  }
+
+  /// Frees the lines for good, as the world is disposed.
+  void _dispose() {
+    _release();
+    _count = 0;
+    _capacity = 0;
   }
 
   /// Sends the lines to the engine, at the end of a frame: those drawn

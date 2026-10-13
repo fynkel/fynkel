@@ -481,6 +481,27 @@ void main() {
     health.transform = Transform(position: Vec3(4, 5, 6));
     expect(object.transform.position, Vec3(4, 5, 6));
   });
+
+  group('a behaviour as it goes', () {
+    for (final (how, end) in [
+      ('taken off', (GameObject o, Behaviour b) => o.removeComponent(b)),
+      ('destroyed with its object', (GameObject o, Behaviour b) => o.destroy()),
+    ]) {
+      test("can't listen or start a routine in its onDestroy, $how", () {
+        final signal = Signal<int>();
+        final object = world.add(GameObject());
+        final late = object.addComponent(LateStarter(signal));
+        world.update(1 / 60);
+        end(object, late);
+        world.update(1 / 60);
+        signal.emit(1);
+        world.update(1 / 60);
+        expect(late.refused, 2);
+        expect(late.heard, 0);
+        expect(late.ran, isFalse);
+      });
+    }
+  });
 }
 
 class Enables extends Behaviour {
@@ -496,5 +517,28 @@ class Enables extends Behaviour {
   void onDisable() {
     super.onDisable();
     log.add('disable');
+  }
+}
+
+/// Tries to listen and start a routine as it goes.
+class LateStarter extends Behaviour {
+  LateStarter(this.signal);
+  final Signal<int> signal;
+  var heard = 0, refused = 0;
+  var ran = false;
+
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    try {
+      on(signal, (_) => heard++);
+    } on StateError {
+      refused++;
+    }
+    try {
+      startRoutine(() async => ran = true);
+    } on StateError {
+      refused++;
+    }
   }
 }

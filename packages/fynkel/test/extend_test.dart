@@ -138,4 +138,16 @@ void main() {
     world.update(1 / 60);
     expect(() => world.readWorldTransforms(ids, 3, out), throwsArgumentError);
   });
+
+  test('a reader made after an object went in the log sees it move again', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final x = world.add(GameObject());
+    final first = world.movedReader();
+    x.position = Vec3(1, 0, 0);
+    final second = world.movedReader();
+    x.position = Vec3(2, 0, 0);
+    expect([for (var i = 0; i < second.length; i++) second[i]], [x]);
+    expect(first.length, 2, reason: 'the first sees it twice, as when it reads late');
+  });
 }

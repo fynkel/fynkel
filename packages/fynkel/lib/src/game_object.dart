@@ -688,6 +688,7 @@ class GameObject with _Moving {
         world._stopRoutines(b._routines);
         world._haltMotions(b._motions);
         b._listening?.cancelAll();
+        b._ending = true;
         world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));

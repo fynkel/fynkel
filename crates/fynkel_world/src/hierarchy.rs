@@ -252,6 +252,27 @@ impl World {
         Ok(matrix)
     }
 
+    /// One object's place in the world, as Dart's `worldTransform` works
+    /// it out: its `Transform` after each of its parents', the rotations
+    /// multiplied and the scales too (as Unity's lossy scale). Unlike
+    /// taking [`world_matrix`](Self::world_matrix) apart, a parent scaled
+    /// to 0 on a side still gives a rotation.
+    pub fn world_transform(&self, id: ObjectId) -> Result<Transform> {
+        self.entity(id)?;
+        let mut world = Transform::default();
+        let mut at = Some(id);
+        while let Some(current) = at {
+            let parent = self.ecs.get::<&Transform>(self.entities[&current]).map_or(Transform::default(), |t| *t);
+            world = Transform {
+                position: parent.position + parent.rotation * (parent.scale * world.position),
+                rotation: (parent.rotation * world.rotation).normalize(),
+                scale: parent.scale * world.scale,
+            };
+            at = self.hierarchy.parent(current);
+        }
+        Ok(world)
+    }
+
     fn local_matrix(&self, entity: hecs::Entity) -> Mat4 {
         self.ecs.get::<&Transform>(entity).map_or(Mat4::IDENTITY, |t| t.matrix())
     }

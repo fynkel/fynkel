@@ -280,6 +280,26 @@ fn broken_files_are_refused_with_a_readable_reason() {
     );
     let bad_index = refused("Box.glb", |j: &mut Value| j["nodes"][1]["mesh"] = json!(7));
     assert!(bad_index.starts_with("the .glb is broken: "), "{bad_index}");
+
+    // A sparse accessor needs no bytes for the values it leaves at 0: a
+    // billion positions from a file of a few hundred bytes.
+    let huge = refused("Box.glb", |j: &mut Value| {
+        let positions = j["meshes"][0]["primitives"][0]["attributes"]["POSITION"].as_u64().unwrap() as usize;
+        let indices = j["meshes"][0]["primitives"][0]["indices"].clone();
+        let (index_view, value_view) = (
+            j["accessors"][indices.as_u64().unwrap() as usize]["bufferView"].clone(),
+            j["accessors"][positions]["bufferView"].clone(),
+        );
+        let accessor = j["accessors"][positions].as_object_mut().unwrap();
+        accessor.remove("bufferView");
+        accessor.remove("byteOffset");
+        accessor.insert("count".into(), json!(1_000_000_000u64));
+        accessor.insert(
+            "sparse".into(),
+            json!({"count": 1, "indices": {"bufferView": index_view, "componentType": 5123}, "values": {"bufferView": value_view}}),
+        );
+    });
+    assert!(huge.contains("claims 1000000000 values, more than the file has bytes"), "{huge}");
 }
 
 #[test]
