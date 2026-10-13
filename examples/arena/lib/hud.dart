@@ -1,5 +1,6 @@
 // What the game shows over the view, in plain Flutter: the score and the
-// wave, the hearts, a pause button, and what to do when paused or over.
+// wave, the hearts, a pause button, and what to do when paused or over;
+// and the health bars over the enemies, in the world.
 
 import 'package:flutter/widgets.dart';
 
@@ -81,6 +82,34 @@ class _Button extends StatelessWidget {
       child: ListenableBuilder(
         listenable: listenable,
         builder: (context, _) => Text(label(), style: Hud._text),
+      ),
+    ),
+  );
+}
+
+/// An enemy's health, over it in the world (its WorldWidget): a bar that
+/// empties as it's hit.
+class HealthBar extends StatelessWidget {
+  const HealthBar(this.health, {super.key});
+
+  final Health health;
+
+  @override
+  Widget build(BuildContext context) => StreamBuilder(
+    stream: health.hurt.stream,
+    initialData: health.left,
+    builder: (context, left) => Container(
+      width: 40,
+      height: 7,
+      padding: const EdgeInsets.all(1),
+      decoration: BoxDecoration(color: const Color(0xAA000000), borderRadius: BorderRadius.circular(3)),
+      alignment: Alignment.centerLeft,
+      child: FractionallySizedBox(
+        widthFactor: left.requireData / health.max,
+        heightFactor: 1,
+        child: DecoratedBox(
+          decoration: BoxDecoration(color: const Color(0xFFB8F27C), borderRadius: BorderRadius.circular(2)),
+        ),
       ),
     ),
   );

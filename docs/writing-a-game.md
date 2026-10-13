@@ -1546,6 +1546,43 @@ class TeamChip extends StatelessWidget {
 
 A test sets the theme itself: `world.theme = gameTheme(Brightness.dark)`.
 
+**Widgets in the world.** A health bar over an enemy, a name tag, a
+damage number or a "press E" hint is a Flutter widget on the object: a
+`WorldWidget`, from `package:fynkel_flutter`. Every view of the world
+shows it over the game, where its camera sees the object, each frame:
+
+```dart
+// lib/tagged.dart
+import 'package:flutter/material.dart' show Alignment, Colors, Text, TextStyle;
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+/// A cube with its name over it.
+class Tagged extends GameObject {
+  Tagged(String name) : super(name: name, components: [MeshRenderer(Mesh.cube(), Material())]) {
+    addComponent(
+      WorldWidget(
+        (context) => Text(name, style: const TextStyle(color: Colors.white)),
+        offset: Vec3(0, 0.8, 0), // above it, in the world's directions
+        alignment: Alignment.bottomCenter, // the tag's bottom middle there
+        shrinkBeyond: 8, // smaller farther than 8 from the camera
+      ),
+    );
+  }
+}
+```
+
+The widget is built once and then only moved, so a hundred cost little
+(100 health bars in the arena hold 120 fps on the Mac and the iPhone).
+To change what it shows, it rebuilds itself as any widget does: a
+`ValueListenableBuilder` of a `ValueNotifier` on the object, or a
+`StreamBuilder` of a signal's `stream` (the arena's `HealthBar`). It's
+hidden while its object is inactive, behind the camera or off the view,
+and the nearer ones are drawn over the farther ones. A tap on it is its
+own, a button in it works, and the game doesn't see that tap. For a widget
+at a point, a damage number say, put it on an empty object there, and
+move or destroy that.
+
 A game inside a bigger app (a title screen, a menu) uses the pieces
 `FynkelApp` is made of: a **`FynkelGame`**, which makes the root and can
 start it over, and a **`FynkelView`**, which shows it:
