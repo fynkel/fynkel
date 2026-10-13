@@ -3,6 +3,7 @@ import 'package:arena/menus.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart' show KeyCode;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 void main() {
@@ -92,6 +93,48 @@ void main() {
     await tester.tap(find.text('Resume'));
     await wait(tester);
     expect(world.paused, isFalse);
+  });
+
+  testWidgets('controls: Dash rebound to F in the settings dashes on F, not space; Escape keeps a key', (tester) async {
+    final settings = Settings();
+    await play(tester, settings);
+    await tester.tap(find.text('II'));
+    await wait(tester);
+    await tester.tap(find.text('Settings'));
+    await wait(tester);
+    await tester.tap(find.widgetWithText(OutlinedButton, 'Space'));
+    await wait(tester);
+    expect(find.text('Press a key for Dash'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyF);
+    await wait(tester);
+    expect(find.widgetWithText(OutlinedButton, 'F'), findsOneWidget);
+    expect(settings.controls['dash'], KeyCode.f);
+    await tester.tap(find.widgetWithText(OutlinedButton, 'W'));
+    await wait(tester);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await wait(tester);
+    expect(settings.controls['up'], KeyCode.w, reason: 'Escape keeps it');
+    await tester.tap(find.byType(BackButton));
+    await wait(tester);
+    await tester.tap(find.text('Resume'));
+    await wait(tester);
+    final player = game(tester).round.player;
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.space);
+    await wait(tester, 0.05);
+    expect(player.dashing, isFalse, reason: 'space is not dash any more');
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.space);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.keyF);
+    await wait(tester, 0.05);
+    expect(player.dashing, isTrue);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.keyF);
+    await wait(tester);
+  });
+
+  test('controls: a key another one has swaps with it; reset goes back', () {
+    final controls = Controls()..set('up', KeyCode.d);
+    expect((controls['up'], controls['right']), (KeyCode.d, KeyCode.w));
+    controls.reset();
+    expect((controls['up'], controls['right']), (KeyCode.w, KeyCode.d));
   });
 
   testWidgets('Start over is a new round from wave 1, playing', (tester) async {

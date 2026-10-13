@@ -790,6 +790,14 @@ class Button3D extends GameObject {
 - **Keys** are `KeyCode`s, by where they are on the keyboard, so W, A, S,
   D stay put on any layout. `input.bindAxis2` and `input.bindAction` add
   your own names.
+- **Rebinding** is binding again: `input.bindAction('dash', [key])` changes
+  the same `InputAction`, so code that kept it sees the new keys. A key
+  held at that moment that's no longer bound lets go (`wasReleased` comes
+  next frame); a `press()` goes on holding. On a controls page,
+  `keyCodeOf(event)` (from `package:fynkel_flutter`) turns the key pressed
+  in a "press a key" dialog into the game's, and `key.label` names it for
+  the player (`Space`, `W`, `↑`). The arena's settings page does it all
+  (`examples/arena/lib/menus.dart`).
 - A Flutter widget over the game (a HUD button) takes its own taps; they
   don't reach the game.
 
@@ -1988,6 +1996,9 @@ multibody joints).
 For code written before: each change that breaks it, newest first.
 
 - **Stage 7** (2026-10-13):
+  - `input.bindAction` on a name already bound changes that
+    `InputAction` and returns it, rather than making a new one;
+    `InputAction.buttons` follows the latest binding.
   - A `FynkelView` pauses its world while a page or dialog covers it
     (`pauseWhenCovered`, on by default), and goes on when it's closed. A
     game that kept running under its own menus pauses there now; give

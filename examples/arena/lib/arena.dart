@@ -1,14 +1,15 @@
-// The game: a top-down arena. Move with W, A, S, D (or the arrow keys),
-// or drag anywhere as a stick. Swipe, tap or press space to dash: a dash
-// goes through enemies and hits them. The enemies come in waves, and each
-// wave has one more. Some leave a heart behind.
+// The game: a top-down arena. Move with W, A, S, D (or the arrow keys;
+// the settings page changes the letters), or drag anywhere as a stick.
+// Swipe, tap or press space to dash: a dash goes through enemies and hits
+// them. The enemies come in waves, and each wave has one more. Some leave
+// a heart behind.
 
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
 import 'package:flutter/widgets.dart' show Alignment;
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldWidget;
+import 'package:fynkel_flutter/fynkel_flutter.dart' show ListenableSignal, WorldWidget;
 
 import 'hud.dart' show HealthBar;
 
@@ -28,12 +29,61 @@ const bars = bool.fromEnvironment('BARS', defaultValue: true);
 /// [point] moved inside the walls, on the floor.
 Vec3 inside(Vec3 point) => Vec3(point.x.clamp(-size + 0.5, size - 0.5), 0, point.z.clamp(-size + 0.5, size - 0.5));
 
+/// The keys the player chose on the settings page. The game binds them
+/// as it starts, and again each time they change; the arrow keys always
+/// move too.
+class Controls extends ChangeNotifier {
+  static const defaults = {
+    'up': KeyCode.w,
+    'down': KeyCode.s,
+    'left': KeyCode.a,
+    'right': KeyCode.d,
+    'dash': KeyCode.space,
+  };
+
+  final _keys = Map.of(defaults);
+
+  /// The key for [name]: one of [defaults]' names.
+  KeyCode operator [](String name) => _keys[name]!;
+
+  /// Gives [name] the [key]. What had that key takes [name]'s old one, so
+  /// no two share a key.
+  void set(String name, KeyCode key) {
+    final old = _keys[name]!;
+    if (old == key) return;
+    for (final other in _keys.keys) {
+      if (_keys[other] == key) _keys[other] = old;
+    }
+    _keys[name] = key;
+    notifyListeners();
+  }
+
+  /// Back to [defaults].
+  void reset() {
+    _keys.addAll(defaults);
+    notifyListeners();
+  }
+
+  /// Binds 'move' and 'dash' in [input] to these keys.
+  void bindTo(Input input) {
+    input.bindAxis2(
+      'move',
+      up: [this['up'], KeyCode.arrowUp],
+      down: [this['down'], KeyCode.arrowDown],
+      left: [this['left'], KeyCode.arrowLeft],
+      right: [this['right'], KeyCode.arrowRight],
+    );
+    input.bindAction('dash', [this['dash']]);
+  }
+}
+
 /// The root: the camera, what the HUD shows, and the round being played.
 class ArenaGame extends GameObject {
   /// [seed] makes every round the same, for tests.
-  ArenaGame({this.seed});
+  ArenaGame({this.seed, Controls? controls}) : controls = controls ?? Controls();
 
   final int? seed;
+  final Controls controls;
   final score = ValueNotifier(0);
   final wave = ValueNotifier(0);
   final health = ValueNotifier(Player.hearts);
@@ -55,6 +105,8 @@ class ArenaGame extends GameObject {
     round = add(Round(math.Random(seed)));
     camera = add(ArenaCamera(round.player));
     input.layers = LayerMask.except([effects]);
+    controls.bindTo(input);
+    on(controls.changed, (_) => controls.bindTo(input));
   }
 
   /// A new round, from wave 1.
@@ -264,7 +316,7 @@ class Player extends GameObject {
       rotation = Quat.lookRotation(facing);
       position = inside(position + direction * (speed * time.delta)) + Vec3(0, 0.5, 0);
     }
-    if (input.action('jump').wasPressed) dash(facing);
+    if (input.action('dash').wasPressed) dash(facing);
   }
 
   /// A finger dragging alone, as a stick: from where it went down to where

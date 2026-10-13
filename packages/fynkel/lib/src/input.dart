@@ -299,9 +299,19 @@ final class Input {
   /// Binds the action [name] to [buttons], replacing what it had, and
   /// returns it. With no buttons, it's pressed only from outside
   /// ([InputAction.press]), as a Flutter button does.
+  ///
+  /// Binding a name again changes the same [InputAction], so what holds it
+  /// sees the new buttons, and a [InputAction.press] goes on holding it.
+  /// If it was held only by a button it no longer has, it's let go: its
+  /// [InputAction.wasReleased] comes in the next frame.
   InputAction bindAction(String name, [List<InputButton> buttons = const []]) {
     _useAll(buttons);
-    return _actions[name] = InputAction._(this, name, List.unmodifiable(buttons));
+    final action = _actions[name];
+    if (action == null) return _actions[name] = InputAction._(this, name, List.unmodifiable(buttons));
+    final held = !_paused && action.isPressed;
+    action._buttons = List.unmodifiable(buttons);
+    if (held && !action.isPressed) _queue.add(_Raw(_RawKind.actionDropped, 0, 0, 0, action: action));
+    return action;
   }
 
   bool _anyDown(List<InputButton> buttons) {
@@ -451,6 +461,9 @@ final class Input {
         if (!action._held) return;
         action._held = false;
         action._releasedAt = _frame;
+      case _RawKind.actionDropped:
+        final action = raw.action!;
+        if (!action.isPressed) action._releasedAt = _frame;
     }
   }
 
@@ -1054,7 +1067,7 @@ final class KeyPress {
 /// A named button ([Input.action]), held by any of its [buttons], or from
 /// outside ([press]), such as by a Flutter button.
 final class InputAction {
-  InputAction._(this._input, this.name, this.buttons);
+  InputAction._(this._input, this.name, this._buttons);
 
   final Input _input;
 
@@ -1062,7 +1075,9 @@ final class InputAction {
   final String name;
 
   /// The keys and mouse buttons that hold it; any one of them does.
-  final List<InputButton> buttons;
+  /// [Input.bindAction] changes them.
+  List<InputButton> get buttons => _buttons;
+  List<InputButton> _buttons;
 
   // Held from outside, and the input frames that pressed and let go of it.
   bool _held = false;
@@ -1122,7 +1137,23 @@ final class _Axis2 {
   Vec2 value = Vec2.zero;
 }
 
-enum _RawKind { down, move, up, cancel, hover, leave, scroll, pad, keyDown, keyUp, release, actionDown, actionUp }
+enum _RawKind {
+  down,
+  move,
+  up,
+  cancel,
+  hover,
+  leave,
+  scroll,
+  pad,
+  keyDown,
+  keyUp,
+  release,
+  actionDown,
+  actionUp,
+  // An action let go by a rebind.
+  actionDropped,
+}
 
 /// A queued event.
 final class _Raw {

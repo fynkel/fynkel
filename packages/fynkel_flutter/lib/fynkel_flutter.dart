@@ -5,13 +5,15 @@
 /// lets game code listen to Flutter notifiers, and [WorldListenables]
 /// lets widgets listen to the world. [WorldTheme] gives the game the app's
 /// theme, and [FlutterColorToFynkel] and [FynkelColorToFlutter] turn one's
-/// colours into the other's.
+/// colours into the other's. [keyCodeOf] turns a Flutter key into the
+/// game's, for a controls page.
 library;
 
 export 'src/colors.dart' show FlutterColorToFynkel, FynkelColorToFlutter;
 export 'src/fynkel_app.dart' show FynkelApp;
 export 'src/fynkel_game.dart' show FynkelGame, FynkelGameState;
 export 'src/fynkel_view.dart' show FynkelView, FynkelViewState, FynkelViewStats, bundleSource;
+export 'src/input_feed.dart' show keyCodeOf;
 export 'src/listenable_signal.dart' show ListenableSignal;
 export 'src/world_listenables.dart' show WorldListenables, WorldTheme;
 export 'src/world_widget.dart' show WorldWidget;

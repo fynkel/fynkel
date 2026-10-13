@@ -650,6 +650,62 @@ void main() {
       expect(fire.wasPressed, isTrue);
     });
 
+    test('binding an action again changes the same one: a held key that is no longer bound lets go', () {
+      final fire = input.bindAction('fire', const [KeyCode.f]);
+      input.simulate.keyDown(KeyCode.f);
+      step();
+      expect(fire.isPressed, isTrue);
+      expect(input.bindAction('fire', const [KeyCode.g]), same(fire));
+      expect(input.action('fire'), same(fire));
+      expect(fire.buttons, [KeyCode.g]);
+      expect(fire.isPressed, isFalse);
+      step();
+      expect(fire.wasReleased, isTrue, reason: 'let go in the next frame');
+      step();
+      expect(fire.wasReleased, isFalse);
+      input.simulate.keyDown(KeyCode.g);
+      step();
+      expect(fire.wasPressed, isTrue);
+      input.bindAction('fire', const [KeyCode.g, KeyCode.h]);
+      step();
+      expect((fire.isPressed, fire.wasReleased), (true, false), reason: 'still held by G');
+      input.simulate.keyUp(KeyCode.g);
+      step();
+      expect(fire.wasReleased, isTrue);
+    });
+
+    test('every key has a short label for a controls page', () {
+      expect(
+        [
+          KeyCode.w,
+          KeyCode.digit1,
+          KeyCode.f12,
+          KeyCode.space,
+          KeyCode.arrowUp,
+          KeyCode.shiftLeft,
+          KeyCode.pageDown,
+          KeyCode.numpad5,
+          KeyCode.backslash,
+          KeyCode.escape,
+        ].map((k) => k.label),
+        ['W', '1', 'F12', 'Space', '↑', 'Left Shift', 'Page Down', 'Num 5', r'\', 'Esc'],
+      );
+      final labels = KeyCode.values.map((k) => k.label).toSet();
+      expect(labels, hasLength(KeyCode.values.length), reason: 'no two the same');
+    });
+
+    test('a pressed action stays pressed through a rebind, and its release still lets go', () {
+      final fire = input.bindAction('fire');
+      fire.press();
+      step();
+      input.bindAction('fire', const [KeyCode.f]);
+      step();
+      expect((fire.isPressed, fire.wasReleased), (true, false));
+      fire.release();
+      step();
+      expect((fire.isPressed, fire.wasReleased), (false, true));
+    });
+
     test('the game uses the keys it binds or asks about; the view claims only those', () {
       expect(input.usesKey(KeyCode.w), isTrue, reason: "'move' binds it");
       expect(input.usesKey(KeyCode.space), isTrue, reason: "'jump' binds it");

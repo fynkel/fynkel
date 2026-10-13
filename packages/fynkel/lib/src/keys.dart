@@ -305,5 +305,43 @@ enum KeyCode implements InputButton {
   numpadDecimal,
 
   /// The Enter key on the number pad.
-  numpadEnter,
+  numpadEnter;
+
+  /// A short name to show the player, as on a US keyboard: `W`, `1`,
+  /// `Space`, `↑`, `Left Shift`, `Num 5`. For a controls page.
+  String get label => switch (this) {
+    arrowUp => '↑',
+    arrowDown => '↓',
+    arrowLeft => '←',
+    arrowRight => '→',
+    minus => '-',
+    equal => '=',
+    bracketLeft => '[',
+    bracketRight => ']',
+    backslash => r'\',
+    semicolon => ';',
+    quote => "'",
+    backquote => '`',
+    comma => ',',
+    period => '.',
+    slash => '/',
+    numpadAdd => 'Num +',
+    numpadSubtract => 'Num -',
+    numpadMultiply => 'Num *',
+    numpadDivide => 'Num /',
+    numpadDecimal => 'Num .',
+    numpadEnter => 'Num Enter',
+    escape => 'Esc',
+    _ when name.length == 1 || (name.startsWith('f') && int.tryParse(name.substring(1)) != null) => name.toUpperCase(),
+    _ when name.startsWith('digit') => name.substring(5),
+    _ when name.startsWith('numpad') => 'Num ${name.substring(6)}',
+    _ when name.endsWith('Left') => 'Left ${_words(name.substring(0, name.length - 4))}',
+    _ when name.endsWith('Right') => 'Right ${_words(name.substring(0, name.length - 5))}',
+    _ => _words(name),
+  };
+
+  // pageUp → Page Up.
+  static String _words(String name) => name
+      .replaceAllMapped(RegExp('[A-Z]'), (m) => ' ${m[0]}')
+      .replaceFirstMapped(RegExp('^.'), (m) => m[0]!.toUpperCase());
 }
