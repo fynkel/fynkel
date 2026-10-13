@@ -222,3 +222,86 @@ opaque (2). And what it liked best: whole systems tested headless in about
 a second, `FynkelGame` and `FynkelView` inside its own `MaterialApp` with
 `restart()` for retry, and taps reaching objects with no physics, passed
 up to the root, through a layer mask.
+
+## H. Step 7: again, with fresh eyes
+
+Two new agents (2026-10-13) wrote briefs 1 and 2 again on the fixed
+framework (main after PR 14 and the docs PR #84), on step 1's rules: only
+the README, the guide and the packages' public code.
+
+| Brief | Lines (game / tests) | Tests | Builds | Their time |
+|---|---|---|---|---|
+| menus: title, settings pop-up, pause, game over | 593 / 319 | 15 | ✅ | ~3–4 h |
+| shooter: waves, pooling, 500 shots, 120 enemies | 807 / 297 | 16 | ✅ | ~4–6 h |
+
+Both analyze clean, pass their tests (most first time) and build for the
+Mac. Their logs are kept outside the repository, in
+`~/Documents/fynkel-s6-step7/`.
+
+**Before and after.** Step 1's menus and shooter games gave 13 findings
+(2, 4–12, 18, 24, 28), six of them confusing. **None came back as a
+stumble** (the two `Color`s, 6, still have no bridge, but the guide's
+warning kept both clear of it). Pause,
+Escape reaching Flutter's shortcuts, signals as streams, pooling, bullets,
+the per-object tint and the moved-only queries were each used and
+praised: "Pause just works with Flutter dialogs", "the guide's §14
+'Bullets' read as if written for exactly this brief". Step 7's logs hold
+no blocker, two confusing things and a handful of minor ones; the time
+went up because the games did more (a settings pop-up that changes the
+game, 120 enemies and 500 shots), not because of stumbles.
+
+What's left, with who hit it, whether I confirmed it, and how much it hurt:
+
+36. **The guide's bullets recipe misses targets that walk into a shot.**
+    §14's `Bullets` casts each move from where the shot is; an enemy that
+    stepped onto that point since the last frame has the ray start inside
+    it, and a ray doesn't hit what it starts inside. No error, and it
+    depends on the frame's length (a 1/60 test passed, a widget test at
+    16 ms missed). (shooter, ~25 min) Confirmed in the guide's sample.
+    **Confusing.** Fix: the recipe casts from one move back
+    (`Ray(at - move, move)`, twice as far), with a test, and says why.
+37. **`game.world` isn't there yet in `FynkelGame`'s builder.** Writing
+    `TouchControls(game.world.input)` beside the view analyzes clean and
+    throws ("before it's added"): the view adds the root when it's built,
+    after the builder. The guide says a Flutter stick "calls
+    `input.setAxis2`" but not how a widget beside the view reaches the
+    input. (menus) Confirmed. **Confusing.** Fix: say so in §15 (read
+    `game.world` in callbacks, not while building), or have `FynkelGame`
+    make the world itself, so it's there from the start (stage 7).
+38. **`world.paused` can't be listened to**, so a pause panel keeps a
+    `ValueNotifier` in step with it by hand. (shooter; the engine review
+    found it too) Confirmed. **Minor.** Fix: a `ValueListenable` or a
+    signal for it (stage 7, with the app's pause).
+39. **A `Pool` can't be walked**: a manager that moves its pooled things
+    keeps its own list of those out, beside the pool. (shooter)
+    Confirmed. **Minor.** Fix: the objects out, as a list to read.
+40. **An axis or action that isn't bound throws**, and `bindAxis2` needs
+    all four key lists, so an axis only Flutter feeds (an aim stick) is
+    made with `setAxis2(name, Vec2.zero)` first. (shooter) Confirmed.
+    **Minor.** Fix: `bindAxis2`'s lists optional, and a way to ask.
+41. **No picture out of `HeadlessView`**: both wrote their own image
+    encoder (PNG, BMP) to look at a frame, and both found real mistakes
+    that way (unlit black sides, a camera too far). (menus, shooter)
+    **Minor.** Fix: `HeadlessView.writePng(path)`, and a line in §17.
+42. **"An object has at most one Light"** isn't in §5, which lists
+    `Light.sun` and `Light.ambient` side by side. The error is clear; the
+    `LateInitializationError` it causes next is what the eye lands on.
+    (menus) **Minor.** Fix: one line in §5.
+43. **The guide's small papercuts**: §1's `minSdk` snippet doesn't match
+    what `flutter create` writes (replace `flutter.minSdkVersion`); §2's
+    `show runApp` import breaks once §11's `shortcuts:` is added; keeping
+    a typed field to a behaviour passed in `components:` needs a pattern
+    the guide doesn't show; `Pool.get`'s new object shows a frame late
+    unless prewarmed; `Signal<void>` is emitted with `emit(null)`.
+    (menus, shooter) **Minor.**
+
+Known and left: no audio (§19), so a sound setting is Flutter's own
+(menus). And a wish: an example of the whole title → play → pause → game
+over → title flow without `FynkelApp` (menus pieced it together from §11
+and §15 without trouble).
+
+**What they liked**: headless tests and widget tests that passed first
+time; the §20 Unity table; pause with Flutter dialogs; `FynkelGame.of`;
+`onApplicationPause`; leaving the page destroying the game with no
+clean-up code; pooled enemies listening once, in the pool's `make`; error
+messages that name the object, the rule and the line.
