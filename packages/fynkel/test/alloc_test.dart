@@ -2,6 +2,10 @@
 // counted by the VM service's allocation profile (see allocations.dart);
 // with its fixed steps and a world system (docs/stage-5.md, step 2).
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';

@@ -160,8 +160,11 @@ final class Physics extends WorldSystem implements Finalizable {
   var _following = 0;
   // Following the moved log: the objects still to look at, and the
   // colliders found below them.
-  final _below = <GameObject>[];
-  final _toFollow = <Collider>[];
+  // Kept from frame to frame: a list's clear() would give its storage back.
+  // The fixed step's length the native world was last told.
+  var _stepLength = 1 / 50;
+  final _below = FrameList<GameObject>();
+  final _toFollow = FrameList<Collider>();
 
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
@@ -295,12 +298,24 @@ final class Physics extends WorldSystem implements Finalizable {
     }
   }
 
+  /// Tells the native world the fixed step's length when it changed: only
+  /// then, as a double passed to a native call (or to a Dart function the
+  /// JIT doesn't inline) is allocated.
+  void _sendStepLength() {
+    final length = world.time.fixedDelta;
+    if (length != _stepLength) {
+      _stepLength = length;
+      _raw.stepLength = length;
+    }
+  }
+
   void _stepNow() {
     _due = false;
     _follow();
     _tellContacts();
     _leavingBefore = _leaving.length;
-    _applyMoved(_raw.step(world.time.fixedDelta));
+    _sendStepLength();
+    _applyMoved(_raw.step());
     _tellContacts();
   }
 
@@ -331,9 +346,8 @@ final class Physics extends WorldSystem implements Finalizable {
     _follow();
     _tellContacts();
     _leavingBefore = _leaving.length;
-    // Straight into the native call: a double passed to a Dart function the
-    // JIT doesn't inline is allocated.
-    checkPhysics(fp_step_begin(_pointer, world.time.fixedDelta));
+    _sendStepLength();
+    checkPhysics(fp_step_begin(_pointer));
     _stepping = true;
   }
 
@@ -540,8 +554,7 @@ final class Physics extends WorldSystem implements Finalizable {
     for (var i = 0; i < count; i++) {
       final object = moved[i];
       if (object.isDestroyed) continue;
-      // Read by index, then cleared: taking each off the end would give
-      // back the list's storage, to be grown again the next frame.
+      // Read by index, then cleared.
       final below = _below..add(object);
       for (var j = 0; j < below.length; j++) {
         final o = below[j];

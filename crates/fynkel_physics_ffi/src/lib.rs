@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 11;
+pub const FP_ABI_VERSION: u32 = 12;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -516,6 +516,10 @@ pub struct FpWorld {
     character_hits: Vec<CharacterHit>,
     /// What the last step broke, until `fp_joints_broken_read`.
     broken: Vec<BrokenJoint>,
+    /// How long a step is, in seconds: `fp_step_length_set`'s. Kept here
+    /// rather than passed to each step, as a double passed to a native
+    /// call is allocated in Dart's JIT.
+    step_length: f32,
     poisoned: bool,
 }
 
@@ -893,6 +897,7 @@ pub extern "C" fn fp_world_new() -> *mut FpWorld {
         edges: Vec::new(),
         character_hits: Vec::new(),
         broken: Vec::new(),
+        step_length: 1.0 / 50.0,
         poisoned: false,
     }))
 }
@@ -1086,20 +1091,45 @@ pub unsafe extern "C" fn fp_collider_remove(world: *mut FpWorld, collider: u64) 
     unsafe { with_world(world, |w| Ok(core!(w).physics.remove_collider(collider)?)) }
 }
 
-/// Moves the world on by `dt` seconds, and writes to `out_moved` how many
-/// bodies the step moved: read them with `fp_moved_read`.
+/// Sets how long each step is, in seconds (1/50 at first): more than 0
+/// and finite.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_step_length_set(world: *mut FpWorld, seconds: f32) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            if !(seconds > 0.0 && seconds.is_finite()) {
+                return Err(Error::new(
+                    FpStatus::InvalidValue,
+                    format!("a step's length must be more than 0 and finite, not {seconds}"),
+                ));
+            }
+            w.step_length = seconds;
+            Ok(())
+        })
+    }
+}
+
+/// Moves the world on by a step (`fp_step_length_set`), and writes to
+/// `out_moved` how many bodies the step moved: read them with
+/// `fp_moved_read`.
 ///
 /// # Safety
 ///
 /// `world` is null or live; `out_moved` is null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fp_step(world: *mut FpWorld, dt: f32, out_moved: *mut u32) -> FpStatus {
+pub unsafe extern "C" fn fp_step(world: *mut FpWorld, out_moved: *mut u32) -> FpStatus {
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
             if out_moved.is_null() {
                 return Err(Error::null("out_moved"));
             }
+            let dt = w.step_length;
             let core = core!(w);
             core.physics.step(dt)?;
             core.physics.moved(&mut core.moved);
@@ -1161,17 +1191,19 @@ impl Drop for Worker {
     }
 }
 
-/// Starts a step of `dt` seconds on the world's own thread and returns at
-/// once; every other call on the world fails until `fp_step_end`.
+/// Starts a step (`fp_step_length_set`) on the world's own thread and
+/// returns at once; every other call on the world fails until
+/// `fp_step_end`.
 ///
 /// # Safety
 ///
 /// `world` is null or live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fp_step_begin(world: *mut FpWorld, dt: f32) -> FpStatus {
+pub unsafe extern "C" fn fp_step_begin(world: *mut FpWorld) -> FpStatus {
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
+            let dt = w.step_length;
             let worker = w.worker.get_or_insert_with(Worker::new);
             let core = w.core.take().expect("with_world checks that no step runs");
             let Some(start) = worker.start.as_ref() else {

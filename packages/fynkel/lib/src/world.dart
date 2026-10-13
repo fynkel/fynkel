@@ -11,6 +11,7 @@ import 'package:meta/meta.dart';
 import 'bindings.g.dart';
 import 'color.dart';
 import 'error.dart';
+import 'frame_list.dart';
 import 'math.dart';
 import 'native.dart';
 
@@ -243,7 +244,7 @@ final class World implements Finalizable {
   // order they were first set. [_sendTransforms] sends them all in one
   // call before anything reads the engine's transforms: a view's frame, a
   // raycast, a world transform, a tap.
-  final _unsent = <GameObject>[];
+  final _unsent = FrameList<GameObject>();
 
   // Goes up whenever an object's transform, parent or layer is set: for
   // systems that follow objects (systems.dart).
@@ -253,7 +254,7 @@ final class World implements Finalizable {
   // layer was set, kept only while a [MovedReader] reads it. [_movedBase]
   // is the place of its first entry, counted since the world was made;
   // [_movedReadTo] the furthest any reader has read.
-  final _movedLog = <GameObject>[];
+  final _movedLog = FrameList<GameObject>();
   var _movedBase = 0;
   var _movedReadTo = 0;
   final _movedReaders = <MovedReader>[];

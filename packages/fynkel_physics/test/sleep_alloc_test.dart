@@ -2,6 +2,10 @@
 // 4): the step still runs between frames each fixed step, and is collected
 // at the next frame's start, counted as alloc_test.dart counts.
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:test/test.dart';

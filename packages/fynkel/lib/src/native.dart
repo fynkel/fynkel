@@ -74,6 +74,7 @@ final class Scratch {
 
   var _transforms = malloc<FyTransform>(_initial);
   var _transformCapacity = _initial;
+  late var _transformFloats = _transforms.cast<Float>();
 
   /// Frees it all. Nothing may use it after.
   void free() {
@@ -100,9 +101,17 @@ final class Scratch {
     if (count > _transformCapacity) {
       malloc.free(_transforms);
       _transforms = malloc<FyTransform>(count);
+      _transformFloats = _transforms.cast();
       _transformCapacity = count;
     }
     return _transforms;
+  }
+
+  /// [transforms] as floats, ten each: kept, as `cast` makes a new pointer
+  /// each call in the JIT.
+  Pointer<Float> transformFloats([int count = 0]) {
+    transforms(count);
+    return _transformFloats;
   }
 
   /// At least [count] bytes.

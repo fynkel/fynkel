@@ -51,7 +51,7 @@ class Tumble extends GameObject {
   Tumble({this.count = cubeCount});
 
   final int count;
-  final physics = RawPhysics();
+  final physics = RawPhysics()..stepLength = stepSeconds;
   final cubes = <GameObject>[];
   final bodies = <int>[];
   var _sinceDrop = 0.0;
@@ -145,7 +145,7 @@ class Tumble extends GameObject {
         stepAndWrite(physics, cubes);
       case 1:
         _collect();
-        physics.beginStep(stepSeconds);
+        physics.beginStep();
         _running = true;
       default:
         _collect();
@@ -176,13 +176,13 @@ class Tumble extends GameObject {
     }
     if (_due == 0) return;
     _due = 0;
-    physics.beginStep(stepSeconds);
+    physics.beginStep();
     _running = true;
   }
 }
 
 /// One fixed step, and each moved cube's pose written to its object.
-void stepAndWrite(RawPhysics physics, List<GameObject> cubes) => write(physics, cubes, physics.step(stepSeconds));
+void stepAndWrite(RawPhysics physics, List<GameObject> cubes) => write(physics, cubes, physics.step());
 
 /// The [moved] cubes' poses written to their objects.
 void write(RawPhysics physics, List<GameObject> cubes, int moved) {

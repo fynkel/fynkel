@@ -53,15 +53,18 @@ final class Debug implements Finalizable {
     if (!enabled) return;
     final until = _untilAfter(seconds);
     final h = size * 0.5;
-    Vec3 corner(int i) =>
-        center + rotation.rotate(Vec3(i & 1 == 0 ? -h.x : h.x, i & 2 == 0 ? -h.y : h.y, i & 4 == 0 ? -h.z : h.z));
     // Each corner to the ones that differ from it in one axis, once.
     for (var i = 0; i < 8; i++) {
       for (final bit in const [1, 2, 4]) {
-        if (i & bit == 0) _add(corner(i), corner(i | bit), color, until);
+        if (i & bit == 0) _add(_corner(center, h, rotation, i), _corner(center, h, rotation, i | bit), color, until);
       }
     }
   }
+
+  // A box's corner [i], its bits the axes on the plus side. Not a closure
+  // in [box]: the JIT would allocate its captured variables at every call.
+  static Vec3 _corner(Vec3 center, Vec3 h, Quat rotation, int i) =>
+      center + rotation.rotate(Vec3(i & 1 == 0 ? -h.x : h.x, i & 2 == 0 ? -h.y : h.y, i & 4 == 0 ? -h.z : h.z));
 
   /// A sphere of [radius] around [center], as three circles: one around
   /// each axis (Unity's `Gizmos.DrawWireSphere`).
@@ -70,21 +73,22 @@ final class Debug implements Finalizable {
     final until = _untilAfter(seconds);
     const segments = 32;
     for (var axis = 0; axis < 3; axis++) {
-      Vec3 at(int i) {
-        final angle = 2 * math.pi * i / segments;
-        final (c, s) = (math.cos(angle) * radius, math.sin(angle) * radius);
-        return center +
-            switch (axis) {
-              0 => Vec3(0, c, s),
-              1 => Vec3(c, 0, s),
-              _ => Vec3(c, s, 0),
-            };
-      }
-
       for (var i = 0; i < segments; i++) {
-        _add(at(i), at(i + 1), color, until);
+        _add(_around(center, radius, axis, i, segments), _around(center, radius, axis, i + 1, segments), color, until);
       }
     }
+  }
+
+  // Point [i] of [segments] on the circle of [radius] around [axis].
+  static Vec3 _around(Vec3 center, double radius, int axis, int i, int segments) {
+    final angle = 2 * math.pi * i / segments;
+    final (c, s) = (math.cos(angle) * radius, math.sin(angle) * radius);
+    return center +
+        switch (axis) {
+          0 => Vec3(0, c, s),
+          1 => Vec3(c, 0, s),
+          _ => Vec3(c, s, 0),
+        };
   }
 
   /// Lines through [points] in order, and back to the first if [closed].
@@ -151,17 +155,22 @@ final class Debug implements Finalizable {
   /// seconds left are kept.
   void _flush() {
     if (!enabled) _count = 0;
-    final now = _world.time._unscaledSinceStart;
-    _keep(now, oneFrame: true);
+    _now = _world.time._unscaledSinceStart;
+    _keep(oneFrame: true);
     if (_count == 0 && _sent == 0) return;
     check(fy_debug_lines_set(_world.pointer, _lines.cast(), _count));
     _sent = _count;
-    _keep(now, oneFrame: false);
+    _keep(oneFrame: false);
   }
 
-  /// Keeps the lines whose time hasn't run out at [now], and the one-frame
+  // The time [_flush] keeps lines until: a field, as the JIT boxes a double
+  // passed along with a named argument.
+  double _now = 0;
+
+  /// Keeps the lines whose time hasn't run out at [_now], and the one-frame
   /// lines if [oneFrame], in order.
-  void _keep(double now, {required bool oneFrame}) {
+  void _keep({required bool oneFrame}) {
+    final now = _now;
     var kept = 0;
     for (var i = 0; i < _count; i++) {
       final until = _until[i];

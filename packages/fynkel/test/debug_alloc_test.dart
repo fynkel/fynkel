@@ -1,6 +1,10 @@
 // A frame that draws debug lines allocates nothing once its buffer has
 // grown (docs/stage-4.md §3.9, step 8), counted as in alloc_test.dart.
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 

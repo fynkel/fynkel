@@ -40,7 +40,10 @@ jobs:
       # package:fynkel. Its build hook compiles fynkel_ffi; its tests draw
       # the stage 1 scene from Dart to the same golden image. The bindings
       # are generated again from the header and must match the committed
-      # ones, so the Dart and C sides can't drift apart.
+      # ones, so the Dart and C sides can't drift apart. The allocation
+      # tests (tagged alloc) run after the rest, one file at a time: they
+      # count what the VM allocates, and other files' compiling would
+      # slow them.
       - name: dart (package:fynkel)
         working-directory: packages/fynkel
         run: |
@@ -50,11 +53,13 @@ jobs:
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
-          dart test
+          dart test -x alloc
+          dart test -t alloc --concurrency=1
       # package:fynkel_physics (docs/stage-5.md): its build hook compiles
       # fynkel_physics_ffi, its tests drive Rapier from Dart, and its
       # bindings must match the header as package:fynkel's do. Its example
-      # (tumble) is analyzed and built for macOS, with both libraries.
+      # (tumble) is analyzed, run headless (both piles fall and land) and
+      # built for macOS, with both libraries.
       - name: dart (package:fynkel_physics)
         working-directory: packages/fynkel_physics
         run: |
@@ -65,9 +70,11 @@ jobs:
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
-          dart test
+          dart test -x alloc
+          dart test -t alloc --concurrency=1
           cd example
           flutter analyze --fatal-infos
+          flutter test
           flutter build macos --debug
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the games'
@@ -134,6 +141,27 @@ jobs:
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
           python3 tools/check_guide.py
+      # Long runs (stage 6, PR 13), a few minutes together:
+      # - the present thread's stress test for a million frames;
+      # - the loaders given damaged copies of every sample, built for
+      #   release, as many copies as there are (tests/damaged.rs);
+      # - Miri on the unsafe code it can run: the C boundary's guard, the
+      #   present stress test (a few hundred frames), and the physics C
+      #   layer's quick tests, on x86_64 as Miri can't run Rapier's ARM
+      #   vector code (all of them pass too, but take 33 minutes);
+      # - the lab's every scene for 40 rounds in one world each, the
+      #   memory flat (examples/lab/test/soak_test.dart).
+      - name: long runs
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          FYNKEL_STRESS_FRAMES=1000000 cargo test -p fynkel_present --test stress
+          FYNKEL_FUZZ_ITERS=1000 cargo test --release -p fynkel_load --test damaged
+          export MIRIFLAGS=-Zmiri-disable-isolation
+          cargo +nightly miri test -p fynkel_cabi
+          cargo +nightly miri test -p fynkel_present --test stress
+          cargo +nightly miri test -p fynkel_physics_ffi --target x86_64-unknown-linux-gnu --test abi -- null_pointers reading_the_moves a_step_is_as_long removed_and_unknown
+          cd examples/lab
+          FYNKEL_SOAK_ROUNDS=40 flutter test --enable-vmservice test/soak_test.dart
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers
       # work, so it must never silently break.

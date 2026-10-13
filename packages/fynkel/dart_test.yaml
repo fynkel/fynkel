@@ -1,0 +1,6 @@
+tags:
+  # The allocation tests (allocations.dart): each warms for 100,000 frames
+  # and counts tens of thousands, slower when files share the compiler.
+  # CI runs them on their own: `dart test -t alloc --concurrency=1`.
+  alloc:
+    timeout: 4x
