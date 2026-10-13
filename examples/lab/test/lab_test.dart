@@ -5,11 +5,13 @@ import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart' show Brightness;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
+import 'package:lab/palette.dart';
 import 'package:lab/scenes.dart';
 import 'package:lab/scenes/character_basics.dart';
 import 'package:lab/scenes/character_course.dart';
@@ -35,6 +37,7 @@ import 'package:lab/scenes/pooling_basics.dart';
 import 'package:lab/scenes/riding_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
+import 'package:lab/scenes/theme_basics.dart';
 
 /// The lab's assets, from its folder, as the app has them.
 Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
@@ -226,6 +229,22 @@ void main() {
     frames(1);
     expect(banner, [true, false]);
     expect(scene.log.value.map((e) => e.text), containsAllInOrder(['paused', 'going on']));
+  });
+
+  test('Theme: light and dark: the sky, floor and cubes follow the theme, from build on', () {
+    final world = World(source: files)..theme = labTheme(Brightness.dark);
+    addTearDown(world.dispose);
+    final scene = world.add(ThemeBasicsScene());
+    world.update(1 / 60);
+    final dark = labTheme(Brightness.dark).colorScheme;
+    expect(scene.camera.clearColor, dark.surface.toFynkel(), reason: 'worn from build');
+    expect(scene.cubes[0].color, dark.primary.toFynkel());
+    world.theme = labTheme(Brightness.light);
+    final light = labTheme(Brightness.light).colorScheme;
+    expect(scene.camera.clearColor, light.surface.toFynkel());
+    expect(scene.floor.color, light.outlineVariant.toFynkel());
+    expect(scene.cubes[2].color, light.tertiary.toFynkel());
+    expect(scene.readout.value, startsWith('light'));
   });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {

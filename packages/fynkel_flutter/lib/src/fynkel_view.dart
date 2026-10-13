@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
+import 'package:flutter/material.dart' show Theme;
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
@@ -23,6 +24,7 @@ import 'package:fynkel/platform.dart';
 import 'error_panel.dart';
 import 'fynkel_game.dart';
 import 'input_feed.dart';
+import 'world_listenables.dart' show WorldTheme;
 
 /// The plugin's channel (darwin/…/FynkelFlutterPlugin.swift and
 /// android/…/FynkelFlutterPlugin.kt).
@@ -104,8 +106,9 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 ///
 /// A [FynkelGame]'s root is shown in the game's world, which the game
 /// makes and disposes; any other root, the view adds to a world of its
-/// own. The root is used
-/// once, when the view is first built: to change level,
+/// own, which wears the theme around the view (`world.theme`) from before
+/// the root is added. The root is used once, when the view is first
+/// built: to change level,
 /// destroy the old root and add another to its world (`root.world`); to
 /// start over, make the root in a [FynkelGame] (as [FynkelApp] does) and
 /// restart it. The world is [FynkelViewState.world] too, for code outside
@@ -278,8 +281,31 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.initState();
     _ticker; // Starts it.
     WidgetsBinding.instance.addObserver(this);
-    _rootWorld = _worldOfRoot();
-    if (widget.world case final world?) _listen(world);
+  }
+
+  var _started = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The first time, after initState: the theme can be read from here on.
+    if (!_started) {
+      _started = true;
+      _rootWorld = _worldOfRoot();
+      if (widget.world case final world?) _listen(world);
+    }
+    _wearTheme();
+  }
+
+  /// Gives the world the app's theme, unless a [FynkelGame] does: the view
+  /// made it, or was given it.
+  void _wearTheme() {
+    final theme = Theme.of(context);
+    if (_owns) {
+      _rootWorld!.theme = theme;
+    } else if (widget.world case final world? when !identical(world, FynkelGame.maybeOf(context)?.world)) {
+      world.theme = theme;
+    }
   }
 
   /// Tells the world when the app goes away and comes back
@@ -327,7 +353,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       hearGameErrors(game, widget.showErrors ? _heard : null);
       return game.world;
     }
-    final world = World(source: widget.source ?? bundleSource());
+    final world = World(source: widget.source ?? bundleSource())..theme = Theme.of(context);
     _owns = true;
     _listen(world);
     return world..add(root);
@@ -375,6 +401,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (_owns) _rootWorld?.dispose();
       _rootWorld = _worldOfRoot();
       if (widget.world case final world?) _listen(world);
+      _wearTheme();
     }
   }
 

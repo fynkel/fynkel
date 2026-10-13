@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'lab.dart' as lab;
+import 'palette.dart' as palette;
 import 'scenes.dart';
 
 void main() => runApp(const LabApp());
@@ -13,11 +14,16 @@ class LabApp extends StatelessWidget {
   const LabApp({super.key});
 
   @override
-  Widget build(BuildContext context) => MaterialApp(
-    title: 'Fynkel lab',
-    debugShowCheckedModeBanner: false,
-    theme: ThemeData(brightness: Brightness.dark, colorSchemeSeed: const Color(0xFF4CA6E0), useMaterial3: true),
-    home: const SceneList(),
+  Widget build(BuildContext context) => ValueListenableBuilder(
+    valueListenable: palette.themeMode,
+    builder: (context, mode, _) => MaterialApp(
+      title: 'Fynkel lab',
+      debugShowCheckedModeBanner: false,
+      theme: palette.labTheme(Brightness.light),
+      darkTheme: palette.labTheme(Brightness.dark),
+      themeMode: mode,
+      home: const SceneList(),
+    ),
   );
 }
 

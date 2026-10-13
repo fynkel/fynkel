@@ -14,6 +14,7 @@ import 'scenes/controls_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/flutter_basics.dart';
+import 'scenes/theme_basics.dart';
 import 'scenes/input.dart';
 import 'scenes/joints_basics.dart';
 import 'scenes/joints_bridge.dart';
@@ -76,4 +77,5 @@ final List<LabScene Function()> scenes = [
   JointsCharacterScene.new,
   AddonsBasicsScene.new,
   FlutterBasicsScene.new,
+  ThemeBasicsScene.new,
 ];
