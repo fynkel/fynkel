@@ -3,6 +3,10 @@
 // query each frame (docs/stage-6-architecture.md, items 7 and 9), counted
 // by the VM service's allocation profile (see allocations.dart).
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:test/test.dart';

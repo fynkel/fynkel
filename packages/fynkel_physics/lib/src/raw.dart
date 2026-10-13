@@ -217,11 +217,23 @@ final class RawPhysics implements Finalizable {
     _check(fp_body_pose_set(_live, body, _pose.ref));
   }
 
-  /// Moves the world on by [dt] seconds and returns how many bodies the
+  /// How long each [step] is, in seconds: 1/50 at first. Throws a
+  /// [PhysicsException] unless it's more than 0 and finite.
+  double get stepLength => _stepLength;
+  set stepLength(double seconds) {
+    _check(fp_step_length_set(_live, seconds));
+    _stepLength = seconds;
+  }
+
+  // Set once rather than passed to each step: in the JIT, a double passed
+  // to a native call is allocated.
+  double _stepLength = 1 / 50;
+
+  /// Moves the world on by [stepLength] and returns how many bodies the
   /// step moved: their keys and poses are [movedKey], [movedPosition] and
   /// [movedRotation] from 0 to one less, until the next step.
-  int step(double dt) {
-    _check(fp_step(_live, dt, _count));
+  int step() {
+    _check(fp_step(_live, _count));
     return _readMoved();
   }
 
@@ -243,11 +255,11 @@ final class RawPhysics implements Finalizable {
     return hit.collider == 0 ? null : hit.distance;
   }
 
-  /// Starts a step of [dt] seconds on a thread of the physics' own, and
+  /// Starts a step of [stepLength] on a thread of the physics' own, and
   /// returns at once: nothing else may be asked of this world until
   /// [endStep], which waits for it and returns what [step] does. (An
   /// experiment, docs/stage-5.md §6.)
-  void beginStep(double dt) => _check(fp_step_begin(_live, dt));
+  void beginStep() => _check(fp_step_begin(_live));
 
   /// Waits for the step [beginStep] started; returns as [step] does.
   int endStep() {

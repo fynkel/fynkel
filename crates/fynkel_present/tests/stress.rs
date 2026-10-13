@@ -16,7 +16,15 @@ use std::time::Instant;
 
 use fynkel_present::{MAX_IN_FLIGHT, Ring, SLOTS, SlotState, Ticket};
 
-const FRAMES: u64 = 1_000_000;
+/// How many frames: 100,000 in `cargo test` (a few seconds), as many as
+/// `FYNKEL_STRESS_FRAMES` says in CI's long run (a million), and a few
+/// hundred under Miri, which runs it a thousand times slower.
+fn frames() -> u64 {
+    if cfg!(miri) {
+        return 300;
+    }
+    std::env::var("FYNKEL_STRESS_FRAMES").ok().and_then(|n| n.parse().ok()).unwrap_or(100_000)
+}
 
 /// xorshift64*.
 struct Rng(u64);
@@ -34,7 +42,8 @@ impl Rng {
 type Writers = Mutex<HashMap<(u64, usize), u32>>;
 
 #[test]
-fn three_threads_and_a_million_frames() {
+fn three_threads_and_many_frames() {
+    let frames = frames();
     let ring = Ring::new();
     let writers = Writers::default();
     let gpu_done = AtomicBool::new(false);
@@ -46,7 +55,7 @@ fn three_threads_and_a_million_frames() {
         s.spawn(|| {
             let mut rng = Rng(1);
             let mut reserved = 0;
-            while reserved < FRAMES {
+            while reserved < frames {
                 let Some(ticket) = ring.reserve() else {
                     thread::yield_now();
                     continue;
@@ -105,7 +114,7 @@ fn three_threads_and_a_million_frames() {
                         let w = writers.lock().unwrap();
                         assert_eq!(w.get(&(frame.generation, frame.slot)).copied().unwrap_or(0), 0);
                         drop(w);
-                        if shown % 50_000 == 0 {
+                        if shown % (frames / 20).max(1) == 0 {
                             ring.reset();
                         }
                     }
@@ -122,13 +131,16 @@ fn three_threads_and_a_million_frames() {
 
     let stats = ring.stats();
     println!("{stats:?}, {shown} shown, in {elapsed:.2?}");
-    assert_eq!(stats.reserved, FRAMES);
+    assert_eq!(stats.reserved, frames);
     assert_eq!(ring.in_flight(), 0);
     assert_eq!(stats.reserved, stats.completed + stats.cancelled + stats.stale, "a frame was lost");
     let waiting = ring.states().iter().filter(|&&s| s == SlotState::Ready).count() as u64;
     assert_eq!(stats.completed, stats.presented + stats.dropped + stats.discarded + waiting, "a frame was lost");
     assert_eq!(stats.presented, shown);
-    assert!(stats.cancelled > 0 && stats.stale > 0 && stats.dropped > 0, "some paths weren't exercised: {stats:?}");
+    // Too few frames under Miri to be sure of each rare path.
+    if !cfg!(miri) {
+        assert!(stats.cancelled > 0 && stats.stale > 0 && stats.dropped > 0, "some paths weren't exercised: {stats:?}");
+    }
     assert!(writers.lock().unwrap().values().all(|&n| n == 0));
 
     // No slot was lost: every one still goes round. Two at a time in flight,

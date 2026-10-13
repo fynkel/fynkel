@@ -2,6 +2,10 @@
 // does following colliders when something changed, counted by the VM
 // service's allocation profile (see allocations.dart).
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:test/test.dart';

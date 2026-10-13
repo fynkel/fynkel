@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 11
+#define FP_ABI_VERSION 12
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -621,21 +621,31 @@ FpStatus fp_mesh_remove(struct FpWorld *world, uint64_t mesh);
 // `world` is null or live.
 FpStatus fp_collider_remove(struct FpWorld *world, uint64_t collider);
 
-// Moves the world on by `dt` seconds, and writes to `out_moved` how many
-// bodies the step moved: read them with `fp_moved_read`.
-//
-// # Safety
-//
-// `world` is null or live; `out_moved` is null or writable.
-FpStatus fp_step(struct FpWorld *world, float dt, uint32_t *out_moved);
-
-// Starts a step of `dt` seconds on the world's own thread and returns at
-// once; every other call on the world fails until `fp_step_end`.
+// Sets how long each step is, in seconds (1/50 at first): more than 0
+// and finite.
 //
 // # Safety
 //
 // `world` is null or live.
-FpStatus fp_step_begin(struct FpWorld *world, float dt);
+FpStatus fp_step_length_set(struct FpWorld *world, float seconds);
+
+// Moves the world on by a step (`fp_step_length_set`), and writes to
+// `out_moved` how many bodies the step moved: read them with
+// `fp_moved_read`.
+//
+// # Safety
+//
+// `world` is null or live; `out_moved` is null or writable.
+FpStatus fp_step(struct FpWorld *world, uint32_t *out_moved);
+
+// Starts a step (`fp_step_length_set`) on the world's own thread and
+// returns at once; every other call on the world fails until
+// `fp_step_end`.
+//
+// # Safety
+//
+// `world` is null or live.
+FpStatus fp_step_begin(struct FpWorld *world);
 
 // Waits for the step `fp_step_begin` started, and writes to `out_moved`
 // how many bodies it moved, as `fp_step` does.

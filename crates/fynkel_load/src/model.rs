@@ -113,7 +113,17 @@ impl ModelData {
     /// Reads a `.glb`. Slow for a big file (images are decoded and
     /// tangents generated here), so a game calls it on a helper isolate.
     pub fn from_glb(bytes: &[u8]) -> Result<Self, ModelError> {
-        Reader::read(bytes)
+        // The gltf crate panics on some damaged files (an index out of
+        // range while it validates; tests/damaged.rs), so its panic becomes
+        // the error it should have been.
+        std::panic::catch_unwind(|| Reader::read(bytes)).unwrap_or_else(|panic| {
+            let reason = panic
+                .downcast_ref::<&str>()
+                .map(|s| s.to_string())
+                .or_else(|| panic.downcast_ref::<String>().cloned())
+                .unwrap_or_default();
+            Err(ModelError::Invalid(format!("the file is damaged ({reason})")))
+        })
     }
 
     /// The scene's name, or `""`.

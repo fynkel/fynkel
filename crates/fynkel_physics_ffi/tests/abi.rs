@@ -7,6 +7,7 @@ use std::ptr;
 
 use fynkel_physics_ffi::*;
 
+// The default step length, `fp_step_length_set`'s.
 const STEP: f32 = 1.0 / 50.0;
 
 fn at(x: f32, y: f32, z: f32) -> FpPose {
@@ -42,7 +43,7 @@ impl World {
     fn step(&self) -> Vec<FpMoved> {
         let mut count = 0;
         // SAFETY: a live world and a writable out.
-        assert_eq!(unsafe { fp_step(self.0, STEP, &mut count) }, FpStatus::Ok);
+        assert_eq!(unsafe { fp_step(self.0, &mut count) }, FpStatus::Ok);
         let mut moved = vec![FpMoved::default(); count as usize];
         // SAFETY: room for exactly count.
         assert_eq!(unsafe { fp_moved_read(self.0, moved.as_mut_ptr(), moved.len()) }, FpStatus::Ok);
@@ -128,8 +129,10 @@ fn bad_values_are_refused_and_nothing_is_added() {
         assert_eq!(fp_collider_add(world.0, 0, bad, at(0.0, 0.0, 0.0), &mut id), FpStatus::InvalidValue);
         assert_eq!(fp_collider_add(world.0, 0, sphere(-1.0), at(0.0, 0.0, 0.0), &mut id), FpStatus::InvalidValue);
         assert_eq!(last_error(), "a sphere's radius must be finite and more than 0, not -1");
-        let mut count = 0;
-        assert_eq!(fp_step(world.0, 0.0, &mut count), FpStatus::InvalidValue);
+        assert_eq!(fp_step_length_set(world.0, 0.0), FpStatus::InvalidValue);
+        assert_eq!(last_error(), "a step's length must be more than 0 and finite, not 0");
+        assert_eq!(fp_step_length_set(world.0, f32::INFINITY), FpStatus::InvalidValue);
+        assert_eq!(fp_step_length_set(world.0, STEP), FpStatus::Ok);
         assert_eq!(fp_gravity_set(world.0, FpVec3 { x: f32::NAN, y: 0.0, z: 0.0 }), FpStatus::InvalidValue);
     }
     assert_eq!(id, 0);
@@ -146,8 +149,8 @@ fn null_pointers_are_refused() {
         assert_eq!(fp_body_add(ptr::null_mut(), 0, 1, at(0.0, 0.0, 0.0), &mut id), FpStatus::NullPointer);
         assert_eq!(last_error(), "world is null");
         assert_eq!(fp_body_add(world.0, 0, 1, at(0.0, 0.0, 0.0), ptr::null_mut()), FpStatus::NullPointer);
-        assert_eq!(fp_step(world.0, STEP, ptr::null_mut()), FpStatus::NullPointer);
-        assert_eq!(fp_step(ptr::null_mut(), STEP, &mut count), FpStatus::NullPointer);
+        assert_eq!(fp_step(world.0, ptr::null_mut()), FpStatus::NullPointer);
+        assert_eq!(fp_step(ptr::null_mut(), &mut count), FpStatus::NullPointer);
         fp_world_free(ptr::null_mut());
     }
     // Nothing was added by the call with a null out.
@@ -165,7 +168,7 @@ fn reading_the_moves_takes_exactly_as_many_as_the_step_said() {
     let mut moved = [FpMoved::default(); 4];
     // SAFETY: a live world, and room for 4.
     unsafe {
-        assert_eq!(fp_step(world.0, STEP, &mut count), FpStatus::Ok);
+        assert_eq!(fp_step(world.0, &mut count), FpStatus::Ok);
         assert_eq!(count, 3);
         assert_eq!(fp_moved_read(world.0, moved.as_mut_ptr(), 4), FpStatus::WrongSize);
         assert_eq!(last_error(), "the last step moved 3 bodies, not 4");
@@ -515,11 +518,11 @@ fn a_step_on_the_worlds_own_thread_moves_as_a_step_here_does_and_the_world_waits
     for _ in 0..60 {
         let expected = here.step();
         // SAFETY: a live world.
-        assert_eq!(unsafe { fp_step_begin(there.0, STEP) }, FpStatus::Ok);
+        assert_eq!(unsafe { fp_step_begin(there.0) }, FpStatus::Ok);
         let mut count = 0;
         // Nothing else is asked of the world while it steps.
         // SAFETY: a live world and a writable out.
-        assert_eq!(unsafe { fp_step(there.0, STEP, &mut count) }, FpStatus::InvalidValue);
+        assert_eq!(unsafe { fp_step(there.0, &mut count) }, FpStatus::InvalidValue);
         assert!(last_error().contains("fp_step_end"), "{}", last_error());
         // SAFETY: a live world and a writable out.
         assert_eq!(unsafe { fp_step_end(there.0, &mut count) }, FpStatus::Ok, "{}", last_error());
@@ -537,7 +540,7 @@ fn a_step_on_the_worlds_own_thread_moves_as_a_step_here_does_and_the_world_waits
     assert_eq!(last_error(), "no step is running");
     // Freed while a step runs: the step ends first.
     // SAFETY: a live world.
-    assert_eq!(unsafe { fp_step_begin(there.0, STEP) }, FpStatus::Ok);
+    assert_eq!(unsafe { fp_step_begin(there.0) }, FpStatus::Ok);
 }
 
 // --- Rigidbodies -----------------------------------------------------------------
@@ -561,6 +564,16 @@ impl World {
         assert_eq!(unsafe { fp_rigidbody_state_get(self.0, body, &mut state) }, FpStatus::Ok, "{}", last_error());
         state
     }
+}
+
+#[test]
+fn a_step_is_as_long_as_the_length_set() {
+    let world = World::new();
+    world.rigidbody(9, body_spec(), at(0.0, 10.0, 0.0));
+    // SAFETY: a live world.
+    assert_eq!(unsafe { fp_step_length_set(world.0, 1.0 / 100.0) }, FpStatus::Ok);
+    let moved = world.step();
+    assert!((moved[0].linear_velocity.y + 9.81 / 100.0).abs() < 1e-4, "{:?}", moved[0]);
 }
 
 #[test]

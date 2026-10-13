@@ -1,5 +1,9 @@
 // As contacts_alloc_test.dart, stepping in the fixed step.
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:test/test.dart';
 
 import 'allocations.dart';

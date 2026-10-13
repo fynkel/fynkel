@@ -8,13 +8,13 @@ extension _Loop on World {
     final w = pointer;
     final n = _unsent.length;
     final ids = scratch.ids(n);
-    final values = scratch.transforms(n);
+    final floats = scratch.transformFloats(n);
     // An FyTransform is ten floats: position, rotation, scale. Written
     // through the pointers, not asTypedList views: in Flutter's debug VM a
     // view made here once had a bad data pointer and crashed the process.
-    final floats = values.cast<Float>();
     var count = 0;
-    for (final object in _unsent) {
+    for (var i = 0; i < n; i++) {
+      final object = _unsent[i];
       if (!object._unsent) continue;
       object._unsent = false;
       final Transform(:position, :rotation, :scale) = object._transform!;
@@ -33,7 +33,7 @@ extension _Loop on World {
       count++;
     }
     _unsent.clear();
-    check(fy_transform_set_many(w, ids, values, count));
+    check(fy_transform_set_many(w, ids, scratch.transforms(), count));
   }
 
   /// Moves each running motion on by this frame's time: those made before
@@ -310,7 +310,14 @@ extension _Loop on World {
       _live.removeWhere((o) => o._destroyed);
       _liveDirty = false;
     }
-    if (_reparented.isEmpty) return;
+    if (_reparented.isNotEmpty) _reorderMoved();
+  }
+
+  /// Puts what was given a new parent last in the live list. Apart from
+  /// [_tidy]: its closure captures, and the JIT allocates a closure's
+  /// variables when the function starts, so in [_tidy] it would cost
+  /// every frame.
+  void _reorderMoved() {
     // Each moved object and what's below it go last, in the order they
     // moved (one moved later, inside another's subtree, goes after it),
     // keeping their order among themselves: one pass over the live list.

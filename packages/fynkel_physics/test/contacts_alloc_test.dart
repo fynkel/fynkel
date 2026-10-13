@@ -4,6 +4,10 @@
 // fixed step (one scenario a file: in the JIT one's code can box doubles
 // in the next's).
 
+// Counted alone, a file at a time: see dart_test.yaml.
+@Tags(['alloc'])
+library;
+
 import 'package:test/test.dart';
 
 import 'allocations.dart';

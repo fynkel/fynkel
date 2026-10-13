@@ -24,7 +24,7 @@ void main() {
     final expected = math.sqrt(2 * 10 / 9.81);
     double? landed;
     for (var i = 1; i <= 200; i++) {
-      physics.step(step);
+      physics.step();
       if (landed == null && physics.bodyPose(ball).$1.y < 0.51) landed = i * step;
     }
     expect(landed, closeTo(expected, step * 1.5));
@@ -38,7 +38,7 @@ void main() {
       final body = physics.addBody(BodyKind.dynamic, key, position: Vec3((key - 100) * 2.0, 3, 0));
       physics.addBox(body, const Vec3(0.5, 0.5, 0.5));
     }
-    final moved = physics.step(step);
+    final moved = physics.step();
     expect(moved, 3);
     for (var i = 0; i < moved; i++) {
       keys.add(physics.movedKey(i));
@@ -50,7 +50,7 @@ void main() {
 
     var last = moved;
     for (var i = 0; i < 500 && last > 0; i++) {
-      last = physics.step(step);
+      last = physics.step();
     }
     expect(last, 0, reason: 'resting bodies fall asleep and aren\'t given back');
   });
@@ -75,7 +75,7 @@ void main() {
     final body = physics.addBody(BodyKind.dynamic, 1);
     physics.addSphere(body, 0.5);
     for (var i = 0; i < 50; i++) {
-      physics.step(step);
+      physics.step();
     }
     expect(physics.bodyPose(body).$1.y, closeTo(9.81 / 2, 0.11));
   });
@@ -98,7 +98,7 @@ void main() {
       throwsA(isA<PhysicsException>().having((e) => e.status, 'status', PhysicsStatus.invalidValue)),
     );
     expect(
-      () => physics.step(0),
+      () => physics.stepLength = 0,
       throwsA(isA<PhysicsException>().having((e) => e.status, 'status', PhysicsStatus.invalidValue)),
     );
   });
@@ -119,7 +119,7 @@ void main() {
 
   test('a disposed world refuses to be used, and disposing twice is fine', () {
     final physics = RawPhysics()..dispose();
-    expect(() => physics.step(step), throwsStateError);
+    expect(() => physics.step(), throwsStateError);
     physics.dispose();
   });
 
@@ -134,9 +134,9 @@ void main() {
       }
     }
     for (var i = 0; i < 50; i++) {
-      final moved = here.step(step);
-      there.beginStep(step);
-      expect(() => there.step(step), throwsA(isA<PhysicsException>()));
+      final moved = here.step();
+      there.beginStep();
+      expect(() => there.step(), throwsA(isA<PhysicsException>()));
       expect(there.endStep(), moved);
       for (var j = 0; j < moved; j++) {
         expect((there.movedKey(j), there.movedPosition(j)), (here.movedKey(j), here.movedPosition(j)));

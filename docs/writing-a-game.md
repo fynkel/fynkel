@@ -1369,6 +1369,8 @@ For code written before: each change that breaks it, newest first.
   - `PhysicsStatus` (in `package:fynkel_physics/raw.dart`) has a `code`,
     and its numbers match the engine's `FynkelStatus` where they mean the
     same: compare statuses by name, not by `index`.
+  - `RawPhysics.step()` and `beginStep()` take no length: set
+    `stepLength` (1/50 at first) once, and each step is that long.
   - `colorTo` changes the renderer's own `color`, not its material, so
     objects sharing the material no longer change with it; give
     `material:` for the old way. `MeshRenderer.color` and
