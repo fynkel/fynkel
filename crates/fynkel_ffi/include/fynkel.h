@@ -112,8 +112,9 @@ typedef struct FyModel FyModel;
 // doesn't take it from them.
 typedef struct FyTexture FyTexture;
 
-// A view: a world drawn into a target by its own render worker. Opaque to
-// C.
+// A view: a world drawn into a target by its own render worker, on the
+// process's GPU device, with the meshes and textures the world's other
+// views have too. Opaque to C.
 typedef struct FyView FyView;
 
 // A world. Opaque to C.
@@ -286,10 +287,11 @@ typedef struct FyViewStats {
   // Apple: frames finished but never shown, because newer ones were
   // waiting. 0 for other views (Android's queue is the OS's).
   uint64_t dropped;
-  // GPU memory the view's textures hold, in bytes: every mip level, as
-  // stored. Up to date as of the last frame drawn.
+  // GPU memory the world's textures hold, in bytes: every mip level, as
+  // stored, once however many views the world has. Up to date as of the
+  // view's last frame drawn.
   uint64_t texture_bytes;
-  // GPU memory the view's meshes hold, in bytes.
+  // GPU memory the world's meshes hold, in bytes.
   uint64_t mesh_bytes;
 } FyViewStats;
 
@@ -970,8 +972,9 @@ FyStatus fy_view_read(const struct FyView *view,
 // `view` is null or live.
 FyStatus fy_view_resize(const struct FyView *view, uint32_t width, uint32_t height);
 
-// For tests: destroys the view's GPU device, as a driver reset would.
-// Soon after, `fy_view_frame` returns `FY_STATUS_DEVICE_LOST`.
+// For tests: destroys the GPU device, as a driver reset would. Every view
+// shares it, so soon after, `fy_view_frame` returns
+// `FY_STATUS_DEVICE_LOST` for each; a view made after has a new one.
 //
 // # Safety
 //

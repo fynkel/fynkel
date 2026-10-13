@@ -170,8 +170,8 @@ class _MeasuredState extends State<_Measured> {
     await Measurement.mark('done');
   }
 
-  // The view makes its engine view, and with it a GPU device, on the UI
-  // isolate in its first tick that has a size: the gap from that tick to
+  // The view makes its engine view (and, the first time, the GPU device)
+  // on the UI isolate in its first tick that has a size: the gap from that tick to
   // the next is how long that held the UI isolate, and with it anything
   // else waiting there, such as a load's last steps.
   Duration? _firstTick;

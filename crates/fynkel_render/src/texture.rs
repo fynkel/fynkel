@@ -129,18 +129,23 @@ struct Defaults {
     flat_normal: wgpu::TextureView,
 }
 
-/// Every texture a renderer has, and what draws need to use them.
-pub(crate) struct Textures {
-    gpu: Gpu,
-    textures: HashMap<(TextureKey, ColorSpace), GpuTexture>,
-    bind_groups: HashMap<MaterialTextures, wgpu::BindGroup>,
+/// What every world's textures share on one device: the bind group
+/// layout, the sampler, the empty-slot textures and the mipmapper.
+pub(crate) struct TextureKit {
     pub(crate) layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     defaults: Defaults,
     mipmapper: Mipmapper,
 }
 
-impl Textures {
+/// Every texture a world has on the GPU, and what draws need to use them.
+#[derive(Default)]
+pub(crate) struct Textures {
+    textures: HashMap<(TextureKey, ColorSpace), GpuTexture>,
+    bind_groups: HashMap<MaterialTextures, wgpu::BindGroup>,
+}
+
+impl TextureKit {
     pub(crate) fn new(gpu: &Gpu) -> Self {
         let device = &gpu.device;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -195,16 +200,11 @@ impl Textures {
             white_linear: pixel("white", wgpu::TextureFormat::Rgba8Unorm, &[255; 4]),
             flat_normal: pixel("flat normal", wgpu::TextureFormat::Rgba16Float, &flat),
         };
-        Self {
-            gpu: gpu.clone(),
-            textures: HashMap::new(),
-            bind_groups: HashMap::new(),
-            layout,
-            sampler,
-            defaults,
-            mipmapper: Mipmapper::new(device),
-        }
+        Self { layout, sampler, defaults, mipmapper: Mipmapper::new(device) }
     }
+}
+
+impl Textures {
 
     /// Uploads RGBA8 pixels under `key` for use in `space`, with a full
     /// mip chain, replacing any texture already there. Submits its own GPU
@@ -214,12 +214,22 @@ impl Textures {
     ///
     /// If `rgba` isn't `width × height × 4` bytes, or a side is 0 or over
     /// the device's limit. `fynkel_load::ImageData` checks all of these.
-    pub(crate) fn upload(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn upload(
+        &mut self,
+        gpu: &Gpu,
+        kit: &TextureKit,
+        key: TextureKey,
+        space: ColorSpace,
+        width: u32,
+        height: u32,
+        rgba: &[u8],
+    ) {
         assert_eq!(rgba.len() as u64, width as u64 * height as u64 * 4, "{width} × {height} RGBA8 pixels");
         // The loader allows 8192 a side, but a device may offer less: over
         // its limit, the image is halved until it fits, not refused by the
         // GPU (which would stop the view).
-        let limit = self.gpu.device.limits().max_texture_dimension_2d;
+        let limit = gpu.device.limits().max_texture_dimension_2d;
         let shrunk;
         let (width, height, rgba) = if width.max(height) > limit {
             shrunk = shrink_to(limit, width, height, rgba);
@@ -227,7 +237,7 @@ impl Textures {
         } else {
             (width, height, rgba)
         };
-        let device = &self.gpu.device;
+        let device = &gpu.device;
         let mip_level_count = width.max(height).ilog2() + 1;
         let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
         let texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -242,15 +252,15 @@ impl Textures {
                 | wgpu::TextureUsages::RENDER_ATTACHMENT,
             view_formats: &[],
         });
-        self.gpu.queue.write_texture(
+        gpu.queue.write_texture(
             texture.as_image_copy(),
             rgba,
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: None },
             size,
         );
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mipmaps") });
-        self.mipmapper.record(device, &mut encoder, &texture);
-        self.gpu.queue.submit([encoder.finish()]);
+        kit.mipmapper.record(device, &mut encoder, &texture);
+        gpu.queue.submit([encoder.finish()]);
 
         let bytes = (0..mip_level_count)
             .map(|mip| texture.size().mip_level_size(mip, texture.dimension()))
@@ -283,7 +293,7 @@ impl Textures {
 
     /// Makes the bind group for `set` unless there is one. Allocates only
     /// when it makes one.
-    pub(crate) fn prepare(&mut self, set: MaterialTextures) {
+    pub(crate) fn prepare(&mut self, device: &wgpu::Device, kit: &TextureKit, set: MaterialTextures) {
         if self.bind_groups.contains_key(&set) {
             return;
         }
@@ -292,9 +302,9 @@ impl Textures {
             let (key, space) = slots[slot];
             match key.and_then(|k| self.textures.get(&(k, space))) {
                 Some(texture) => &texture.view,
-                None if slot == MaterialTextures::NORMAL => &self.defaults.flat_normal,
-                None if space == ColorSpace::Srgb => &self.defaults.white_srgb,
-                None => &self.defaults.white_linear,
+                None if slot == MaterialTextures::NORMAL => &kit.defaults.flat_normal,
+                None if space == ColorSpace::Srgb => &kit.defaults.white_srgb,
+                None => &kit.defaults.white_linear,
             }
         };
         let texture = |slot: usize| wgpu::BindGroupEntry {
@@ -307,19 +317,20 @@ impl Textures {
             texture(2),
             texture(3),
             texture(4),
-            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+            wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
         ];
-        let bind_group = self.gpu.device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("material textures"),
-            layout: &self.layout,
+            layout: &kit.layout,
             entries: &entries,
         });
         self.bind_groups.insert(set, bind_group);
     }
 
-    /// The bind group [`Textures::prepare`] made for `set`.
-    pub(crate) fn bind_group(&self, set: &MaterialTextures) -> &wgpu::BindGroup {
-        &self.bind_groups[set]
+    /// The bind group [`Textures::prepare`] made for `set`, unless a
+    /// texture it used changed since.
+    pub(crate) fn bind_group(&self, set: &MaterialTextures) -> Option<&wgpu::BindGroup> {
+        self.bind_groups.get(set)
     }
 }
 

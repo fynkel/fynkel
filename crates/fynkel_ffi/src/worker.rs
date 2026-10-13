@@ -4,8 +4,10 @@
 //! Posting never waits for the GPU. Scenes go through a mailbox where the
 //! newest wins: a scene posted while another is still waiting replaces it
 //! (it is *coalesced*), so a slow GPU means fewer, fresher frames rather
-//! than a growing queue. Mesh and texture changes are not coalesced; they queue up in
-//! order and are applied before the next scene is drawn.
+//! than a growing queue. Mesh and texture changes are not coalesced; they
+//! queue up in order, in the world's ledger, and the first worker of the
+//! world to draw next makes them (the world's views share its meshes and
+//! textures, and the device: `device.rs`).
 //!
 //! Scene buffers circulate between the poster and the worker, so a steady
 //! stream of frames allocates nothing on either side. There are never more
@@ -19,12 +21,17 @@
 //! thread and leaves nothing behind.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak, mpsc};
 use std::thread;
 
 use fynkel_present::Target;
-use fynkel_render::{Gpu, RenderScene, Renderer};
+#[cfg(test)]
+use fynkel_render::Gpu;
+use fynkel_render::{RenderScene, Renderer};
 
+#[cfg(test)]
+use crate::device::Device;
+use crate::device::WorldGpu;
 use crate::error::{Error, FyStatus};
 use crate::extract::ResourceOp;
 
@@ -39,7 +46,7 @@ pub(crate) struct WorkerStats {
     /// The target had nowhere to draw. The next scene posted brings the
     /// picture up to date.
     pub(crate) skipped: u64,
-    /// GPU memory the renderer's textures and meshes hold, as of the last
+    /// GPU memory the world's textures and meshes hold, as of the last
     /// scene taken.
     pub(crate) texture_bytes: u64,
     pub(crate) mesh_bytes: u64,
@@ -48,6 +55,23 @@ pub(crate) struct WorkerStats {
 #[derive(Debug)]
 pub(crate) struct Worker {
     shared: Arc<Shared>,
+    world: Arc<WorldGpu>,
+}
+
+/// Stops a worker from outside, for its device: lost, or in error.
+#[derive(Debug)]
+pub(crate) struct Stopper(Weak<Shared>);
+
+impl Stopper {
+    pub(crate) fn stop(&self, message: String) {
+        if let Some(shared) = self.0.upgrade() {
+            shared.fail(message);
+        }
+    }
+
+    pub(crate) fn is_alive(&self) -> bool {
+        self.0.strong_count() > 0
+    }
 }
 
 #[derive(Debug)]
@@ -64,11 +88,10 @@ struct Mailbox {
     pending: Option<(u64, RenderScene)>,
     /// Scene buffers ready for reuse.
     spare: Vec<RenderScene>,
-    ops: Vec<ResourceOp>,
     /// A new size for the target, applied before the next scene is drawn.
     size: Option<(u32, u32)>,
     stop: bool,
-    /// A test asked the worker to destroy its device ([`Worker::lose_device`]).
+    /// A test asked the worker to destroy the device ([`Worker::lose_device`]).
     lose_device: bool,
     /// The worker stopped and dropped everything it owned.
     finished: bool,
@@ -80,46 +103,51 @@ struct Mailbox {
 }
 
 impl Worker {
-    /// Starts the worker on a render thread, which owns `gpu`, `renderer`
-    /// and `target` from now on.
+    /// Starts a worker of its own (a device and a world of its own, the
+    /// renderer's assets) on a render thread, for tests.
+    #[cfg(test)]
     pub(crate) fn start<T: Target + 'static>(gpu: Gpu, renderer: Renderer, target: T) -> std::io::Result<Self> {
         Self::start_on(&RENDER_THREADS, gpu, renderer, target)
     }
 
     /// [`Worker::start`], on a thread of `threads`.
+    #[cfg(test)]
     fn start_on<T: Target + 'static>(
         threads: &'static RenderThreads,
         gpu: Gpu,
         renderer: Renderer,
         target: T,
     ) -> std::io::Result<Self> {
+        let world = WorldGpu::with_assets(&Device::new(gpu), renderer.assets().clone());
+        Self::start_in(threads, world, renderer, target)
+    }
+
+    /// Starts the worker of a view of `world` on a render thread, which owns
+    /// `renderer` (sharing `world`'s assets) and `target` from now on.
+    pub(crate) fn start_for<T: Target + 'static>(
+        world: Arc<WorldGpu>,
+        renderer: Renderer,
+        target: T,
+    ) -> std::io::Result<Self> {
+        Self::start_in(&RENDER_THREADS, world, renderer, target)
+    }
+
+    fn start_in<T: Target + 'static>(
+        threads: &'static RenderThreads,
+        world: Arc<WorldGpu>,
+        renderer: Renderer,
+        target: T,
+    ) -> std::io::Result<Self> {
         let shared = Arc::new(Shared { mailbox: Mutex::default(), wake: Condvar::new(), finished: Condvar::new() });
-        // wgpu's own handlers panic, on whichever thread calls next. These
-        // stop the worker instead, with a status the view can act on: a new
-        // view has a new device, and uploads everything again.
-        gpu.device.on_uncaptured_error(Arc::new({
-            let shared = shared.clone();
-            move |error| shared.fail(format!("the GPU reported an error: {error}"))
-        }));
-        gpu.device.set_device_lost_callback({
-            let shared = shared.clone();
-            // Dropping the device doesn't call it, and nothing here
-            // destroys it but a test.
-            move |_reason, message| {
-                shared.fail(if message.is_empty() {
-                    "the GPU device was lost".to_owned()
-                } else {
-                    format!("the GPU device was lost: {message}")
-                })
-            }
-        });
+        world.device.watch(Stopper(Arc::downgrade(&shared)));
         let job = Job {
             work: Box::new({
                 let shared = shared.clone();
+                let world = world.clone();
                 move || {
                     // Everything the worker owns is dropped inside, on this
                     // thread, before it counts as finished.
-                    let result = panic::catch_unwind(AssertUnwindSafe(|| run(&shared, gpu, renderer, target)));
+                    let result = panic::catch_unwind(AssertUnwindSafe(|| run(&shared, &world, renderer, target)));
                     let failure = match result {
                         Ok(Ok(())) => return,
                         Ok(Err(failure)) => failure,
@@ -135,7 +163,7 @@ impl Worker {
             shared: shared.clone(),
         };
         threads.run(job)?;
-        Ok(Self { shared })
+        Ok(Self { shared, world })
     }
 
     /// A scene buffer to fill: a spare one when there is one.
@@ -143,15 +171,18 @@ impl Worker {
         self.shared.lock().spare.pop().unwrap_or_default()
     }
 
-    /// Hands `scene` (frame `number`) and the mesh changes in `ops` to the
-    /// worker. `ops` is left empty. Fails only when the worker has stopped
+    /// Hands `scene` (frame `number`) to the worker, and the mesh changes in
+    /// `ops` to the world's ledger, for the first of its workers to draw.
+    /// `ops` is left empty. Fails only when the worker has stopped
     /// ([`Worker::failure`]).
     pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<ResourceOp>) -> Result<(), Error> {
         let mut mailbox = self.shared.lock();
         if let Some((status, message)) = &mailbox.failure {
             return Err(Error::new(*status, message.clone()));
         }
-        mailbox.ops.append(ops);
+        if !ops.is_empty() {
+            self.world.ledger().ops.append(ops);
+        }
         mailbox.stats.posted += 1;
         if let Some((_, replaced)) = mailbox.pending.replace((number, scene)) {
             mailbox.spare.push(replaced);
@@ -173,8 +204,8 @@ impl Worker {
         Ok(())
     }
 
-    /// For tests: destroys the worker's device, as a driver reset would.
-    /// It's done on the render thread, which owns the device.
+    /// For tests: destroys the device, as a driver reset would, which stops
+    /// every view on it. It's done on the render thread, between frames.
     pub(crate) fn lose_device(&self) {
         self.shared.lock().lose_device = true;
         self.shared.wake.notify_one();
@@ -301,7 +332,8 @@ impl Shared {
 }
 
 /// Draws until stopped. Fails when the target can't take a new size.
-fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
+fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
+    let gpu = &world.device.gpu;
     let mut ops = Vec::new();
     loop {
         let (number, scene, size) = {
@@ -313,15 +345,10 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
                 if mailbox.lose_device {
                     mailbox.lose_device = false;
                     drop(mailbox);
-                    gpu.device.destroy();
-                    // wgpu calls the device-lost callback only once the
-                    // device is polled with nothing left to do; stop now, as
-                    // a real loss does before the next frame.
-                    shared.fail("the GPU device was lost".to_owned());
+                    world.device.destroy();
                     return Ok(());
                 }
                 if let Some((number, scene)) = mailbox.pending.take() {
-                    std::mem::swap(&mut mailbox.ops, &mut ops);
                     break (number, scene, mailbox.size.take());
                 }
                 mailbox = shared.wake.wait(mailbox).unwrap_or_else(PoisonError::into_inner);
@@ -336,26 +363,31 @@ fn run<T: Target>(shared: &Shared, gpu: Gpu, mut renderer: Renderer, mut target:
                     .resize(width, height)
                     .map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
             }
-            for op in ops.drain(..) {
-                match op {
-                    ResourceOp::UploadMesh(key, mesh) => renderer.upload_mesh(key, &mesh),
-                    ResourceOp::RemoveMesh(key) => {
-                        renderer.remove_mesh(key);
-                    }
-                    ResourceOp::UploadTexture(key, space, image) => {
-                        renderer.upload_texture(key, space, image.width(), image.height(), image.pixels());
-                    }
-                    ResourceOp::RemoveTexture(key) => {
-                        renderer.remove_texture(key);
+            // The world's changes, by whichever of its workers comes first.
+            // Taken with the assets locked, so no other worker draws before
+            // they're made.
+            {
+                let mut assets = fynkel_render::lock_assets(&world.assets);
+                std::mem::swap(&mut world.ledger().ops, &mut ops);
+                for op in ops.drain(..) {
+                    match op {
+                        ResourceOp::UploadMesh(key, mesh) => assets.upload_mesh(key, &mesh),
+                        ResourceOp::RemoveMesh(key) => {
+                            assets.remove_mesh(key);
+                        }
+                        ResourceOp::UploadTexture(key, space, image) => {
+                            assets.upload_texture(key, space, image.width(), image.height(), image.pixels());
+                        }
+                        ResourceOp::RemoveTexture(key) => {
+                            assets.remove_texture(key);
+                        }
                     }
                 }
-            }
-            // Before the frame is finished: a reader woken by it must see
-            // the memory its uploads took.
-            {
+                // Before the frame is finished: a reader woken by it must
+                // see the memory its uploads took.
                 let mut mailbox = shared.lock();
-                mailbox.stats.texture_bytes = renderer.texture_bytes();
-                mailbox.stats.mesh_bytes = renderer.mesh_bytes();
+                mailbox.stats.texture_bytes = assets.texture_bytes();
+                mailbox.stats.mesh_bytes = assets.mesh_bytes();
             }
 
             let drawn = match target.begin() {

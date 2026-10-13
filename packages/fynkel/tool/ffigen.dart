@@ -12,7 +12,7 @@ import 'package:ffigen/ffigen.dart';
 /// Calls that may block or take long: they are not leaf calls, so the Dart
 /// VM can collect garbage and run other isolates while they run.
 const _blocking = {
-  'fy_view_new_headless', // creates a GPU device and starts a thread
+  'fy_view_new_headless', // may create the GPU device, and starts a thread
   'fy_view_new_apple', // the same
   'fy_view_new_android', // the same
   'fy_apple_set_frame_ready', // waits for a frame-ready call in progress
