@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's and 7's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -13,6 +13,7 @@ import 'scenes/contacts_basics.dart';
 import 'scenes/controls_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
+import 'scenes/flutter_basics.dart';
 import 'scenes/input.dart';
 import 'scenes/joints_basics.dart';
 import 'scenes/joints_bridge.dart';
@@ -74,4 +75,5 @@ final List<LabScene Function()> scenes = [
   JointsChainScene.new,
   JointsCharacterScene.new,
   AddonsBasicsScene.new,
+  FlutterBasicsScene.new,
 ];

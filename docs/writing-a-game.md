@@ -42,13 +42,15 @@ nearly all since Android 11; a 32-bit one gets an error saying so.
 
 **Android needs Android 11 or later.** Set it in the app before its first
 Android build, or the build stops at "minSdkVersion 24 cannot be smaller
-than version 30 declared in library [:fynkel_flutter]":
+than version 30 declared in library [:fynkel_flutter]". In
+`android/app/build.gradle.kts`, `flutter create` wrote `minSdk =
+flutter.minSdkVersion`; make it 30:
 
 ```kotlin
 // my_game/android/app/build.gradle.kts
 android {
     defaultConfig {
-        minSdk = 30
+        minSdk = 30 // was flutter.minSdkVersion
     }
 }
 ```
@@ -251,7 +253,11 @@ class Turret extends GameObject {
   new shot; `ObjectHandle(shot).object` is null from the release on (and
   once it's destroyed).
 - `countActive` and `countInactive` say how many are out and waiting;
-  `prewarm(n)` makes them ahead, so play doesn't make (and load) them;
+  `prewarm(n)` makes them ahead, so play doesn't make (and load) them:
+  a new one `get` makes shows from the next frame, once it's loaded,
+  where a waiting one shows at once;
+  `activeAt(i)` walks the ones out without making a list (walk from the
+  end to release as you go), and `active` gives a copy;
   `clear()` destroys the waiting ones; with `maxSize`, a release beyond
   that many waiting destroys. Hidden objects aren't in `world.all`, so a
   wave's "are they all gone" works the same with a pool. Getting and
@@ -298,6 +304,10 @@ shortcuts an object has (`transform`, `position`, `get<T>()`, `world`,
   until it's turned back on.
 - A destroyed object still has its components, to read: a dead enemy's
   `get<Health>()` still says how much it took.
+- **To keep a behaviour in a typed field**, make it in a constructor of
+  your own and pass it on, so the field and the components share it:
+  `Enemy() : this._(Health(3));` then `Enemy._(this.health) :
+  super(components: [health]);` with `final Health health;`.
 
 **Which one?** If a subclass's `onUpdate` would make sense on another kind
 of object, it belongs in a behaviour. Keep a class for what an object *is*
@@ -437,6 +447,8 @@ class Beacon extends GameObject {
   for that object, and `null` gives it back. `material.copy()` makes a
   material of its own to change every value.
 - **Lights**: `Light.sun` (from the object's forward) and `Light.ambient`.
+  An object has at most one `Light`, so the sun and the ambient light go
+  on objects of their own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
   `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`).
@@ -696,6 +708,8 @@ class Scoreboard extends GameObject {
 }
 ```
 
+- A signal with nothing to tell is a `Signal<void>`, emitted with
+  `emit(null)`.
 - `emit(value)` calls every listener at once, in order. A handler that
   throws goes to `world.errors`, and the others still hear.
 - `signal.listen(handler)` listens without an owner: cancel it yourself.
@@ -819,6 +833,12 @@ void main() => runApp(
   ),
 );
 ```
+
+§2's `show runApp` is too narrow for this: import all of `widgets.dart`,
+and `services.dart` for the keys, as here. A pause panel shows itself
+when the game pauses, from wherever it's paused, with
+`ValueListenableBuilder(valueListenable: game.world.pausedListenable,
+...)`; game code hears it with `on(world.onPausedChanged, ...)`.
 
 ## 12. Assets
 
@@ -1495,6 +1515,13 @@ class PlayPage extends StatelessWidget {
 }
 ```
 
+`FynkelGame` makes the game's world and adds the root to it before the
+builder runs, so `game.world` is there from the start: a widget beside
+the view can take `game.world.input` while it's built, as an on-screen
+stick does (`Stick(game.world.input)`). The view shows the game's world;
+a game whose assets don't come from the app's bundle gives
+`FynkelGame(source: ...)`.
+
 Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
 saving there run, and then the engine's memory is freed.
@@ -1552,7 +1579,8 @@ lands where you say. To put one on an object, ask the camera where it is
 on screen: `world.camera!.worldToScreenPoint(target.position, width: 800,
 height: 600)`.
 `HeadlessView(world, width:, height:)` renders a frame without a window,
-for a picture of the game. `examples/arena/test` tests a whole game this
+for a picture of the game: `File('shot.png').writeAsBytesSync(view.png())`
+saves it to look at, which finds an unlit side or a camera too far fast. `examples/arena/test` tests a whole game this
 way.
 
 **An error in the game fails the test** by itself, as it would be an
@@ -1781,6 +1809,12 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 7** (2026-10-13):
+  - `FynkelGame` makes the world and adds the root before its builder
+    runs, so `game.world` works there. A `source:` for its assets goes on
+    the `FynkelGame` now: given to its `FynkelView`, it's reported and
+    not used.
 
 - **Stage 6, the review's bugs** (2026-10-13):
   - Changing the parent of an object that's being destroyed, or putting

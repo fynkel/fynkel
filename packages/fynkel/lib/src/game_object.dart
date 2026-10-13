@@ -78,6 +78,7 @@ class GameObject with _Moving {
   // [ObjectHandle].
   Pool<GameObject>? _pool;
   _PoolState _pooled = _PoolState.none;
+  int _poolIndex = 0;
   int _generation = 0;
   bool _started = false;
 

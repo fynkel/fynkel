@@ -288,7 +288,8 @@ final class World implements Finalizable {
   /// what moves while paused. [Time.scale] is left as it was, and the first
   /// frame after the pause counts no time, however long it was.
   ///
-  /// Unlike `time.scale = 0`, which stops only the time.
+  /// Unlike `time.scale = 0`, which stops only the time. Each change is
+  /// told by [onPausedChanged].
   bool get paused => _paused;
   set paused(bool value) {
     if (value == _paused) return;
@@ -297,9 +298,15 @@ final class World implements Finalizable {
     input._pausing = value;
     time._paused = value;
     if (!value) time._skip = true;
+    onPausedChanged.emit(value);
   }
 
   var _paused = false;
+
+  /// Emits [paused]'s new value each time it changes, as it changes: for
+  /// what shows the pause, such as a pause panel (in Flutter,
+  /// `world.pausedListenable` from `fynkel_flutter`).
+  final onPausedChanged = Signal<bool>();
 
   /// Whether the app is away: in the background, or hidden. [FynkelView]
   /// sets it from the app's lifecycle; a test can set it. When it changes,

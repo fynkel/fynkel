@@ -102,7 +102,10 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// which must be bounded, so menus and HUDs are Flutter widgets around or
 /// on top of it.
 ///
-/// The root is used once, when the view is first built: to change level,
+/// A [FynkelGame]'s root is shown in the game's world, which the game
+/// makes and disposes; any other root, the view adds to a world of its
+/// own. The root is used
+/// once, when the view is first built: to change level,
 /// destroy the old root and add another to its world (`root.world`); to
 /// start over, make the root in a [FynkelGame] (as [FynkelApp] does) and
 /// restart it. The world is [FynkelViewState.world] too, for code outside
@@ -169,12 +172,13 @@ class FynkelView extends StatefulWidget {
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
-  /// The game: added to the view's own world when the view is first
-  /// built.
+  /// The game: shown in its [FynkelGame]'s world, or else added to the
+  /// view's own world when the view is first built.
   final GameObject? root;
 
   /// Where the view's own world loads assets from; the app's bundle
-  /// ([bundleSource]) when null.
+  /// ([bundleSource]) when null. A [FynkelGame]'s root loads from the
+  /// game's: give it there.
   final AssetSource? source;
 
   /// A world made by hand ([FynkelView.world]), shown in place of a
@@ -220,11 +224,15 @@ class FynkelView extends StatefulWidget {
 /// A [FynkelView]'s state: its [world], for code outside the game, such
 /// as a HUD (`GlobalKey<FynkelViewState>().currentState!.world`).
 class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  World? _own;
+  // The root's world, and whether the view made it (and so disposes it);
+  // the FynkelGame that made it, if one did.
+  World? _rootWorld;
+  bool _owns = false;
+  FynkelGameState? _game;
 
-  /// The world shown: the view's own, which its root was added to, or the
-  /// one it was given.
-  World get world => widget.world ?? _own!;
+  /// The world shown: the root's (the view's own, which it added the root
+  /// to, or a [FynkelGame]'s), or the one it was given.
+  World get world => widget.world ?? _rootWorld!;
 
   late final Ticker _ticker = createTicker(_tick)..start();
   int? _lastMicros;
@@ -270,7 +278,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.initState();
     _ticker; // Starts it.
     WidgetsBinding.instance.addObserver(this);
-    _own = _makeOwn();
+    _rootWorld = _worldOfRoot();
     if (widget.world case final world?) _listen(world);
   }
 
@@ -278,7 +286,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// ([World.applicationPaused]).
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final world = widget.world ?? _own;
+    final world = widget.world ?? _rootWorld;
     if (world == null || world.isDisposed) return;
     switch (state) {
       case AppLifecycleState.hidden || AppLifecycleState.paused:
@@ -291,21 +299,47 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
-  /// A world with the widget's root in it, if it has one. It's heard
-  /// before the root is added, which may throw at once.
-  World? _makeOwn() {
+  /// The world of the widget's root, if it has one: its [FynkelGame]'s,
+  /// or else one the view makes and adds it to. It's heard before the root is added, which may throw at once.
+  World? _worldOfRoot() {
     final root = widget.root;
+    _owns = false;
     if (root == null) return null;
+    final game = FynkelGame.maybeOf(context);
+    if (game != null && identical(game.game, root)) {
+      if (widget.source != null) {
+        // Reported, not thrown: the view goes on with the game's world.
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: ArgumentError.value(
+              widget.source,
+              'source',
+              "$root is a FynkelGame's, whose world loads its assets: give source: to the FynkelGame, not its view",
+            ),
+            library: 'fynkel_flutter',
+          ),
+        );
+      }
+      // The game hears its world's errors from the start (what onLoad
+      // threw, before this view was made), and passes them on.
+      _listen(null);
+      _game = game;
+      hearGameErrors(game, widget.showErrors ? _heard : null);
+      return game.world;
+    }
     final world = World(source: widget.source ?? bundleSource());
+    _owns = true;
     _listen(world);
     return world..add(root);
   }
 
-  void _listen(World world) {
+  void _listen(World? world) {
     _errorsHeard?.cancel();
     _errorsHeard = null;
     _gameErrors.clear();
-    if (widget.showErrors) _errorsHeard = world.errors.listen(_heard);
+    if (_game case final game?) stopHearingGameErrors(game, _heard);
+    _game = null;
+    if (widget.showErrors && world != null) _errorsHeard = world.errors.listen(_heard);
   }
 
   void _heard(ObjectError error) {
@@ -338,8 +372,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     // from a root to a world or back, starts the view over.
     if (oldWidget.world != widget.world) {
       _release();
-      _own?.dispose();
-      _own = _makeOwn();
+      if (_owns) _rootWorld?.dispose();
+      _rootWorld = _worldOfRoot();
       if (widget.world case final world?) _listen(world);
     }
   }
@@ -347,12 +381,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _errorsHeard?.cancel();
+    _listen(null);
     _ticker.dispose();
     _ownFocus?.dispose();
     _release();
     // A view still drawing keeps what it last had until it's freed.
-    _own?.dispose();
+    if (_owns) _rootWorld?.dispose();
     super.dispose();
   }
 

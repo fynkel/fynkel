@@ -36,6 +36,9 @@ class _Gun extends GameObject {
       shots.release(live[i]);
       live[i] = shots.get(_place);
     }
+    for (var i = shots.countActive - 1; i >= 0; i--) {
+      if (shots.activeAt(i).isDestroyed) throw StateError('walked a destroyed one');
+    }
   }
 
   static void _place(_Shot shot) => shot.transform = const Transform(position: Vec3(1, 2, 3));

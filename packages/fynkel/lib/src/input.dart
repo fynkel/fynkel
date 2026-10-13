@@ -234,7 +234,7 @@ final class Input {
   /// 1: x to the right, y up. `'move'` reads W, A, S, D and the arrow
   /// keys; [bindAxis2] adds others, and [setAxis2] adds a Flutter stick's
   /// value to the keys'. Throws an [ArgumentError] for a name that isn't
-  /// bound or set. Zero while the world is paused. It's the "2D Vector
+  /// bound or set (a typo, most likely; [hasAxis2] asks). Zero while the world is paused. It's the "2D Vector
   /// composite" of Unity's Input System; there's no one-way axis, so for
   /// Unity's `GetAxis("Horizontal")` read `axis2('move').x`.
   Vec2 axis2(String name) {
@@ -264,13 +264,15 @@ final class Input {
   }
 
   /// Binds the two-way control [name] to keys or buttons for each way,
-  /// replacing what it had.
+  /// replacing what it had. A way not given has none: `bindAxis2('aim')`
+  /// makes an axis only [setAxis2] feeds, such as a Flutter stick's, which
+  /// reads zero until it's set.
   void bindAxis2(
     String name, {
-    required List<InputButton> up,
-    required List<InputButton> down,
-    required List<InputButton> left,
-    required List<InputButton> right,
+    List<InputButton> up = const [],
+    List<InputButton> down = const [],
+    List<InputButton> left = const [],
+    List<InputButton> right = const [],
   }) {
     final kept = _axes[name]?.value ?? Vec2.zero;
     _axes[name] = _Axis2(List.of(up), List.of(down), List.of(left), List.of(right))..value = kept;
@@ -283,14 +285,21 @@ final class Input {
   /// The named button [name], held by any of the keys and mouse buttons
   /// bound to it: `input.action('jump').wasPressed`. `'jump'` is the space
   /// bar; [bindAction] adds others. Throws an [ArgumentError] for a name
-  /// that isn't bound.
+  /// that isn't bound ([hasAction] asks).
   InputAction action(String name) =>
       _actions[name] ?? (throw ArgumentError.value(name, 'name', 'is no action (bound: ${_actions.keys})'));
 
+  /// Whether there's a two-way control [name], bound or set, so [axis2]
+  /// reads it.
+  bool hasAxis2(String name) => _axes.containsKey(name);
+
+  /// Whether there's an action [name], so [action] gives it.
+  bool hasAction(String name) => _actions.containsKey(name);
+
   /// Binds the action [name] to [buttons], replacing what it had, and
   /// returns it. With no buttons, it's pressed only from outside
-  /// ([InputAction.press]).
-  InputAction bindAction(String name, List<InputButton> buttons) {
+  /// ([InputAction.press]), as a Flutter button does.
+  InputAction bindAction(String name, [List<InputButton> buttons = const []]) {
     _useAll(buttons);
     return _actions[name] = InputAction._(this, name, List.unmodifiable(buttons));
   }

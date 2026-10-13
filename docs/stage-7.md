@@ -150,7 +150,7 @@ holding stage 6's frame rates on the three devices.
 
 ## 4. Checklist
 
-- [ ] Phase 1: groundwork
+- [x] Phase 1: groundwork (PR #90)
 - [ ] Phase 2: one look for the app and the game
 - [ ] Phase 3: widgets in the world
 - [ ] Phase 4: menus, pop-ups and navigation

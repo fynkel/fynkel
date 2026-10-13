@@ -5,6 +5,7 @@ import 'package:ffi/ffi.dart';
 
 import 'bindings.g.dart';
 import 'native.dart';
+import 'png.dart';
 import 'world.dart';
 
 /// What a view did since it was made (`fy_view_stats`).
@@ -204,6 +205,12 @@ final class HeadlessView extends WorldView {
     check(fy_view_read(_live, number, timeout.inMilliseconds, _pixels, _length, scratch.id));
     return (number: scratch.id.value, rgba: Uint8List.fromList(_pixels.asTypedList(_length)));
   }
+
+  /// Draws the world as it is now and gives the picture as a PNG file's
+  /// bytes, to look at what a test sees:
+  /// `File('shot.png').writeAsBytesSync(view.png())`.
+  Uint8List png({Duration timeout = const Duration(seconds: 10)}) =>
+      encodePng(width, height, read(frame(), timeout: timeout).rgba);
 
   @override
   void resize(int width, int height) {

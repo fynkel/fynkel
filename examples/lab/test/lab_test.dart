@@ -7,6 +7,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/scenes.dart';
@@ -15,6 +16,7 @@ import 'package:lab/scenes/character_course.dart';
 import 'package:lab/scenes/addons_basics.dart';
 import 'package:lab/scenes/colour_basics.dart';
 import 'package:lab/scenes/contacts_basics.dart';
+import 'package:lab/scenes/flutter_basics.dart';
 import 'package:lab/scenes/input.dart';
 import 'package:lab/scenes/joints_basics.dart';
 import 'package:lab/scenes/joints_bridge.dart';
@@ -193,6 +195,37 @@ void main() {
     pause.onChanged(false);
     frames(31);
     expect(scene.cube.position.x, closeTo(4, 0.01), reason: 'the first frame after counts no time');
+  });
+
+  test('Flutter: beside the game: the stick moves the cube, and P pauses and goes on, heard by the banner', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(FlutterBasicsScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(1);
+    final banner = <bool>[];
+    world.pausedListenable.addListener(() => banner.add(world.pausedListenable.value));
+    world.input.setAxis2('move', const Vec2(1, 0));
+    frames(30);
+    expect(scene.cube.position.x, closeTo(2, 0.01), reason: 'the stick moves it 4 m/s');
+    world.input.setAxis2('move', Vec2.zero);
+    world.input.simulate.keyDown(KeyCode.p);
+    frames(1);
+    world.input.simulate.keyUp(KeyCode.p);
+    frames(1);
+    expect(world.paused, isTrue);
+    world.input.simulate.keyDown(KeyCode.p);
+    frames(1);
+    expect(world.paused, isTrue, reason: 'paused, the game hears no keys');
+    world.paused = false; // the banner's tap
+    frames(1);
+    expect(banner, [true, false]);
+    expect(scene.log.value.map((e) => e.text), containsAllInOrder(['paused', 'going on']));
   });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
