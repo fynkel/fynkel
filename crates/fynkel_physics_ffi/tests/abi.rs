@@ -393,7 +393,8 @@ fn a_mesh_collider_comes_through_c_and_bad_meshes_are_refused() {
         );
         assert_eq!(fp_mesh_add(world.0, ptr::null(), 3, [0u32, 1, 2].as_ptr(), 3, &mut out), FpStatus::NullPointer);
         let mut other = 0;
-        for bad in [mesh_spec(mesh, 2), mesh_spec(mesh + 100, 0)] {
+        for bad in [mesh_spec(mesh, 2), mesh_spec(mesh + 100, 0), FpColliderSpec { character: 2, ..mesh_spec(mesh, 0) }]
+        {
             let status = fp_object_collider_add(world.0, 4, bad, object(0.0, 0.0, 0.0, 1.0), 0, &mut other);
             assert_eq!(status, FpStatus::InvalidValue);
         }

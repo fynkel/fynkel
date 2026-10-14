@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 12;
+pub const FP_ABI_VERSION: u32 = 13;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -143,6 +143,9 @@ pub struct FpColliderSpec {
     /// For `FP_COLLIDER_KIND_MESH`.
     pub mesh: u64,
     pub convex: u32,
+    /// 1 for a character controller's: it meets triggers as a kinematic
+    /// body would, before its first `fp_character_move` too. 0 otherwise.
+    pub character: u32,
 }
 
 /// Where a pair of colliders is in its touching.
@@ -715,6 +718,9 @@ fn spec(s: FpColliderSpec) -> Result<ColliderSpec, Error> {
     };
     if s.listens > 3 {
         return Err(invalid(format!("listens is 0 to 3, not {}", s.listens)));
+    }
+    if s.character > 1 {
+        return Err(invalid(format!("character is 0 or 1, not {}", s.character)));
     }
     Ok(ColliderSpec { shape, center: vector(s.center), is_trigger, layer: s.layer, material, listens: s.listens })
 }
@@ -1322,7 +1328,9 @@ pub unsafe extern "C" fn fp_object_collider_add(
                 return Err(Error::null("out"));
             }
             let body = (body != 0).then_some(body);
-            let id = core!(w).physics.add_object_collider(key, self::spec(spec)?, self::object(object), body)?;
+            let physics = &mut core!(w).physics;
+            let id = physics.add_object_collider(key, self::spec(spec)?, self::object(object), body)?;
+            physics.set_character(id, spec.character == 1)?;
             write(out, "out", id)
         })
     }
@@ -1337,7 +1345,13 @@ pub unsafe extern "C" fn fp_object_collider_add(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fp_collider_spec_set(world: *mut FpWorld, collider: u64, spec: FpColliderSpec) -> FpStatus {
     // SAFETY: as this function's.
-    unsafe { with_world(world, |w| Ok(core!(w).physics.set_collider_spec(collider, self::spec(spec)?)?)) }
+    unsafe {
+        with_world(world, |w| {
+            let physics = &mut core!(w).physics;
+            physics.set_collider_spec(collider, self::spec(spec)?)?;
+            Ok(physics.set_character(collider, spec.character == 1)?)
+        })
+    }
 }
 
 /// The following colliders `ids[i]`'s objects are now at `objects[i]`; those
