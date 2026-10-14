@@ -16,8 +16,11 @@
 //! Maps hold plain depth (0 near the light, 1 far), and the forward pass
 //! compares a surface's own against them (`forward.wgsl`).
 
+use std::sync::OnceLock;
+
 use glam::{Mat4, Vec3, Vec4};
 
+use crate::assets::PipelineMaker;
 use crate::scene::{CameraView, ShadowLevel};
 
 /// The most cascades a level has.
@@ -229,12 +232,18 @@ pub(crate) struct ShadowKit {
     /// How far apart the view matrices are in the frame's buffer: the
     /// device's alignment for dynamic offsets.
     pub(crate) view_stride: u64,
-    /// The cascades' opaque and cut-out pipelines, then the spot maps'.
-    pipelines: [wgpu::RenderPipeline; 4],
+    maker: PipelineMaker,
+    /// The casters' shader, and its layouts for opaque and cut-out ones.
+    shader: wgpu::ShaderModule,
+    opaque_layout: wgpu::PipelineLayout,
+    cutout_layout: wgpu::PipelineLayout,
+    /// The cascades' opaque and cut-out pipelines, then the spot maps',
+    /// each made when first drawn with.
+    pipelines: [OnceLock<wgpu::RenderPipeline>; 4],
 }
 
 impl ShadowKit {
-    pub(crate) fn new(device: &wgpu::Device, textures_layout: &wgpu::BindGroupLayout) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, textures_layout: &wgpu::BindGroupLayout, maker: &PipelineMaker) -> Self {
         let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow view"),
             entries: &[wgpu::BindGroupLayoutEntry {
@@ -292,6 +301,27 @@ impl ShadowKit {
             bind_group_layouts: &[Some(&view_layout), Some(textures_layout)],
             immediate_size: 0,
         });
+        Self {
+            view_layout,
+            maps_layout,
+            sampler,
+            view_stride: u64::from(device.limits().min_uniform_buffer_offset_alignment).max(64),
+            maker: maker.clone(),
+            shader,
+            opaque_layout,
+            cutout_layout,
+            pipelines: Default::default(),
+        }
+    }
+
+    /// The pipeline that draws casters into a spot map or a cascade,
+    /// opaque or cut out.
+    pub(crate) fn pipeline(&self, spot: bool, cutout: bool) -> &wgpu::RenderPipeline {
+        self.pipelines[usize::from(spot) * 2 + usize::from(cutout)]
+            .get_or_init(|| self.make(if spot { SPOT_FORMAT } else { CASCADE_FORMAT }, cutout))
+    }
+
+    fn make(&self, format: wgpu::TextureFormat, cutout: bool) -> wgpu::RenderPipeline {
         // From the mesh, the position and the UV; from the caster, the rest.
         let vertex_attributes = [
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
@@ -320,57 +350,37 @@ impl ShadowKit {
         // either side. The bias keeps a surface from shadowing itself where
         // it slopes away from the light (acne); the forward pass also moves
         // its lookups out along the normal.
-        let pipeline = |format: wgpu::TextureFormat, cutout: bool| {
-            let bias = match format {
-                CASCADE_FORMAT => wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 },
-                _ => wgpu::DepthBiasState { constant: 4, slope_scale: 1.5, clamp: 0.0 },
-            };
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(if cutout { "shadow cut-out" } else { "shadow" }),
-                layout: Some(if cutout { &cutout_layout } else { &opaque_layout }),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &buffers,
-                },
-                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Less),
-                    stencil: Default::default(),
-                    bias,
-                }),
-                multisample: Default::default(),
-                fragment: cutout.then(|| wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_cutout"),
-                    compilation_options: Default::default(),
-                    targets: &[],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+        let bias = match format {
+            CASCADE_FORMAT => wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 },
+            _ => wgpu::DepthBiasState { constant: 4, slope_scale: 1.5, clamp: 0.0 },
         };
-        Self {
-            view_layout,
-            maps_layout,
-            sampler,
-            view_stride: u64::from(device.limits().min_uniform_buffer_offset_alignment).max(64),
-            pipelines: [
-                pipeline(CASCADE_FORMAT, false),
-                pipeline(CASCADE_FORMAT, true),
-                pipeline(SPOT_FORMAT, false),
-                pipeline(SPOT_FORMAT, true),
-            ],
-        }
-    }
-
-    /// The pipeline that draws casters into a spot map or a cascade,
-    /// opaque or cut out.
-    pub(crate) fn pipeline(&self, spot: bool, cutout: bool) -> &wgpu::RenderPipeline {
-        &self.pipelines[usize::from(spot) * 2 + usize::from(cutout)]
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(if cutout { "shadow cut-out" } else { "shadow" }),
+            layout: Some(if cutout { &self.cutout_layout } else { &self.opaque_layout }),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias,
+            }),
+            multisample: Default::default(),
+            fragment: cutout.then(|| wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_cutout"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
     }
 }
 

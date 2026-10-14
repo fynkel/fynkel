@@ -4,6 +4,7 @@
 //! once however many views show the world.
 
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use glam::Vec3;
@@ -29,6 +30,25 @@ pub struct Kit {
     /// Shadow maps' layouts, sampler and pipelines.
     pub(crate) shadows: ShadowKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
+    pub(crate) maker: PipelineMaker,
+}
+
+/// Makes a device's render pipelines, and counts them.
+#[derive(Clone, Debug)]
+pub(crate) struct PipelineMaker {
+    device: wgpu::Device,
+    made: Arc<AtomicU32>,
+}
+
+impl PipelineMaker {
+    fn new(device: &wgpu::Device) -> Self {
+        Self { device: device.clone(), made: Arc::default() }
+    }
+
+    pub(crate) fn make(&self, descriptor: wgpu::RenderPipelineDescriptor<'_>) -> wgpu::RenderPipeline {
+        self.made.fetch_add(1, Ordering::Relaxed);
+        self.device.create_render_pipeline(&descriptor)
+    }
 }
 
 impl std::fmt::Debug for Kit {
@@ -66,9 +86,11 @@ impl Kit {
                 count: None,
             }],
         });
-        let textures = TextureKit::new(gpu);
+        let maker = PipelineMaker::new(&gpu.device);
+        let textures = TextureKit::new(gpu, &maker);
         Arc::new(Self {
-            shadows: ShadowKit::new(&gpu.device, &textures.layout),
+            shadows: ShadowKit::new(&gpu.device, &textures.layout, &maker),
+            maker,
             gpu: gpu.clone(),
             quality: Quality::for_adapter(&gpu.adapter.get_info()),
             frame_layout,
@@ -87,6 +109,12 @@ impl Kit {
     /// for a scene that doesn't choose one.
     pub fn quality(&self) -> Quality {
         self.quality
+    }
+
+    /// How many render pipelines it has made: each is a shader compiled
+    /// for the GPU, the bulk of the time to a first frame.
+    pub fn pipelines_made(&self) -> u32 {
+        self.maker.made.load(Ordering::Relaxed)
     }
 
     /// The pipelines that draw into `format`, made on first use.

@@ -8,7 +8,9 @@
 //! shrinks (`mipmap.wgsl`).
 
 use std::collections::HashMap;
+use std::sync::OnceLock;
 
+use crate::assets::PipelineMaker;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, MaterialTextures, TextureKey};
 
@@ -18,16 +20,20 @@ struct GpuTexture {
     bytes: u64,
 }
 
-/// Draws mip levels, one pipeline per texture format.
+/// Draws mip levels, one pipeline per texture format, made when a texture
+/// of that format is first uploaded.
 struct Mipmapper {
     layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
-    srgb: wgpu::RenderPipeline,
-    linear: wgpu::RenderPipeline,
+    maker: PipelineMaker,
+    shader: wgpu::ShaderModule,
+    pipeline_layout: wgpu::PipelineLayout,
+    srgb: OnceLock<wgpu::RenderPipeline>,
+    linear: OnceLock<wgpu::RenderPipeline>,
 }
 
 impl Mipmapper {
-    fn new(device: &wgpu::Device) -> Self {
+    fn new(device: &wgpu::Device, maker: &PipelineMaker) -> Self {
         let shader = device.create_shader_module(wgpu::include_wgsl!("mipmap.wgsl"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mipmap"),
@@ -38,29 +44,6 @@ impl Mipmapper {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let pipeline = |format: wgpu::TextureFormat| {
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("mipmap"),
-                layout: Some(&pipeline_layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(format.into())],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        };
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("mipmap"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -70,14 +53,45 @@ impl Mipmapper {
         Self {
             layout,
             sampler,
-            srgb: pipeline(wgpu::TextureFormat::Rgba8UnormSrgb),
-            linear: pipeline(wgpu::TextureFormat::Rgba8Unorm),
+            maker: maker.clone(),
+            shader,
+            pipeline_layout,
+            srgb: OnceLock::new(),
+            linear: OnceLock::new(),
         }
+    }
+
+    fn make(&self, format: wgpu::TextureFormat) -> wgpu::RenderPipeline {
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some("mipmap"),
+            layout: Some(&self.pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &self.shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &self.shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(format.into())],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
     }
 
     /// Records drawing levels 1 and up of `texture` from level 0.
     fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
-        let pipeline = if texture.format().is_srgb() { &self.srgb } else { &self.linear };
+        let pipeline = if texture.format().is_srgb() {
+            self.srgb.get_or_init(|| self.make(wgpu::TextureFormat::Rgba8UnormSrgb))
+        } else {
+            self.linear.get_or_init(|| self.make(wgpu::TextureFormat::Rgba8Unorm))
+        };
         let level = |mip| {
             texture.create_view(&wgpu::TextureViewDescriptor {
                 base_mip_level: mip,
@@ -146,7 +160,7 @@ pub(crate) struct Textures {
 }
 
 impl TextureKit {
-    pub(crate) fn new(gpu: &Gpu) -> Self {
+    pub(crate) fn new(gpu: &Gpu, maker: &PipelineMaker) -> Self {
         let device = &gpu.device;
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("material textures"),
@@ -200,7 +214,7 @@ impl TextureKit {
             white_linear: pixel("white", wgpu::TextureFormat::Rgba8Unorm, &[255; 4]),
             flat_normal: pixel("flat normal", wgpu::TextureFormat::Rgba16Float, &flat),
         };
-        Self { layout, sampler, defaults, mipmapper: Mipmapper::new(device) }
+        Self { layout, sampler, defaults, mipmapper: Mipmapper::new(device, maker) }
     }
 }
 

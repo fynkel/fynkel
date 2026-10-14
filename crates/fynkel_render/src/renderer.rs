@@ -24,12 +24,12 @@
 //! 2. The last pass, when there is a scene image: the image onto the view
 //!    (`finish.wgsl`). Effects that need the whole picture (bloom) go here.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
-use crate::assets::{self, Assets, Kit, SharedAssets};
+use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, TextureKey};
@@ -244,15 +244,26 @@ type CasterKey = (u8, bool, MaterialTextures, u64);
 
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
+///
+/// Each is made the first time a frame draws with it: a game uses one or
+/// two of the forward pipelines, and the view's format draws the scene only
+/// at low quality.
 pub(crate) struct Pipelines {
     /// The format they draw into.
     format: wgpu::TextureFormat,
+    maker: PipelineMaker,
+    device: wgpu::Device,
+    frame_layout: wgpu::BindGroupLayout,
+    textures_layout: wgpu::BindGroupLayout,
+    maps_layout: wgpu::BindGroupLayout,
+    image_layout: wgpu::BindGroupLayout,
+    forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
     /// Opaque then cut-out, each for every [`Faces`] (see
     /// [`pipeline_index`]).
-    forward: Vec<wgpu::RenderPipeline>,
-    lines: wgpu::RenderPipeline,
+    forward: [OnceLock<wgpu::RenderPipeline>; 6],
+    lines: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
-    finish: Option<wgpu::RenderPipeline>,
+    finish: OnceLock<wgpu::RenderPipeline>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -841,7 +852,7 @@ impl Renderer {
                     continue;
                 };
                 if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
-                    pass.set_pipeline(&scene_pipelines.forward[pipeline_index(batch.cutout, batch.faces)]);
+                    pass.set_pipeline(scene_pipelines.forward(batch.cutout, batch.faces));
                 }
                 if last.is_none_or(|l| l.textures != batch.textures) {
                     pass.set_bind_group(1, bind_group, &[]);
@@ -852,7 +863,7 @@ impl Renderer {
                 pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
             }
             if !self.line_vertices.is_empty() {
-                pass.set_pipeline(&scene_pipelines.lines);
+                pass.set_pipeline(scene_pipelines.lines());
                 pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
                 pass.draw(0..self.line_vertices.len() as u32, 0..1);
             }
@@ -877,7 +888,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(pipelines.finish.as_ref().expect("a view's format is sRGB"));
+            pass.set_pipeline(pipelines.finish());
             pass.set_bind_group(0, &image.bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -948,14 +959,36 @@ impl Renderer {
 
 impl Pipelines {
     pub(crate) fn new(kit: &Kit, format: wgpu::TextureFormat) -> Self {
-        let device = &kit.gpu.device;
-        let frame_layout = &kit.frame_layout;
-        let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
+        Self {
+            format,
+            maker: kit.maker.clone(),
+            device: kit.gpu.device.clone(),
+            frame_layout: kit.frame_layout.clone(),
+            textures_layout: kit.textures.layout.clone(),
+            maps_layout: kit.shadows.maps_layout.clone(),
+            image_layout: kit.image_layout.clone(),
+            forward_shader: OnceLock::new(),
+            forward: Default::default(),
+            lines: OnceLock::new(),
+            finish: OnceLock::new(),
+        }
+    }
 
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("forward"),
-            bind_group_layouts: &[Some(frame_layout), Some(&kit.textures.layout), Some(&kit.shadows.maps_layout)],
-            immediate_size: 0,
+    /// The pipeline for opaque or cut-out draws facing `faces`.
+    fn forward(&self, cutout: bool, faces: Faces) -> &wgpu::RenderPipeline {
+        self.forward[pipeline_index(cutout, faces)].get_or_init(|| self.make_forward(cutout, faces))
+    }
+
+    fn make_forward(&self, cutout: bool, faces: Faces) -> wgpu::RenderPipeline {
+        let device = &self.device;
+        let (shader, layout) = self.forward_shader.get_or_init(|| {
+            let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("forward"),
+                bind_group_layouts: &[Some(&self.frame_layout), Some(&self.textures_layout), Some(&self.maps_layout)],
+                immediate_size: 0,
+            });
+            (shader, layout)
         });
         // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
         let vertex_attributes =
@@ -981,69 +1014,74 @@ impl Pipelines {
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
         // don't use it. Its alpha becomes MSAA coverage, and it writes
         // colour only, so the target stays opaque.
-        let pipeline = |cutout: bool, faces: Faces| {
-            let (front_face, cull_mode) = match faces {
-                Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
-                Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
-                Faces::Both => (wgpu::FrontFace::Ccw, None),
-            };
-            let constants = [("double_sided", if faces == Faces::Both { 1.0 } else { 0.0 })];
-            let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(if cutout { "forward cut-out" } else { "forward" }),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &buffers,
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face,
-                    cull_mode,
-                    ..Default::default()
-                },
-                // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
-                // depth has most precision near 0, which is where reversed-Z puts
-                // the distance, where perspective has least.
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Greater),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: Renderer::SAMPLES,
-                    alpha_to_coverage_enabled: cutout,
-                    ..Default::default()
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
-                    compilation_options,
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+        let (front_face, cull_mode) = match faces {
+            Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
+            Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
+            Faces::Both => (wgpu::FrontFace::Ccw, None),
         };
+        let constants = [("double_sided", if faces == Faces::Both { 1.0 } else { 0.0 })];
+        let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(if cutout { "forward cut-out" } else { "forward" }),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face,
+                cull_mode,
+                ..Default::default()
+            },
+            // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
+            // depth has most precision near 0, which is where reversed-Z puts
+            // the distance, where perspective has least.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: Renderer::SAMPLES,
+                alpha_to_coverage_enabled: cutout,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
+                compilation_options,
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
 
+    /// Debug lines' pipeline.
+    fn lines(&self) -> &wgpu::RenderPipeline {
+        self.lines.get_or_init(|| self.make_lines())
+    }
+
+    fn make_lines(&self) -> wgpu::RenderPipeline {
         // Lines: over everything (depth always passes, and isn't written),
         // blended by their alpha.
-        let line_shader = device.create_shader_module(wgpu::include_wgsl!("lines.wgsl"));
-        let line_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let line_shader = self.device.create_shader_module(wgpu::include_wgsl!("lines.wgsl"));
+        let line_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lines"),
-            bind_group_layouts: &[Some(frame_layout)],
+            bind_group_layouts: &[Some(&self.frame_layout)],
             immediate_size: 0,
         });
         let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
-        let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some("lines"),
             layout: Some(&line_layout),
             vertex: wgpu::VertexState {
@@ -1070,7 +1108,7 @@ impl Pipelines {
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: self.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     // Colour only: the target stays opaque.
                     write_mask: wgpu::ColorWrites::COLOR,
@@ -1078,53 +1116,48 @@ impl Pipelines {
             }),
             multiview_mask: None,
             cache: None,
-        });
+        })
+    }
 
+    /// The last pass's pipeline, onto a view (of an sRGB format).
+    fn finish(&self) -> &wgpu::RenderPipeline {
+        assert!(self.format.is_srgb(), "a view's format is sRGB");
+        self.finish.get_or_init(|| self.make_finish())
+    }
+
+    fn make_finish(&self) -> wgpu::RenderPipeline {
         // The last pass, onto a view.
-        let finish = format.is_srgb().then(|| {
-            let shader = device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("finish"),
-                bind_group_layouts: &[Some(&kit.image_layout)],
-                immediate_size: 0,
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("finish"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+        let shader = self.device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("finish"),
+            bind_group_layouts: &[Some(&self.image_layout)],
+            immediate_size: 0,
         });
-
-        Self {
-            format,
-            finish,
-            forward: [false, true]
-                .into_iter()
-                .flat_map(|cutout| Faces::ALL.map(|faces| (cutout, faces)))
-                .map(|(cutout, faces)| pipeline(cutout, faces))
-                .collect(),
-            lines,
-        }
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some("finish"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
     }
 }
 
