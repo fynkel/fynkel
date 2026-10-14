@@ -2283,6 +2283,9 @@ For code written before: each change that breaks it, newest first.
     its events' own, from Flutter, and not limited by `time.maxDelta`:
     a 1 s hold through a hitch is no longer a tap, and a swipe's speed
     is no longer overstated.
+  - A still finger or mouse gets `onPointerExit` when what was under it
+    moves away or is hidden, and `onPointerEnter` when something comes
+    under it, at the next frame's input step; before, only when it moved.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

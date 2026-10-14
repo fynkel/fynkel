@@ -682,9 +682,12 @@ final class Input {
   /// After the events: each finger's move, long press and hold, then the
   /// pinch and twist, and the scroll.
   void _gestures() {
+    final targets = _targets;
     for (var i = 0; i < _fingers.length; i++) {
       final finger = _fingers[i];
       _flush(finger);
+      // Still, but what's under it may have moved.
+      if (targets != null && finger._scene != targets.scene) targets.moved(finger);
       if (!finger._down) continue;
       final age = _now - finger._downAt;
       if (finger._tapping && !finger._longPressed && age >= settings.longPressTime) {
@@ -904,6 +907,9 @@ final class Finger {
   RayHit? _startedOver;
   RayHit? _over;
   int _overFrame = -1;
+
+  // The scene ([_Targets.scene]) when what it's over was last told.
+  int _scene = -1;
   int _overVersion = -1;
   int _version = 0;
   Object? _taker;
@@ -1369,6 +1375,10 @@ abstract interface class _Targets {
 
   /// It moved, or appeared: what it's over may have changed.
   void moved(Finger finger);
+
+  /// Changes when what's under a still finger may have: an object moved,
+  /// came, went, or was shown or hidden.
+  int get scene;
 
   /// It's gone: it's over nothing now.
   void left(Finger finger);

@@ -87,7 +87,13 @@ final class _Pointing implements _Targets {
   }
 
   @override
-  void moved(Finger finger) => _overNow(finger, finger.over?.gameObject);
+  void moved(Finger finger) {
+    finger._scene = scene;
+    _overNow(finger, finger.over?.gameObject);
+  }
+
+  @override
+  int get scene => world._transformVersion + world._shape;
 
   @override
   void left(Finger finger) => _overNow(finger, null);
