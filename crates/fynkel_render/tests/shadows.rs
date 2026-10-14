@@ -88,6 +88,23 @@ fn the_sun_casts_shadows_at_every_level() {
     }
 }
 
+/// Hardening R10: a caster far towards the sun, past how far the map's
+/// depth range may stretch, is flattened onto its near end: it still
+/// casts.
+#[test]
+fn a_caster_far_towards_the_sun_still_casts() {
+    let gpu = gpu();
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let mut scene = stage(vec![sun()], quality);
+        let towards_sun = -Vec3::new(1.0, -2.0, 0.0).normalize();
+        let roof =
+            Mat4::from_scale_rotation_translation(Vec3::splat(6.0), Quat::IDENTITY, IN_THE_OPEN + towards_sun * 200.0);
+        scene.draws.push(Draw { receive_shadows: false, ..Draw::new(PLANE, roof, material(0.5)) });
+        let (shade, _) = shade_at(&gpu, &scene, IN_THE_OPEN);
+        assert!(shade < 0.5, "{quality:?}: under a roof 200 m up, the floor is in shadow ({shade})");
+    }
+}
+
 #[test]
 fn a_draw_can_choose_not_to_cast_or_receive_shadows() {
     let gpu = gpu();

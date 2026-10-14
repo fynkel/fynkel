@@ -125,14 +125,16 @@ impl Cascade {
 
     /// Whether a sphere at `at` with radius `r` can cast a shadow into this
     /// cascade: it overlaps the map across, and isn't wholly past its far
-    /// end. If so, the depth range is stretched towards the sun to hold it.
+    /// end. If so, the depth range is stretched towards the sun to hold it,
+    /// up to [`MAX_STRETCH`].
     pub(crate) fn reach(&mut self, basis: &[Vec3; 3], at: Vec3, r: f32) -> bool {
         let across = self.radius + r;
         let hit = (basis[0].dot(at) - self.centre[0]).abs() < across
             && (basis[1].dot(at) - self.centre[1]).abs() < across
             && basis[2].dot(at) - r < self.far;
         if hit {
-            self.near = self.near.min(basis[2].dot(at) - r);
+            let limit = self.far - (2.0 + MAX_STRETCH) * self.radius;
+            self.near = self.near.min(basis[2].dot(at) - r).max(limit);
         }
         hit
     }
@@ -225,6 +227,12 @@ pub(crate) struct Caster {
     /// The base colour's alpha and the alpha cutoff (0 for opaque).
     pub(crate) alpha: [f32; 4],
 }
+
+/// How far casters may stretch a cascade's depth range towards the sun,
+/// past its sphere, in its radius. Further ones are flattened onto the
+/// map's near end (`shadow.wgsl`), so the depth bias, a share of the
+/// range, stays about the same size in metres.
+pub(crate) const MAX_STRETCH: f32 = 8.0;
 
 pub(crate) const CASTER_SIZE: u64 = std::mem::size_of::<Caster>() as u64;
 
@@ -394,7 +402,9 @@ impl ShadowKit {
             layout: Some(if cutout { &self.cutout_layout } else { &self.opaque_layout }),
             vertex: wgpu::VertexState {
                 module: &self.shader,
-                entry_point: Some("vs_main"),
+                // The cascades' casters past the depth range are flattened
+                // onto its near end ([`MAX_STRETCH`]).
+                entry_point: Some(if format == CASCADE_FORMAT { "vs_cascade" } else { "vs_main" }),
                 compilation_options: Default::default(),
                 buffers: &buffers,
             },
@@ -651,6 +661,19 @@ mod tests {
                 }
             }
         }
+    }
+
+    // Hardening R10: the depth bias is a fixed share of the depth range, so
+    // a caster far towards the sun mustn't stretch it without end. Past the
+    // limit, casters are flattened onto the map's near end (shadow.wgsl).
+    #[test]
+    fn a_far_caster_stretches_the_depth_range_only_so_far() {
+        let basis = light_basis(Vec3::new(0.3, -1.0, 0.2));
+        let centre = Vec3::new(3.0, 1.0, -2.0);
+        let mut cascade = Cascade::around(&basis, centre, 5.0, 1024);
+        assert!(cascade.reach(&basis, centre - basis[2] * 1000.0, 1.0), "it still casts");
+        let range = cascade.far - cascade.near;
+        assert!(range <= (2.0 + 8.0) * 5.0 + 1e-3, "{range} m deep: the sphere and 8 radii more");
     }
 
     #[test]
