@@ -419,6 +419,9 @@ final class Physics extends WorldSystem implements Finalizable {
   // --- Colliders -------------------------------------------------------------
 
   void _add(Collider collider) {
+    // Its rigidbody's native pose must be where its object is now: the
+    // collider is placed against it.
+    _follow();
     final object = collider.gameObject;
     final key = _freeKeys.isNotEmpty ? _freeKeys.removeLast() : (_byKey..add(null)).length - 1;
     collider._layer = object.layer;
@@ -690,7 +693,9 @@ final class Physics extends WorldSystem implements Finalizable {
   void _removeBody(Rigidbody body) {
     if (_disposed || body._id == 0) return;
     // Its colliders go to the next rigidbody up, or none, first: removing
-    // a body removes the colliders on it.
+    // a body removes the colliders on it. That one's native pose must be
+    // where its object is now.
+    _follow();
     final id = body._id;
     for (final c in [...body._colliders]) {
       c._place._walk(c.gameObject, without: body);
