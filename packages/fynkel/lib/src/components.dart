@@ -363,8 +363,10 @@ enum LightKind {
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
   /// Shines along the object's [GameObject.forward]: give the object
-  /// `Transform(rotation: Quat.lookRotation(direction))`.
-  Light.sun({Color color = Color.white, double intensity = 1}) : this._(LightKind.sun, color, intensity);
+  /// `Transform(rotation: Quat.lookRotation(direction))`. With [shadows],
+  /// what it shines on casts shadows (see [Light.shadows]).
+  Light.sun({Color color = Color.white, double intensity = 1, bool shadows = false})
+    : this._(LightKind.sun, color, intensity, 10, 30 * math.pi / 180, 0.2, shadows);
 
   /// Light from every direction: see [LightKind.ambient]. A dim one, say
   /// `Light.ambient(intensity: 0.25)`, keeps the sides the sun misses from
@@ -381,14 +383,16 @@ final class Light extends Component {
   /// A spotlight at the object's position, shining along its forward in a
   /// cone [angle] across (`40.deg`), reaching [range] metres. [softness]
   /// is how much of the cone fades, from its rim in: 0 for a hard edge, 1
-  /// to fade all the way to the middle. Brightness as [Light.point].
+  /// to fade all the way to the middle. Brightness as [Light.point]. With
+  /// [shadows], what it shines on casts shadows (see [Light.shadows]).
   Light.spot({
     Color color = Color.white,
     double intensity = 1,
     double range = 10,
     double angle = 30 * math.pi / 180,
     double softness = 0.2,
-  }) : this._(LightKind.spot, color, intensity, range, angle, softness);
+    bool shadows = false,
+  }) : this._(LightKind.spot, color, intensity, range, angle, softness, shadows);
 
   Light._(
     this._kind,
@@ -397,11 +401,13 @@ final class Light extends Component {
     this._range = 10,
     this._angle = 30 * math.pi / 180,
     this._softness = 0.2,
+    this._shadows = false,
   ]) : super._();
 
   LightKind _kind;
   Color _color;
   double _intensity, _range, _angle, _softness;
+  bool _shadows;
 
   /// What kind of light it is; it can change while it's on.
   LightKind get kind => _kind;
@@ -433,9 +439,20 @@ final class Light extends Component {
   double get softness => _softness;
   set softness(double value) => _change(() => _softness = value);
 
+  /// Whether what it shines on casts shadows: false unless set. A sun's
+  /// reach [Quality]'s shadow distance from the camera (40, 60 or 100 m)
+  /// and fade out there; only the first sun made with shadows casts them.
+  /// A spot light's reach its [range]; each level gives a few spot lights
+  /// shadows (1, 2 or 4), the ones nearest the camera. A point light's
+  /// shadows aren't drawn yet. A [MeshRenderer] can choose not to cast
+  /// them, or not to receive them.
+  bool get shadows => _shadows;
+  set shadows(bool value) => _change(() => _shadows = value);
+
   void _change(void Function() set) {
     _checkChangeable();
-    final (kind, color, intensity, range, angle, softness) = (_kind, _color, _intensity, _range, _angle, _softness);
+    final (kind, color, intensity, range, angle, softness, shadows) =
+        (_kind, _color, _intensity, _range, _angle, _softness, _shadows);
     set();
     try {
       _live?._writeLight(this);
@@ -446,18 +463,22 @@ final class Light extends Component {
       _range = range;
       _angle = angle;
       _softness = softness;
+      _shadows = shadows;
       rethrow;
     }
   }
 
   @override
-  String toString() => switch (kind) {
-    LightKind.sun || LightKind.ambient => 'Light.${kind.name}(color: $color, intensity: $intensity)',
-    LightKind.point => 'Light.point(color: $color, intensity: $intensity, range: $range)',
-    LightKind.spot =>
-      'Light.spot(color: $color, intensity: $intensity, range: $range, angle: ${angle.inDegrees}°, '
-          'softness: $softness)',
-  };
+  String toString() {
+    final more = shadows ? ', shadows: true' : '';
+    return switch (kind) {
+      LightKind.sun || LightKind.ambient => 'Light.${kind.name}(color: $color, intensity: $intensity$more)',
+      LightKind.point => 'Light.point(color: $color, intensity: $intensity, range: $range$more)',
+      LightKind.spot =>
+        'Light.spot(color: $color, intensity: $intensity, range: $range, angle: ${angle.inDegrees}°, '
+            'softness: $softness$more)',
+    };
+  }
 }
 
 /// Draws [mesh] with [material] at the object's [Transform]. Without both,
@@ -466,6 +487,10 @@ final class Light extends Component {
 /// A material is shared: every renderer that has it changes when it does.
 /// For one object alone, set [color] (a hit flash, a team colour), or give
 /// it its own material with [Material.copy].
+///
+/// It casts shadows and shadows fall on it, as in Unity; turn either off
+/// with [castShadows] and [receiveShadows]
+/// (`MeshRenderer(water, glass)..castShadows = false`).
 final class MeshRenderer extends Component {
   /// Draws [mesh] with [material]: both are optional, and can be set
   /// later, but nothing is drawn until it has both.
@@ -474,6 +499,7 @@ final class MeshRenderer extends Component {
   Mesh? _mesh;
   Material? _material;
   Color? _color;
+  bool _castShadows = true, _receiveShadows = true;
 
   /// The shape it draws; null draws nothing. A mesh can be on any number
   /// of renderers.
@@ -495,9 +521,19 @@ final class MeshRenderer extends Component {
   Color? get color => _color;
   set color(Color? value) => _change(() => _color = value);
 
+  /// Whether it blocks the light of lights with [Light.shadows]: true
+  /// unless set. Off for what shouldn't darken the ground: water, a glow,
+  /// a ghost.
+  bool get castShadows => _castShadows;
+  set castShadows(bool value) => _change(() => _castShadows = value);
+
+  /// Whether shadows fall on it: true unless set.
+  bool get receiveShadows => _receiveShadows;
+  set receiveShadows(bool value) => _change(() => _receiveShadows = value);
+
   void _change(void Function() set) {
     _checkChangeable();
-    final (mesh, material, color) = (_mesh, _material, _color);
+    final (mesh, material, color, cast, receive) = (_mesh, _material, _color, _castShadows, _receiveShadows);
     set();
     try {
       _live?._writeMeshRenderer(this);
@@ -505,6 +541,8 @@ final class MeshRenderer extends Component {
       _mesh = mesh;
       _material = material;
       _color = color;
+      _castShadows = cast;
+      _receiveShadows = receive;
       rethrow;
     }
   }
