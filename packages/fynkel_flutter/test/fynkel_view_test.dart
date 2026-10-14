@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, forgetReset;
+import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, debugViewsOpen, forgetReset;
 import 'package:fynkel_flutter/src/error_panel.dart' show ErrorPanel;
 import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer, worldWidgetsOf;
 
@@ -125,6 +125,9 @@ void main() {
   late int nextTexture;
   // When set, `register` answers only once it completes.
   Completer<void>? hold;
+  // Whether the plugin's unregister fails, as it does for a texture it
+  // already let go of.
+  late bool unregisterFails;
 
   setUp(() {
     world = World();
@@ -138,6 +141,7 @@ void main() {
     resets = [];
     nextTexture = 7;
     hold = null;
+    unregisterFails = false;
     // The Swift or Kotlin plugin, as far as Dart can see it.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       final args = call.arguments as Map? ?? const {};
@@ -166,6 +170,7 @@ void main() {
           final texture = args['texture'] as int;
           expect(alive(views[texture]!), isTrue, reason: 'the view is freed only after this');
           calls.add('unregister $texture');
+          if (unregisterFails) throw PlatformException(code: 'gone', message: 'no such texture');
           return null;
         case 'resize':
           final texture = args['texture'] as int;
@@ -278,6 +283,18 @@ void main() {
     await tester.pumpWidget(sized(const SizedBox()));
     await tester.pump();
     expect(calls, ['register', 'unregister 7']);
+  });
+
+  testWidgets('a view is freed even when the plugin fails to let go of it', (tester) async {
+    unregisterFails = true;
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    final open = debugViewsOpen;
+    await tester.pumpWidget(sized(const SizedBox()));
+    await tester.pump();
+    expect(calls, ['register', 'unregister 7']);
+    expect(debugViewsOpen, open - 1, reason: 'freed all the same');
+    expect(tester.takeException().toString(), contains('no such texture'), reason: 'and reported');
   });
 
   testWidgets('removed while its texture is being registered, the view is let go once that finishes', (tester) async {

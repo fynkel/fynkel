@@ -55,6 +55,12 @@ bool _resetSent = false;
 @visibleForTesting
 void forgetReset() => _resetSent = false;
 
+/// How many engine views the [FynkelView]s made and haven't freed yet, so
+/// a test can check none is left behind.
+@visibleForTesting
+int get debugViewsOpen => _viewsOpen;
+int _viewsOpen = 0;
+
 /// What a [FynkelView] did in one stats window (about a second).
 @immutable
 class FynkelViewStats {
@@ -612,6 +618,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _fail(error, stack);
       return null;
     }
+    _viewsOpen++;
     _view = view;
     _registration = _register(view);
     return view;
@@ -721,9 +728,24 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     _windowStartMicros = 0;
     if (view == null || registration == null) return;
     unawaited(() async {
-      final texture = await registration;
-      if (texture != null) await channel.invokeMethod<void>('unregister', {'texture': texture});
-      view.dispose();
+      try {
+        final texture = await registration;
+        if (texture != null) await channel.invokeMethod<void>('unregister', {'texture': texture});
+      } catch (error, stack) {
+        // The plugin already let go of it (after a reset, or with the
+        // engine detached): it's freed all the same.
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'fynkel_flutter',
+            context: ErrorDescription('while FynkelView let go of its view'),
+          ),
+        );
+      } finally {
+        view.dispose();
+        _viewsOpen--;
+      }
     }());
   }
 
