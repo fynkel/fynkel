@@ -118,10 +118,6 @@ pub struct Android {
     joined: Option<Jvm>,
     /// Joining was tried: it happens once.
     tried: bool,
-    /// How many frames were submitted, and how many of them the GPU has
-    /// finished.
-    submitted: u64,
-    finished: Arc<AtomicU64>,
 }
 
 /// The platform side: gives the worker its surface and takes it away. Any
@@ -171,8 +167,6 @@ impl Android {
             size: (width.max(1), height.max(1)),
             joined: None,
             tried: false,
-            submitted: 0,
-            finished: Arc::default(),
         };
         (target, AndroidPresenter { shared })
     }
@@ -284,12 +278,7 @@ impl Target for Android {
     }
 
     fn finish(&mut self, frame: Frame, encoder: wgpu::CommandEncoder, _number: u64) {
-        self.queue.submit([encoder.finish()]);
-        self.submitted += 1;
-        let finished = self.finished.clone();
-        self.queue.on_submitted_work_done(move || {
-            finished.fetch_add(1, Ordering::Release);
-        });
+        let submitted = self.queue.submit([encoder.finish()]);
         // Flutter takes each frame on the main thread, where Dart runs, and
         // waits there for the GPU to finish it (Android 12's ImageReader in
         // acquiring it, Flutter itself from 13). Waiting here first, on a
@@ -299,20 +288,19 @@ impl Target for Android {
         // same, and that wait falls on Flutter as before.
         //
         // The platform thread waits for the lease to give the surface up
-        // (a resize, the app going to the background): then the frame is
-        // presented at once and the rest of the wait falls on Flutter, so
-        // that thread waits for no GPU work.
+        // (a resize, the app going to the background): if it already does,
+        // the frame is presented at once and the wait falls on Flutter;
+        // otherwise it waits behind at most this frame's GPU work.
         //
-        // The GPU is polled, not waited on with a timeout: a short timeout
-        // lost the Note10+'s device (Mali's driver answers a timed wait with
-        // an error wgpu takes as a lost device).
-        let start = std::time::Instant::now();
-        while self.finished.load(Ordering::Acquire) < self.submitted
-            && start.elapsed() < std::time::Duration::from_secs(1)
-            && !frame.lease.wanted()
-        {
-            let _ = self.shared.device.poll(wgpu::PollType::Poll);
-            std::thread::sleep(std::time::Duration::from_micros(500));
+        // One blocking wait: a short timeout lost the Note10+'s device
+        // (Mali's driver answers a timed-out wait with an error wgpu takes
+        // as a lost device), and polling every 0.5 ms instead cost the
+        // shadows scene 9 fps (56.9 → 47.9 at medium).
+        if !frame.lease.wanted() {
+            let _ = self.shared.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submitted),
+                timeout: Some(std::time::Duration::from_secs(1)),
+            });
         }
         let Frame { texture, view, lease } = frame;
         drop(view);
