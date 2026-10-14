@@ -343,3 +343,63 @@ fn material_values_outside_gltfs_ranges_are_clamped() {
     // In range, nothing is said.
     assert!(!load("AlphaBlendModeTest.glb").warnings().iter().any(|w| w.contains("clamped")));
 }
+
+/// Hardening R13: KHR_mesh_quantization (gltfpack's default) stores
+/// positions, normals and UVs as small integers, normalised or not. A
+/// square, 2 m across, facing up.
+#[test]
+fn a_quantized_mesh_reads_as_floats() {
+    let mut bin = Vec::new();
+    // Positions: normalised i16, padded to 8 bytes a vertex.
+    for (x, z) in [(-1i16, -1i16), (1, -1), (1, 1), (-1, 1)] {
+        for c in [x * 32767, 0, z * 32767, 0] {
+            bin.extend(c.to_le_bytes());
+        }
+    }
+    // Normals: normalised i8, padded to 4 bytes.
+    for _ in 0..4 {
+        bin.extend([0u8, 127, 0, 0]);
+    }
+    // UVs: plain u8 (not normalised: whole texels of a 1 × 1 tile), padded to 4.
+    for (u, v) in [(0u8, 0u8), (1, 0), (1, 1), (0, 1)] {
+        bin.extend([u, v, 0, 0]);
+    }
+    for i in [0u16, 2, 1, 0, 3, 2] {
+        bin.extend(i.to_le_bytes());
+    }
+    let json = json!({
+        "asset": {"version": "2.0"},
+        "extensionsUsed": ["KHR_mesh_quantization"],
+        "extensionsRequired": ["KHR_mesh_quantization"],
+        "buffers": [{"byteLength": bin.len()}],
+        "bufferViews": [
+            {"buffer": 0, "byteOffset": 0, "byteLength": 32, "byteStride": 8, "target": 34962},
+            {"buffer": 0, "byteOffset": 32, "byteLength": 16, "byteStride": 4, "target": 34962},
+            {"buffer": 0, "byteOffset": 48, "byteLength": 16, "byteStride": 4, "target": 34962},
+            {"buffer": 0, "byteOffset": 64, "byteLength": 12, "target": 34963}
+        ],
+        "accessors": [
+            {"bufferView": 0, "componentType": 5122, "normalized": true, "count": 4, "type": "VEC3",
+             "min": [-1, 0, -1], "max": [1, 0, 1]},
+            {"bufferView": 1, "componentType": 5120, "normalized": true, "count": 4, "type": "VEC3"},
+            {"bufferView": 2, "componentType": 5121, "count": 4, "type": "VEC2"},
+            {"bufferView": 3, "componentType": 5123, "count": 6, "type": "SCALAR"}
+        ],
+        "meshes": [{"primitives": [{"attributes": {"POSITION": 0, "NORMAL": 1, "TEXCOORD_0": 2}, "indices": 3}]}],
+        "nodes": [{"mesh": 0}],
+        "scenes": [{"nodes": [0]}],
+        "scene": 0
+    });
+    let model = ModelData::from_glb(&join(&json, &bin)).unwrap_or_else(|e| panic!("{e}"));
+    let [mesh] = model.meshes() else { panic!("{:?}", model.meshes().len()) };
+    let corners: Vec<([f32; 3], [f32; 3], [f32; 2])> =
+        mesh.vertices().iter().map(|v| (v.position, v.normal, v.uv)).collect();
+    for (position, normal, uv) in &corners {
+        assert!(position.iter().all(|c| (c.abs() - 1.0).abs() < 1e-6 || *c == 0.0), "{position:?}");
+        assert!((normal[1] - 1.0).abs() < 1e-6, "{normal:?}");
+        assert!(uv.iter().all(|c| *c == 0.0 || *c == 1.0), "{uv:?}");
+    }
+    let first = corners.iter().find(|(p, ..)| p[0] < 0.0 && p[2] < 0.0).expect("the (-1, -1) corner");
+    assert_eq!(first.2, [0.0, 0.0]);
+    assert!(model.warnings().is_empty(), "{:?}", model.warnings());
+}
