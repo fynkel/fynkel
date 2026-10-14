@@ -258,8 +258,13 @@ extension _Loop on World {
     final time = this.time;
     if (!time._fixedDue) return;
     final systems = _systems;
+    var steps = 0;
     try {
       while (time._fixedDue) {
+        if (steps++ == time._maxFixedSteps) {
+          time._dropFixedSteps();
+          break;
+        }
         time._fixedTime += time._fixedDelta;
         time._fixedSteps++;
         time._inFixed = true;

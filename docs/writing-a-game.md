@@ -586,7 +586,9 @@ tested.
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A
 frame runs as many as its time holds: at 120 fps most frames have none,
-at 30 some have two. Inside a step `time.delta` is `time.fixedDelta`. To
+at 30 some have two. A frame runs at most `time.maxFixedSteps` (5), and
+drops the time past that, so a step slower than its frame can't snowball.
+Inside a step `time.delta` is `time.fixedDelta`. To
 draw something a step moves without it stepping, draw it between where
 the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
 
@@ -598,8 +600,10 @@ the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
   (§11), which stops the input too.
 - `time.unscaledDelta`, `time.sinceStart`, `time.unscaledSinceStart`,
   `time.frame`.
-- `time.maxDelta` (1/3 s): a long hitch counts as at most this, so nothing
-  jumps through walls.
+- `time.maxDelta` (1/3 s): a long hitch counts as at most this much game
+  time, whatever the scale, so nothing jumps through walls.
+- `time.maxFixedSteps` (5): the most fixed steps a frame runs. Raise it
+  for a game that runs `time.scale` fast at a low frame rate.
 - `time.fixedDelta`, `time.fixedAlpha`, `time.inFixedStep`: the fixed
   steps.
 
@@ -2251,6 +2255,13 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Hardening** (2026-10-14):
+  - `time.maxDelta` limits the game's time after `time.scale`, as
+    Unity's does: at a scale of 5 a hitch counts for 1/3 s, not 5/3.
+  - A frame runs at most `time.maxFixedSteps` (5) fixed steps, and drops
+    the rest of its time: a frame of 1/3 s runs 5 where it ran 16. Set it
+    higher to keep the old behaviour.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first
