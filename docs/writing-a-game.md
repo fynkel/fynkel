@@ -449,7 +449,7 @@ class Beacon extends GameObject {
   for that object, and `null` gives it back. `material.copy()` makes a
   material of its own to change every value.
 - **Lights**: `Light.sun` (from the object's forward), `Light.ambient`,
-  and lamps: `Light.point` and `Light.spot` (below). An object has at
+  and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
   `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
@@ -465,8 +465,8 @@ nothing in the game reaches it any more.
 
 A world is drawn at one of three levels, `Quality.low`, `medium` or
 `high`. Each is meant to hold its devices' frame rate, and the effects
-to come (shadows, a sky, bloom) each say which levels they're on at.
-Until then every level draws the same picture.
+(shadows, and to come a sky and bloom) each say what they do at each
+level.
 
 When the game doesn't choose, the device picks: high on Apple's GPUs and
 desktops', medium on phones' Mali and Adreno, low on a software GPU or
@@ -526,6 +526,42 @@ GameObject handTorch() => GameObject(
 - **A frame takes 64 lamps** in view, the ones nearest the camera. A
   world with more than 64 point and spot lights, or more than four suns,
   says so once.
+
+### Shadows
+
+A sun or a spotlight casts shadows when asked; every object then casts
+them and has them fall on it, unless its renderer says not, as in Unity:
+
+```dart
+/// A low evening sun, casting long shadows.
+GameObject eveningSun() => GameObject(
+  transform: Transform(rotation: Quat.lookRotation(Vec3(-0.6, -0.5, -0.4))),
+  components: [Light.sun(intensity: 2, shadows: true)],
+);
+
+/// A puddle: it shadows nothing, but shadows fall on it.
+MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
+```
+
+- **The sun's shadows** reach a set distance from the camera and fade
+  out there: 40 m at low quality, 60 m at medium, 100 m at high (less if
+  the camera's `far` is nearer). They're drawn into maps seen from the
+  sun: at low one map with hard edges, at medium two with soft ones, at
+  high three softer ones. With more than one, the nearest covers least,
+  so shadows near the camera are sharpest. The maps move with the camera
+  a whole texel at a time, so a still shadow's edge doesn't crawl as the
+  camera moves. Only the first sun with `shadows` casts them.
+- **A spotlight's shadows** reach as far as its `range`. Each frame
+  gives a few spotlights shadows, the ones nearest the camera: 1 at low,
+  2 at medium, 4 at high. The others still light, without shadows.
+- **Point lights don't cast shadows** yet.
+- **`castShadows: false`** is for what shouldn't darken the ground (a
+  glow, water, a ghost) and for what can't shadow anything (a flat
+  floor), which also saves drawing it into the maps.
+  **`receiveShadows: false`** keeps shadows off an object.
+- `light.shadows`, `renderer.castShadows` and `renderer.receiveShadows`
+  can change at any time. The lab's 'Look: shadows' scene shows the sun's
+  and a spotlight's, at each level.
 
 ## 6. The frame, the lifecycle and time
 
