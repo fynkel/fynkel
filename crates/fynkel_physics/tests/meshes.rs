@@ -184,3 +184,23 @@ fn a_mesh_colliders_edges_are_read_where_it_is_each_once() {
     let ball = physics.add_static_collider(3, ball, ObjectPose::IDENTITY).unwrap();
     assert!(physics.collider_edges(ball, &mut edges).is_err());
 }
+
+#[test]
+fn colliders_of_one_mesh_at_one_scale_share_one_shape() {
+    let mut physics = Physics::new();
+    let mesh = trough(&mut physics);
+    let twice =
+        |x: f32| ObjectPose { position: Vector::new(x, 0.0, 0.0), scale: Vector::splat(2.0), ..ObjectPose::IDENTITY };
+    let before = physics.mesh_shapes_made();
+    let ids: Vec<u64> =
+        (0..100).map(|i| physics.add_static_collider(i, spec(mesh, false), twice(i as f32 * 10.0)).unwrap()).collect();
+    assert_eq!(physics.mesh_shapes_made() - before, 2, "the mesh's own, and one for a hundred colliders at 2");
+    for (i, &id) in ids.iter().enumerate() {
+        let back = ObjectPose { scale: Vector::splat(3.0), ..twice(i as f32 * 10.0) };
+        physics.follow(&[id], &[back]).unwrap();
+    }
+    assert_eq!(physics.mesh_shapes_made() - before, 3, "and one more for all of them at a new scale");
+    // Still the trough, at its new scale: its sides reach y = 6 at x = ±6.
+    let y = height(&mut physics, 5.0).expect("a hit");
+    assert!((y - 5.0).abs() < 1e-3, "{y}");
+}
