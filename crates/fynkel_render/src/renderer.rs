@@ -572,14 +572,17 @@ impl Renderer {
             self.frame_lights.push(Reach::of(light));
         }
         stats.lights = self.frame_lights.len() as u32;
-        // The cells: their slices end where the furthest lamp's reach does.
+        // The cells: their slices end where the furthest lamp's reach does,
+        // rounded up a quarter octave at a time so a moving camera seldom
+        // changes the grid's shape (`Clusters` keeps it while it holds).
         let forward = camera.view.inverse().transform_vector3(Vec3::NEG_Z).normalize();
-        let far = self
+        let reach = self
             .frame_lights
             .iter()
             .map(|l| (l.position - camera.position).dot(forward) + l.range)
-            .fold(camera.near * 2.0, f32::max)
-            .min(camera.far.max(camera.near * 2.0));
+            .fold(camera.near * 2.0, f32::max);
+        let quarters = ((reach / camera.near).log2() * 4.0).ceil();
+        let far = (camera.near * (quarters * 0.25).exp2()).min(camera.far.max(camera.near * 2.0));
         let half = match camera.orthographic {
             Some(h) => (h * aspect, h),
             None => {

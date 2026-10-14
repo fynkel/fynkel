@@ -182,20 +182,31 @@ impl Grid {
 /// The cells and their lamps, rebuilt each frame. Allocates nothing once
 /// built.
 pub(crate) struct Clusters {
+    /// How many lamps each cell holds; apart from the lists, so a frame
+    /// clears and reads a byte a cell, not a whole list.
+    counts: Vec<u8>,
     /// Each cell's lamps: (how brightly it lights the cell, its index), the
-    /// brightest first, and how many.
-    lamps: Vec<([(f32, u8); MAX_PER_CELL], u8)>,
-    /// Each cell's view-space bounding sphere, for this frame's grid.
+    /// brightest first. Only the first `counts` are meant.
+    lamps: Vec<[(f32, u8); MAX_PER_CELL]>,
+    /// Each cell's view-space bounding sphere, for the grid in `cut_for`.
     spheres: Vec<(Vec3, f32)>,
+    /// The grid's shape the spheres were worked out for (its half sizes,
+    /// whether orthographic, near and far), or `None` before the first.
+    cut_for: Option<((f32, f32), bool, f32, f32)>,
     words: Vec<u32>,
+    /// How many of `words` this frame wrote.
+    used: usize,
 }
 
 impl Clusters {
     pub(crate) fn new() -> Self {
         Self {
-            lamps: vec![([(0.0, 0); MAX_PER_CELL], 0); CELLS],
+            counts: vec![0; CELLS],
+            lamps: vec![[(0.0, 0); MAX_PER_CELL]; CELLS],
             spheres: vec![(Vec3::ZERO, 0.0); CELLS],
+            cut_for: None,
             words: vec![0; BYTES as usize / 4],
+            used: CELLS,
         }
     }
 
@@ -204,14 +215,16 @@ impl Clusters {
     /// cell kept. Returns how many cells had more than `cap`.
     pub(crate) fn build(&mut self, grid: &Grid, lights: &[Reach], cap: usize) -> u32 {
         let cap = cap.clamp(1, MAX_PER_CELL);
-        for cell in &mut self.lamps {
-            cell.1 = 0;
-        }
+        self.counts.fill(0);
         let mut full = [0u64; CELLS.div_ceil(64)];
-        if !lights.is_empty() {
+        // The spheres stay as long as the grid's shape does; the view
+        // matrix doesn't move them.
+        let shape = Some((grid.half, grid.orthographic, grid.near, grid.far));
+        if !lights.is_empty() && self.cut_for != shape {
             for (i, sphere) in self.spheres.iter_mut().enumerate() {
                 *sphere = grid.cell_sphere(i % TILES_X, i / TILES_X % TILES_Y, i / (TILES_X * TILES_Y));
             }
+            self.cut_for = shape;
         }
         for (index, light) in lights.iter().enumerate() {
             let seen = light.moved(&grid.view);
@@ -230,7 +243,7 @@ impl Clusters {
                         let i = (k * TILES_Y + y) * TILES_X + x;
                         let (at, cell_r) = self.spheres[i];
                         let Some(bright) = seen.at(at, cell_r) else { continue };
-                        let (best, count) = &mut self.lamps[i];
+                        let (best, count) = (&mut self.lamps[i], &mut self.counts[i]);
                         let n = usize::from(*count);
                         if n == cap {
                             full[i / 64] |= 1 << (i % 64);
@@ -254,9 +267,9 @@ impl Clusters {
         // Each cell's word, then the lists, a byte each.
         let mut at = 0usize;
         let lists = CELLS * 4;
-        for (i, (best, count)) in self.lamps.iter().enumerate() {
-            self.words[i] = ((at as u32) << 8) | u32::from(*count);
-            for &(_, lamp) in &best[..usize::from(*count)] {
+        for (i, &count) in self.counts.iter().enumerate() {
+            self.words[i] = ((at as u32) << 8) | u32::from(count);
+            for &(_, lamp) in &self.lamps[i][..usize::from(count)] {
                 let byte = lists + at;
                 let word = &mut self.words[byte / 4];
                 let shift = (byte % 4) * 8;
@@ -264,12 +277,14 @@ impl Clusters {
                 at += 1;
             }
         }
+        self.used = CELLS + at.div_ceil(4);
         full.iter().map(|w| w.count_ones()).sum()
     }
 
-    /// The buffer forward.wgsl reads as `cells`.
+    /// The buffer forward.wgsl reads as `cells`: only what this frame
+    /// wrote, as the rest isn't read.
     pub(crate) fn bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.words)
+        bytemuck::cast_slice(&self.words[..self.used])
     }
 }
 
@@ -293,7 +308,7 @@ mod tests {
     fn holding(c: &Clusters) -> Vec<usize> {
         (0..CELLS)
             .filter(|&i| {
-                let (best, n) = &c.lamps[i];
+                let (best, n) = (&c.lamps[i], &c.counts[i]);
                 best[..usize::from(*n)].iter().any(|&(_, l)| l == 0)
             })
             .collect()
@@ -323,19 +338,20 @@ mod tests {
     }
 
     /// A lamp is in every cell its sphere touches, and in no cell its
-    /// sphere's box can't reach, for both kinds of camera.
+    /// sphere's box can't reach, for both kinds of camera. One `Clusters`
+    /// for all, so a frame keeps nothing of the last's lamps or grid.
     #[test]
     fn a_lamp_is_in_the_cells_it_reaches() {
         let mut perspective = CameraView::looking_at(Vec3::new(0.0, 1.0, 5.0), Vec3::ZERO);
         perspective.near = 0.1;
         let mut orthographic = perspective;
         orthographic.orthographic = Some(3.0);
+        let mut c = Clusters::new();
         for camera in [perspective, orthographic] {
             let g = grid(&camera, 16.0 / 9.0, 20.0);
             for (at, range) in
                 [(Vec3::new(0.5, 0.2, 0.0), 1.0), (Vec3::new(-2.0, 0.0, -3.0), 2.5), (camera.position, 0.5)]
             {
-                let mut c = Clusters::new();
                 let lamp = Light::point(at, range, Vec3::ONE);
                 assert_eq!(c.build(&g, &[Reach::of(&lamp)], 8), 0);
                 let cells = holding(&c);
@@ -364,7 +380,7 @@ mod tests {
             (1..=10).map(|i| Reach::of(&Light::point(Vec3::ZERO, 100.0, Vec3::splat(i as f32)))).collect();
         let mut c = Clusters::new();
         assert_eq!(c.build(&g, &lamps, 4), CELLS as u32, "every cell has all ten");
-        let (best, n) = &c.lamps[0];
+        let (best, n) = (&c.lamps[0], &c.counts[0]);
         assert_eq!(*n, 4);
         let kept: Vec<u8> = best[..4].iter().map(|&(_, l)| l).collect();
         assert_eq!(kept, [9, 8, 7, 6], "the four brightest");

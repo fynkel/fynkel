@@ -172,7 +172,7 @@ impl FrameRing {
         let Parts { uniforms, views, instances, lines, casters, cells } = parts;
         debug_assert_eq!(uniforms.len() as u64, self.parts.uniforms);
         debug_assert!(views.len() as u64 <= self.parts.views);
-        debug_assert_eq!(cells.len() as u64, crate::clusters::BYTES);
+        debug_assert!(cells.len() as u64 <= crate::clusters::BYTES);
         if let Some(last) = self.last.take() {
             let slot = &self.slots[last];
             slot.state.store(MAPPING, Ordering::Relaxed);
