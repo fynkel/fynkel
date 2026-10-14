@@ -451,8 +451,15 @@ final class Light extends Component {
 
   void _change(void Function() set) {
     _checkChangeable();
-    final (kind, color, intensity, range, angle, softness, shadows) =
-        (_kind, _color, _intensity, _range, _angle, _softness, _shadows);
+    final (kind, color, intensity, range, angle, softness, shadows) = (
+      _kind,
+      _color,
+      _intensity,
+      _range,
+      _angle,
+      _softness,
+      _shadows,
+    );
     set();
     try {
       _live?._writeLight(this);

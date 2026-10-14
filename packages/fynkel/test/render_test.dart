@@ -149,10 +149,16 @@ void main() {
     );
     final grey = Material(color: Color.rgb(0.7, 0.7, 0.7), roughness: 1);
     final floor = world.add(
-      GameObject(transform: Transform(scale: Vec3.one * 12), components: [MeshRenderer(Mesh.plane(), grey)]),
+      GameObject(
+        transform: Transform(scale: Vec3.one * 12),
+        components: [MeshRenderer(Mesh.plane(), grey)],
+      ),
     );
     final cube = world.add(
-      GameObject(transform: Transform(position: Vec3(0, 1.5, 0)), components: [MeshRenderer(Mesh.cube(), grey)]),
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), grey)],
+      ),
     );
     final sun = world.add(
       GameObject(
