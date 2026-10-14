@@ -10,16 +10,20 @@ use glam::Vec3;
 
 use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
-use crate::scene::{ColorSpace, MeshKey, TextureKey};
+use crate::scene::{ColorSpace, MeshKey, Quality, TextureKey};
 use crate::texture::{TextureKit, Textures};
 use fynkel_mesh::MeshData;
 
 /// One GPU device and what every renderer on it shares: the frame layout,
 /// the texture kit, and the pipelines for each target format, made the
-/// first time a renderer asks for that format.
+/// first time a renderer asks for that format. Also the quality level the
+/// device picks.
 pub struct Kit {
     pub(crate) gpu: Gpu,
+    quality: Quality,
     pub(crate) frame_layout: wgpu::BindGroupLayout,
+    /// The last pass's input: the scene's half-float image.
+    pub(crate) image_layout: wgpu::BindGroupLayout,
     pub(crate) textures: TextureKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
 }
@@ -46,12 +50,38 @@ impl Kit {
                 count: None,
             }],
         });
-        Arc::new(Self { gpu: gpu.clone(), frame_layout, textures: TextureKit::new(gpu), pipelines: Mutex::default() })
+        let image_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("scene image"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        Arc::new(Self {
+            gpu: gpu.clone(),
+            quality: Quality::for_adapter(&gpu.adapter.get_info()),
+            frame_layout,
+            image_layout,
+            textures: TextureKit::new(gpu),
+            pipelines: Mutex::default(),
+        })
     }
 
     /// The device this kit is for.
     pub fn gpu(&self) -> &Gpu {
         &self.gpu
+    }
+
+    /// The quality level this device picks ([`Quality::for_adapter`]),
+    /// for a scene that doesn't choose one.
+    pub fn quality(&self) -> Quality {
+        self.quality
     }
 
     /// The pipelines that draw into `format`, made on first use.

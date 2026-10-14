@@ -241,6 +241,9 @@ external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.U
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
 external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fy_quality_auto(ffi.Pointer<ffi.Uint32> out);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Uint32, ffi.Pointer<FyRayHit>)>(
   isLeaf: true,
 )
@@ -366,6 +369,9 @@ external void fy_world_free(ffi.Pointer<FyWorld> world);
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32)>(isLeaf: true)
+external int fy_world_quality_set(ffi.Pointer<FyWorld> world, int level);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
@@ -379,7 +385,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 20;
+const int FY_ABI_VERSION = 21;
 
 const int FY_APPLE_MORE = 2;
 
@@ -400,6 +406,14 @@ const int FY_MESH_PLANE = 2;
 const int FY_MESH_QUAD = 5;
 
 const int FY_MESH_SPHERE = 1;
+
+const int FY_QUALITY_AUTO = 0;
+
+const int FY_QUALITY_HIGH = 3;
+
+const int FY_QUALITY_LOW = 1;
+
+const int FY_QUALITY_MEDIUM = 2;
 
 final class FyCamera extends ffi.Struct {
   @ffi.Float()

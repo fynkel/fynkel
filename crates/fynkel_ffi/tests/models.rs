@@ -162,6 +162,11 @@ fn bounds(bytes: &[u8]) -> (Vec3, f32) {
 /// framed to fit its bounding sphere (`zoom` closer: a flat model fills
 /// less of it), under a sun from over the camera's left shoulder.
 fn render(name: &str, from: Vec3, zoom: f32) -> fynkel_golden::Image {
+    render_at(name, from, zoom, FY_QUALITY_AUTO)
+}
+
+/// [`render`] at a quality `level`.
+fn render_at(name: &str, from: Vec3, zoom: f32, level: u32) -> fynkel_golden::Image {
     let bytes = sample(name);
     let (centre, radius) = bounds(bytes);
     let world = World::new();
@@ -200,6 +205,8 @@ fn render(name: &str, from: Vec3, zoom: f32) -> fynkel_golden::Image {
         let ambient = world.spawn();
         ok(fy_light_set(w, ambient, &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.25 }));
     }
+    // SAFETY: a live world.
+    ok(unsafe { fy_world_quality_set(w, level) });
     let view = View::headless(&world, 256, 256);
     view.read(view.frame(), 256, 256)
 }
@@ -221,10 +228,14 @@ fn normal_tangent_mirror_test_matches_its_golden() {
     assert_golden("gltf_normal_tangent_mirror", &render("NormalTangentMirrorTest.glb", Vec3::Z, 1.4));
 }
 
-/// MASK cut-outs at three cutoffs; BLEND drawn opaque.
+/// MASK cut-outs at three cutoffs; BLEND drawn opaque. The same at every
+/// quality level: cut-out edges are where the scene image could differ.
 #[test]
 fn alpha_blend_mode_test_matches_its_golden() {
-    assert_golden("gltf_alpha_blend_mode", &render("AlphaBlendModeTest.glb", Vec3::new(0.0, 0.3, 1.0), 1.1));
+    for level in [FY_QUALITY_AUTO, FY_QUALITY_LOW, FY_QUALITY_MEDIUM, FY_QUALITY_HIGH] {
+        let image = render_at("AlphaBlendModeTest.glb", Vec3::new(0.0, 0.3, 1.0), 1.1, level);
+        assert_golden("gltf_alpha_blend_mode", &image);
+    }
 }
 
 /// Each arrow must point at the target of its own colour.

@@ -223,3 +223,25 @@ fn a_camera_whose_near_is_not_below_its_far_is_refused_saying_so() {
     ok(unsafe { fy_camera_set(world.0, main, &lens) });
     assert_golden("cube", &view.read(view.frame(), 256, 256));
 }
+
+#[test]
+fn a_world_draws_the_same_at_every_quality_level_and_refuses_others() {
+    let world = World::new();
+    stage1(&world);
+    let view = View::headless(&world, 256, 256);
+    for level in [FY_QUALITY_LOW, FY_QUALITY_HIGH, FY_QUALITY_MEDIUM, FY_QUALITY_AUTO] {
+        // SAFETY: a live world.
+        ok(unsafe { fy_world_quality_set(world.0, level) });
+        assert_golden("cube", &view.read(view.frame(), 256, 256));
+    }
+    // SAFETY: a live world.
+    assert_eq!(unsafe { fy_world_quality_set(world.0, 4) }, FyStatus::InvalidValue);
+    assert!(last_error().contains("4 isn't a quality level"), "{}", last_error());
+
+    let mut auto = 0;
+    // SAFETY: a local out-value.
+    ok(unsafe { fy_quality_auto(&mut auto) });
+    assert!([FY_QUALITY_LOW, FY_QUALITY_MEDIUM, FY_QUALITY_HIGH].contains(&auto), "{auto}");
+    #[cfg(target_os = "macos")]
+    assert_eq!(auto, FY_QUALITY_HIGH, "an Apple GPU");
+}

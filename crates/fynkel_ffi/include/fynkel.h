@@ -10,13 +10,25 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 20
+#define FY_ABI_VERSION 21
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
 
 // `FyLight::kind`.
 #define FY_LIGHT_AMBIENT 1
+
+// A quality level: the device's own (`fy_quality_auto`).
+#define FY_QUALITY_AUTO 0
+
+// A quality level: the cheapest, for slow or unknown GPUs.
+#define FY_QUALITY_LOW 1
+
+// A quality level: phones' (Mali, Adreno).
+#define FY_QUALITY_MEDIUM 2
+
+// A quality level: Apple's GPUs and desktops'.
+#define FY_QUALITY_HIGH 3
 
 // `fy_mesh_new_shape`'s shape: a 1×1×1 cube.
 #define FY_MESH_CUBE 0
@@ -438,6 +450,24 @@ FyStatus fy_camera_active(const struct FyWorld *world, uint64_t *out);
 FyStatus fy_camera_shake_set(const struct FyWorld *world,
                              uint64_t camera,
                              const struct FyVec3 *offset);
+
+// Sets the quality level the world's views draw at: a `FY_QUALITY_*`.
+// `FY_QUALITY_AUTO`, as a new world has, is the device's own. Taken by
+// each `fy_view_frame` after.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_world_quality_set(const struct FyWorld *world, uint32_t level);
+
+// Writes the quality level this device picks for a world left at
+// `FY_QUALITY_AUTO` to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`.
+// Makes the device if there's none yet.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_quality_auto(uint32_t *out);
 
 // Names the object with `len` bytes of UTF-8 at `name`, or clears its name
 // when `len` is 0. Names needn't be unique.

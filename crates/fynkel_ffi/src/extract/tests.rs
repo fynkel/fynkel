@@ -73,9 +73,9 @@ fn the_stage_1_scene_is_extracted_resolved_and_linear() {
     assert_eq!(camera.clear_color, rgb(Camera::default().clear_color));
     assert_eq!(camera.orthographic, None, "perspective unless asked");
 
-    let sun = scene.sun.unwrap();
-    assert!(close(sun.direction, Vec3::new(-0.4, -1.0, -0.3).normalize()), "{:?}", sun.direction);
-    assert_eq!(sun.color, Vec3::ONE);
+    let (direction, color) = scene.sun().unwrap();
+    assert!(close(direction, Vec3::new(-0.4, -1.0, -0.3).normalize()), "{direction:?}");
+    assert_eq!(color, Vec3::ONE);
     assert!(close(scene.ambient, Vec3::splat(0.15)));
 
     let [draw] = scene.draws[..] else { panic!("{:?}", scene.draws) };
@@ -88,7 +88,7 @@ fn the_stage_1_scene_is_extracted_resolved_and_linear() {
 }
 
 #[test]
-fn the_lowest_id_camera_and_sun_win_and_ambients_add_up() {
+fn the_lowest_id_camera_wins_suns_come_in_id_order_and_ambients_add_up() {
     let mut world = World::new();
     let ids: Vec<ObjectId> = (0..4).map(|_| world.spawn()).collect();
     // Inserted in reverse, so the ECS's own order isn't the id order.
@@ -104,8 +104,22 @@ fn the_lowest_id_camera_and_sun_win_and_ambients_add_up() {
     }
     let (scene, _) = extract(&world);
     assert!((scene.camera.unwrap().fov_y - 10f32.to_radians()).abs() < 1e-6);
-    assert_eq!(scene.sun.unwrap().color, Vec3::ONE);
+    assert_eq!(scene.sun().unwrap().1, Vec3::ONE, "the first sun is the lowest id's");
+    let colors: Vec<f32> = scene.lights.iter().map(|l| l.color.x).collect();
+    assert_eq!(colors, [1.0, 2.0, 3.0, 4.0], "every sun is in the list, by id");
     assert!(close(scene.ambient, Vec3::splat(0.75)));
+}
+
+#[test]
+fn the_worlds_quality_level_goes_with_its_scene() {
+    let (world, _) = stage1_world();
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(scene.quality, None, "the device's, unless the world picks");
+    extract.quality = Some(Quality::Low);
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(scene.quality, Some(Quality::Low));
 }
 
 #[test]
@@ -113,7 +127,7 @@ fn a_sun_without_a_transform_has_no_direction_and_is_ignored() {
     let mut world = World::new();
     let id = world.spawn();
     world.insert(id, Light::DEFAULT).unwrap();
-    assert_eq!(extract(&world).0.sun, None);
+    assert_eq!(extract(&world).0.lights, []);
 }
 
 #[test]
@@ -312,7 +326,7 @@ fn the_camera_and_the_sun_follow_their_parents() {
     let expected = CameraView::looking_at(Vec3::new(13.0, 0.0, 0.0), Vec3::new(12.0, 0.0, 0.0));
     assert!(camera.view.abs_diff_eq(expected.view, 1e-5), "{}", camera.view);
     // The rig faces -X, and so does the sun, with unit length.
-    assert!(close(scene.sun.unwrap().direction, Vec3::NEG_X), "{}", scene.sun.unwrap().direction);
+    assert!(close(scene.sun().unwrap().0, Vec3::NEG_X), "{}", scene.sun().unwrap().0);
 }
 
 #[test]
@@ -347,7 +361,7 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
     extract.run(&world, &mut scene, &mut ops);
     assert_eq!(scene.camera, full.camera, "the rig's camera is left out");
     assert_ne!(world.active_camera(), Some(parts[0]), "and the world agrees");
-    assert_eq!(scene.sun, full.sun, "and its sun");
+    assert_eq!(scene.lights, full.lights, "and its sun");
     assert!(close(scene.ambient, full.ambient), "and its ambient light");
     assert_eq!(scene.draws.iter().map(|d| d.mesh).collect::<Vec<_>>(), [mesh_key(cube_mesh)], "and its sphere");
 
@@ -355,7 +369,7 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
     extract.run(&world, &mut scene, &mut ops);
     assert!((scene.camera.unwrap().fov_y - 20f32.to_radians()).abs() < 1e-6, "shown, the rig's camera wins");
     assert_eq!(world.active_camera(), Some(parts[0]));
-    assert_eq!(scene.sun.unwrap().color, Vec3::splat(9.0), "and its sun");
+    assert_eq!(scene.sun().unwrap().1, Vec3::splat(9.0), "and its sun");
     assert!(close(scene.ambient, Vec3::splat(9.15)));
     assert_eq!(scene.draws.len(), 2);
 
@@ -471,7 +485,7 @@ fn only_layers_in_the_cameras_culling_mask_are_drawn_and_lights_light_them_all()
         extract.run(&world, &mut scene, &mut ops);
         assert_eq!(scene.draws.len(), drawn, "mask {mask:#x}");
         assert!(close(scene.ambient, Vec3::splat(1.15)), "mask {mask:#x}");
-        assert!(scene.camera.is_some() && scene.sun.is_some());
+        assert!(scene.camera.is_some() && scene.sun().is_some());
     }
 }
 

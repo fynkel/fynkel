@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps, then stage 6's and 7's. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's, 7's and 8's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -24,6 +24,7 @@ import 'scenes/joints_character.dart';
 import 'scenes/layer_matrix.dart';
 import 'scenes/layers_basics.dart';
 import 'scenes/lifecycle.dart';
+import 'scenes/look.dart';
 import 'scenes/menus_basics.dart';
 import 'scenes/mesh_colliders_basics.dart';
 import 'scenes/motion.dart';
@@ -88,4 +89,5 @@ final List<LabScene Function()> scenes = [
   RebindingBasicsScene.new,
   MinimapBasicsScene.new,
   SplitScreenBasicsScene.new,
+  LookScene.new,
 ];

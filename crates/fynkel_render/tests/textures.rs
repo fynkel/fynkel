@@ -25,7 +25,8 @@ fn solid(rgba: [u8; 4]) -> Vec<u8> {
 fn facing_plane(material: PbrMaterial) -> RenderScene {
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
-        sun: None,
+        lights: Vec::new(),
+        quality: None,
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         draws: vec![Draw {
@@ -145,7 +146,7 @@ fn each_slot_reads_its_texture_in_its_colour_space() {
         m.roughness = 1.0;
     }));
     scene.ambient = Vec3::splat(0.1);
-    scene.sun = Some(Sun { direction: Vec3::NEG_Z, color: Vec3::splat(0.3) });
+    scene.lights = vec![Light::sun(Vec3::NEG_Z, Vec3::splat(0.3))];
     let (want, wrong) = (lit(0.5, as_data, as_data, 0.3, 0.1), lit(0.5, as_colour, as_colour, 0.3, 0.1));
     check("metallic-roughness", centre(&scene, &mut r), want, wrong);
 }
@@ -178,7 +179,7 @@ fn normal_maps_bend_the_normal_the_gltf_way() {
             ..PbrMaterial::DEFAULT
         });
         let l = (to_light + Vec3::Z).normalize();
-        scene.sun = Some(Sun { direction: -l, color: Vec3::ONE });
+        scene.lights = vec![Light::sun(-l, Vec3::ONE)];
         let got = rgb(render(&gpu, &mut r, &scene, 64, 64).0.pixel(32, 32));
         // The texel stores the normal to 8 bits; shade with what it holds.
         let [x, y, z, _] = encode(mapped).map(|c| c as f32 / 255.0 * 2.0 - 1.0);
@@ -210,7 +211,8 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
         camera.clear_color = [0.0, 0.0, 0.3];
         RenderScene {
             camera: Some(camera),
-            sun: None,
+            lights: Vec::new(),
+            quality: None,
             ambient: Vec3::ZERO,
             lines: Vec::new(),
             draws: vec![Draw {
@@ -480,4 +482,14 @@ fn textured_materials_match_their_golden() {
     let (image, stats) = render(&gpu, &mut r, &scene, 320, 180);
     assert_eq!(stats.draw_calls, 4);
     assert_golden("textured_materials", &image);
+
+    // The same at every level: drawn straight to the view at low, through
+    // the scene image above it. The cut-out's edges, the glow and the
+    // normal map are where the two could differ.
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        scene.quality = Some(quality);
+        let (image, _) = render(&gpu, &mut r, &scene, 320, 180);
+        assert_eq!(r.quality(), quality);
+        assert_golden("textured_materials", &image);
+    }
 }

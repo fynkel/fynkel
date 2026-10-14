@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
-use fynkel_render::{Gpu, Renderer};
+use fynkel_render::{Gpu, Quality, Renderer};
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 20;
+pub const FY_ABI_VERSION: u32 = 21;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -116,6 +116,33 @@ pub struct FyCamera {
 pub const FY_LIGHT_DIRECTIONAL: u32 = 0;
 /// `FyLight::kind`.
 pub const FY_LIGHT_AMBIENT: u32 = 1;
+
+/// A quality level: the device's own (`fy_quality_auto`).
+pub const FY_QUALITY_AUTO: u32 = 0;
+/// A quality level: the cheapest, for slow or unknown GPUs.
+pub const FY_QUALITY_LOW: u32 = 1;
+/// A quality level: phones' (Mali, Adreno).
+pub const FY_QUALITY_MEDIUM: u32 = 2;
+/// A quality level: Apple's GPUs and desktops'.
+pub const FY_QUALITY_HIGH: u32 = 3;
+
+fn quality_of(level: u32) -> Option<Option<Quality>> {
+    match level {
+        FY_QUALITY_AUTO => Some(None),
+        FY_QUALITY_LOW => Some(Some(Quality::Low)),
+        FY_QUALITY_MEDIUM => Some(Some(Quality::Medium)),
+        FY_QUALITY_HIGH => Some(Some(Quality::High)),
+        _ => None,
+    }
+}
+
+fn level_of(quality: Quality) -> u32 {
+    match quality {
+        Quality::Low => FY_QUALITY_LOW,
+        Quality::Medium => FY_QUALITY_MEDIUM,
+        Quality::High => FY_QUALITY_HIGH,
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -394,6 +421,8 @@ pub struct FyWorld {
     gpu: Mutex<Weak<WorldGpu>>,
     /// The camera shake: which camera, and how far it's moved when drawn.
     shake: Mutex<Option<(ObjectId, Vec3)>>,
+    /// The quality level its views draw at, or `None` for the device's.
+    quality: Mutex<Option<Quality>>,
 }
 
 impl FyWorld {
@@ -523,6 +552,7 @@ pub extern "C" fn fy_world_new() -> *mut FyWorld {
         raycaster: Mutex::default(),
         gpu: Mutex::default(),
         shake: Mutex::default(),
+        quality: Mutex::default(),
     };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
@@ -845,6 +875,41 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
         };
         *world.shake.lock().unwrap_or_else(PoisonError::into_inner) = shake;
         Ok(())
+    })
+}
+
+/// Sets the quality level the world's views draw at: a `FY_QUALITY_*`.
+/// `FY_QUALITY_AUTO`, as a new world has, is the device's own. Taken by
+/// each `fy_view_frame` after.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_quality_set(world: *const FyWorld, level: u32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let quality = quality_of(level)
+            .ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("{level} isn't a quality level")))?;
+        *world.quality.lock().unwrap_or_else(PoisonError::into_inner) = quality;
+        Ok(())
+    })
+}
+
+/// Writes the quality level this device picks for a world left at
+/// `FY_QUALITY_AUTO` to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`.
+/// Makes the device if there's none yet.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_quality_auto(out: *mut u32) -> FyStatus {
+    guard(|| {
+        let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, level_of(device.kit.quality()), "out") }
     })
 }
 
@@ -2181,6 +2246,7 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let clock = &mut *clock;
         let mut scene = view.worker.scene();
         clock.extract.shake = *view.world.shake.lock().unwrap_or_else(PoisonError::into_inner);
+        clock.extract.quality = *view.world.quality.lock().unwrap_or_else(PoisonError::into_inner);
         clock
             .extract
             .run_shared(&*view.world.lock()?, &mut scene, &mut view.gpu.ledger())
