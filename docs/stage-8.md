@@ -1,6 +1,6 @@
 # Stage 8 plan: the look
 
-Status: proposed 2026-10-14. Scope and rules:
+Status: accepted 2026-10-14, with the recommended answers to §4. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 7 is done
 ([report](stage-7-report.md)).
 
