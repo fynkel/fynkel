@@ -388,6 +388,32 @@ void main() {
       expect(input.mousePosition, isNull);
     });
 
+    test('leaving during a drag: it goes when the button comes up, unless it came back', () {
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
+      step();
+      input.simulate
+        ..fingerMove(-1, 250, 50)
+        ..leave(-1);
+      step();
+      expect(input.fingers, hasLength(1), reason: 'still dragging');
+      input.simulate.fingerUp(-1, 260, 50);
+      step();
+      expect(input.fingers, isEmpty, reason: 'it left the view');
+      expect(input.mousePosition, isNull);
+
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
+      step();
+      input.simulate
+        ..fingerMove(-1, 250, 50)
+        ..leave(-1)
+        ..fingerMove(-1, 150, 50)
+        ..hover(-1, 150, 50);
+      step();
+      input.simulate.fingerUp(-1, 150, 50);
+      step();
+      expect(input.fingers, hasLength(1), reason: 'it came back');
+    });
+
     test('its buttons: which pressed, others pressed meanwhile, and their taps', () {
       input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse, buttons: 2);
       step();

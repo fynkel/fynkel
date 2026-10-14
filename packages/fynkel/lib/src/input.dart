@@ -480,11 +480,20 @@ final class Input {
           _targets?.moved(finger);
           return;
         }
-        if (finger._down) return;
+        if (finger._down) {
+          // Back over the view mid-drag.
+          finger._outside = false;
+          return;
+        }
         _move(finger, raw.x, raw.y);
       case _RawKind.leave:
         final finger = _finger(raw.id);
-        if (finger == null || finger._down) return;
+        if (finger == null) return;
+        if (finger._down) {
+          // Dragged out of the view: it goes when the button comes up.
+          finger._outside = true;
+          return;
+        }
         _flush(finger);
         _fingers.remove(finger);
         finger._gone = true;
@@ -613,8 +622,8 @@ final class Input {
     finger._upAt = _eventAt;
     finger._cancelled = cancelled;
     if (cancelled || _eventAt - finger._downAt > settings.tapTime) finger._tapping = false;
-    final mouse = finger.kind == FingerKind.mouse;
-    if (!mouse) {
+    final stays = finger.kind == FingerKind.mouse && !finger._outside;
+    if (!stays) {
       _fingers.remove(finger);
       finger._gone = true;
     }
@@ -651,7 +660,7 @@ final class Input {
     }
     _emit(onFingerUp, finger);
     _targets?.up(finger);
-    if (!mouse) _targets?.left(finger);
+    if (!stays) _targets?.left(finger);
     finger._dragging = false;
   }
 
@@ -882,6 +891,9 @@ final class Finger {
   bool _cancelled = false;
   bool _gone = false;
 
+  // A mouse that left the view while pressed.
+  bool _outside = false;
+
   // The last few (time, x, y), for [velocity].
   final _samples = Float64List(_sampleCount * 3);
   int _sampled = 0;
@@ -917,6 +929,7 @@ final class Finger {
     _pressure = pressure;
     _tapCount = 0;
     _down = true;
+    _outside = false;
     _moved = false;
     _tapping = true;
     _dragging = false;
