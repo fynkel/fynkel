@@ -244,6 +244,9 @@ by more than its cap is lit by the nearest ones, with a test.
   picks this up; until then a game for the Note10+ class with lamps can
   set `world.quality = Quality.low`.
 
+  After hardening phase 4 (2026-10-14), the same scene at medium: 56.9
+  (min 37.9). Still open.
+
 ### Phase 3: shadows
 
 - **The sun's shadows.** `Light.sun(shadows: true)`.
@@ -345,6 +348,10 @@ holds at each level.
   up. High was never meant for the Note10+; it's listed for the record.
   A game for that class of phone that wants shadows today can use low,
   which holds 60.
+
+  After hardening phase 4 (2026-10-14), at medium: 57.9 (min 39.9) with
+  shadows, 59.9 (min 58.9) without. Phase 2's hardening had cost both
+  about 9 fps (V10's GPU polling); undone. Still open at 57.9.
 
 ### Phase 4: the sky and what reflects it
 

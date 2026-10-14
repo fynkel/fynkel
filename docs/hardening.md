@@ -438,6 +438,9 @@ the finished texture under it; an upload budget per frame.
 **R9. Targets are rebuilt on a one-pixel change.** (S)
 `renderer.rs:715-721`. Round sizes up to 16 and render to a
 sub-rectangle, or allocate with slack. Pairs with V9.
+*Done by V9*: a view resizes once its size holds still, so a drag no
+longer rebuilds a target a frame; and the MSAA resolve needs its
+targets the same size, so slack would only move the rebuild.
 
 **R10. The cascade's depth range follows the casters.** (S)
 `shadows.rs:130` pulls `near` toward the sun by every caster's radius,
@@ -600,7 +603,27 @@ planned; neither needs anything here changed again.
   shouldn't: fixed in both packages, and what it then found (debug
   drawing, `get`) fixed too. The done criterion's "tweened light and
   colour" is held as "set every frame", see Raised and left.
-- [ ] Phase 4: the renderer
+- [x] Phase 4: the renderer (R1–R13; R9 done by V9, R13's samplers
+  left, see Raised and left). Every golden unchanged after R1 and R2;
+  R6's two cascade goldens re-blessed after looking (the band now blends).
+  R3's two-view test passes, R5's goldens exist. Each bug row had a test
+  that failed first; R10's also fails without its depth clamp. On the
+  Note10+: the pipeline cache takes a warm start's first-frame gap from
+  1049 to 17.6 ms. Measuring R11 found V10's GPU polling (phase 2) cost
+  the shadows scene 9 fps; it waits in one call again (Raised and left).
+  The lab, Note10+, medium, 60 s each, alone:
+
+  | | fps (min) |
+  |---|---|
+  | shadows, stage 8 (f76a3beb) | 55.9 (37.9) |
+  | shadows, phase 3's main with V10's polling | 47.9 (33.0) |
+  | shadows, now | 57.9 (39.9) |
+  | shadows off, now | 59.9 (58.9) |
+  | lamps, now | 56.9 (37.9) |
+
+  Medium doesn't reach 60 with shadows or lamps, so stage 8 phase 6's
+  open item stays open; without them it does. R11's variants leave out
+  what a frame doesn't use, which these two scenes do use.
 - [ ] Phase 5: what a game writes
 - [ ] Phase 6: the hook and the guide
 - [ ] Stage 8 phase 4 resumes
@@ -611,9 +634,9 @@ So they aren't raised again.
 
 - **Android's wait for the GPU after submit** (`android.rs:289`) looked
   like a serialisation bug. It is deliberate and measured (12.7 → 27 fps
-  at 10,000 objects); only the lease across it is wrong (V10). Whether
-  CPU work hiding behind it explains the Note10+'s medium gap is for
-  R11's measurement to say.
+  at 10,000 objects); only the lease across it is wrong (V10). R11's
+  measurement found the medium gap isn't hiding behind it: see V10's
+  wait below.
 - **`maxAngularVelocity` should default to 7** (P5): 7 was Unity 5.6's
   and older. Current Unity (6 included, and 2020.1 already) defaults to 50
   (`Physics.defaultMaxAngularSpeed`), as Fynkel does.
@@ -650,5 +673,22 @@ So they aren't raised again.
   inline (found in `Debug.box` and `sphere`): an optional `double x = 0`
   is unboxed on entry and boxed again where it's stored. Public calls
   on per-frame paths take `double?` instead.
+- **The renderer records its passes holding the assets lock** (R8):
+  uploads are made outside it now, so a view's frame waits only for
+  another's recording, not for a texture being made. Splitting the
+  recording from the lock is a larger change with no measured cost.
+- **R13's clamp and mirror samplers**: a material's wrap mode would have
+  to cross the world, the ABI and Dart for three samplers. Quantization
+  is done; the wraps stay a warning until a game's texture needs them.
+- **Two texture and five glTF goldens differ on the Note10+**, on main
+  as well: Mali filters a little differently. The goldens are the
+  desktop's; the device run reports them, it doesn't gate.
+- **V10's wait for the GPU** (phase 2) polled every 0.5 ms so the
+  platform thread could take the surface between polls. On the Note10+
+  that cost 9 fps (47.9 against 56.9), and a short timed wait loses its
+  device (Mali answers a timed-out wait with an error wgpu takes as a
+  lost device). It waits once again, up to 1 s, unless the platform
+  thread already wants the surface: that thread waits behind at most
+  one frame's GPU work.
 - **Sound, particles, animation, prebuilt binaries, Linux hosts, an
   editor**: the stages after this plan, in their planned order.
