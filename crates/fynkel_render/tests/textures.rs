@@ -371,7 +371,10 @@ fn draws_are_batched_by_textures_too() {
         .collect();
     let (_, stats) = render(&gpu, &mut r, &scene, 64, 64);
     // A ×2, B, none, and A cut out.
-    assert_eq!(stats, FrameStats { draws: 5, draw_calls: 4, missing_meshes: 0, culled: 0, lines: 0 });
+    assert_eq!(
+        stats,
+        FrameStats { draws: 5, draw_calls: 4, missing_meshes: 0, culled: 0, lines: 0, ..Default::default() }
+    );
 }
 
 /// The look, for a person to check: a UV grid on a cube, a bumpy

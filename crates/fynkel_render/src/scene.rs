@@ -110,7 +110,8 @@ impl CameraView {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Light {
     /// Linear colour × intensity. 1.0 from a sun lights a rough surface
-    /// that faces it to its albedo (stage 1 plan §3.6).
+    /// that faces it to its albedo (stage 1 plan §3.6); so does 1.0 from a
+    /// point or spot light 1 m away.
     pub color: Vec3,
     pub kind: LightKind,
 }
@@ -118,11 +119,28 @@ pub struct Light {
 /// What kind of light a [`Light`] is.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum LightKind {
-    /// Parallel light from one direction, as from the sun.
+    /// Parallel light from one direction, as from the sun. It lights every
+    /// object.
     Sun {
         /// The direction the light travels (from the sun towards the
         /// scene). Needn't be normalized.
         direction: Vec3,
+    },
+    /// A lamp: light from a point in every direction, falling off with the
+    /// square of the distance, and fading to nothing at `range`.
+    Point { position: Vec3, range: f32 },
+    /// A point light that shines only in a cone.
+    Spot {
+        position: Vec3,
+        /// The cone's axis, the way the light shines. Needn't be
+        /// normalized.
+        direction: Vec3,
+        range: f32,
+        /// The cone's full angle, in radians, below π.
+        angle: f32,
+        /// How much of the cone fades, from its edge in: 0 for a hard
+        /// edge, 1 to fade all the way to the axis.
+        softness: f32,
     },
 }
 
@@ -130,6 +148,26 @@ impl Light {
     /// A sun shining along `direction` with `color` (colour × intensity).
     pub fn sun(direction: Vec3, color: Vec3) -> Self {
         Self { color, kind: LightKind::Sun { direction } }
+    }
+
+    /// A lamp at `position` reaching `range` metres.
+    pub fn point(position: Vec3, range: f32, color: Vec3) -> Self {
+        Self { color, kind: LightKind::Point { position, range } }
+    }
+
+    /// A spotlight at `position` shining along `direction`, in a cone
+    /// `angle` radians across whose outer `softness` fades.
+    pub fn spot(position: Vec3, direction: Vec3, range: f32, angle: f32, softness: f32, color: Vec3) -> Self {
+        Self { color, kind: LightKind::Spot { position, direction, range, angle, softness } }
+    }
+
+    /// Where a point or spot light is and how far it reaches; `None` for a
+    /// sun.
+    pub fn reach(&self) -> Option<(Vec3, f32)> {
+        match self.kind {
+            LightKind::Sun { .. } => None,
+            LightKind::Point { position, range } | LightKind::Spot { position, range, .. } => Some((position, range)),
+        }
     }
 }
 
@@ -159,11 +197,24 @@ impl Quality {
         }
     }
 
-    /// Whether the scene is drawn into a half-float image with a last pass
-    /// after it, which later effects (bloom) need. Low draws straight to
-    /// the screen.
-    pub(crate) fn hdr(self) -> bool {
-        self != Self::Low
+    /// How many point and spot lights may light one object: the ones
+    /// brightest at it, which among lights alike are the nearest.
+    ///
+    /// Lighting a pixel with 8 is too much for a Mali G76 (a Note10+) with
+    /// 32 lamps over its whole screen (stage 8 phase 2), so phones' level
+    /// takes 4, as low does.
+    pub fn lights_per_object(self) -> usize {
+        match self {
+            Self::Low | Self::Medium => 4,
+            Self::High => 8,
+        }
+    }
+
+    /// The format of the image the scene is drawn into, with a last pass
+    /// after it, which later effects (bloom) need: half floats, or `None`
+    /// at low, which draws straight to the screen.
+    pub(crate) fn image_format(self) -> Option<wgpu::TextureFormat> {
+        (self != Self::Low).then_some(wgpu::TextureFormat::Rgba16Float)
     }
 }
 
@@ -234,8 +285,12 @@ pub struct Line {
 pub struct RenderScene {
     /// `None` draws nothing but black.
     pub camera: Option<CameraView>,
-    /// Every light. Only the first sun lights the scene for now; the
-    /// others are carried for what comes next (stage 8).
+    /// Every light. Suns light every object, up to
+    /// [`Renderer::MAX_SUNS`](crate::Renderer::MAX_SUNS) of them in order.
+    /// Point and spot lights light the objects they reach: up to
+    /// [`Renderer::MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS) a frame, the
+    /// ones nearest the camera, and each object the ones brightest at it,
+    /// up to [`Quality::lights_per_object`].
     pub lights: Vec<Light>,
     /// Linear radiance arriving equally from every direction. 1.0 alone
     /// shows a rough surface at its albedo.
@@ -251,14 +306,10 @@ pub struct RenderScene {
 impl RenderScene {
     /// The first sun in [`RenderScene::lights`]: its direction and colour.
     pub fn sun(&self) -> Option<(Vec3, Vec3)> {
-        // Every light is a sun so far.
-        self.lights
-            .iter()
-            .map(|l| {
-                let LightKind::Sun { direction } = l.kind;
-                (direction, l.color)
-            })
-            .next()
+        self.lights.iter().find_map(|l| match l.kind {
+            LightKind::Sun { direction } => Some((direction, l.color)),
+            _ => None,
+        })
     }
 
     /// Empties the scene but keeps its memory, so refilling it every frame

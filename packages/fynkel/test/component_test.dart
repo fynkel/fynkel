@@ -146,20 +146,29 @@ void main() {
     expect(log, ['destroy child', 'destroy c', 'destroy root', 'destroy a', 'destroy b']);
   });
 
-  test('a second sun is noted once: only one lights the scene', () {
+  test('more suns or lamps than a frame takes are noted, once each', () {
     final said = <String>[];
     runZoned(() {
       final world = World();
       addTearDown(world.dispose);
-      world.add(GameObject(name: 'sun', components: [Light.sun()]));
+      for (var i = 0; i < 4; i++) {
+        world.add(GameObject(components: [Light.sun()]));
+      }
       world.add(GameObject(components: [Light.ambient()]));
-      expect(said, isEmpty, reason: 'one sun, and an ambient light');
-      final second = world.add(GameObject(name: 'second', components: [Light.sun()]));
+      for (var i = 0; i < 64; i++) {
+        world.add(GameObject(components: [Light.point()]));
+      }
+      expect(said, isEmpty, reason: 'four suns, 64 lamps and an ambient light all light a frame');
+      final fifth = world.add(GameObject(name: 'fifth', components: [Light.sun()]));
       world.add(GameObject(components: [Light.sun()]));
-      second.get<Light>()!.intensity = 2;
+      fifth.get<Light>()!.intensity = 2;
+      expect(said, hasLength(1));
+      world.add(GameObject(name: 'spare', components: [Light.spot()]));
+      world.add(GameObject(components: [Light.point()]));
     }, zoneSpecification: ZoneSpecification(print: (_, _, _, line) => said.add(line)));
-    expect(said, hasLength(1));
-    expect(said.single, allOf(contains('second'), contains('sun'), contains('Only one sun lights the scene')));
+    expect(said, hasLength(2));
+    expect(said[0], allOf(contains('fifth'), contains('5 suns'), contains('the first four made light the scene')));
+    expect(said[1], allOf(contains('spare'), contains('65 point and spot lights'), contains('nearest the camera')));
   });
 
   test('get finds a component by its type, a subtype or an interface, before and after adding', () {

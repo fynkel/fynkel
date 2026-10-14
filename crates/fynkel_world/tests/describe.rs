@@ -74,8 +74,14 @@ fn set_refuses_bad_values_and_changes_nothing() {
     assert_eq!(camera.set(9, Value::F32(1.0)), Err(FieldError::NoField { ty: "Camera", index: 9 }));
 
     let mut light = Light::default();
-    assert_eq!(light.set(0, Value::Enum(2)), Err(FieldError::WrongKind { ty: "Light", field: "kind" }));
+    assert_eq!(light.set(0, Value::Enum(4)), Err(FieldError::WrongKind { ty: "Light", field: "kind" }));
     assert!(light.set(2, Value::F32(-1.0)).is_err(), "negative intensity");
+    assert!(light.set(3, Value::F32(-1.0)).is_err(), "negative range");
+    assert!(light.set(4, Value::F32(180.0)).is_err(), "a spot as wide as a plane");
+    assert!(light.set(5, Value::F32(1.5)).is_err(), "softness past 1");
+    assert_eq!(light, Light::default());
+    assert_eq!(light.set(0, Value::Enum(3)), Ok(()));
+    assert_eq!(light.kind, LightKind::Spot);
 
     let mut t = Transform::default();
     assert_eq!(

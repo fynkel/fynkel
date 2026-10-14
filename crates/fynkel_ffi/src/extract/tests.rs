@@ -110,6 +110,42 @@ fn the_lowest_id_camera_wins_suns_come_in_id_order_and_ambients_add_up() {
     assert!(close(scene.ambient, Vec3::splat(0.75)));
 }
 
+/// Point and spot lights go with the suns, in id order: placed by their
+/// world transform, but a parent's scale doesn't stretch their range. A
+/// spot's angle goes from degrees to radians.
+#[test]
+fn point_and_spot_lights_are_placed_by_their_world_transform() {
+    use fynkel_render::LightKind as Kind;
+    let mut world = World::new();
+    let rig = world.spawn();
+    let rig_transform = Transform {
+        position: Vec3::new(10.0, 0.0, 0.0),
+        rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        scale: Vec3::splat(3.0),
+    };
+    world.insert(rig, rig_transform).unwrap();
+    let (lamp, spot, sun) = (world.spawn(), world.spawn(), world.spawn());
+    world.insert(lamp, Light::point(Color::WHITE, 2.0, 5.0)).unwrap();
+    world.insert(lamp, Transform::from_position(Vec3::new(0.0, 1.0, 0.0))).unwrap();
+    world.insert(spot, Light::spot(Color::WHITE, 3.0, 8.0, 40.0, 0.5)).unwrap();
+    world.insert(spot, Transform::from_position(Vec3::new(0.0, 0.0, 1.0))).unwrap();
+    world.set_parent(spot, Some(rig)).unwrap();
+    world.insert(sun, Light::DEFAULT).unwrap();
+    world.insert(sun, Transform::default()).unwrap();
+
+    let (scene, _) = extract(&world);
+    let [lamp, spot, sun] = scene.lights[..] else { panic!("three lights: {:?}", scene.lights) };
+    assert_eq!(lamp.kind, Kind::Point { position: Vec3::new(0.0, 1.0, 0.0), range: 5.0 });
+    assert_eq!(lamp.color, Vec3::splat(2.0));
+    let Kind::Spot { position, direction, range, angle, softness } = spot.kind else { panic!("{spot:?}") };
+    // One unit behind the rig (+Z), times 3, turned a quarter left: +X.
+    assert!(close(position, Vec3::new(13.0, 0.0, 0.0)), "{position}");
+    assert!(close(direction, Vec3::NEG_X), "{direction}");
+    assert_eq!((range, softness), (8.0, 0.5), "the rig's scale leaves the range alone");
+    assert!((angle - 40f32.to_radians()).abs() < 1e-6);
+    assert!(matches!(sun.kind, Kind::Sun { .. }));
+}
+
 #[test]
 fn the_worlds_quality_level_goes_with_its_scene() {
     let (world, _) = stage1_world();

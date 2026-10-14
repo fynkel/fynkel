@@ -10,10 +10,12 @@
 //!   ([`Extract::shake`]) moves it when it's drawn, not in the world. One
 //!   whose near clip isn't below its far draws nothing, so the frame is
 //!   refused with a message instead.
-//! - Every directional light with a `Transform` is a sun, in the order of
-//!   their ids; each shines along its world forward (-Z). The renderer
-//!   uses the first for now. A directional light without a transform has
-//!   no direction and is ignored.
+//! - Every directional, point and spot light with a `Transform` goes to the
+//!   renderer, in the order of their ids. A directional light is a sun,
+//!   shining along its world forward (-Z); a point light shines from its
+//!   world position; a spot light from there along its forward. Without a
+//!   transform, a light has no place and is ignored. The renderer chooses
+//!   which light what (its `RenderScene::lights`).
 //! - Every ambient light adds to the ambient term.
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
 //!   with both a mesh and a material, and its layer is in the camera's
@@ -26,8 +28,9 @@
 //! - Only shown objects count, for all of the above: an inactive object and
 //!   everything below it are left out (stage 3 plan §3.3).
 //! - Everything is placed by its world transform: its own after its
-//!   parents' (stage 2 plan §3.1). The camera and the sun take only the
-//!   position and rotation from it; a parent's scale doesn't stretch them.
+//!   parents' (stage 2 plan §3.1). The camera and the lights take only the
+//!   position and rotation from it; a parent's scale doesn't stretch them
+//!   (a light's range is its own).
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -84,9 +87,9 @@ pub(crate) struct Extract {
     pub(crate) shake: Option<(ObjectId, Vec3)>,
     /// The world's quality level, or `None` for the device's.
     pub(crate) quality: Option<Quality>,
-    /// The suns found, by id, before they're put in order. Kept so a frame
-    /// allocates nothing.
-    suns: Vec<(ObjectId, RenderLight)>,
+    /// The lights found, by id, before they're put in order. Kept so a
+    /// frame allocates nothing.
+    lights: Vec<(ObjectId, RenderLight)>,
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
     materials: HashMap<MaterialId, PbrMaterial>,
@@ -230,18 +233,33 @@ impl Extract {
         });
 
         scene.quality = self.quality;
-        let suns = &mut self.suns;
-        suns.clear();
+        let lights = &mut self.lights;
+        lights.clear();
         world.for_each2::<Light, Transform>(|id, light, t| {
-            if light.kind == LightKind::Directional
-                && let Some((rotation, _)) = placed(id, t)
-            {
-                let color = Vec3::from(rgb(light.color)) * light.intensity;
-                suns.push((id, RenderLight::sun(rotation * Vec3::NEG_Z, color)));
+            if light.kind == LightKind::Ambient {
+                return;
             }
+            let Some((rotation, position)) = placed(id, t) else { return };
+            let color = Vec3::from(rgb(light.color)) * light.intensity;
+            let forward = rotation * Vec3::NEG_Z;
+            lights.push((
+                id,
+                match light.kind {
+                    LightKind::Point => RenderLight::point(position, light.range, color),
+                    LightKind::Spot => RenderLight::spot(
+                        position,
+                        forward,
+                        light.range,
+                        light.spot_angle.to_radians(),
+                        light.softness,
+                        color,
+                    ),
+                    _ => RenderLight::sun(forward, color),
+                },
+            ));
         });
-        suns.sort_unstable_by_key(|&(id, _)| id);
-        scene.lights.extend(suns.iter().map(|&(_, light)| light));
+        lights.sort_unstable_by_key(|&(id, _)| id);
+        scene.lights.extend(lights.iter().map(|&(_, light)| light));
         world.for_each::<Light>(|id, light| {
             if light.kind == LightKind::Ambient && matrices.shown(world, id) {
                 scene.ambient += Vec3::from(rgb(light.color)) * light.intensity;

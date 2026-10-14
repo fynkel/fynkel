@@ -199,11 +199,19 @@ fn render_at(name: &str, from: Vec3, zoom: f32, level: u32) -> fynkel_golden::Im
 
         let sun = world.spawn();
         let white = srgb(1.0, 1.0, 1.0);
-        ok(fy_light_set(w, sun, &FyLight { kind: FY_LIGHT_DIRECTIONAL, color: white, intensity: 1.0 }));
+        ok(fy_light_set(
+            w,
+            sun,
+            &FyLight { kind: FY_LIGHT_DIRECTIONAL, color: white, intensity: 1.0, ..Default::default() },
+        ));
         let shoulder = at.rotation * Vec3::new(-0.5, 0.8, 0.6);
         ok(fy_transform_set(w, sun, &transform(Transform::default().looking_at(-shoulder))));
         let ambient = world.spawn();
-        ok(fy_light_set(w, ambient, &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.25 }));
+        ok(fy_light_set(
+            w,
+            ambient,
+            &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.25, ..Default::default() },
+        ));
     }
     // SAFETY: a live world.
     ok(unsafe { fy_world_quality_set(w, level) });

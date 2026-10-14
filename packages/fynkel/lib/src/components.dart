@@ -342,13 +342,22 @@ final class Camera extends Component {
 /// What kind of light a [Light] is.
 enum LightKind {
   /// Light from far away, like the sun, shining along the object's forward
-  /// (its [GameObject.forward]): Unity's `LightType.Directional`. Only the
-  /// one with the lowest id is used.
+  /// (its [GameObject.forward]): Unity's `LightType.Directional`. It
+  /// lights everything. Up to four light a frame, the first ones made.
   sun,
 
   /// Light from every direction, adding to every surface, as Unity's
   /// `RenderSettings.ambientLight`. All ambient lights add up.
   ambient,
+
+  /// A lamp: light from the object's position in every direction, falling
+  /// off with distance and gone at its [Light.range]. Unity's
+  /// `LightType.Point`.
+  point,
+
+  /// A spotlight: a lamp that shines only in a cone around the object's
+  /// forward, [Light.angle] across. Unity's `LightType.Spot`.
+  spot,
 }
 
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
@@ -362,13 +371,39 @@ final class Light extends Component {
   /// going black.
   Light.ambient({Color color = Color.white, double intensity = 1}) : this._(LightKind.ambient, color, intensity);
 
-  Light._(this._kind, this._color, this._intensity) : super._();
+  /// A lamp at the object's position, reaching [range] metres. Light falls
+  /// off with the square of the distance: a lamp of [intensity] 1 lights a
+  /// surface 1 m away as a sun of 1 does, and a quarter as much at 2 m. A
+  /// room lamp 2–3 m from what it lights wants 5 to 20.
+  Light.point({Color color = Color.white, double intensity = 1, double range = 10})
+    : this._(LightKind.point, color, intensity, range);
+
+  /// A spotlight at the object's position, shining along its forward in a
+  /// cone [angle] across (`40.deg`), reaching [range] metres. [softness]
+  /// is how much of the cone fades, from its rim in: 0 for a hard edge, 1
+  /// to fade all the way to the middle. Brightness as [Light.point].
+  Light.spot({
+    Color color = Color.white,
+    double intensity = 1,
+    double range = 10,
+    double angle = 30 * math.pi / 180,
+    double softness = 0.2,
+  }) : this._(LightKind.spot, color, intensity, range, angle, softness);
+
+  Light._(
+    this._kind,
+    this._color,
+    this._intensity, [
+    this._range = 10,
+    this._angle = 30 * math.pi / 180,
+    this._softness = 0.2,
+  ]) : super._();
 
   LightKind _kind;
   Color _color;
-  double _intensity;
+  double _intensity, _range, _angle, _softness;
 
-  /// A sun or an ambient light; it can change while it's on.
+  /// What kind of light it is; it can change while it's on.
   LightKind get kind => _kind;
   set kind(LightKind value) => _change(() => _kind = value);
 
@@ -383,9 +418,24 @@ final class Light extends Component {
   double get intensity => _intensity;
   set intensity(double value) => _change(() => _intensity = value);
 
+  /// A point or spot light's reach in metres, 0 to 1,000,000; 10 unless
+  /// set. The light fades smoothly to nothing there. A parent's scale
+  /// doesn't change it.
+  double get range => _range;
+  set range(double value) => _change(() => _range = value);
+
+  /// A spot light's cone, edge to edge, 0 to 179°; 30° unless set.
+  double get angle => _angle;
+  set angle(double value) => _change(() => _angle = value);
+
+  /// How much of a spot light's cone fades, from its rim in, 0 to 1; 0.2
+  /// unless set.
+  double get softness => _softness;
+  set softness(double value) => _change(() => _softness = value);
+
   void _change(void Function() set) {
     _checkChangeable();
-    final (kind, color, intensity) = (_kind, _color, _intensity);
+    final (kind, color, intensity, range, angle, softness) = (_kind, _color, _intensity, _range, _angle, _softness);
     set();
     try {
       _live?._writeLight(this);
@@ -393,12 +443,21 @@ final class Light extends Component {
       _kind = kind;
       _color = color;
       _intensity = intensity;
+      _range = range;
+      _angle = angle;
+      _softness = softness;
       rethrow;
     }
   }
 
   @override
-  String toString() => 'Light.${kind.name}(color: $color, intensity: $intensity)';
+  String toString() => switch (kind) {
+    LightKind.sun || LightKind.ambient => 'Light.${kind.name}(color: $color, intensity: $intensity)',
+    LightKind.point => 'Light.point(color: $color, intensity: $intensity, range: $range)',
+    LightKind.spot =>
+      'Light.spot(color: $color, intensity: $intensity, range: $range, angle: ${angle.inDegrees}°, '
+          'softness: $softness)',
+  };
 }
 
 /// Draws [mesh] with [material] at the object's [Transform]. Without both,

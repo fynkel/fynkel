@@ -474,20 +474,26 @@ extension _Objects on World {
     }
   }
 
-  /// Says once, when a second [Light.sun] is put in the world, that only
-  /// one lights the scene: the renderer draws one sun and drops the rest.
-  void _noteSun(GameObject object) {
-    if (_warnedSuns) return;
+  /// Says once, when more suns or lamps are put in the world than light a
+  /// frame, which are left out: past four suns, the ones made last; past
+  /// 64 point and spot lights in view, the ones furthest from the camera.
+  void _noteLights(GameObject object) {
+    final sun = object.get<Light>()?.kind == LightKind.sun;
+    if (sun ? _warnedSuns : _warnedLamps) return;
+    // The object itself, which may not be among the live ones yet.
+    var count = 1;
     for (final other in _live) {
       if (identical(other, object) || other._destroyed) continue;
-      if (other.get<Light>()?.kind != LightKind.sun) continue;
-      _warnedSuns = true;
-      String named(GameObject o) => o.name == null ? '$o' : '$o (${o.name})';
-      print(
-        'Fynkel: ${named(object)} has a Light.sun, and so has ${named(other)}. Only one sun lights the scene, the '
-        'one on the object made first; the others are left out.',
-      );
-      return;
+      final kind = other.get<Light>()?.kind;
+      if (kind == null || kind == LightKind.ambient || (kind == LightKind.sun) != sun) continue;
+      count++;
     }
+    final (cap, what) = sun
+        ? (4, 'suns: the first four made light the scene, the others are left out')
+        : (64, 'point and spot lights: at most 64 in view light a frame, the ones nearest the camera');
+    if (count <= cap) return;
+    sun ? _warnedSuns = true : _warnedLamps = true;
+    final named = object.name == null ? '$object' : '$object (${object.name})';
+    print('Fynkel: with $named, the world has $count $what.');
   }
 }

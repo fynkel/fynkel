@@ -1,25 +1,47 @@
-// The forward pass: metallic-roughness PBR lit by one sun and an ambient
-// term, tonemapped (Khronos PBR Neutral) in the same pass. Materials are
+// The forward pass: metallic-roughness PBR lit by suns, point and spot
+// lights and an ambient term, tonemapped (Khronos PBR Neutral) in the same
+// pass. Materials are
 // glTF's: factors times textures, a tangent-space normal map, occlusion of
 // the ambient light, emission, and cut-outs (MASK).
 //
-// Units (stage 1 plan §3.6): `sun_color` is colour × intensity. The sun's
-// irradiance is π × that, so with Lambert's albedo / π a rough surface
-// facing a sun of intensity 1 shows its albedo. Ambient is radiance from
-// every direction, which also gives the albedo at 1.0.
+// Units (stage 1 plan §3.6): a light's colour is colour × intensity. A
+// sun's irradiance is π × that, so with Lambert's albedo / π a rough
+// surface facing a sun of intensity 1 shows its albedo. A point or spot
+// light's is π × that / distance², the same at 1 m, and fades smoothly to
+// nothing at its range (Karis, "Real Shading in Unreal Engine 4"). Ambient
+// is radiance from every direction, which also gives the albedo at 1.0.
 //
 // The BRDF is Filament's: GGX distribution, height-correlated Smith
 // visibility, Schlick Fresnel, and a plain Lambert diffuse.
+
+struct Sun {
+    // xyz: unit vector towards the sun.
+    to_sun: vec4<f32>,
+    color: vec4<f32>,
+};
+
+// A point or spot light.
+struct Lamp {
+    // w: 1 / range².
+    position: vec4<f32>,
+    color: vec4<f32>,
+    // xyz: the unit vector a spot light shines along.
+    direction: vec4<f32>,
+    // The cone's fade: saturate(cos(angle from the axis) * x + y), squared.
+    // A point light's (0, 1) is 1 every way.
+    cone: vec4<f32>,
+};
 
 struct Frame {
     view_proj: mat4x4<f32>,
     // w = 1: the camera's position. w = 0 (orthographic): the unit vector
     // towards the camera, the same everywhere.
     camera_position: vec4<f32>,
-    // xyz: unit vector towards the sun. w: 1 if there is a sun.
-    to_sun: vec4<f32>,
-    sun_color: vec4<f32>,
     ambient: vec4<f32>,
+    // x: how many suns there are.
+    counts: vec4<u32>,
+    suns: array<Sun, 4>,
+    lamps: array<Lamp, 64>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -68,6 +90,9 @@ struct VertexIn {
     @location(13) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
     @location(14) uv_transform: vec4<f32>,
+    // The lamps that light it: indices into `frame.lamps`, a byte each,
+    // nearest first, 0xFF after the last.
+    @location(15) lamps: vec2<u32>,
 };
 
 struct VertexOut {
@@ -79,6 +104,7 @@ struct VertexOut {
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) emissive: vec3<f32>,
+    @location(7) @interpolate(flat) lamps: vec2<u32>,
 };
 
 @vertex
@@ -98,6 +124,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.base_color = in.base_color;
     out.params = in.params;
     out.emissive = in.emissive.rgb;
+    out.lamps = in.lamps;
     return out;
 }
 
@@ -117,7 +144,10 @@ fn visibility_smith(n_dot_v: f32, n_dot_l: f32, alpha: f32) -> f32 {
 }
 
 fn fresnel_schlick(f0: vec3<f32>, v_dot_h: f32) -> vec3<f32> {
-    return f0 + (vec3<f32>(1.0) - f0) * pow(1.0 - v_dot_h, 5.0);
+    // (1 - v·h)⁵, multiplied out: cheaper than pow on phones' GPUs.
+    let x = 1.0 - v_dot_h;
+    let x2 = x * x;
+    return f0 + (vec3<f32>(1.0) - f0) * (x2 * x2 * x);
 }
 
 // The split-sum environment BRDF, approximated analytically (Karis,
@@ -152,6 +182,30 @@ fn tonemap_neutral(color_in: vec3<f32>) -> vec3<f32> {
     color *= new_peak / peak;
     let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
     return mix(color, vec3<f32>(new_peak), g);
+}
+
+// What a surface reflects towards `v` of light arriving from `l` with
+// `irradiance` (on a surface facing it).
+struct Surface {
+    n: vec3<f32>,
+    v: vec3<f32>,
+    n_dot_v: f32,
+    f0: vec3<f32>,
+    diffuse: vec3<f32>,
+    alpha: f32,
+};
+
+fn reflected(s: Surface, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
+    let n_dot_l = dot(s.n, l);
+    if n_dot_l <= 0.0 {
+        return vec3<f32>(0.0);
+    }
+    let h = normalize(l + s.v);
+    let n_dot_h = max(dot(s.n, h), 0.0);
+    let v_dot_h = max(dot(s.v, h), 0.0);
+    let specular = distribution_ggx(n_dot_h, s.alpha) * visibility_smith(s.n_dot_v, n_dot_l, s.alpha)
+        * fresnel_schlick(s.f0, v_dot_h);
+    return (s.diffuse / PI + specular) * irradiance * n_dot_l;
 }
 
 // The surface's normal: the interpolated one, bent by the normal map.
@@ -204,19 +258,33 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // another matter (glTF's rule).
     var color = frame.ambient.rgb * (diffuse_color + env_brdf(f0, roughness, n_dot_v)) * occlusion;
 
-    if frame.to_sun.w > 0.5 {
-        let l = frame.to_sun.xyz;
-        let n_dot_l = max(dot(n, l), 0.0);
-        if n_dot_l > 0.0 {
-            let h = normalize(l + v);
-            let n_dot_h = max(dot(n, h), 0.0);
-            let v_dot_h = max(dot(v, h), 0.0);
-            let specular = distribution_ggx(n_dot_h, alpha) * visibility_smith(n_dot_v, n_dot_l, alpha)
-                * fresnel_schlick(f0, v_dot_h);
-            let diffuse = diffuse_color / PI;
-            let irradiance = frame.sun_color.rgb * PI * n_dot_l;
-            color += (diffuse + specular) * irradiance;
+    let surface = Surface(n, v, n_dot_v, f0, diffuse_color, alpha);
+    for (var i = 0u; i < frame.counts.x; i++) {
+        let sun = frame.suns[i];
+        color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * PI);
+    }
+    for (var i = 0u; i < 8u; i++) {
+        let index = (in.lamps[i / 4u] >> ((i % 4u) * 8u)) & 0xFFu;
+        if index == 0xFFu {
+            break;
         }
+        // Its position first: past its range (the object is reached, not
+        // every pixel of it), the rest isn't read.
+        let position = frame.lamps[index].position;
+        let to_lamp = position.xyz - in.world_position;
+        let distance2 = dot(to_lamp, to_lamp);
+        let near = distance2 * position.w;
+        if near >= 1.0 {
+            continue;
+        }
+        let lamp = frame.lamps[index];
+        let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
+        // Closer than 10 cm counts as 10 cm, so a surface touching a lamp
+        // isn't infinitely bright.
+        let reach = 1.0 - near * near;
+        let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
+        let falloff = reach * reach * cone * cone / max(distance2, 0.01);
+        color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
     }
     color += in.emissive * emissive_sample;
     return vec4<f32>(color, base.a);

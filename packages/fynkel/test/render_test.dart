@@ -89,6 +89,55 @@ void main() {
     expect((r, g, b), (255, 0, 0), reason: "shown, the rig's camera wins and clears to red");
   });
 
+  test('a lamp and a spotlight light what they reach, in colour, and a lamp moved away lights nothing', () {
+    // A grey wall facing the camera, dark but for the lights put in.
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 3)),
+        components: [Camera()],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(rotation: Quat.axisAngle(Vec3.right, 90.deg), scale: Vec3.one * 4),
+        components: [MeshRenderer(Mesh.plane(), Material(color: Color.rgb(0.5, 0.5, 0.5), roughness: 1))],
+      ),
+    );
+    final view = HeadlessView(world, width: 64, height: 64);
+    addTearDown(view.dispose);
+    List<int> pixel(int x, int y) {
+      final rgba = view.read(view.frame()).rgba;
+      final i = (y * 64 + x) * 4;
+      return rgba.sublist(i, i + 3);
+    }
+
+    expect(pixel(32, 32), [0, 0, 0], reason: 'no light yet');
+    final lamp = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 1)),
+        components: [Light.point(color: Color.rgb(1, 0, 0), intensity: 2, range: 5)],
+      ),
+    );
+    final [r, g, b] = pixel(32, 32);
+    expect(r, greaterThan(100), reason: 'a red lamp 1 m away');
+    expect((g, b), (0, 0), reason: 'red only');
+    lamp.get<Light>()!.range = 0.9;
+    expect(pixel(32, 32), [0, 0, 0], reason: 'out of its reach');
+    lamp.destroy();
+
+    // A narrow spot from 2 m: the middle lit, the corner not.
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 2)),
+        components: [Light.spot(intensity: 8, angle: 40.deg, softness: 0)],
+      ),
+    );
+    expect(pixel(32, 32)[0], greaterThan(100));
+    expect(pixel(4, 4), [0, 0, 0]);
+  });
+
   test('changing a material changes the objects that use it', () {
     final scene = stage1();
     final view = HeadlessView(scene.world, width: 64, height: 64);

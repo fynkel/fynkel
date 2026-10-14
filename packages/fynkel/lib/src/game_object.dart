@@ -792,11 +792,14 @@ class GameObject with _Moving {
 
   Light _readLight() {
     final l = scratch.light.ref;
-    return switch (l.kind) {
-      FY_LIGHT_DIRECTIONAL => Light.sun(color: l.color.read(), intensity: l.intensity),
-      FY_LIGHT_AMBIENT => Light.ambient(color: l.color.read(), intensity: l.intensity),
+    final kind = switch (l.kind) {
+      FY_LIGHT_DIRECTIONAL => LightKind.sun,
+      FY_LIGHT_AMBIENT => LightKind.ambient,
+      FY_LIGHT_POINT => LightKind.point,
+      FY_LIGHT_SPOT => LightKind.spot,
       final kind => throw StateError('the engine returned light kind $kind, which this package:fynkel predates'),
     };
+    return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness);
   }
 
   void _write(Component component) => switch (component) {
@@ -903,11 +906,16 @@ class GameObject with _Moving {
     l.kind = switch (value.kind) {
       LightKind.sun => FY_LIGHT_DIRECTIONAL,
       LightKind.ambient => FY_LIGHT_AMBIENT,
+      LightKind.point => FY_LIGHT_POINT,
+      LightKind.spot => FY_LIGHT_SPOT,
     };
     l.color.write(value.color);
     l.intensity = value.intensity;
+    l.range = value.range;
+    l.spot_angle = value.angle.inDegrees;
+    l.softness = value.softness;
     check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
-    if (value.kind == LightKind.sun) world._noteSun(this);
+    if (value.kind != LightKind.ambient) world._noteLights(this);
   }
 
   void _writeMeshRenderer(MeshRenderer value) {

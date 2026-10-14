@@ -448,9 +448,9 @@ class Beacon extends GameObject {
   own (Unity's `MaterialPropertyBlock`): it replaces the material's color
   for that object, and `null` gives it back. `material.copy()` makes a
   material of its own to change every value.
-- **Lights**: `Light.sun` (from the object's forward) and `Light.ambient`.
-  An object has at most one `Light`, so the sun and the ambient light go
-  on objects of their own.
+- **Lights**: `Light.sun` (from the object's forward), `Light.ambient`,
+  and lamps: `Light.point` and `Light.spot` (below). An object has at
+  most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
   `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`). Keep `near`
@@ -486,6 +486,46 @@ Quality chooseQuality(World world, Quality? chosen) {
 Above low, the scene is drawn into a half-float image first and copied
 to the screen by a last pass, which is where bloom will go. At low it's
 drawn straight to the screen, in one pass.
+
+### Lamps and spotlights
+
+A point light shines from its object's position every way; a spotlight
+shines from there along the object's forward, in a cone. Both reach
+`range` metres and fade smoothly to nothing there:
+
+```dart
+/// A warm lamp on a post, reaching 8 m.
+GameObject lampPost(Vec3 at) => GameObject(
+  name: 'lamp post',
+  transform: Transform(position: at + Vec3(0, 2.5, 0)),
+  components: [Light.point(color: Color.rgb(1, 0.8, 0.55), intensity: 10, range: 8)],
+);
+
+/// A torch that shines where its object faces: turn the object to aim it.
+GameObject handTorch() => GameObject(
+  name: 'torch',
+  components: [Light.spot(intensity: 40, range: 20, angle: 30.deg, softness: 0.3)],
+);
+```
+
+- **Brightness** is the sun's, at 1 m: a lamp of `intensity` 1 lights a
+  surface 1 m away as a sun of 1 does, and a quarter as much at 2 m (light
+  falls off with the square of the distance). A room lamp 2–3 m from what
+  it lights wants 5 to 20; a torch across a room, 50 and up.
+- **`angle`** is the cone's width, edge to edge, up to 179°.
+  **`softness`** is how much of it fades, from the rim in: 0 is a hard
+  edge, 1 fades all the way to the middle.
+- **Every sun lights everything**, up to four of them.
+- **Each object is lit by the lamps that light it most**: up to 4 at low
+  and medium quality, 8 at high. Among lamps alike, those are the nearest.
+  A spotlight counts only for what's in its cone, and a lamp only for
+  what it reaches. So a big floor under many lamps gets only the few that
+  light its middle most: make it of tiles a lamp's range or less across,
+  and each tile gets its own. The lab's 'Look: lamps' scene is a room
+  of 1 m tiles.
+- **A frame takes 64 lamps** in view, the ones nearest the camera. A
+  world with more than 64 point and spot lights, or more than four suns,
+  says so once.
 
 ## 6. The frame, the lifecycle and time
 
@@ -2063,6 +2103,10 @@ What keeps a game fast:
   longer a step is: `time.fixedDelta = 1 / 100` (or 1 / 120) where a
   game needs it. Keep a joint's two bodies within 10 times each other's
   mass, as Unity advises.
+- **Short-reaching lamps.** A lamp costs something for each object it
+  reaches, and the pixels it lights; one that reaches no further than it
+  needs to costs least. Turn a lamp off with `intensity = 0`: it's left
+  out altogether.
 - **A lower quality level for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
   screen (§5).
@@ -2072,7 +2116,7 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-Audio, animation of models, point and spot lights and shadows, saving,
+Audio, animation of models, shadows, saving,
 gamepads, scene files and an editor. In physics: 2D physics,
 `ConfigurableJoint`, and chains of joints that don't stretch (Rapier's
 multibody joints).
@@ -2166,6 +2210,10 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 8** (2026-10-14):
+  - Every `Light.sun` lights the scene, up to four, where only the first
+    did; a world with two no longer says so. One with a fifth does.
 
 - **Stage 7** (2026-10-13):
   - A camera shake no longer moves the camera's object: its `position`
