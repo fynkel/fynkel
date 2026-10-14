@@ -163,4 +163,31 @@ void main() {
       expect(most, greaterThan(20.deg), reason: 'the elbow bends');
     });
   });
+
+  group('P3: setting a rigidbody\'s position or rotation keeps what the game set before', () {
+    test('a rotation set on the object, then the body\'s position', () {
+      final world = newWorld();
+      final body = Rigidbody(useGravity: false);
+      final o = world.add(GameObject(components: [BoxCollider(), body]));
+      world.update(step);
+      final turned = Quat.axisAngle(Vec3.up, 90.deg);
+      o.rotation = turned;
+      body.position = const Vec3(3, 0, 0);
+      expect(o.worldTransform.rotation.angleTo(turned), lessThan(1e-3));
+      expect(body.rotation.angleTo(turned), lessThan(1e-3));
+      world.update(step);
+      expect(o.worldTransform.rotation.angleTo(turned), lessThan(1e-3));
+    });
+
+    test('a position set on the object, then the body\'s rotation', () {
+      final world = newWorld();
+      final body = Rigidbody(useGravity: false);
+      final o = world.add(GameObject(components: [BoxCollider(), body]));
+      world.update(step);
+      o.position = const Vec3(3, 0, 0);
+      body.rotation = Quat.axisAngle(Vec3.up, 90.deg);
+      expect(o.worldTransform.position.x, closeTo(3, 1e-4));
+      expect(body.position.x, closeTo(3, 1e-4));
+    });
+  });
 }

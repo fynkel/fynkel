@@ -238,7 +238,7 @@ final class Rigidbody extends Behaviour {
   @override
   Vec3 get position => _readState('position').pose.position.get();
   @override
-  set position(Vec3 value) => _teleport(value, rotation);
+  set position(Vec3 value) => _teleport(value, _moved ? gameObject.worldTransform.rotation : rotation);
 
   /// How the body is turned, in the world: where the last step left it, as
   /// [position]. Setting it turns the body and its object at once. Throws
@@ -246,7 +246,11 @@ final class Rigidbody extends Behaviour {
   @override
   Quat get rotation => _readState('rotation').pose.rotation.get();
   @override
-  set rotation(Quat value) => _teleport(position, value);
+  set rotation(Quat value) => _teleport(_moved ? gameObject.worldTransform.position : position, value);
+
+  /// Whether the game moved its object since physics last looked: then the
+  /// object, not the body, says where the rest of it is.
+  bool get _moved => _id != 0 && _place.chain() != _place.stamp;
 
   /// Whether it's asleep: still for a while, so the step skips it until
   /// something touches it or the game pushes it. False while it isn't in
