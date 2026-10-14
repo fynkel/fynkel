@@ -1792,9 +1792,13 @@ pub unsafe extern "C" fn fy_texture_new_rgba(
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_texture_free(texture: *mut FyTexture) {
     if !texture.is_null() {
-        // SAFETY: made by Box::into_raw in new_texture; the caller gives it
-        // up.
-        drop(unsafe { Box::from_raw(texture) });
+        // A panic here leaks the texture rather than abort (fy_world_free).
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in new_texture; the caller gives
+            // it up.
+            drop(unsafe { Box::from_raw(texture) });
+            Ok(())
+        });
     }
 }
 
@@ -1914,9 +1918,13 @@ pub unsafe extern "C" fn fy_model_load(bytes: *const u8, len: usize, out: *mut *
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_model_free(model: *mut FyModel) {
     if !model.is_null() {
-        // SAFETY: made by Box::into_raw in fy_model_load; the caller gives
-        // it up.
-        drop(unsafe { Box::from_raw(model) });
+        // A panic here leaks the model rather than abort (fy_world_free).
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in fy_model_load; the caller gives
+            // it up.
+            drop(unsafe { Box::from_raw(model) });
+            Ok(())
+        });
     }
 }
 
@@ -2298,10 +2306,18 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let mut scene = view.worker.scene();
         clock.extract.shake = *view.world.shake.lock().unwrap_or_else(PoisonError::into_inner);
         clock.extract.quality = *view.world.quality.lock().unwrap_or_else(PoisonError::into_inner);
-        clock
-            .extract
-            .run_shared(&*view.world.lock()?, &mut scene, &mut view.gpu.ledger())
-            .map_err(|message| Error::new(FyStatus::InvalidValue, message))?;
+        let world = match view.world.lock() {
+            Ok(world) => world,
+            Err(error) => {
+                view.worker.recycle(scene);
+                return Err(error);
+            }
+        };
+        if let Err(message) = clock.extract.run_shared(&world, &mut scene, &mut view.gpu.ledger()) {
+            view.worker.recycle(scene);
+            return Err(Error::new(FyStatus::InvalidValue, message));
+        }
+        drop(world);
         let number = clock.last_number + 1;
         view.worker.post(number, scene, &mut Vec::new())?;
         clock.last_number = number;

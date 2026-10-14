@@ -153,8 +153,10 @@ fn a_panic_on_the_worker_is_reported_to_the_next_post() {
         assert!(Instant::now() < deadline);
         thread::sleep(Duration::from_millis(1));
     }
+    let spare = worker.spare_scenes();
     let error = worker.post(8, RenderScene::default(), &mut Vec::new()).unwrap_err();
     assert_eq!(error, Error::new(FyStatus::WorkerFailed, "the render worker panicked: boom in frame 7"));
+    assert_eq!(worker.spare_scenes(), spare + 1, "the scene posted in vain is kept for reuse");
     drop(worker); // joins a thread that already ended
 }
 
@@ -233,6 +235,49 @@ fn a_gpu_error_stops_the_worker_rather_than_panic() {
     let failure = failure(&worker);
     assert_eq!(failure.status, FyStatus::DeviceLost);
     assert!(failure.message.starts_with("the GPU reported an error"), "{}", failure.message);
+}
+
+/// A target whose frames make a GPU error on the render thread.
+struct Faulty(Headless, wgpu::Device);
+
+impl Target for Faulty {
+    type Frame = <Headless as Target>::Frame;
+    fn format(&self) -> wgpu::TextureFormat {
+        self.0.format()
+    }
+    fn size(&self) -> (u32, u32) {
+        self.0.size()
+    }
+    fn begin(&mut self) -> Option<Self::Frame> {
+        // Mapped at creation, a buffer's size must be a multiple of 4.
+        let _ = self.1.create_buffer(&wgpu::BufferDescriptor {
+            label: None,
+            size: 3,
+            usage: wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: true,
+        });
+        self.0.begin()
+    }
+    fn view<'a>(&'a self, frame: &'a Self::Frame) -> &'a wgpu::TextureView {
+        self.0.view(frame)
+    }
+    fn finish(&mut self, frame: Self::Frame, encoder: wgpu::CommandEncoder, number: u64) {
+        self.0.finish(frame, encoder, number);
+    }
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.0.resize(width, height)
+    }
+}
+
+#[test]
+fn a_gpu_error_in_a_frame_stops_that_view_alone() {
+    let gpu = gpu();
+    let worker = start(&gpu, Faulty(headless(&gpu).0, gpu.device.clone()));
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    let failure = failure(&worker);
+    assert_eq!(failure.status, FyStatus::WorkerFailed);
+    assert!(failure.message.starts_with("the GPU reported an error"), "{}", failure.message);
+    assert!(!worker.world.device.is_lost(), "the device every view shares goes on");
 }
 
 /// A target that notes the thread it draws on, and when it is dropped.
@@ -346,5 +391,6 @@ fn a_thread_whose_worker_panicked_serves_the_next_view() {
     }
     drop(boom);
     let (next, _, _) = noting(&gpu, threads);
-    assert_eq!(next.stats().rendered, 1);
+    // Counted just after the frame is read.
+    wait_for(&next, |stats| stats.rendered == 1);
 }

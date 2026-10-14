@@ -27,7 +27,7 @@ use std::thread;
 use fynkel_present::Target;
 #[cfg(test)]
 use fynkel_render::Gpu;
-use fynkel_render::{RenderScene, Renderer};
+use fynkel_render::{RenderScene, Renderer, wgpu};
 
 #[cfg(test)]
 use crate::device::Device;
@@ -97,9 +97,10 @@ struct Mailbox {
     panic: bool,
     /// The worker stopped and dropped everything it owned.
     finished: bool,
-    /// Why the worker stopped, if it did on its own: it panicked
-    /// ([`FyStatus::WorkerFailed`]), or the GPU reported an error or lost
-    /// the device ([`FyStatus::DeviceLost`]).
+    /// Why the worker stopped, if it did on its own: it panicked or the GPU
+    /// reported an error in its frame ([`FyStatus::WorkerFailed`]), or the
+    /// device was lost or reported an error elsewhere
+    /// ([`FyStatus::DeviceLost`]).
     failure: Option<(FyStatus, String)>,
     stats: WorkerStats,
 }
@@ -173,14 +174,22 @@ impl Worker {
         self.shared.lock().spare.pop().unwrap_or_default()
     }
 
+    /// Takes back a scene buffer from [`Worker::scene`] that won't be
+    /// posted.
+    pub(crate) fn recycle(&self, scene: RenderScene) {
+        self.shared.lock().spare.push(scene);
+    }
+
     /// Hands `scene` (frame `number`) to the worker, and the mesh changes in
     /// `ops` to the world's ledger, for the first of its workers to draw.
     /// `ops` is left empty. Fails only when the worker has stopped
-    /// ([`Worker::failure`]).
+    /// ([`Worker::failure`]); `scene` is then kept for reuse.
     pub(crate) fn post(&self, number: u64, scene: RenderScene, ops: &mut Vec<ResourceOp>) -> Result<(), Error> {
         let mut mailbox = self.shared.lock();
         if let Some((status, message)) = &mailbox.failure {
-            return Err(Error::new(*status, message.clone()));
+            let error = Error::new(*status, message.clone());
+            mailbox.spare.push(scene);
+            return Err(error);
         }
         if !ops.is_empty() {
             self.world.ledger().ops.append(ops);
@@ -370,55 +379,59 @@ fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut
         };
 
         // One pool per pass, so what Metal autoreleases on this thread is
-        // freed every frame and every resize, not when the view goes.
-        let drawn = fynkel_present::autorelease_pool(|| -> Result<bool, String> {
-            if let Some((width, height)) = size {
-                target
-                    .resize(width, height)
-                    .map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
-            }
-            // The world's changes, by whichever of its workers comes first.
-            // Taken with the assets locked, so no other worker draws before
-            // they're made.
-            {
-                let mut assets = fynkel_render::lock_assets(&world.assets);
-                std::mem::swap(&mut world.ledger().ops, &mut ops);
-                for op in ops.drain(..) {
-                    match op {
-                        ResourceOp::UploadMesh(key, mesh) => assets.upload_mesh(key, &mesh),
-                        ResourceOp::RemoveMesh(key) => {
-                            assets.remove_mesh(key);
-                        }
-                        ResourceOp::UploadTexture(key, space, image) => {
-                            assets.upload_texture(key, space, image.width(), image.height(), image.pixels());
-                        }
-                        ResourceOp::RemoveTexture(key) => {
-                            assets.remove_texture(key);
+        // freed every frame and every resize, not when the view goes. A GPU
+        // error raised in it stops this view alone (the scopes are this
+        // thread's); one raised elsewhere stops every view on the device.
+        let drawn = scoped(&gpu.device, || {
+            fynkel_present::autorelease_pool(|| -> Result<bool, String> {
+                if let Some((width, height)) = size {
+                    target
+                        .resize(width, height)
+                        .map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
+                }
+                // The world's changes, by whichever of its workers comes first.
+                // Taken with the assets locked, so no other worker draws before
+                // they're made.
+                {
+                    let mut assets = fynkel_render::lock_assets(&world.assets);
+                    std::mem::swap(&mut world.ledger().ops, &mut ops);
+                    for op in ops.drain(..) {
+                        match op {
+                            ResourceOp::UploadMesh(key, mesh) => assets.upload_mesh(key, &mesh),
+                            ResourceOp::RemoveMesh(key) => {
+                                assets.remove_mesh(key);
+                            }
+                            ResourceOp::UploadTexture(key, space, image) => {
+                                assets.upload_texture(key, space, image.width(), image.height(), image.pixels());
+                            }
+                            ResourceOp::RemoveTexture(key) => {
+                                assets.remove_texture(key);
+                            }
                         }
                     }
+                    // Before the frame is finished: a reader woken by it must
+                    // see the memory its uploads took.
+                    let mut mailbox = shared.lock();
+                    mailbox.stats.texture_bytes = assets.texture_bytes();
+                    mailbox.stats.mesh_bytes = assets.mesh_bytes();
                 }
-                // Before the frame is finished: a reader woken by it must
-                // see the memory its uploads took.
-                let mut mailbox = shared.lock();
-                mailbox.stats.texture_bytes = assets.texture_bytes();
-                mailbox.stats.mesh_bytes = assets.mesh_bytes();
-            }
 
-            let drawn = match target.begin() {
-                Some(frame) => {
-                    let (width, height) = target.size();
-                    renderer.prepare(&scene, width, height);
-                    let mut encoder =
-                        gpu.device.create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor {
-                            label: Some("frame"),
-                        });
-                    renderer.encode(&mut encoder, target.view(&frame));
-                    target.finish(frame, encoder, number);
-                    true
-                }
-                None => false,
-            };
-            Ok(drawn)
+                let drawn = match target.begin() {
+                    Some(frame) => {
+                        let (width, height) = target.size();
+                        renderer.prepare(&scene, width, height);
+                        let mut encoder =
+                            gpu.device.create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor {
+                                label: Some("frame"),
+                            });
+                        renderer.encode(&mut encoder, target.view(&frame));
+                        target.finish(frame, encoder, number);
+                        true
+                    }
+                    None => false,
+                };
+                Ok(drawn)
+            })
         })?;
 
         let mut mailbox = shared.lock();
@@ -428,6 +441,29 @@ fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut
         } else {
             mailbox.stats.skipped += 1;
         }
+    }
+}
+
+/// Runs `body` inside error scopes on this thread: a validation or
+/// out-of-memory error it raises fails it, instead of reaching the
+/// device's handler.
+fn scoped<R>(device: &wgpu::Device, body: impl FnOnce() -> Result<R, String>) -> Result<R, String> {
+    let memory = device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+    let validation = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    let result = body();
+    let error = now(validation.pop()).or_else(|| now(memory.pop()));
+    match error {
+        Some(error) => Err(format!("the GPU reported an error: {error}")),
+        None => result,
+    }
+}
+
+/// A scope's error: on native backends it's ready at once.
+fn now(pop: impl Future<Output = Option<wgpu::Error>>) -> Option<wgpu::Error> {
+    let mut pop = std::pin::pin!(pop);
+    match pop.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(error) => error,
+        std::task::Poll::Pending => None,
     }
 }
 

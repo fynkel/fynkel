@@ -3,9 +3,11 @@
 //!
 //! The device is made by the first view and kept after the last one goes,
 //! so the next view (a hot restart's, a second one beside it) starts at
-//! once and compiles no shaders. When it's lost, or reports an error, every
-//! view on it stops with `FY_STATUS_DEVICE_LOST`; the next view made gets a
-//! new device, and each world uploads its meshes and textures again.
+//! once and compiles no shaders. When it's lost, or reports an error
+//! outside a view's frame, every view on it stops with
+//! `FY_STATUS_DEVICE_LOST`; the next view made gets a new device, and each
+//! world uploads its meshes and textures again. An error in a view's frame
+//! stops that view alone (`FY_STATUS_WORKER_FAILED`, the worker's scopes).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
