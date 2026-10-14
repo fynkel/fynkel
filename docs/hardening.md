@@ -476,6 +476,62 @@ samplers keyed in the bind group.
 test passes, R5's goldens exist, and the Note10+ numbers for R11 are in
 stage 8's table.
 
+## Phase 4b: lights by place, not by object
+
+Added 2026-10-14, after phase 4, from a screenshot of the lab's lamps
+scene: squares of light on the floor, each lamp stopping at a tile's
+edge.
+
+**L1. A lamp lights whole objects or none.** (L)
+Each object gets the lamps brightest at it, 4 at low and medium and 8 at
+high (`brightest_lights`, `renderer.rs:1327`), passed as instance
+attribute 11. Two neighbouring floor tiles often choose differently, so
+a lamp lights one tile and not the next: a hard edge along the tile. A
+big mesh (one floor, terrain, a room in one piece) gets only the lamps
+nearest its middle. The guide tells games to work round it with tiles a
+lamp's range across (`writing-a-game.md:524`); the lab's lamps scene
+does.
+*Fix*: clustered forward lighting, as Unity's Forward+ and most engines
+do it. Each frame the view is cut into cells: a screen grid of 16 × 9,
+by 16 slices of depth spaced exponentially from near to far (linear for
+an orthographic camera); 2,304 cells. On the CPU, which already culls
+the frame's 64 lights, each lamp's bounding sphere (a cone's, for a
+spot) is entered into every cell it reaches. Two storage buffers go up
+with the frame, a cell's first index and count, and the indices. A pixel
+finds its cell from its screen position and depth and lights itself
+with that cell's lamps. A lamp's edge is then where its range ends,
+wherever that falls, and every object is lit the same way.
+- **A cell's cap** replaces the cap per object: `lights_per_cell`, set
+  by quality. Over it, the dimmest at the cell's middle are left out,
+  which can show a cell's edge; `FrameStats` counts the cells that hit
+  it, and the cap is chosen so the lab's scenes at their 32-light budget
+  never do. Start at 8 for low and medium, 16 for high; measure.
+- **Instance attribute 11 goes**, and 8 bytes an instance with it:
+  room for stage 9's skinning, as R1 wanted.
+- **Unchanged**: the frame's 64-light pool and which lights make it,
+  suns, spot shadow maps (still a map per spot, the nearest first).
+- **The guide and the lab**: the tiles advice goes; the lamps scene's
+  floor and walls become one piece each, to show it.
+*Tests* (the first two fail today):
+- one big plane under 6 lamps spread along it: the floor under each is
+  brighter with its lamp than without;
+- two tiles side by side, a lamp over their seam: the light either side
+  of the seam differs by no more than across the middle of a tile;
+- binning (unit): a lamp is in every cell its sphere touches, and in
+  none it can't reach, for perspective and orthographic cameras;
+- a cell over its cap keeps the brightest, and is counted;
+- the lamps goldens re-blessed after we both look; every other golden
+  unchanged.
+*Measure*: the lab on the Note10+ at medium, 60 s, alone. Lamps must
+hold at least today's 56.9 (min 37.9), shadows today's 57.9. The
+renderer's bench, prepare and whole frame at 1,000 and 10,000 objects
+with 32 lamps, before and after. The Mac and the iPhone at each level.
+If the Note10+ falls below its bar, the cell cap and grid are tuned
+before merging, and the numbers go in the PR.
+
+*Done when* the tests pass, the bars hold, and the guide no longer
+mentions tiles.
+
 ## Phase 5: what a game writes
 
 Papercuts from the examples and the guide. Each is small; together they
@@ -571,6 +627,7 @@ to §15 or §16, and a Blender-glb-as-level note to §12.
 | 2 | Physics' transform sync (P1–P10) | Wrong results today for ragdolls and for any collider enabled after a teleport |
 | 3 | The Dart frame (D1–D14) | Silent cliffs and silent failures in the core every game runs on |
 | 4 | The renderer (R1–R13) | Must land before the sky, see-through and bloom pile onto the same shader and layout |
+| 4b | Lights by place (L1) | Same shader and layout as 4; the sky builds on its light loop |
 | 5 | What a game writes (G1–G8) | Shrinks the examples and the next game; needs 3 done for `enabled` and `destroy(after:)` |
 | 6 | The hook and the guide (B1–B2) | Last, so the guide describes what the phases above left |
 
@@ -628,6 +685,7 @@ planned; neither needs anything here changed again.
   Medium doesn't reach 60 with shadows or lamps, so stage 8 phase 6's
   open item stays open; without them it does. R11's variants leave out
   what a frame doesn't use, which these two scenes do use.
+- [ ] Phase 4b: lights by place, not by object (L1)
 - [ ] Phase 5: what a game writes
 - [ ] Phase 6: the hook and the guide
 - [ ] Stage 8 phase 4 resumes
