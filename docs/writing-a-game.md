@@ -1167,7 +1167,11 @@ kinematic body, which pushes what it meets. A body's object can have a
 parent: physics writes its pose back relative to it. With
 `RigidbodyInterpolation.interpolate`, what's drawn is between the body's
 last two steps, so it moves smoothly at 120 fps on 50 steps a second;
-`rigidbody.position` reads where physics has it. A small, fast body can
+`rigidbody.position` reads where physics has it. Queries (raycasts,
+overlaps) and character controllers meet the body there too, where the
+last step left it, up to a step ahead of what's drawn, as in Unity. A
+controller riding an interpolated platform (`moveWithGround`) goes with
+the platform's steps. A small, fast body can
 pass through a thin one between steps: Rapier sweeps every fast body
 against static colliders, and `CollisionDetectionMode.continuous` sweeps
 it against bodies too. `physics.gravity`, `defaultSolverIterations` and
@@ -1188,7 +1192,8 @@ can pass something by; see bullets below.
 **The step runs between frames**, on the physics' own thread: it starts
 when a frame is done, and its results are written at the start of the
 next, before `onFixedUpdate` and the updates. Queries in the updates
-never wait for it, and see the world that's drawn. The costs: a force
+never wait for it, and see the world as the last step left it (an
+interpolated body's drawn pose trails that by up to a step). The costs: a force
 shows a frame later, and `await fixedStep` resumes before that step has
 run. `physics.stepBetweenFrames = false` steps
 within the frame instead, as Unity does.
