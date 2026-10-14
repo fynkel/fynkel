@@ -1285,6 +1285,26 @@ void main() {
     expect(dts.length, greaterThan(before + 10), reason: 'the world runs on');
   });
 
+  testWidgets('a failed render worker brings a new view, as a lost device does', (tester) async {
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(calls, ['register']);
+    expect(fy_view_fail_worker(Pointer.fromAddress(views[7]!)), FyStatus.FY_STATUS_OK);
+    // The render thread panics in real time.
+    for (var i = 0; i < 200 && tester.takeException() == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(calls, ['register', 'unregister 7', 'register']);
+    expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
+    expect(alive(views[8]!), isTrue);
+  });
+
   testWidgets('with no plugin, as in a widget test of the game, the game runs on unseen', (tester) async {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, null);
     forgetReset();

@@ -569,7 +569,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (_android) _sendSize(view, texture);
       view.frame();
     } on FynkelException catch (error, stack) {
-      if (error.status != FynkelStatus.deviceLost) rethrow;
+      if (error.status != FynkelStatus.deviceLost && error.status != FynkelStatus.workerFailed) rethrow;
       _lost(error, stack, micros);
       return;
     }
@@ -680,9 +680,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     setState(() => _error = error);
   }
 
-  /// The GPU device was lost: a new view, with a new device, takes the old
-  /// one's place from the next frame and uploads everything again. More than
-  /// [_maxLosses] in a minute, and the view fails.
+  /// The GPU device was lost, or the render worker stopped: a new view
+  /// (with a new device, when it was lost) takes the old one's place from
+  /// the next frame and uploads everything again. More than [_maxLosses] in
+  /// a minute, and the view fails.
   void _lost(FynkelException error, StackTrace stack, int micros) {
     _losses
       ..removeWhere((at) => micros - at > 60000000)
