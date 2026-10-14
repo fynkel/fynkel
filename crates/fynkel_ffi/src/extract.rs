@@ -10,10 +10,10 @@
 //!   ([`Extract::shake`]) moves it when it's drawn, not in the world. One
 //!   whose near clip isn't below its far draws nothing, so the frame is
 //!   refused with a message instead.
-//! - The sun is the directional light with the lowest id that has a
-//!   `Transform`; it shines along its world forward (-Z). A
-//!   directional light without a transform has no direction and is
-//!   ignored.
+//! - Every directional light with a `Transform` is a sun, in the order of
+//!   their ids; each shines along its world forward (-Z). The renderer
+//!   uses the first for now. A directional light without a transform has
+//!   no direction and is ignored.
 //! - Every ambient light adds to the ambient term.
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
 //!   with both a mesh and a material, and its layer is in the camera's
@@ -34,7 +34,8 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    CameraView, ColorSpace, Draw, Line, MaterialTextures, MeshKey, PbrMaterial, RenderScene, Sun, TextureKey,
+    CameraView, ColorSpace, Draw, Light as RenderLight, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
+    RenderScene, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
@@ -81,6 +82,11 @@ pub(crate) struct Extract {
     /// The world's camera shake: how far its camera is moved, in the
     /// world, when this view draws from it.
     pub(crate) shake: Option<(ObjectId, Vec3)>,
+    /// The world's quality level, or `None` for the device's.
+    pub(crate) quality: Option<Quality>,
+    /// The suns found, by id, before they're put in order. Kept so a frame
+    /// allocates nothing.
+    suns: Vec<(ObjectId, RenderLight)>,
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
     materials: HashMap<MaterialId, PbrMaterial>,
@@ -223,19 +229,19 @@ impl Extract {
             clear_color: rgb(c.clear_color),
         });
 
-        let mut sun: Option<(ObjectId, Sun)> = None;
+        scene.quality = self.quality;
+        let suns = &mut self.suns;
+        suns.clear();
         world.for_each2::<Light, Transform>(|id, light, t| {
             if light.kind == LightKind::Directional
-                && sun.is_none_or(|(best, _)| id < best)
                 && let Some((rotation, _)) = placed(id, t)
             {
-                sun = Some((
-                    id,
-                    Sun { direction: rotation * Vec3::NEG_Z, color: Vec3::from(rgb(light.color)) * light.intensity },
-                ));
+                let color = Vec3::from(rgb(light.color)) * light.intensity;
+                suns.push((id, RenderLight::sun(rotation * Vec3::NEG_Z, color)));
             }
         });
-        scene.sun = sun.map(|(_, s)| s);
+        suns.sort_unstable_by_key(|&(id, _)| id);
+        scene.lights.extend(suns.iter().map(|&(_, light)| light));
         world.for_each::<Light>(|id, light| {
             if light.kind == LightKind::Ambient && matrices.shown(world, id) {
                 scene.ambient += Vec3::from(rgb(light.color)) * light.intensity;

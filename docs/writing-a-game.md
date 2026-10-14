@@ -461,6 +461,32 @@ class Beacon extends GameObject {
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
 
+### Quality levels
+
+A world is drawn at one of three levels, `Quality.low`, `medium` or
+`high`. Each is meant to hold its devices' frame rate, and the effects
+to come (shadows, a sky, bloom) each say which levels they're on at.
+Until then every level draws the same picture.
+
+When the game doesn't choose, the device picks: high on Apple's GPUs and
+desktops', medium on phones' Mali and Adreno, low on a software GPU or
+one it doesn't know. `Quality.device` says which. A game can choose at
+any time, from its settings page for example, and every view of the
+world draws at the new level from its next frame:
+
+```dart
+/// The settings page's choice: a level, or null to let the device pick.
+/// Gives the level drawn at.
+Quality chooseQuality(World world, Quality? chosen) {
+  world.quality = chosen;
+  return world.quality ?? Quality.device;
+}
+```
+
+Above low, the scene is drawn into a half-float image first and copied
+to the screen by a last pass, which is where bloom will go. At low it's
+drawn straight to the screen, in one pass.
+
 ## 6. The frame, the lifecycle and time
 
 Each object and behaviour gets these calls, in the order they were added:
@@ -2037,6 +2063,9 @@ What keeps a game fast:
   longer a step is: `time.fixedDelta = 1 / 100` (or 1 / 120) where a
   game needs it. Keep a joint's two bodies within 10 times each other's
   mass, as Unity advises.
+- **A lower quality level for an older phone.** `world.quality =
+  Quality.low` draws in one pass, with no image between the scene and the
+  screen (§5).
 - **Measure** on the slowest phone you support. Each example has a
   `lib/measured.dart` for package:fynkel_measure's tool, which gives the
   frame rate and memory: `dart run fynkel_measure:measure rate`.

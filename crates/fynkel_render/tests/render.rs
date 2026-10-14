@@ -17,6 +17,51 @@ fn the_stage_1_cube_matches_its_golden() {
     assert_golden("cube", &image);
 }
 
+/// Every level draws the same picture (stage 8 phase 1): the scene image
+/// and the last pass change nothing on screen. A renderer can change level
+/// from one frame to the next, and back.
+#[test]
+fn every_quality_level_draws_the_same_cube() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let (_, _) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
+    assert_eq!(r.quality(), r.assets().lock().unwrap().kit().quality(), "the device's level, unless the scene picks");
+    for quality in [Quality::Low, Quality::High, Quality::Medium, Quality::Low] {
+        let scene = RenderScene { quality: Some(quality), ..stage1_scene() };
+        let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
+        assert_eq!((r.quality(), stats.draws), (quality, 1));
+        assert_golden("cube", &image);
+    }
+}
+
+/// The device's level: Apple's GPUs and desktops high, Mali and Adreno
+/// medium, a software GPU low.
+#[test]
+fn each_gpu_gets_its_quality_level() {
+    let this = gpu().adapter.get_info();
+    let gpu = |vendor: u32, device_type: wgpu::DeviceType, backend: wgpu::Backend| wgpu::AdapterInfo {
+        vendor,
+        device_type,
+        backend,
+        ..this.clone()
+    };
+    use wgpu::{Backend::*, DeviceType::*};
+    let cases = [
+        (gpu(0x106B, IntegratedGpu, Metal), Quality::High),
+        (gpu(0x13B5, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x5143, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x10DE, DiscreteGpu, Vulkan), Quality::High),
+        (gpu(0x8086, IntegratedGpu, Dx12), Quality::High),
+        (gpu(0x10005, Cpu, Vulkan), Quality::Low),
+        (gpu(0x1234, Other, Vulkan), Quality::Low),
+    ];
+    for (info, want) in cases {
+        assert_eq!(Quality::for_adapter(&info), want, "{info:?}");
+    }
+    #[cfg(target_os = "macos")]
+    assert_eq!(Quality::for_adapter(&this), Quality::High, "this Mac");
+}
+
 #[test]
 fn an_empty_scene_shows_exactly_the_clear_colour() {
     let gpu = gpu();
@@ -60,7 +105,8 @@ fn light_units_match_the_documented_maths() {
     for (sun, ambient) in [(1.0, 0.0), (0.0, 1.0), (0.6, 0.3), (3.0, 0.0)] {
         let scene = RenderScene {
             camera: Some(camera),
-            sun: (sun > 0.0).then_some(Sun { direction: Vec3::NEG_Z, color: Vec3::splat(sun) }),
+            lights: (sun > 0.0).then(|| Light::sun(Vec3::NEG_Z, Vec3::splat(sun))).into_iter().collect(),
+            quality: None,
             ambient: Vec3::splat(ambient),
             lines: Vec::new(),
             draws: vec![draw],
@@ -101,7 +147,8 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
     for (name, direction, (want_x, want_y)) in cases {
         let scene = RenderScene {
             camera: Some(camera),
-            sun: Some(Sun { direction, color: Vec3::ONE }),
+            lights: vec![Light::sun(direction, Vec3::ONE)],
+            quality: None,
             ambient: Vec3::splat(0.05),
             lines: Vec::new(),
             draws: vec![Draw {
@@ -369,7 +416,8 @@ fn non_uniform_scale_keeps_normals_right() {
     let turn = Quat::from_rotation_z(0.6);
     let scene = RenderScene {
         camera: Some(camera),
-        sun: Some(Sun { direction: Vec3::NEG_Y, color: Vec3::ONE }),
+        lights: vec![Light::sun(Vec3::NEG_Y, Vec3::ONE)],
+        quality: None,
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         draws: vec![Draw {
@@ -414,6 +462,11 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
     assert_eq!(stats, FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, culled: 0, lines: 2 });
     assert_golden("lines", &image);
+    // The same at every level.
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let scene = RenderScene { quality: Some(quality), ..scene.clone() };
+        assert_golden("lines", &render(&gpu, &mut r, &scene, 256, 256).0);
+    }
 
     // The lines alone, no draws: still drawn.
     scene.draws.clear();

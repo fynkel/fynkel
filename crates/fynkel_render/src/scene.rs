@@ -106,15 +106,65 @@ impl CameraView {
     }
 }
 
-/// The sun: parallel light from one direction.
+/// A light, resolved: where it is or which way it shines, and its colour.
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Sun {
-    /// The direction the light travels (from the sun towards the scene).
-    /// Needn't be normalized.
-    pub direction: Vec3,
-    /// Linear colour × intensity. 1.0 lights a rough surface that faces
-    /// the sun to its albedo (stage 1 plan §3.6).
+pub struct Light {
+    /// Linear colour × intensity. 1.0 from a sun lights a rough surface
+    /// that faces it to its albedo (stage 1 plan §3.6).
     pub color: Vec3,
+    pub kind: LightKind,
+}
+
+/// What kind of light a [`Light`] is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum LightKind {
+    /// Parallel light from one direction, as from the sun.
+    Sun {
+        /// The direction the light travels (from the sun towards the
+        /// scene). Needn't be normalized.
+        direction: Vec3,
+    },
+}
+
+impl Light {
+    /// A sun shining along `direction` with `color` (colour × intensity).
+    pub fn sun(direction: Vec3, color: Vec3) -> Self {
+        Self { color, kind: LightKind::Sun { direction } }
+    }
+}
+
+/// How much a frame may cost, for how it looks. Each level holds its
+/// devices' frame rate: [`Quality::for_adapter`] picks one for a GPU.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Quality {
+    Low,
+    Medium,
+    High,
+}
+
+impl Quality {
+    /// The level for a GPU: high on Apple's and on desktops', medium on
+    /// phones' (Mali, Adreno), low on a software one or one not known.
+    pub fn for_adapter(info: &wgpu::AdapterInfo) -> Self {
+        const APPLE: u32 = 0x106B;
+        const ARM: u32 = 0x13B5;
+        const QUALCOMM: u32 = 0x5143;
+        match (info.device_type, info.vendor) {
+            (wgpu::DeviceType::Cpu, _) => Self::Low,
+            (_, ARM | QUALCOMM) => Self::Medium,
+            (_, APPLE) => Self::High,
+            (_, _) if info.backend == wgpu::Backend::Metal => Self::High,
+            (wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu, _) => Self::High,
+            _ => Self::Low,
+        }
+    }
+
+    /// Whether the scene is drawn into a half-float image with a last pass
+    /// after it, which later effects (bloom) need. Low draws straight to
+    /// the screen.
+    pub(crate) fn hdr(self) -> bool {
+        self != Self::Low
+    }
 }
 
 /// A metallic-roughness material, resolved: glTF's, factors times
@@ -184,23 +234,41 @@ pub struct Line {
 pub struct RenderScene {
     /// `None` draws nothing but black.
     pub camera: Option<CameraView>,
-    pub sun: Option<Sun>,
+    /// Every light. Only the first sun lights the scene for now; the
+    /// others are carried for what comes next (stage 8).
+    pub lights: Vec<Light>,
     /// Linear radiance arriving equally from every direction. 1.0 alone
     /// shows a rough surface at its albedo.
     pub ambient: Vec3,
     pub draws: Vec<Draw>,
     /// Drawn after the draws, over them, one pixel wide.
     pub lines: Vec<Line>,
+    /// The level to draw at; `None` for the device's own
+    /// ([`Kit::quality`](crate::Kit::quality)).
+    pub quality: Option<Quality>,
 }
 
 impl RenderScene {
+    /// The first sun in [`RenderScene::lights`]: its direction and colour.
+    pub fn sun(&self) -> Option<(Vec3, Vec3)> {
+        // Every light is a sun so far.
+        self.lights
+            .iter()
+            .map(|l| {
+                let LightKind::Sun { direction } = l.kind;
+                (direction, l.color)
+            })
+            .next()
+    }
+
     /// Empties the scene but keeps its memory, so refilling it every frame
     /// allocates nothing.
     pub fn clear(&mut self) {
         self.camera = None;
-        self.sun = None;
+        self.lights.clear();
         self.ambient = Vec3::ZERO;
         self.draws.clear();
         self.lines.clear();
+        self.quality = None;
     }
 }

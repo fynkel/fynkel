@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
@@ -40,6 +41,22 @@ void main() {
 
     final frame = view.read(view.frame());
     expectGolden('cube', frame.rgba, 256, 256);
+  });
+
+  test('every quality level draws the same picture, and a world can change level between frames', () {
+    final scene = stage1();
+    final world = scene.world;
+    final view = HeadlessView(world, width: 256, height: 256);
+    addTearDown(view.dispose);
+    addTearDown(world.dispose);
+
+    expect(world.quality, isNull, reason: "the device's, unless the game picks");
+    if (Platform.isMacOS) expect(Quality.device, Quality.high, reason: 'an Apple GPU');
+    for (final quality in [Quality.low, Quality.high, Quality.medium, null]) {
+      world.quality = quality;
+      expect(world.quality, quality);
+      expectGolden('cube', view.read(view.frame()).rgba, 256, 256);
+    }
   });
 
   test('an inactive object and everything below it are missing from the picture', () {

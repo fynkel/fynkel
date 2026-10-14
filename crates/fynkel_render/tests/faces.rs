@@ -27,7 +27,8 @@ fn scene(draws: Vec<Draw>) -> RenderScene {
     camera.clear_color = [0.0, 0.0, 0.2];
     RenderScene {
         camera: Some(camera),
-        sun: Some(Sun { direction: Vec3::new(0.0, -0.5, -1.0), color: Vec3::ONE }),
+        lights: vec![Light::sun(Vec3::new(0.0, -0.5, -1.0), Vec3::ONE)],
+        quality: None,
         ambient: Vec3::splat(0.1),
         lines: Vec::new(),
         draws,
@@ -159,7 +160,7 @@ fn uv_scale_and_offset_pick_part_of_a_texture() {
         };
         // Unlit, so only the emission shows.
         let mut unlit = scene(vec![Draw { mesh: PLANE, model, material }]);
-        (unlit.sun, unlit.ambient) = (None, Vec3::ZERO);
+        (unlit.lights, unlit.ambient) = (Vec::new(), Vec3::ZERO);
         let (image, _) = render(&gpu, r, &unlit, SIZE, SIZE);
         // Two points across the plane's middle row, left and right.
         [SIZE / 2 - 12, SIZE / 2 + 12].map(|x| image.pixel(x, SIZE / 2 - 12))

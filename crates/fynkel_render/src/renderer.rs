@@ -1,10 +1,16 @@
-//! The forward renderer: one pass, 4× MSAA, reversed-Z.
+//! The forward renderer: 4× MSAA, reversed-Z, in passes.
 //!
 //! A frame has two halves. [`Renderer::prepare`] is plain CPU work: it
 //! turns the scene into per-draw instance data and the frame uniforms, in
 //! buffers it reuses, so a steady frame allocates nothing.
 //! [`Renderer::encode`] writes that where the GPU reads it (see
-//! `frame_ring`) and records the pass. Debug lines come last, on top.
+//! `frame_ring`) and records the passes, in order:
+//!
+//! 1. The scene: every draw, then the debug lines on top. Above
+//!    [`Quality::Low`] it is drawn into a half-float image (the scene
+//!    image); at low, straight into the view.
+//! 2. The last pass, when there is a scene image: the image onto the view
+//!    (`finish.wgsl`). Effects that need the whole picture (bloom) go here.
 
 use std::sync::Arc;
 
@@ -14,7 +20,7 @@ use glam::{Mat3, Mat4, Vec3, Vec4};
 use crate::assets::{self, Assets, Kit, SharedAssets};
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
-use crate::scene::{ColorSpace, MaterialTextures, MeshKey, RenderScene, TextureKey};
+use crate::scene::{ColorSpace, MaterialTextures, MeshKey, Quality, RenderScene, TextureKey};
 use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
@@ -70,13 +76,27 @@ struct LineVertex {
 
 pub(crate) const FRAME_UNIFORMS_SIZE: u64 = std::mem::size_of::<FrameUniforms>() as u64;
 
-/// The multisampled colour and depth targets, remade when the size changes.
+/// The multisampled colour and depth targets, and the scene image the
+/// colour resolves into above low quality. Remade when the size or the
+/// quality's need for the image changes.
 struct Targets {
     width: u32,
     height: u32,
     color: wgpu::TextureView,
     depth: wgpu::TextureView,
+    image: Option<SceneImage>,
 }
+
+/// The half-float image the scene is drawn into, and the bind group the
+/// last pass reads it through.
+struct SceneImage {
+    view: wgpu::TextureView,
+    bind_group: wgpu::BindGroup,
+}
+
+/// The scene image's format: half floats, so effects after the scene get
+/// the light values (stage 8).
+const IMAGE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 
 /// Which faces a pipeline draws, and which way round.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -127,6 +147,8 @@ pub(crate) struct Pipelines {
     /// [`pipeline_index`]).
     forward: Vec<wgpu::RenderPipeline>,
     lines: wgpu::RenderPipeline,
+    /// The last pass, onto a view: for sRGB formats only (a view's).
+    finish: Option<wgpu::RenderPipeline>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -136,6 +158,9 @@ pub struct Renderer {
     kit: Arc<Kit>,
     format: wgpu::TextureFormat,
     pipelines: Arc<Pipelines>,
+    /// The pipelines that draw into the scene image, got the first time
+    /// it's used.
+    image_pipelines: Option<Arc<Pipelines>>,
     assets: SharedAssets,
     frame_data: FrameRing,
     targets: Option<Targets>,
@@ -152,6 +177,8 @@ pub struct Renderer {
     normals: Vec<(Mat3, bool)>,
     clear: wgpu::Color,
     size: (u32, u32),
+    /// This frame's level: the scene's, or the device's.
+    quality: Quality,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -197,8 +224,10 @@ impl Renderer {
                 FRAME_UNIFORMS_SIZE,
                 64 * INSTANCE_SIZE,
             ),
+            quality: kit.quality(),
             kit,
             format,
+            image_pipelines: None,
             assets,
             targets: None,
             uniforms: FrameUniforms::zeroed(),
@@ -221,6 +250,12 @@ impl Renderer {
     /// The target format this renderer draws into.
     pub fn format(&self) -> wgpu::TextureFormat {
         self.format
+    }
+
+    /// The level the last frame was prepared at: its scene's, or the
+    /// device's when the scene didn't choose.
+    pub fn quality(&self) -> Quality {
+        self.quality
     }
 
     /// Uploads `data` under `key` to its assets ([`Assets::upload_mesh`]).
@@ -258,6 +293,7 @@ impl Renderer {
     /// nothing once its buffers have grown to the scene's size.
     pub fn prepare(&mut self, scene: &RenderScene, width: u32, height: u32) -> FrameStats {
         self.size = (width.max(1), height.max(1));
+        self.quality = scene.quality.unwrap_or(self.kit.quality());
         self.instances.clear();
         self.batches.clear();
         self.line_vertices.clear();
@@ -290,12 +326,13 @@ impl Renderer {
             Some(_) => camera.view.inverse().transform_vector3(Vec3::Z).normalize().extend(0.0),
             None => camera.position.extend(1.0),
         };
-        let to_sun = scene.sun.map(|s| (-s.direction).normalize_or_zero()).unwrap_or(Vec3::ZERO);
+        let sun = scene.sun();
+        let to_sun = sun.map(|(direction, _)| (-direction).normalize_or_zero()).unwrap_or(Vec3::ZERO);
         self.uniforms = FrameUniforms {
             view_proj: (projection * camera.view).to_cols_array_2d(),
             camera_position: to_viewer.into(),
             to_sun: to_sun.extend(if to_sun == Vec3::ZERO { 0.0 } else { 1.0 }).into(),
-            sun_color: scene.sun.map_or(Vec3::ZERO, |s| s.color).extend(0.0).into(),
+            sun_color: sun.map_or(Vec3::ZERO, |(_, color)| color).extend(0.0).into(),
             ambient: scene.ambient.extend(0.0).into(),
         };
 
@@ -359,83 +396,121 @@ impl Renderer {
     }
 
     /// The GPU half: writes what [`Renderer::prepare`] built where the GPU
-    /// reads it and records the pass into `encoder`, resolving into
-    /// `target`. The target must be a view in this renderer's format, of
-    /// the size given to `prepare`. `encoder` must be submitted before the
-    /// next `encode`.
+    /// reads it and records the passes into `encoder`, ending in `target`.
+    /// The target must be a view in this renderer's format, of the size
+    /// given to `prepare`. `encoder` must be submitted before the next
+    /// `encode`.
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let (width, height) = self.size;
-        if self.targets.as_ref().is_none_or(|t| (t.width, t.height) != (width, height)) {
-            self.targets = Some(self.create_targets(width, height));
+        let image = self.quality.hdr();
+        if self.targets.as_ref().is_none_or(|t| (t.width, t.height, t.image.is_some()) != (width, height, image)) {
+            self.targets = Some(self.create_targets(width, height, image));
         }
+        if image && self.image_pipelines.is_none() {
+            self.image_pipelines = Some(self.kit.pipelines(IMAGE_FORMAT));
+        }
+        let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, .. } = self;
+        let targets = targets.as_ref().expect("made above");
+
         // Bind groups for texture sets not seen before. A steady frame only
         // looks them up. The world's other views wait while this one
         // records; a mesh or texture they free meanwhile is gone from the
         // next frame on.
-        let mut assets = assets::lock(&self.assets);
-        let Assets { kit, meshes, textures } = &mut *assets;
+        let mut assets = assets::lock(assets);
+        let Assets { kit: _, meshes, textures } = &mut *assets;
         for batch in &self.batches {
             textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
         }
-        let frame = self.frame_data.write(
-            &self.kit.gpu.device,
+        let frame = frame_data.write(
+            &kit.gpu.device,
             bytemuck::bytes_of(&self.uniforms),
             bytemuck::cast_slice(&self.instances),
             bytemuck::cast_slice(&self.line_vertices),
         );
 
-        let targets = self.targets.as_ref().expect("made above");
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: Some("forward"),
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view: &targets.color,
-                depth_slice: None,
-                resolve_target: Some(target),
-                // The multisampled colour is only needed until it's resolved,
-                // so it's never stored. On tile GPUs it never leaves the chip.
-                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear), store: wgpu::StoreOp::Discard },
-            })],
-            depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                view: &targets.depth,
-                depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
-                stencil_ops: None,
-            }),
-            timestamp_writes: None,
-            occlusion_query_set: None,
-            multiview_mask: None,
-        });
-        if self.batches.is_empty() && self.line_vertices.is_empty() {
-            return;
-        }
-        pass.set_bind_group(0, frame.bind_group, &[]);
-        if !self.batches.is_empty() {
-            pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
-        }
-        let mut last: Option<&Batch> = None;
-        for batch in &self.batches {
-            // Freed since prepare, by another view's render worker.
-            let (Some(mesh), Some(bind_group)) = (meshes.get(&batch.mesh), textures.bind_group(&batch.textures)) else {
-                continue;
-            };
-            if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
-                pass.set_pipeline(&self.pipelines.forward[pipeline_index(batch.cutout, batch.faces)]);
+        // 1. The scene, into the scene image or straight into the view.
+        let (scene_pipelines, resolve) = match &targets.image {
+            Some(image) => (image_pipelines.as_deref().expect("got above"), &image.view),
+            None => (&**pipelines, target),
+        };
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.color,
+                    depth_slice: None,
+                    resolve_target: Some(resolve),
+                    // The multisampled colour is only needed until it's
+                    // resolved, so it's never stored. On tile GPUs it never
+                    // leaves the chip.
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear), store: wgpu::StoreOp::Discard },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &targets.depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            if !self.batches.is_empty() || !self.line_vertices.is_empty() {
+                pass.set_bind_group(0, frame.bind_group, &[]);
             }
-            if last.is_none_or(|l| l.textures != batch.textures) {
-                pass.set_bind_group(1, bind_group, &[]);
+            if !self.batches.is_empty() {
+                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
-            last = Some(batch);
-            pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-            pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            let mut last: Option<&Batch> = None;
+            for batch in &self.batches {
+                // Freed since prepare, by another view's render worker.
+                let (Some(mesh), Some(bind_group)) = (meshes.get(&batch.mesh), textures.bind_group(&batch.textures))
+                else {
+                    continue;
+                };
+                if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
+                    pass.set_pipeline(&scene_pipelines.forward[pipeline_index(batch.cutout, batch.faces)]);
+                }
+                if last.is_none_or(|l| l.textures != batch.textures) {
+                    pass.set_bind_group(1, bind_group, &[]);
+                }
+                last = Some(batch);
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            }
+            if !self.line_vertices.is_empty() {
+                pass.set_pipeline(&scene_pipelines.lines);
+                pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
+                pass.draw(0..self.line_vertices.len() as u32, 0..1);
+            }
         }
-        if !self.line_vertices.is_empty() {
-            pass.set_pipeline(&self.pipelines.lines);
-            pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
-            pass.draw(0..self.line_vertices.len() as u32, 0..1);
+
+        // 2. The last pass: the scene image onto the view.
+        if let Some(image) = &targets.image {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("finish"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: target,
+                    depth_slice: None,
+                    resolve_target: None,
+                    // Every pixel is written, so what was there is never read.
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: None,
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(pipelines.finish.as_ref().expect("a view's format is sRGB"));
+            pass.set_bind_group(0, &image.bind_group, &[]);
+            pass.draw(0..3, 0..1);
         }
     }
 
-    fn create_targets(&self, width: u32, height: u32) -> Targets {
+    fn create_targets(&self, width: u32, height: u32, image: bool) -> Targets {
         let make = |label, format| {
             self.kit
                 .gpu
@@ -454,7 +529,37 @@ impl Renderer {
                 })
                 .create_view(&Default::default())
         };
-        Targets { width, height, color: make("msaa colour", self.format), depth: make("msaa depth", DEPTH_FORMAT) }
+        let device = &self.kit.gpu.device;
+        let image = image.then(|| {
+            // Resolved into, then read by the last pass: stored, so it
+            // costs memory and bandwidth where the MSAA targets don't.
+            let view = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("scene image"),
+                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: IMAGE_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default());
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("scene image"),
+                layout: &self.kit.image_layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
+            });
+            SceneImage { view, bind_group }
+        });
+        let color_format = if image.is_some() { IMAGE_FORMAT } else { self.format };
+        Targets {
+            width,
+            height,
+            color: make("msaa colour", color_format),
+            depth: make("msaa depth", DEPTH_FORMAT),
+            image,
+        }
     }
 
     /// `prepare` + `encode` + submit, for callers that don't need the split.
@@ -602,7 +707,43 @@ impl Pipelines {
             cache: None,
         });
 
+        // The last pass, onto a view.
+        let finish = format.is_srgb().then(|| {
+            let shader = device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("finish"),
+                bind_group_layouts: &[Some(&kit.image_layout)],
+                immediate_size: 0,
+            });
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("finish"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: None,
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        });
+
         Self {
+            finish,
             forward: [false, true]
                 .into_iter()
                 .flat_map(|cutout| Faces::ALL.map(|faces| (cutout, faces)))

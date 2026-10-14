@@ -345,6 +345,19 @@ final class World implements Finalizable {
 
   var _applicationPaused = false;
 
+  /// The [Quality] level the world's views draw at, from their next
+  /// frame: null, as a new world has, for the one the device picks
+  /// ([Quality.device]). A game can change it at any time, from its
+  /// settings page for example; `world.quality ?? Quality.device` is the
+  /// level drawn at.
+  Quality? get quality => _quality;
+  set quality(Quality? value) {
+    check(fy_world_quality_set(_engineWorld, value?._level ?? FY_QUALITY_AUTO));
+    _quality = value;
+  }
+
+  Quality? _quality;
+
   /// The virtual cameras, their blends, and shaking the view's camera
   /// (docs/stage-4.md §3.8).
   late final Cameras cameras = Cameras._(this);
@@ -695,4 +708,37 @@ final class ObjectError {
 extension WorldPointer on World {
   /// The engine's world. Throws a StateError once the world is disposed.
   Pointer<FyWorld> get pointer => _engineWorld;
+}
+
+/// How much a frame may cost, for how it looks: set on [World.quality].
+/// Each level is meant to hold its devices' frame rate, and each effect
+/// says which levels it's on at. Every level draws the same picture until
+/// those effects come (stage 8).
+enum Quality {
+  /// For slow GPUs, and ones not known: the scene is drawn straight to the
+  /// screen, in one pass.
+  low(FY_QUALITY_LOW),
+
+  /// Phones' GPUs (Mali, Adreno).
+  medium(FY_QUALITY_MEDIUM),
+
+  /// Apple's GPUs, and desktops'.
+  high(FY_QUALITY_HIGH);
+
+  const Quality(this._level);
+
+  final int _level;
+
+  /// The level this device picks for a world that doesn't choose: high on
+  /// Apple's GPUs and desktops', medium on Mali and Adreno, low on a
+  /// software GPU or one not known. Starts the GPU if no view has yet.
+  static Quality get device {
+    final out = malloc<Uint32>();
+    try {
+      check(fy_quality_auto(out));
+      return values.firstWhere((q) => q._level == out.value);
+    } finally {
+      malloc.free(out);
+    }
+  }
 }

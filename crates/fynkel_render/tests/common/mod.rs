@@ -116,7 +116,8 @@ pub fn stage1_scene() -> RenderScene {
     camera.clear_color = [linear(0.1), linear(0.1), linear(0.12)];
     RenderScene {
         camera: Some(camera),
-        sun: Some(Sun { direction: Vec3::new(-0.4, -1.0, -0.3), color: Vec3::ONE }),
+        lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE)],
+        quality: None,
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         draws: vec![Draw {
