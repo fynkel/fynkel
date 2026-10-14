@@ -185,12 +185,18 @@ pub(crate) struct Clusters {
     /// Each cell's lamps: (how brightly it lights the cell, its index), the
     /// brightest first, and how many.
     lamps: Vec<([(f32, u8); MAX_PER_CELL], u8)>,
+    /// Each cell's view-space bounding sphere, for this frame's grid.
+    spheres: Vec<(Vec3, f32)>,
     words: Vec<u32>,
 }
 
 impl Clusters {
     pub(crate) fn new() -> Self {
-        Self { lamps: vec![([(0.0, 0); MAX_PER_CELL], 0); CELLS], words: vec![0; BYTES as usize / 4] }
+        Self {
+            lamps: vec![([(0.0, 0); MAX_PER_CELL], 0); CELLS],
+            spheres: vec![(Vec3::ZERO, 0.0); CELLS],
+            words: vec![0; BYTES as usize / 4],
+        }
     }
 
     /// Enters each of `lights` (the frame's list, in its order) into every
@@ -202,6 +208,11 @@ impl Clusters {
             cell.1 = 0;
         }
         let mut full = [0u64; CELLS.div_ceil(64)];
+        if !lights.is_empty() {
+            for (i, sphere) in self.spheres.iter_mut().enumerate() {
+                *sphere = grid.cell_sphere(i % TILES_X, i / TILES_X % TILES_Y, i / (TILES_X * TILES_Y));
+            }
+        }
         for (index, light) in lights.iter().enumerate() {
             let seen = light.moved(&grid.view);
             let (c, r) = (seen.position, seen.range);
@@ -216,9 +227,9 @@ impl Clusters {
             for k in k0..=k1 {
                 for y in y0..=y1 {
                     for x in x0..=x1 {
-                        let (at, cell_r) = grid.cell_sphere(x, y, k);
-                        let Some(bright) = seen.at(at, cell_r) else { continue };
                         let i = (k * TILES_Y + y) * TILES_X + x;
+                        let (at, cell_r) = self.spheres[i];
+                        let Some(bright) = seen.at(at, cell_r) else { continue };
                         let (best, count) = &mut self.lamps[i];
                         let n = usize::from(*count);
                         if n == cap {
