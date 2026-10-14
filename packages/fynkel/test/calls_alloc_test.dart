@@ -1,5 +1,6 @@
 // Calls a game makes every frame allocate nothing: finding a component
-// below an object (docs/hardening.md D10), counted by the VM service's
+// below an object (docs/hardening.md D10), a light's intensity and a
+// renderer's colour tweened for ever (D14), counted by the VM service's
 // allocation profile (see allocations.dart).
 
 // Counted alone, a file at a time: see dart_test.yaml.
@@ -24,6 +25,19 @@ class _Finder extends GameObject {
   }
 }
 
+/// A lamp whose intensity pulses, and a cube whose colour does.
+class _Pulse extends GameObject {
+  _Pulse() : super(components: [Light.point(), MeshRenderer(Mesh.cube(), Material())]);
+
+  @override
+  void onStart() {
+    super.onStart();
+    final light = get<Light>()!;
+    tween(0.5, 2.0, seconds: 1, loops: -1, yoyo: true, onUpdate: (v) => light.intensity = v);
+    colorTo(const Color(0xFFFF0000), seconds: 0.5, loops: -1, yoyo: true);
+  }
+}
+
 void main() {
   final madeEachFrame = allocations();
 
@@ -39,6 +53,7 @@ void main() {
       parent = parent.add(GameObject());
     }
     parent.addComponent(_Marker());
+    world.add(_Pulse());
     world.update(1 / 60);
 
     expect(await madeEachFrame(world, 50000), isEmpty);

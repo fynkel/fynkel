@@ -554,7 +554,7 @@ final class Material {
   bool _uses(Texture2D texture) => _textures.any((t) => identical(t, texture));
 
   void _changed() {
-    _release.removeWhere((world) => !world._updateMaterial(this));
+    _release.updateMaterial(this);
   }
 
   // The engine checks again; checking here too reports the mistake where
@@ -634,6 +634,22 @@ final class _Release {
       },
     );
     if (_in.isEmpty) _finalizer.detach(this);
+  }
+
+  /// Writes [material], this one's, to each world that has it, and forgets
+  /// those gone or that no longer have it. In place, with no closure: a
+  /// tween changes a material every frame.
+  void updateMaterial(Material material) {
+    final entries = _in;
+    var kept = 0;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      final world = entry.$1.target;
+      if (world != null && world._updateMaterial(material)) entries[kept++] = entry;
+    }
+    if (kept == entries.length) return;
+    entries.length = kept;
+    if (kept == 0) _finalizer.detach(this);
   }
 
   /// [world] took the resource out, and may add it again.
