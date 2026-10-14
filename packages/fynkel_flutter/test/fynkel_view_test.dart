@@ -357,6 +357,18 @@ void main() {
     await tester.pumpWidget(sized(const SizedBox()));
   });
 
+  testWidgets('a game resets the plugin as it starts, before it shows any view', (tester) async {
+    forgetReset();
+    await tester.pumpWidget(FynkelGame(make: Tiny.new, builder: (context, game) => const SizedBox()));
+    await tester.pump();
+    expect(resets, [0], reason: "an earlier isolate's views are freed though this game shows none yet");
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(calls, ['register']);
+    expect(resets, [0], reason: 'once per isolate');
+    await tester.pumpWidget(sized(const SizedBox()));
+  });
+
   // On Android a view laid out before its window has a size would get a
   // surface of its own (Flutter makes it 1 × 1), only to swap it at once.
   testWidgets('an empty layout makes no view until there is a size', (tester) async {

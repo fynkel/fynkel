@@ -50,6 +50,20 @@ bool get _android => debugAndroid ?? Platform.isAndroid;
 /// it, even while the first is still waiting for the answer.
 bool _resetSent = false;
 
+/// Tells the plugin to free the views an earlier isolate left, once per
+/// isolate: [FynkelGame] does it as it starts, so a hot restart into a game
+/// that shows no view yet leaks none, and the first view does it too. With
+/// no plugin (a widget test) there's nothing to free.
+Future<void> resetPlugin() async {
+  if (_resetSent) return;
+  _resetSent = true;
+  try {
+    await channel.invokeMethod<void>('reset');
+  } on MissingPluginException {
+    // Nothing to free.
+  }
+}
+
 /// Forgets that this isolate reset the plugin, so a test can check that it
 /// does.
 @visibleForTesting
