@@ -93,6 +93,8 @@ struct Mailbox {
     stop: bool,
     /// A test asked the worker to destroy the device ([`Worker::lose_device`]).
     lose_device: bool,
+    /// A test asked the worker to panic ([`Worker::panic`]).
+    panic: bool,
     /// The worker stopped and dropped everything it owned.
     finished: bool,
     /// Why the worker stopped, if it did on its own: it panicked
@@ -208,6 +210,13 @@ impl Worker {
     /// every view on it. It's done on the render thread, between frames.
     pub(crate) fn lose_device(&self) {
         self.shared.lock().lose_device = true;
+        self.shared.wake.notify_one();
+    }
+
+    /// For tests: makes the worker panic before its next frame, as a bug in
+    /// it would.
+    pub(crate) fn panic(&self) {
+        self.shared.lock().panic = true;
         self.shared.wake.notify_one();
     }
 
@@ -341,6 +350,11 @@ fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut
             loop {
                 if mailbox.stop || mailbox.failure.is_some() {
                     return Ok(());
+                }
+                if mailbox.panic {
+                    mailbox.panic = false;
+                    drop(mailbox);
+                    panic!("a test made the render worker panic");
                 }
                 if mailbox.lose_device {
                     mailbox.lose_device = false;

@@ -241,7 +241,7 @@ external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.U
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
 external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>()
 external int fy_quality_auto(ffi.Pointer<ffi.Uint32> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Uint32, ffi.Pointer<FyRayHit>)>(
@@ -309,6 +309,9 @@ external int fy_transform_set_many(
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Uint64)>(isLeaf: true)
 external int fy_view_camera_set(ffi.Pointer<FyView> view, int camera);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>)>(isLeaf: true)
+external int fy_view_fail_worker(ffi.Pointer<FyView> view);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_view_frame(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Uint64> out_number);
@@ -385,7 +388,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 23;
+const int FY_ABI_VERSION = 24;
 
 const int FY_APPLE_MORE = 2;
 

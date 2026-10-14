@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 23;
+pub const FY_ABI_VERSION: u32 = 24;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -2400,9 +2400,20 @@ pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height:
     })
 }
 
-/// For tests: destroys the GPU device, as a driver reset would. Every view
-/// shares it, so soon after, `fy_view_frame` returns
-/// `FY_STATUS_DEVICE_LOST` for each; a view made after has a new one.
+/// Whether the test hooks may run: only in a test process, one with
+/// `FLUTTER_TEST` (set by `flutter test`) or `FYNKEL_TEST_HOOKS` in its
+/// environment. A game's hook calls fail with `FY_STATUS_UNSUPPORTED`.
+fn test_hooks() -> Result<(), Error> {
+    if std::env::var_os("FLUTTER_TEST").is_some() || std::env::var_os("FYNKEL_TEST_HOOKS").is_some() {
+        return Ok(());
+    }
+    Err(Error::new(FyStatus::Unsupported, "test hooks run only in tests (FLUTTER_TEST or FYNKEL_TEST_HOOKS set)"))
+}
+
+/// For tests only (see `fy_view_fail_worker`): destroys the GPU device, as
+/// a driver reset would. Every view shares it, so soon after,
+/// `fy_view_frame` returns `FY_STATUS_DEVICE_LOST` for each; a view made
+/// after has a new one.
 ///
 /// # Safety
 ///
@@ -2410,9 +2421,29 @@ pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height:
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_view_lose_device(view: *const FyView) -> FyStatus {
     guard(|| {
+        test_hooks()?;
         // SAFETY: per this function's contract.
         let view = unsafe { handle(view, "view") }?;
         view.worker.lose_device();
+        Ok(())
+    })
+}
+
+/// For tests only: makes the view's render worker panic before its next
+/// frame, as a bug in it would, so soon after `fy_view_frame` returns
+/// `FY_STATUS_WORKER_FAILED`. Runs only in a test process (`FLUTTER_TEST`
+/// or `FYNKEL_TEST_HOOKS` set); `FY_STATUS_UNSUPPORTED` otherwise.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_fail_worker(view: *const FyView) -> FyStatus {
+    guard(|| {
+        test_hooks()?;
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        view.worker.panic();
         Ok(())
     })
 }
