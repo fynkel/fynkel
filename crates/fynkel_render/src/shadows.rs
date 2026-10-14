@@ -16,7 +16,9 @@
 //! Maps hold plain depth (0 near the light, 1 far), and the forward pass
 //! compares a surface's own against them (`forward.wgsl`).
 
-use std::sync::OnceLock;
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock, PoisonError, Weak};
 
 use glam::{Mat4, Vec3, Vec4};
 
@@ -237,12 +239,35 @@ pub(crate) struct ShadowKit {
     shader: wgpu::ShaderModule,
     opaque_layout: wgpu::PipelineLayout,
     cutout_layout: wgpu::PipelineLayout,
+    /// GPU memory of every view's maps.
+    pub(crate) bytes: Arc<AtomicU64>,
+    /// The map arrays views hold, by kind, size and layers, for another
+    /// view that wants the same to share.
+    arrays: Mutex<HashMap<(usize, u32, u32), Weak<MapArray>>>,
+    /// The 1×1 maps that stand in for none, of each kind.
+    stand_ins: [OnceLock<Arc<MapArray>>; 2],
     /// The cascades' opaque and cut-out pipelines, then the spot maps',
     /// each made when first drawn with.
     pipelines: [OnceLock<wgpu::RenderPipeline>; 4],
 }
 
 impl ShadowKit {
+    /// Maps of kind `k` (0 the cascades, 1 the spot maps) and `shape`: the
+    /// ones another view holds, if it has them. 0 layers is a stand-in.
+    pub(crate) fn array(&self, device: &wgpu::Device, k: usize, (size, count): (u32, u32)) -> Arc<MapArray> {
+        if count == 0 {
+            return self.stand_ins[k].get_or_init(|| Arc::new(MapArray::new(device, k, (1, 1), None))).clone();
+        }
+        let mut arrays = self.arrays.lock().unwrap_or_else(PoisonError::into_inner);
+        arrays.retain(|_, held| held.strong_count() > 0);
+        if let Some(held) = arrays.get(&(k, size, count)).and_then(Weak::upgrade) {
+            return held;
+        }
+        let made = Arc::new(MapArray::new(device, k, (size, count), Some(&self.bytes)));
+        arrays.insert((k, size, count), Arc::downgrade(&made));
+        made
+    }
+
     pub(crate) fn new(device: &wgpu::Device, textures_layout: &wgpu::BindGroupLayout, maker: &PipelineMaker) -> Self {
         let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow view"),
@@ -307,6 +332,9 @@ impl ShadowKit {
             sampler,
             view_stride: u64::from(device.limits().min_uniform_buffer_offset_alignment).max(64),
             maker: maker.clone(),
+            bytes: Arc::default(),
+            arrays: Mutex::default(),
+            stand_ins: Default::default(),
             shader,
             opaque_layout,
             cutout_layout,
@@ -387,67 +415,111 @@ impl ShadowKit {
 /// One renderer's shadow maps: the cascades and the spot maps, each an
 /// array of layers, and the forward pass's bind group for them. With no
 /// shadows, each is a 1×1 map that nothing reads.
+/// A view's shadow maps, the cascades' then the spot maps': each an array
+/// shared with the device's other views that want the same, and the bind
+/// group the forward pass reads them through.
 pub(crate) struct ShadowMaps {
     /// Size and layers of the cascades, then of the spot maps.
     pub(crate) shape: [(u32, u32); 2],
-    /// One view per layer, to draw into: the cascades', then the spot
-    /// maps'.
-    pub(crate) layers: Vec<wgpu::TextureView>,
+    arrays: [Arc<MapArray>; 2],
     pub(crate) bind_group: wgpu::BindGroup,
 }
 
 impl ShadowMaps {
     /// Maps of `shape`: the cascades' size and layers, then the spot maps'.
-    /// A shape of 0 layers makes a 1×1 map with one.
+    /// A shape of 0 layers is a 1×1 map that stands in for none.
     pub(crate) fn new(device: &wgpu::Device, kit: &ShadowKit, shape: [(u32, u32); 2]) -> Self {
-        let mut layers = Vec::new();
-        let mut arrays = Vec::with_capacity(2);
-        for ((size, count), (format, label)) in
-            shape.into_iter().zip([(CASCADE_FORMAT, "sun shadow maps"), (SPOT_FORMAT, "spot shadow maps")])
-        {
-            let (size, count) = if count == 0 { (1, 1) } else { (size, count) };
-            let texture = device.create_texture(&wgpu::TextureDescriptor {
-                label: Some(label),
-                size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: count },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format,
-                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-                view_formats: &[],
-            });
-            for layer in 0..count {
-                layers.push(texture.create_view(&wgpu::TextureViewDescriptor {
+        let arrays = [0, 1].map(|k| kit.array(device, k, shape[k]));
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("shadow maps"),
+            layout: &kit.maps_layout,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&arrays[0].array) },
+                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&arrays[1].array) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
+            ],
+        });
+        Self { shape, arrays, bind_group }
+    }
+
+    /// The view to draw cascade `i` into, or spot map `i`.
+    pub(crate) fn layer(&self, spot: bool, i: usize) -> &wgpu::TextureView {
+        &self.arrays[usize::from(spot)].layers[i]
+    }
+
+    /// The GPU memory of maps of `shape`.
+    pub(crate) fn bytes(shape: [(u32, u32); 2]) -> u64 {
+        (0..2).map(|k| map_bytes(k, shape[k])).sum()
+    }
+}
+
+/// One texture array of shadow maps.
+pub(crate) struct MapArray {
+    /// A view per layer, to draw into.
+    layers: Vec<wgpu::TextureView>,
+    /// All of them, to read.
+    array: wgpu::TextureView,
+    /// Its memory, and the kit's count it's in: none for a stand-in.
+    counted: Option<(u64, Arc<AtomicU64>)>,
+}
+
+impl MapArray {
+    /// `count` maps of kind `k` (0 the cascades, 1 the spot maps), `size`
+    /// texels square; its memory added to `counter`, if given.
+    fn new(device: &wgpu::Device, k: usize, (size, count): (u32, u32), counter: Option<&Arc<AtomicU64>>) -> Self {
+        let (format, label) = [(CASCADE_FORMAT, "sun shadow maps"), (SPOT_FORMAT, "spot shadow maps")][k];
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some(label),
+            size: wgpu::Extent3d { width: size, height: size, depth_or_array_layers: count },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let layers = (0..count)
+            .map(|layer| {
+                texture.create_view(&wgpu::TextureViewDescriptor {
                     label: Some(label),
                     dimension: Some(wgpu::TextureViewDimension::D2),
                     base_array_layer: layer,
                     array_layer_count: Some(1),
                     ..Default::default()
-                }));
-            }
-            arrays.push(texture.create_view(&wgpu::TextureViewDescriptor {
-                label: Some(label),
-                dimension: Some(wgpu::TextureViewDimension::D2Array),
-                ..Default::default()
-            }));
-        }
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow maps"),
-            layout: &kit.maps_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&arrays[0]) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&arrays[1]) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
-            ],
+                })
+            })
+            .collect();
+        let array = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            dimension: Some(wgpu::TextureViewDimension::D2Array),
+            ..Default::default()
         });
-        Self { shape, layers, bind_group }
+        let counted = counter.map(|counter| {
+            let bytes = map_bytes(k, (size, count));
+            counter.fetch_add(bytes, Ordering::Relaxed);
+            (bytes, counter.clone())
+        });
+        Self { layers, array, counted }
     }
+}
 
-    /// The view to draw cascade `i` into, or spot map `i`.
-    pub(crate) fn layer(&self, spot: bool, i: usize) -> &wgpu::TextureView {
-        let cascades = self.shape[0].1.max(1) as usize;
-        &self.layers[if spot { cascades + i } else { i }]
+impl Drop for MapArray {
+    fn drop(&mut self) {
+        if let Some((bytes, counter)) = &self.counted {
+            counter.fetch_sub(*bytes, Ordering::Relaxed);
+        }
     }
+}
+
+/// The GPU memory of `count` maps of kind `k`, `size` texels square.
+fn map_bytes(k: usize, (size, count): (u32, u32)) -> u64 {
+    let format = [CASCADE_FORMAT, SPOT_FORMAT][k];
+    u64::from(size) * u64::from(size) * u64::from(count) * texel_bytes(format)
+}
+
+/// A shadow map texel's bytes.
+fn texel_bytes(format: wgpu::TextureFormat) -> u64 {
+    u64::from(format.block_copy_size(Some(wgpu::TextureAspect::DepthOnly)).unwrap_or(4))
 }
 
 #[cfg(test)]

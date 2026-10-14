@@ -192,6 +192,11 @@ impl Kit {
         self.maker.made.load(Ordering::Relaxed)
     }
 
+    /// GPU memory of the shadow maps its renderers hold.
+    pub fn shadow_bytes(&self) -> u64 {
+        self.shadows.bytes.load(Ordering::Relaxed)
+    }
+
     /// Whether its pipelines are kept between runs
     /// ([`set_pipeline_cache_dir`]).
     pub fn caches_pipelines(&self) -> bool {

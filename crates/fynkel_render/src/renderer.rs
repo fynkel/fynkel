@@ -61,6 +61,9 @@ pub struct FrameStats {
     pub shadow_maps: u32,
     /// Draws into shadow maps: one per caster per map it falls in.
     pub shadow_casters: u32,
+    /// GPU memory of the shadow maps the view holds, shared with the kit's
+    /// other views or not.
+    pub shadow_bytes: u64,
 }
 
 /// `Frame` in forward.wgsl.
@@ -310,6 +313,10 @@ pub struct Renderer {
     /// the spot maps; `None` where it needs none.
     shadow_shape: [Option<(u32, u32)>; 2],
     shadow_maps: Option<ShadowMaps>,
+    /// The maps' shape the next `encode` draws with, and for how many
+    /// frames each kind has been using fewer than it holds.
+    shadow_next: [(u32, u32); 2],
+    shadow_idle: [u32; 2],
     clear: wgpu::Color,
     size: (u32, u32),
     /// This frame's level: the scene's, or the device's.
@@ -323,6 +330,9 @@ impl std::fmt::Debug for Renderer {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// How many frames shadow maps a view stops using are kept: about a
+/// second.
+const KEEP_UNUSED_MAPS: u32 = 60;
 const INSTANCE_SIZE: u64 = std::mem::size_of::<Instance>() as u64;
 
 impl Renderer {
@@ -385,6 +395,8 @@ impl Renderer {
             shadow_maps_drawn: (0, 0),
             shadow_shape: [None; 2],
             shadow_maps: None,
+            shadow_next: [(1, 0); 2],
+            shadow_idle: [0; 2],
             clear: wgpu::Color::BLACK,
             size: (0, 0),
             kit,
@@ -395,6 +407,11 @@ impl Renderer {
     /// ([`Renderer::sharing`]).
     pub fn assets(&self) -> &SharedAssets {
         &self.assets
+    }
+
+    /// The device's pipelines and shared GPU state it draws with.
+    pub fn kit(&self) -> &Arc<Kit> {
+        &self.kit
     }
 
     /// The target format this renderer draws into.
@@ -595,6 +612,17 @@ impl Renderer {
             }
         }
         self.prepare_shadows(scene, &camera, aspect, shadow_sun.map(|(_, direction)| direction), &mut stats);
+        // The shadow maps `encode` draws with: as many as the frame uses.
+        // A kind it uses fewer of keeps what it has a while, so shadows that
+        // come and go don't remake them, then lets them go.
+        let had = self.shadow_maps.as_ref().map_or([(1, 0); 2], |m| m.shape);
+        for (k, had) in had.into_iter().enumerate() {
+            let want = self.shadow_shape[k].unwrap_or((had.0, 0));
+            let fewer = want.0 == had.0 && want.1 < had.1;
+            self.shadow_idle[k] = if fewer { self.shadow_idle[k] + 1 } else { 0 };
+            self.shadow_next[k] = if fewer && self.shadow_idle[k] <= KEEP_UNUSED_MAPS { had } else { want };
+        }
+        stats.shadow_bytes = ShadowMaps::bytes(self.shadow_next);
         stats.lines = scene.lines.len() as u32;
         stats.draws = self.instances.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
@@ -695,7 +723,7 @@ impl Renderer {
         }
         if spots > 0 {
             self.shadow_maps_drawn.1 = spots as u8;
-            self.shadow_shape[1] = Some((level.spot_map_size, level.spot_maps.min(MAX_SPOT_MAPS) as u32));
+            self.shadow_shape[1] = Some((level.spot_map_size, spots as u32));
         }
 
         self.caster_order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -738,13 +766,8 @@ impl Renderer {
         {
             self.image_pipelines = Some(self.kit.pipelines(format));
         }
-        // The shadow maps, remade when a level needs others. A kind of map
-        // the frame doesn't use keeps what it had, so a spot light coming
-        // into view doesn't make new ones.
-        let had = self.shadow_maps.as_ref().map_or([(1, 0); 2], |m| m.shape);
-        let shape = [0, 1].map(|k| self.shadow_shape[k].unwrap_or(had[k]));
-        if self.shadow_maps.is_none() || shape != had {
-            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, shape));
+        if self.shadow_maps.as_ref().is_none_or(|m| m.shape != self.shadow_next) {
+            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, self.shadow_next));
         }
         let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, .. } = self;
         let targets = targets.as_ref().expect("made above");

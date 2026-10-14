@@ -310,3 +310,68 @@ fn a_still_shadow_stays_still_as_the_camera_moves() {
         }
     }
 }
+
+// --- Memory (hardening R3) ------------------------------------------------------
+
+/// A level's sun maps' bytes: 16-bit depth.
+fn cascade_bytes(quality: Quality) -> u64 {
+    let level = quality.shadows();
+    u64::from(level.map_size).pow(2) * level.cascades as u64 * 2
+}
+
+/// `n` of a level's spot maps' bytes: 32-bit depth.
+fn spot_bytes(quality: Quality, n: u64) -> u64 {
+    u64::from(quality.shadows().spot_map_size).pow(2) * n * 4
+}
+
+#[test]
+fn one_shadowed_spot_holds_one_map() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let from = Vec3::new(-1.5, 4.0, 0.0);
+    let torch = Light::spot(from, Vec3::NEG_Y, 12.0, 1.0, 0.2, Vec3::ONE).with_shadows(true);
+    let (_, stats) = render(&gpu, &mut r, &stage(vec![torch], Quality::High), 32, 32);
+    assert_eq!(stats.shadow_maps, 1);
+    assert_eq!(stats.shadow_bytes, spot_bytes(Quality::High, 1), "not the level's 4");
+    assert_eq!(r.kit().shadow_bytes(), stats.shadow_bytes);
+}
+
+#[test]
+fn maps_go_a_while_after_shadows_stop() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let lit = stage(vec![sun()], Quality::Medium);
+    let (_, stats) = render(&gpu, &mut r, &lit, 32, 32);
+    assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium));
+    // A frame or two without: still there, so shadows that flicker on and
+    // off don't remake them.
+    let dark = stage(vec![sun().with_shadows(false)], Quality::Medium);
+    let (_, stats) = render(&gpu, &mut r, &dark, 32, 32);
+    assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium));
+    // A couple of seconds without: gone.
+    for _ in 0..120 {
+        render(&gpu, &mut r, &dark, 32, 32);
+    }
+    let (_, stats) = render(&gpu, &mut r, &dark, 32, 32);
+    assert_eq!(stats.shadow_bytes, 0);
+    assert_eq!(r.kit().shadow_bytes(), 0);
+}
+
+#[test]
+fn views_of_one_kit_share_their_maps() {
+    let gpu = gpu();
+    let kit = Kit::new(&gpu);
+    let mut views: Vec<Renderer> = (0..2).map(|_| Renderer::sharing(Assets::shared(&kit), SRGB)).collect();
+    for r in &mut views {
+        r.upload_mesh(CUBE, &MeshData::cube());
+        r.upload_mesh(PLANE, &MeshData::plane());
+        let (_, stats) = render(&gpu, r, &stage(vec![sun()], Quality::Medium), 32, 32);
+        assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium), "each view sees its maps");
+    }
+    assert_eq!(kit.shadow_bytes(), cascade_bytes(Quality::Medium), "one set between them");
+    // At another level, a view takes maps of its own.
+    render(&gpu, &mut views[1], &stage(vec![sun()], Quality::High), 32, 32);
+    assert_eq!(kit.shadow_bytes(), cascade_bytes(Quality::Medium) + cascade_bytes(Quality::High));
+    drop(views);
+    assert_eq!(kit.shadow_bytes(), 0, "gone with the views");
+}
