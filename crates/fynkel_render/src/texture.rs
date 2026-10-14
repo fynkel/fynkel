@@ -14,10 +14,10 @@ use crate::assets::PipelineMaker;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, MaterialTextures, TextureKey};
 
-struct GpuTexture {
+pub(crate) struct GpuTexture {
     view: wgpu::TextureView,
     /// All mip levels, as stored (4 bytes a pixel).
-    bytes: u64,
+    pub(crate) bytes: u64,
 }
 
 /// Draws mip levels, one pipeline per texture format, made when a texture
@@ -218,26 +218,15 @@ impl TextureKit {
     }
 }
 
-impl Textures {
-    /// Uploads RGBA8 pixels under `key` for use in `space`, with a full
-    /// mip chain, replacing any texture already there. Submits its own GPU
-    /// work.
+impl GpuTexture {
+    /// A texture of RGBA8 pixels for use in `space`, with a full mip chain.
+    /// Submits its own GPU work.
     ///
     /// # Panics
     ///
-    /// If `rgba` isn't `width × height × 4` bytes, or a side is 0 or over
-    /// the device's limit. `fynkel_load::ImageData` checks all of these.
-    #[allow(clippy::too_many_arguments)]
-    pub(crate) fn upload(
-        &mut self,
-        gpu: &Gpu,
-        kit: &TextureKit,
-        key: TextureKey,
-        space: ColorSpace,
-        width: u32,
-        height: u32,
-        rgba: &[u8],
-    ) {
+    /// If `rgba` isn't `width × height × 4` bytes, or a side is 0.
+    /// `fynkel_load::ImageData` checks both.
+    pub(crate) fn new(gpu: &Gpu, kit: &TextureKit, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) -> Self {
         assert_eq!(rgba.len() as u64, width as u64 * height as u64 * 4, "{width} × {height} RGBA8 pixels");
         // The loader allows 8192 a side, but a device may offer less: over
         // its limit, the image is halved until it fits, not refused by the
@@ -278,8 +267,14 @@ impl Textures {
         let bytes = (0..mip_level_count)
             .map(|mip| texture.size().mip_level_size(mip, texture.dimension()))
             .map(|level| level.width as u64 * level.height as u64 * 4);
-        let gpu_texture = GpuTexture { view: texture.create_view(&Default::default()), bytes: bytes.sum() };
-        self.textures.insert((key, space), gpu_texture);
+        Self { view: texture.create_view(&Default::default()), bytes: bytes.sum() }
+    }
+}
+
+impl Textures {
+    /// Puts `texture` under `key` for use in `space`, replacing any there.
+    pub(crate) fn insert(&mut self, key: TextureKey, space: ColorSpace, texture: GpuTexture) {
+        self.textures.insert((key, space), texture);
         self.forget_bind_groups(key);
     }
 

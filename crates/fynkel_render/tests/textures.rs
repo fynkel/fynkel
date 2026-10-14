@@ -514,3 +514,26 @@ fn textured_materials_match_their_golden() {
         assert_golden("textured_materials", &image);
     }
 }
+
+/// Hardening R8: a texture or mesh is made on the GPU (pixels written,
+/// mips drawn) without the assets every view of the world draws from,
+/// then put in under their lock, so a level streaming in doesn't stall
+/// the views.
+#[test]
+fn textures_and_meshes_are_made_without_holding_the_assets() {
+    let gpu = gpu();
+    let r = renderer(&gpu, SRGB);
+    let (assets, kit) = (r.assets().clone(), r.kit().clone());
+    let held = lock_assets(&assets);
+    let (texture, mesh) = std::thread::scope(|s| {
+        s.spawn(|| (kit.make_texture(ColorSpace::Srgb, 64, 64, &[200; 64 * 64 * 4]), kit.make_mesh(&MeshData::cube())))
+            .join()
+            .expect("made while another thread holds the assets")
+    });
+    drop(held);
+    let mut assets = lock_assets(&assets);
+    let before = (assets.texture_bytes(), assets.mesh_bytes());
+    assets.insert_texture(A, texture);
+    assets.insert_mesh(MeshKey(9), mesh);
+    assert!(assets.texture_bytes() > before.0 && assets.mesh_bytes() > before.1);
+}

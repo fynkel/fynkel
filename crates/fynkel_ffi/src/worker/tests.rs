@@ -464,3 +464,42 @@ fn a_thread_whose_worker_panicked_serves_the_next_view() {
     // Counted just after the frame is read.
     wait_for(&next, |stats| stats.rendered == 1);
 }
+
+// Hardening R8: a frame makes at most a budget of uploads, oldest first;
+// the rest wait for the next, in order. Removing costs nothing, and a
+// frame always makes at least one, however big.
+#[test]
+fn a_frame_takes_its_budget_of_uploads_and_leaves_the_rest_in_order() {
+    use fynkel_render::{ColorSpace, MeshKey, TextureKey};
+    use fynkel_world::ImageData;
+    let image = |side: u32| Arc::new(ImageData::from_rgba(side, side, vec![0; (side * side * 4) as usize]).unwrap());
+    let texture = |k: u64, side: u32| ResourceOp::UploadTexture(TextureKey(k), ColorSpace::Srgb, image(side));
+    let names = |ops: &[ResourceOp]| -> Vec<String> {
+        ops.iter()
+            .map(|op| match op {
+                ResourceOp::UploadTexture(k, ..) => format!("t{}", k.0),
+                ResourceOp::RemoveTexture(k) => format!("-t{}", k.0),
+                ResourceOp::UploadMesh(k, _) => format!("m{}", k.0),
+                ResourceOp::RemoveMesh(k) => format!("-m{}", k.0),
+            })
+            .collect()
+    };
+    // 1024² is 4 MiB: three of them over a 10 MiB budget.
+    let mut waiting = vec![
+        texture(1, 1024),
+        ResourceOp::RemoveTexture(TextureKey(7)),
+        texture(2, 1024),
+        ResourceOp::UploadMesh(MeshKey(3), Arc::new(fynkel_world::MeshData::cube())),
+        texture(4, 1024),
+        ResourceOp::RemoveMesh(MeshKey(5)),
+    ];
+    let mut frame = Vec::new();
+    take_within(&mut waiting, &mut frame, 10 << 20);
+    assert_eq!(names(&frame), ["t1", "-t7", "t2", "m3"]);
+    assert_eq!(names(&waiting), ["t4", "-m5"]);
+
+    let mut big = vec![texture(1, 4096), texture(2, 16)];
+    frame.clear();
+    take_within(&mut big, &mut frame, 10 << 20);
+    assert_eq!(names(&frame), ["t1"], "one too big for the budget still goes, alone");
+}

@@ -427,7 +427,8 @@ impl Renderer {
 
     /// Uploads `data` under `key` to its assets ([`Assets::upload_mesh`]).
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
-        assets::lock(&self.assets).upload_mesh(key, data);
+        let made = self.kit.make_mesh(data);
+        assets::lock(&self.assets).insert_mesh(key, made);
     }
 
     /// Frees the mesh under `key` ([`Assets::remove_mesh`]).
@@ -437,7 +438,8 @@ impl Renderer {
 
     /// Uploads an image under `key` to its assets ([`Assets::upload_texture`]).
     pub fn upload_texture(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
-        assets::lock(&self.assets).upload_texture(key, space, width, height, rgba);
+        let made = self.kit.make_texture(space, width, height, rgba);
+        assets::lock(&self.assets).insert_texture(key, made);
     }
 
     /// Frees the textures under `key` ([`Assets::remove_texture`]).

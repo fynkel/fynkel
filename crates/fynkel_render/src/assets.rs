@@ -14,7 +14,7 @@ use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
 use crate::scene::{ColorSpace, MeshKey, Quality, TextureKey};
 use crate::shadows::ShadowKit;
-use crate::texture::{TextureKit, Textures};
+use crate::texture::{GpuTexture, TextureKit, Textures};
 use fynkel_mesh::MeshData;
 
 /// One GPU device and what every renderer on it shares: the frame layout,
@@ -192,6 +192,27 @@ impl Kit {
         self.maker.made.load(Ordering::Relaxed)
     }
 
+    /// A mesh on the GPU, for [`Assets::insert_mesh`]: made without any
+    /// world's assets held.
+    pub fn make_mesh(&self, data: &MeshData) -> MadeMesh {
+        let device = &self.gpu.device;
+        let vertices =
+            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
+        let indices =
+            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
+        let (min, max) = data.bounds();
+        let centre = (min + max) * 0.5;
+        let radius = data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max);
+        MadeMesh(GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius })
+    }
+
+    /// A texture on the GPU, for [`Assets::insert_texture`]: its pixels
+    /// written and its mips drawn, without any world's assets held. As
+    /// [`Assets::upload_texture`] says, but for the key.
+    pub fn make_texture(&self, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) -> MadeTexture {
+        MadeTexture { space, texture: GpuTexture::new(&self.gpu, &self.textures, space, width, height, rgba) }
+    }
+
     /// GPU memory of the shadow maps its renderers hold.
     pub fn shadow_bytes(&self) -> u64 {
         self.shadows.bytes.load(Ordering::Relaxed)
@@ -243,6 +264,29 @@ impl std::fmt::Debug for Assets {
     }
 }
 
+/// A mesh made on the GPU by [`Kit::make_mesh`], to put in a world's
+/// [`Assets`].
+pub struct MadeMesh(GpuMesh);
+
+/// A texture made on the GPU by [`Kit::make_texture`], to put in a world's
+/// [`Assets`].
+pub struct MadeTexture {
+    space: ColorSpace,
+    texture: GpuTexture,
+}
+
+impl std::fmt::Debug for MadeMesh {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MadeMesh").field("bytes", &self.0.bytes()).finish()
+    }
+}
+
+impl std::fmt::Debug for MadeTexture {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MadeTexture").field("space", &self.space).field("bytes", &self.texture.bytes).finish()
+    }
+}
+
 /// [`Assets`] shared by the renderers of every view of one world.
 pub type SharedAssets = Arc<Mutex<Assets>>;
 
@@ -263,17 +307,17 @@ impl Assets {
     }
 
     /// Uploads `data` under `key`, replacing any mesh already there.
+    /// [`Kit::make_mesh`] and [`Assets::insert_mesh`] do it without holding
+    /// the assets while the GPU's buffers are made.
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
-        let device = &self.kit.gpu.device;
-        let vertices =
-            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
-        let indices =
-            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
-        let (min, max) = data.bounds();
-        let centre = (min + max) * 0.5;
-        let radius = data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max);
-        self.meshes
-            .insert(key, GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius });
+        let made = self.kit.make_mesh(data);
+        self.insert_mesh(key, made);
+    }
+
+    /// Puts a mesh made by [`Kit::make_mesh`] under `key`, replacing any
+    /// there.
+    pub fn insert_mesh(&mut self, key: MeshKey, mesh: MadeMesh) {
+        self.meshes.insert(key, mesh.0);
     }
 
     /// Frees the mesh under `key`. Returns whether there was one.
@@ -294,9 +338,18 @@ impl Assets {
     ///
     /// If `rgba` isn't `width × height × 4` bytes, or a side is 0. A side
     /// over the device's limit (8192 on most) is halved until it fits.
+    ///
+    /// [`Kit::make_texture`] and [`Assets::insert_texture`] do it without
+    /// holding the assets while the GPU works.
     pub fn upload_texture(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
-        let kit = &*self.kit;
-        self.textures.upload(&kit.gpu, &kit.textures, key, space, width, height, rgba);
+        let made = self.kit.make_texture(space, width, height, rgba);
+        self.insert_texture(key, made);
+    }
+
+    /// Puts a texture made by [`Kit::make_texture`] under `key`, replacing
+    /// any there in its space. Draws use it from the next frame.
+    pub fn insert_texture(&mut self, key: TextureKey, texture: MadeTexture) {
+        self.textures.insert(key, texture.space, texture.texture);
     }
 
     /// Frees the textures under `key`, in both spaces. Returns whether
