@@ -19,13 +19,14 @@ final class Time {
   double _scale = 1;
   double _maxDelta = 1 / 3;
   double _fixedDelta = 1 / 50;
+  int _maxFixedSteps = 5;
   double _fixedTime = 0;
   int _fixedSteps = 0;
   bool _inFixed = false;
 
-  /// The seconds this frame counts for: the frame's time, at most
-  /// [maxDelta], times [scale]. Move by `speed * time.delta`. Inside a
-  /// fixed step, [fixedDelta].
+  /// The seconds this frame counts for: the frame's time times [scale],
+  /// at most [maxDelta] (as Unity's). Move by `speed * time.delta`. Inside
+  /// a fixed step, [fixedDelta].
   double get delta => _inFixed ? _fixedDelta : _delta;
 
   /// This frame's seconds without [scale] (still at most [maxDelta]): for
@@ -53,9 +54,10 @@ final class Time {
     _scale = value;
   }
 
-  /// The most one frame counts for, in seconds (1/3 by default, as
-  /// Unity's): after a hitch (loading, the app in the background) the game
-  /// steps this far rather than jumping. Throws an [ArgumentError] unless
+  /// The most one frame counts for, in seconds of game time (1/3 by
+  /// default, as Unity's): after a hitch (loading, the app in the
+  /// background) the game steps this far rather than jumping, whatever
+  /// its [scale]. Throws an [ArgumentError] unless
   /// it's more than 0.
   double get maxDelta => _maxDelta;
   set maxDelta(double value) {
@@ -73,6 +75,17 @@ final class Time {
     _fixedDelta = value;
   }
 
+  /// The most fixed steps one frame runs (5 by default): past that, the
+  /// rest of the frame's time is dropped, so a frame slower than its
+  /// steps can't make the next one slower still. Raise it for a game that
+  /// runs [scale] fast at a low frame rate. Throws an [ArgumentError]
+  /// unless it's 1 or more.
+  int get maxFixedSteps => _maxFixedSteps;
+  set maxFixedSteps(int value) {
+    if (value < 1) throw ArgumentError.value(value, 'maxFixedSteps', 'must be 1 or more');
+    _maxFixedSteps = value;
+  }
+
   /// Whether a fixed step is running: in [GameObject.onFixedUpdate], and
   /// in what runs with it.
   bool get inFixedStep => _inFixed;
@@ -84,6 +97,9 @@ final class Time {
     return alpha < 0 ? 0 : (alpha > 1 ? 1 : alpha);
   }
 
+  /// Drops the frame's time the steps couldn't keep up with.
+  void _dropFixedSteps() => _fixedTime = _sinceStart;
+
   /// Whether the frame's time holds another fixed step.
   bool get _fixedDue => _fixedTime + _fixedDelta <= _sinceStart + 1e-9;
 
@@ -94,13 +110,15 @@ final class Time {
 
   void _advance(double dt) {
     if (!(dt >= 0)) throw ArgumentError.value(dt, 'dt', 'must be 0 or more');
-    var raw = dt < _maxDelta ? dt : _maxDelta;
+    var frame = dt;
     if (_skip) {
       _skip = false;
-      raw = 0;
+      frame = 0;
     }
+    final raw = frame < _maxDelta ? frame : _maxDelta;
     _unscaledDelta = raw;
-    _delta = _paused ? 0 : raw * _scale;
+    final scaled = _paused ? 0.0 : frame * _scale;
+    _delta = scaled < _maxDelta ? scaled : _maxDelta;
     _sinceStart += _delta;
     _unscaledSinceStart += raw;
     _frame++;

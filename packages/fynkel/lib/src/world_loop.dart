@@ -50,7 +50,7 @@ extension _Loop on World {
         ended = true;
         continue;
       }
-      if (m._made >= frame || m._owner._holdsStill) continue;
+      if (m._made >= frame || m._owner._paused) continue;
       try {
         m._step(m.unscaled ? time._unscaledDelta : time._delta);
       } catch (error, stack) {
@@ -139,15 +139,16 @@ extension _Loop on World {
     _microtasks.clear();
   }
 
-  /// Unwinds [routine] from what it waits for.
+  /// Unwinds [routine] from what it waits for. The world's lists let go
+  /// of the waits at their next routines step.
   void _failWaits(Routine<Object?> routine) {
-    for (final waits in [_waits, _fixedWaits]) {
-      for (var i = 0; i < waits.length; i++) {
-        final wait = waits[i];
-        if (wait.over || !identical(wait.routine, routine)) continue;
-        wait.over = true;
-        wait.fail(RoutineStopped._(), StackTrace.current);
-      }
+    final waits = routine._waits;
+    if (waits == null) return;
+    routine._waits = null;
+    for (final wait in waits) {
+      if (wait.over) continue;
+      wait.over = true;
+      wait.fail(RoutineStopped._(), StackTrace.current);
     }
   }
 
@@ -258,11 +259,17 @@ extension _Loop on World {
     final time = this.time;
     if (!time._fixedDue) return;
     final systems = _systems;
+    var steps = 0;
     try {
       while (time._fixedDue) {
+        if (steps++ == time._maxFixedSteps) {
+          time._dropFixedSteps();
+          break;
+        }
         time._fixedTime += time._fixedDelta;
         time._fixedSteps++;
         time._inFixed = true;
+        input._inFixed = true;
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
           if (system._off) continue;
@@ -283,10 +290,12 @@ extension _Loop on World {
           }
         }
         _runRoutines(fixed: true);
+        input._fixedStepDone();
         if (_disposeAsked) return;
       }
     } finally {
       time._inFixed = false;
+      input._inFixed = false;
     }
   }
 

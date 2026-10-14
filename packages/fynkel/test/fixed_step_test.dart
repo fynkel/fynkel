@@ -8,6 +8,21 @@ import 'package:test/test.dart';
 /// Every call, in order.
 final log = <String>[];
 
+/// Counts the presses and releases its fixed steps see, of space, the
+/// left mouse button and the 'jump' action.
+class FixedPresses extends GameObject {
+  var keys = 0, keyUps = 0, buttons = 0, actions = 0;
+
+  @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+    if (input.wasPressed(KeyCode.space)) keys++;
+    if (input.wasReleased(KeyCode.space)) keyUps++;
+    if (input.wasPressed(MouseButton.left)) buttons++;
+    if (input.action('jump').wasPressed) actions++;
+  }
+}
+
 class Ticks extends GameObject {
   Ticks(String name, {super.components, super.children}) : super(name: name);
 
@@ -179,8 +194,35 @@ void main() {
       world.update(1 / 60);
       expect(a.fixed, 2, reason: 'paused, none');
       world.time.scale = 1;
+      world.time.maxFixedSteps = 100;
       world.update(5);
       expect(a.fixed, 2 + 16, reason: 'a 5 s hitch counts as maxDelta, 1/3 s: 16 steps');
+    });
+
+    test('a frame runs at most maxFixedSteps, and drops the rest of its time', () {
+      final world = newWorld();
+      final a = world.add(Ticks('a'));
+      expect(world.time.maxFixedSteps, 5);
+      world.update(5);
+      expect(a.fixed, 5, reason: 'a hitch holds 16 steps; 5 run');
+      world.update(0.01);
+      expect(a.fixed, 5, reason: 'the 11 dropped don\'t come in the next frames');
+      world.update(0.02);
+      expect(a.fixed, 6);
+      expect(() => world.time.maxFixedSteps = 0, throwsArgumentError);
+    });
+
+    test('maxDelta limits the game\'s time, after the scale', () {
+      final world = newWorld();
+      final a = world.add(Ticks('a'));
+      world.time.scale = 5;
+      world.time.maxFixedSteps = 100;
+      world.update(1);
+      expect(world.time.delta, closeTo(1 / 3, 1e-12), reason: 'not 5/3');
+      expect(world.time.unscaledDelta, closeTo(1 / 3, 1e-12));
+      expect(a.fixed, 16);
+      world.update(1 / 60);
+      expect(world.time.delta, closeTo(5 / 60, 1e-12), reason: 'a normal frame is scaled as before');
     });
 
     test('fixedAlpha is how far the frame is towards the next step', () {
@@ -390,6 +432,32 @@ void main() {
       await pumpEventQueue();
       expect(errors.single.gameObject, same(object));
     });
+  });
+
+  test('a press is seen by exactly one fixed step, however many the frame runs', () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.input.simulate.resize(100, 100);
+    final presses = world.add(FixedPresses());
+    world.input.bindAction('jump', [KeyCode.j]);
+    world.update(0);
+    // A frame of two steps.
+    world.input.simulate
+      ..keyDown(KeyCode.space)
+      ..keyDown(KeyCode.j)
+      ..fingerDown(1, 50, 50, kind: FingerKind.mouse);
+    world.update(2 / 50);
+    expect((presses.keys, presses.buttons, presses.actions), (1, 1, 1), reason: 'not twice');
+    // Frames of no step: the release waits for the next one.
+    world.input.simulate.keyUp(KeyCode.space);
+    world.update(0.25 / 50);
+    world.input.simulate.keyDown(KeyCode.space);
+    world.update(0.25 / 50);
+    expect((presses.keys, presses.keyUps), (1, 0));
+    world.update(0.5 / 50);
+    expect((presses.keys, presses.keyUps), (2, 1), reason: 'not never');
+    world.update(1 / 50);
+    expect((presses.keys, presses.keyUps), (2, 1));
   });
 }
 

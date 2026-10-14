@@ -164,6 +164,8 @@ final class World implements Finalizable {
     _unsent.clear();
     _assets.clear();
     _free(owned, null);
+    // What a disposed world reports from here goes to the zone.
+    _errors.close();
   }
 
   // --- Errors ---
@@ -187,8 +189,18 @@ final class World implements Finalizable {
   /// rethrow to stop.
   Stream<ObjectError> get errors => _errors.stream;
 
+  /// Emits [value] on one of the world's signals, sending what an owner-less
+  /// listener throws to [errors]: it mustn't escape the frame.
+  void _emit<T>(Signal<T> signal, T value) {
+    try {
+      signal.emit(value);
+    } catch (error, stack) {
+      _report(null, error, stack);
+    }
+  }
+
   void _report(GameObject? object, Object error, StackTrace stack) {
-    if (_errors.hasListener) {
+    if (_errors.hasListener && !_errors.isClosed) {
       _errors.add(ObjectError._(object, error, stack));
     } else {
       Zone.current.handleUncaughtError(error, stack);
@@ -268,8 +280,9 @@ final class World implements Finalizable {
   // readWorldTransforms' last buffer, as the engine's type.
   Pointer<FyTransform> _manyOut = nullptr;
 
-  // Whether the world has said that it has more suns, or more lamps, than a
-  // frame takes ([_noteLights]).
+  // How many suns and lamps the world has, and whether it has said that
+  // it has more than a frame takes ([_countLight]).
+  var _suns = 0, _lamps = 0;
   var _warnedSuns = false, _warnedLamps = false;
 
   // Whether a destroyed object is in [_unsent], to be dropped at the next
@@ -299,7 +312,7 @@ final class World implements Finalizable {
     input._pausing = value;
     time._paused = value;
     if (!value) time._skip = true;
-    onPausedChanged.emit(value);
+    _emit(onPausedChanged, value);
   }
 
   var _paused = false;
@@ -464,7 +477,7 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
 
     input
-      .._now = time._unscaledSinceStart
+      .._now += dt
       .._step();
 
     var kept = 0;

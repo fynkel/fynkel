@@ -121,6 +121,34 @@ void main() {
     return (level: l, robot: r, arm: a);
   }
 
+  test('a still mouse leaves an object that moves away, and enters one that comes under it', () {
+    final box = world.add(
+      Pointed(
+        'box',
+        components: [cube()],
+        transform: Transform(position: Vec3(0, 0, -5)),
+      ),
+    );
+    input.simulate.hover(-1, middle.$1, middle.$2);
+    frame();
+    expect(log, ['enter box']);
+    log.clear();
+    box.position = Vec3(0, 50, -5);
+    frame();
+    frame();
+    expect(log, ['exit box'], reason: 'it went from under the mouse');
+    log.clear();
+    box.position = Vec3(0, 0, -5);
+    frame();
+    frame();
+    expect(log, ['enter box']);
+    log.clear();
+    box.active = false;
+    frame();
+    frame();
+    expect(log, ['exit box'], reason: 'hidden');
+  });
+
   test("fingers aim from the input's camera when it has one, and touch nothing while it's gone", () {
     // A cube ahead of the main camera, and one behind it that only a
     // camera turned round sees.

@@ -7,9 +7,11 @@
 //
 // It's started with the VM service's address, the counted isolate's id,
 // and a port; it answers with its own port, then each request with one
-// message: ['mark'] → null, a count kept; ['zero'] → null, what came since
-// kept as a window's cost; ['count', minimum] → {class: [id, instances]}
-// made since, beyond that cost, for those with at least minimum; ['now']
+// message: ['mark'] → null, a count kept after a full collection; ['zero']
+// → null, what came since kept as a window's cost; ['count', minimum] →
+// [collections, {class: [id, instances]}]: the counted isolate's garbage
+// collections since 'zero', and what was made since, beyond that cost, for
+// those with at least minimum; ['now']
 // → the VM's clock; ['trace', classId, on] → null; ['traces', classId,
 // since] → lines.
 
@@ -21,6 +23,10 @@ import 'package:vm_service/vm_service_io.dart';
 Future<void> main(List<String> args, SendPort reply) async {
   final service = await vmServiceConnectUri(args[0]);
   final isolate = args[1];
+  await service.streamListen(EventStreams.kGC);
+  service.onGCEvent.listen((event) {
+    if (event.isolate?.id == isolate) _collections++;
+  });
   final requests = ReceivePort();
   reply.send(requests.sendPort);
   await for (final request in requests) {
@@ -38,22 +44,26 @@ Future<void> main(List<String> args, SendPort reply) async {
 Future<void> _answer(VmService service, String isolate, String what, List<Object?> rest, SendPort reply) async {
   switch (what) {
     case 'mark':
-      _last = await _count(service, isolate);
+      _last = await _count(service, isolate, gc: true);
       reply.send(null);
     case 'zero':
       final now = await _count(service, isolate);
       _zero = _beyond(now, _last);
       _last = now;
+      _collections = 0;
       reply.send(null);
     case 'count':
       final minimum = rest[0]! as num;
       final now = await _count(service, isolate);
       final made = _beyond(now, _last);
       _last = now;
-      reply.send({
-        for (final MapEntry(key: (name, id), :value) in made.entries)
-          if (value - (_zero[(name, id)] ?? 0) >= minimum) name: [id, value - (_zero[(name, id)] ?? 0)],
-      });
+      reply.send([
+        _collections,
+        {
+          for (final MapEntry(key: (name, id), :value) in made.entries)
+            if (value - (_zero[(name, id)] ?? 0) >= minimum) name: [id, value - (_zero[(name, id)] ?? 0)],
+        },
+      ]);
     case 'now':
       reply.send((await service.getVMTimelineMicros()).timestamp!);
     case 'trace':
@@ -80,11 +90,20 @@ Future<void> _answer(VmService service, String isolate, String what, List<Object
 // two counts, and what a window of no frames made is taken off. Only the
 // classes over a minimum are sent: a big answer, decoded in the counted
 // isolate, would be tallied in the next window.
+//
+// The profile's instancesAccumulated is not a running tally: in this VM
+// it equals instancesCurrent, a walk of the heap, dead objects included
+// until a collection frees them. So a window counts what was made only
+// if nothing was collected in it: 'mark' starts from an empty new space,
+// and the collections since 'zero' are sent with the count, for the
+// test to count again over fewer frames.
 var _last = <(String, String), int>{};
 var _zero = <(String, String), int>{};
 
-Future<Map<(String, String), int>> _count(VmService service, String isolate) async {
-  final profile = await service.getAllocationProfile(isolate);
+var _collections = 0;
+
+Future<Map<(String, String), int>> _count(VmService service, String isolate, {bool gc = false}) async {
+  final profile = await service.getAllocationProfile(isolate, gc: gc);
   return {for (final m in profile.members!) ('${m.classRef!.name}', m.classRef!.id!): m.instancesAccumulated ?? 0};
 }
 

@@ -31,6 +31,9 @@ final class Signal<T> {
   // [stream]'s, once asked for.
   StreamController<T>? _controller;
 
+  // What [next] gives outside a routine until the next emit.
+  Future<T>? _next;
+
   /// Whether anything listens, with [listen], `on` or [stream].
   bool get hasListeners => _subscriptions.length > _cancelledCount || (_controller?.hasListener ?? false);
 
@@ -85,24 +88,27 @@ final class Signal<T> {
   /// routine is paused, and stopping the routine unwinds it from here,
   /// through its `finally` blocks. `race([died.next, wait(5)])` waits for
   /// at most 5 seconds. Outside a routine it's a plain future that
-  /// listens until the next emit: one that never comes keeps the listener
-  /// for ever.
+  /// listens until the next emit; asked again before then, it's the same
+  /// future, so asking each frame keeps one listener, not one a frame.
   Future<T> get next {
     final routine = _currentRoutine;
     if (routine == null) {
+      if (_next case final pending?) return pending;
       final completer = Completer<T>();
       late final SignalSubscription<T> subscription;
       subscription = listen((value) {
         subscription.cancel();
+        _next = null;
         completer.complete(value);
       });
-      return completer.future;
+      return _next = completer.future;
     }
     if (routine._stopped) throw RoutineStopped._();
     final world = routine._world;
     final wait = _NextWait<T>(routine, world.time._frame);
     wait.subscription = listen(wait.fire);
     world._waits.add(wait);
+    (routine._waits ??= []).add(wait);
     final future = wait.values.future;
     _waitOf[future] = wait;
     return future;
@@ -136,6 +142,10 @@ final class SignalSubscription<T> {
 
   // The GameObject or Behaviour that listens with `on`, or null.
   final _Moving? _owner;
+
+  // Made with `on` while its owner was shown (enabled): a pool's release
+  // cancels these, and keeps the ones made during the load.
+  bool _whileShown = false;
 
   bool _cancelled = false;
 
@@ -184,6 +194,14 @@ final class _Listening {
     _subscriptions.add(WeakReference(subscription));
   }
 
+  /// Cancels the ones made while their owner was shown.
+  void cancelShown() {
+    for (final w in _subscriptions) {
+      if (w.target case final s? when s._whileShown) s.cancel();
+    }
+    _subscriptions.removeWhere((w) => w.target?._cancelled ?? true);
+  }
+
   void cancelAll() {
     for (final w in _subscriptions) {
       w.target?.cancel();
@@ -193,7 +211,7 @@ final class _Listening {
 }
 
 SignalSubscription<T> _on<T>(_Moving owner, Signal<T> signal, void Function(T value) handler) {
-  final subscription = signal._add(SignalSubscription<T>._(signal, handler, owner));
+  final subscription = signal._add(SignalSubscription<T>._(signal, handler, owner)).._whileShown = !owner._holdsStill;
   (owner._listening ??= _Listening()).add(subscription);
   return subscription;
 }

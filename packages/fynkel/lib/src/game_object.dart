@@ -143,6 +143,9 @@ class GameObject with _Moving {
   @override
   bool get _holdsStill => !_enabled;
 
+  @override
+  bool get _loading => !_appeared;
+
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
   World get world => _world ?? (throw _notAdded('world'));
@@ -239,7 +242,7 @@ class GameObject with _Moving {
   /// ```
   ///
   /// It stops when this object is destroyed, and is paused while it's
-  /// hidden. Throws a [StateError] before the object is added.
+  /// hidden, though not during its own load. Throws a [StateError] before the object is added.
   Routine<T> startRoutine<T>(Future<T> Function() body) => world._start(this, this, body);
 
   /// Stops every routine this object started ([startRoutine]), not those
@@ -567,15 +570,25 @@ class GameObject with _Moving {
   String? get name {
     if (_described case final d?) return d.name;
     final w = _engine('its name can\'t be read');
+    if (_nameKnown) return _name;
     final capacity = scratch.byteCapacity;
     check(fy_name_get(w, id, scratch.bytes(), capacity, scratch.count));
     final length = scratch.count.value;
-    if (length == 0) return null;
+    if (length == 0) {
+      _nameKnown = true;
+      return _name = null;
+    }
     if (length > capacity) {
       check(fy_name_get(w, id, scratch.bytes(length), length, scratch.count));
     }
-    return const Utf8Decoder().convert(scratch.bytes().asTypedList(length));
+    _nameKnown = true;
+    return _name = const Utf8Decoder().convert(scratch.bytes().asTypedList(length));
   }
+
+  // The name as the engine has it, once read or written: only this object
+  // changes it.
+  String? _name;
+  bool _nameKnown = false;
 
   set name(String? value) {
     if (_described case final d?) {
@@ -588,12 +601,16 @@ class GameObject with _Moving {
   void _writeName(String value) {
     final length = scratch.utf8(value);
     check(fy_name_set(_engine('its name can\'t be set'), id, scratch.bytes(), length));
+    _name = value == '' ? null : value;
+    _nameKnown = true;
   }
 
   /// The first object below this one named [name], searching depth first
   /// in [children] order, or null. This object itself isn't searched.
   /// Unlike Unity's `Transform.Find`, which looks only at the direct
-  /// children and takes `'a/b'` paths, this searches every descendant.
+  /// children and takes `'a/b'` paths, this searches every descendant: find
+  /// once (in onLoad or onStart) and keep what it gives, rather than each
+  /// frame.
   GameObject? find(String name) {
     final w = _engine('nothing can be found below it');
     final length = scratch.utf8(name);
@@ -697,8 +714,9 @@ class GameObject with _Moving {
         world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));
-      case Light():
+      case Light l:
         check(fy_light_remove(world.pointer, id));
+        world._countLight(this, l, _LightCount.none);
       case MeshRenderer():
         check(fy_mesh_renderer_remove(world.pointer, id));
     }
@@ -719,7 +737,10 @@ class GameObject with _Moving {
   /// they can't be changed. One taken off with [removeComponent] is gone.
   T? get<T extends Object>() {
     _probe();
-    for (final c in _components ?? const <Component>[]) {
+    // By index: an iterator would be made each call.
+    final components = _components;
+    for (var i = 0; components != null && i < components.length; i++) {
+      final c = components[i];
       if (c is T && !c._takenOff) return c as T;
     }
     return null;
@@ -751,8 +772,10 @@ class GameObject with _Moving {
   /// depth first in [children] order, or null.
   T? getInChildren<T extends Object>() {
     if (get<T>() case final found?) return found;
-    for (final child in children) {
-      if (child.getInChildren<T>() case final found?) return found;
+    // By index, as [children] makes a list.
+    final children = _children;
+    for (var i = 0; children != null && i < children.length; i++) {
+      if (children[i].getInChildren<T>() case final found?) return found;
     }
     return null;
   }
@@ -760,7 +783,12 @@ class GameObject with _Moving {
   /// Reads the engine components of an object the engine made, the first
   /// time they're asked for, so the same instances come back after.
   void _probe() {
-    if (_probed) return;
+    if (!_probed) _probeNow();
+  }
+
+  // Apart from [_probe], whose every call would otherwise make this one's
+  // closure context.
+  void _probeNow() {
     _probed = true;
     final world = _world;
     if (world == null || _destroyed || world.isDisposed) return;
@@ -918,7 +946,7 @@ class GameObject with _Moving {
     l.softness = value.softness;
     l.shadows = value.shadows;
     check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
-    if (value.kind != LightKind.ambient) world._noteLights(this);
+    world._countLight(this, value, _LightCount.of(value.kind));
   }
 
   void _writeMeshRenderer(MeshRenderer value) {

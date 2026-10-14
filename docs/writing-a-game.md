@@ -244,10 +244,11 @@ class Turret extends GameObject {
   below the pool's parent.
 - **A released object starts clean**: it's hidden, the routines and
   motions it and everything below it ran are stopped (a hidden object's
-  would only pause, and resume stale), and it's back below the pool's
-  parent. Its fields, and the signals it listens to, are the game's: a
-  hidden object still hears signals, so listen in `onEnable` and cancel
-  in `onDisable` if it shouldn't.
+  would only pause, and resume stale), what they listened to with `on`
+  while shown (from `onEnable` on) is cancelled, and it's back below the
+  pool's parent. So listen in `onEnable`, and each `get` listens once
+  again; what it listened to in `onLoad` stays, through every reuse. Its
+  fields are the game's.
 - **`release()` on the object** gives it back to its pool, or destroys
   it if it didn't come from one: write it where you'd write `destroy()`.
 - **Hold pooled objects with an `ObjectHandle`.** A field pointing at a
@@ -586,7 +587,9 @@ tested.
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A
 frame runs as many as its time holds: at 120 fps most frames have none,
-at 30 some have two. Inside a step `time.delta` is `time.fixedDelta`. To
+at 30 some have two. A frame runs at most `time.maxFixedSteps` (5), and
+drops the time past that, so a step slower than its frame can't snowball.
+Inside a step `time.delta` is `time.fixedDelta`. To
 draw something a step moves without it stepping, draw it between where
 the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
 
@@ -598,8 +601,10 @@ the last two steps left it, `time.fixedAlpha` of the way (0 to 1).
   (§11), which stops the input too.
 - `time.unscaledDelta`, `time.sinceStart`, `time.unscaledSinceStart`,
   `time.frame`.
-- `time.maxDelta` (1/3 s): a long hitch counts as at most this, so nothing
-  jumps through walls.
+- `time.maxDelta` (1/3 s): a long hitch counts as at most this much game
+  time, whatever the scale, so nothing jumps through walls.
+- `time.maxFixedSteps` (5): the most fixed steps a frame runs. Raise it
+  for a game that runs `time.scale` fast at a low frame rate.
 - `time.fixedDelta`, `time.fixedAlpha`, `time.inFixedStep`: the fixed
   steps.
 
@@ -767,7 +772,8 @@ class Spawner extends GameObject {
   started. It
   **stops by itself** when its object is destroyed (or its behaviour
   removed), and **pauses** while its object is hidden or the behaviour
-  isn't enabled.
+  isn't enabled, except during their own load: an `onLoad` may await a
+  routine (or a tween) of its own.
 - **Waits**: `await nextFrame`, `await fixedStep` (right after the next
   fixed step's `onFixedUpdate` calls), `await wait(seconds)`
   (`unscaled: true` to go on while paused), `await waitUntil(() => test)`,
@@ -915,6 +921,12 @@ and stays until set again), and a button calls `input.action('jump')
 .press()` when it goes down and `.release()` when it comes up (or both at
 once for a tap).
 
+**In `onFixedUpdate`**, `wasPressed` and `wasReleased` (an action's too)
+mean since the last fixed step, so each press is seen once there: a frame
+that runs two fixed steps doesn't jump twice, and one that runs none
+passes the press to the next. Unity's `GetKeyDown` in `FixedUpdate`
+misses or repeats presses; here it doesn't.
+
 **Keys and Flutter.** The view hears every key and gives each to the game
 (`onKeyDown` hears them all), but it keeps from Flutter only the keys the
 game uses: those bound to an axis or an action, and those it has asked
@@ -927,7 +939,9 @@ Escape work. Keys for the app rather than the game go in `FynkelApp`'s
 no fixed steps; updates still run, with `unscaledDelta`), held keys,
 fingers and actions let go, and input that comes while paused is dropped.
 The view claims no keys then, so the pause menu's shortcuts get every one.
-The first frame after it counts no time, however long the pause was:
+When it ends, the keys still down on the keyboard are held again (and
+`wasPressed` that frame). The first frame after it counts no time, however
+long the pause was:
 
 ```dart
 // lib/paused_app.dart
@@ -2251,6 +2265,32 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Hardening** (2026-10-14):
+  - `time.maxDelta` limits the game's time after `time.scale`, as
+    Unity's does: at a scale of 5 a hitch counts for 1/3 s, not 5/3.
+  - A frame runs at most `time.maxFixedSteps` (5) fixed steps, and drops
+    the rest of its time: a frame of 1/3 s runs 5 where it ran 16. Set it
+    higher to keep the old behaviour.
+  - A pool's `release` cancels what the object, and everything below
+    it, listened to with `on` while shown; what it listened to in its
+    load stays. A pooled object listening in `onEnable` no longer hears
+    once more per reuse.
+  - An object's or behaviour's routines and tweens run during its own
+    load, so an `onLoad` that awaits one finishes; they hung there.
+  - `wasPressed` and `wasReleased` in `onFixedUpdate` mean since the
+    last fixed step, where they meant this frame: a press is seen by one
+    fixed step, not by each of the frame's, nor by none.
+  - A finger's times (a tap's, a long press's, `age`, `velocity`) are
+    its events' own, from Flutter, and not limited by `time.maxDelta`:
+    a 1 s hold through a hitch is no longer a tap, and a swipe's speed
+    is no longer overstated.
+  - A still finger or mouse gets `onPointerExit` when what was under it
+    moves away or is hidden, and `onPointerEnter` when something comes
+    under it, at the next frame's input step; before, only when it moved.
+  - Keys still down when a pause ends, or when the view gets focus back,
+    are held again; they stayed up until pressed again.
+  - `World.dispose` closes `world.errors`.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

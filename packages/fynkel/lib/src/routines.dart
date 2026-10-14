@@ -91,6 +91,8 @@ final class Routine<T> implements Future<T> {
   final Routine<Object?>? _parent;
   final _result = Completer<T>.sync();
   List<Routine<Object?>>? _children;
+  // What it waits for and hasn't been given yet: one wait, mostly.
+  List<_Wait>? _waits;
   var _running = true;
   var _stopped = false;
   var _awaited = false;
@@ -126,7 +128,7 @@ final class Routine<T> implements Future<T> {
     _result.completeError(RoutineStopped._(), StackTrace.current);
   }
 
-  bool get _paused => _owner._holdsStill;
+  bool get _paused => _owner._paused;
 
   void _finish(T value) {
     if (!_running) return;
@@ -202,7 +204,16 @@ final class _Wait {
   final bool Function()? test;
   final bool until; // ends when [test] is true (else when it's false)
   final completer = Completer<void>.sync();
-  bool over = false;
+
+  /// Whether it's done with: ended, failed or given up. Once it is, its
+  /// routine no longer holds it.
+  bool get over => _over;
+  set over(bool value) {
+    _over = value;
+    if (value) routine._waits?.remove(this);
+  }
+
+  bool _over = false;
 
   /// Ends it: the routine goes on.
   void end() => completer.complete();
@@ -230,6 +241,7 @@ Future<void> _addWait(_Wait Function(Routine<Object?> routine, int frame) make, 
   final world = routine._world;
   final wait = make(routine, fixed ? world.time._fixedSteps : world.time._frame);
   (fixed ? world._fixedWaits : world._waits).add(wait);
+  (routine._waits ??= []).add(wait);
   final future = wait.completer.future;
   _waitOf[future] = wait;
   return future;

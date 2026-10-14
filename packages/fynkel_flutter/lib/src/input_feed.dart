@@ -43,6 +43,7 @@ class InputFeed {
     kind: _kind(e.kind),
     buttons: e.buttons,
     pressure: _pressure(e),
+    at: e.timeStamp,
   );
 
   /// A pressed finger, mouse or pen moves.
@@ -52,18 +53,20 @@ class InputFeed {
     e.localPosition.dy,
     buttons: e.buttons,
     pressure: _pressure(e),
+    at: e.timeStamp,
   );
 
   /// A finger, mouse button or pen lifts.
-  void pointerUp(PointerUpEvent e) => _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy);
+  void pointerUp(PointerUpEvent e) =>
+      _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy, at: e.timeStamp);
 
   /// Flutter took a pointer away (a gesture won elsewhere, say): it ends
   /// without a lift.
-  void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e));
+  void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e), at: e.timeStamp);
 
   /// A mouse or pen over the view with nothing pressed, or coming in.
   void hover(PointerEvent e) =>
-      _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind));
+      _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind), at: e.timeStamp);
 
   /// A mouse or pen leaves the view.
   void exit(PointerExitEvent e) => _input().simulate.leave(_id(e));
@@ -98,7 +101,9 @@ class InputFeed {
     if (key == null) return KeyEventResult.ignored;
     final input = _input();
     final used = switch (e) {
-      KeyDownEvent() => input.simulate.keyDown(key),
+      // A repeat holds a key the game let go meanwhile (the view lost focus,
+      // or the game paused); for one it holds, it's nothing.
+      KeyDownEvent() || KeyRepeatEvent() => input.simulate.keyDown(key),
       KeyUpEvent() => input.simulate.keyUp(key),
       _ => input.simulate.claims(key),
     };
@@ -107,6 +112,15 @@ class InputFeed {
 
   /// The view lost focus: its keys won't come up here, so they're let go.
   void releaseKeys() => _input().simulate.releaseKeys();
+
+  /// Holds the keys the keyboard holds now: after a pause, or when the view
+  /// gets focus back, those still down weren't told again.
+  void holdKeys() {
+    final input = _input().simulate;
+    for (final physical in HardwareKeyboard.instance.physicalKeysPressed) {
+      if (keyCodes[physical] case final key?) input.keyDown(key);
+    }
+  }
 }
 
 /// The game's key for a Flutter [KeyEvent], or null for one it has none

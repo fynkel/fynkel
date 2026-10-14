@@ -64,6 +64,40 @@ class Fails extends GameObject {
   }
 }
 
+/// Waits three frames in a routine of its own during its load.
+class WaitsInLoad extends GameObject {
+  WaitsInLoad({super.components}) : super(name: 'waits');
+
+  var frames = 0;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await startRoutine(() async {
+      for (var i = 0; i < 3; i++) {
+        await nextFrame;
+        frames++;
+      }
+    });
+  }
+}
+
+/// [WaitsInLoad] as a behaviour.
+class BehaviourWaitsInLoad extends Behaviour {
+  var frames = 0;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await startRoutine(() async {
+      for (var i = 0; i < 3; i++) {
+        await nextFrame;
+        frames++;
+      }
+    });
+  }
+}
+
 /// Loads [file] and adds a copy of it.
 class Holder extends GameObject {
   Holder(this.file, {super.transform});
@@ -424,6 +458,43 @@ void main() {
     await expectLater(flaky.assets.instantiate('Box.glb'), throwsA(isA<FileSystemException>()));
     fail = false;
     expect(await flaky.assets.instantiate('Box.glb'), isA<GameObject>());
+  });
+
+  test('a routine awaited in its own onLoad runs, and the object appears', () async {
+    final waits = world.add(WaitsInLoad());
+    final behaviour = BehaviourWaitsInLoad();
+    final holder = world.add(GameObject(name: 'holder', components: [behaviour]));
+    final late = world.add(GameObject(name: 'late'));
+    world.update(0);
+    final added = BehaviourWaitsInLoad();
+    late.addComponent(added);
+    for (var i = 0; i < 10; i++) {
+      world.update(1 / 60);
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect((waits.frames, behaviour.frames, added.frames), (3, 3, 3));
+    expect((waits.activeInHierarchy, holder.activeInHierarchy, late.activeInHierarchy), (true, true, true));
+  });
+
+  test('once loaded, a hidden object\'s routines still pause', () async {
+    final waits = world.add(WaitsInLoad());
+    for (var i = 0; i < 10; i++) {
+      world.update(1 / 60);
+      await Future<void>.delayed(Duration.zero);
+    }
+    var ticks = 0;
+    waits.startRoutine(() async {
+      while (true) {
+        await nextFrame;
+        ticks++;
+      }
+    });
+    waits.active = false;
+    for (var i = 0; i < 5; i++) {
+      world.update(1 / 60);
+      await Future<void>.delayed(Duration.zero);
+    }
+    expect(ticks, 0);
   });
 }
 

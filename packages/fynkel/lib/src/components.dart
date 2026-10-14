@@ -205,7 +205,15 @@ final class Camera extends Component {
 
   /// Vertical field of view in radians, 1° to 179°: 60.deg unless set.
   double get fovY => _fovY;
-  set fovY(double value) => _change(() => _fovY = value);
+  set fovY(double value) {
+    _checkChangeable();
+    final old = _fovY;
+    _fovY = value;
+    if (_write() case final failed?) {
+      _fovY = old;
+      failed.raise();
+    }
+  }
 
   /// How near to the camera things are drawn, in metres (Unity's
   /// `nearClipPlane`): 0.1 unless set, 0.0001 to 1,000,000. Keep it below
@@ -213,33 +221,81 @@ final class Camera extends Component {
   /// throws an [ArgumentError] from its frame, naming it. Checked only
   /// then, so setting one and then the other is fine.
   double get near => _near;
-  set near(double value) => _change(() => _near = value);
+  set near(double value) {
+    _checkChangeable();
+    final old = _near;
+    _near = value;
+    if (_write() case final failed?) {
+      _near = old;
+      failed.raise();
+    }
+  }
 
   /// How far from the camera things are drawn, in metres (Unity's
   /// `farClipPlane`): 1,000 unless set, 0.001 to 1,000,000,000.
   double get far => _far;
-  set far(double value) => _change(() => _far = value);
+  set far(double value) {
+    _checkChangeable();
+    final old = _far;
+    _far = value;
+    if (_write() case final failed?) {
+      _far = old;
+      failed.raise();
+    }
+  }
 
   /// What the view shows where nothing is drawn (Unity's
   /// `backgroundColor`).
   Color get clearColor => _clearColor;
-  set clearColor(Color value) => _change(() => _clearColor = value);
+  set clearColor(Color value) {
+    _checkChangeable();
+    final old = _clearColor;
+    _clearColor = value;
+    if (_write() case final failed?) {
+      _clearColor = old;
+      failed.raise();
+    }
+  }
 
   /// Parallel projection: things keep their size however far away they
   /// are, and [fovY] is unused. For a map, a board game or a side view.
   bool get orthographic => _orthographic;
-  set orthographic(bool value) => _change(() => _orthographic = value);
+  set orthographic(bool value) {
+    _checkChangeable();
+    final old = _orthographic;
+    _orthographic = value;
+    if (_write() case final failed?) {
+      _orthographic = old;
+      failed.raise();
+    }
+  }
 
   /// Half the view's height, in metres, when [orthographic] (Unity's
   /// `orthographicSize`): 5 shows 10 m from top to bottom.
   double get orthographicSize => _orthographicSize;
-  set orthographicSize(double value) => _change(() => _orthographicSize = value);
+  set orthographicSize(double value) {
+    _checkChangeable();
+    final old = _orthographicSize;
+    _orthographicSize = value;
+    if (_write() case final failed?) {
+      _orthographicSize = old;
+      failed.raise();
+    }
+  }
 
   /// The layers it draws (Unity's `cullingMask`): objects on the others
   /// ([GameObject.layer]) aren't drawn, nor tapped through it. Lights light
   /// every layer.
   LayerMask get cullingMask => _cullingMask;
-  set cullingMask(LayerMask value) => _change(() => _cullingMask = value);
+  set cullingMask(LayerMask value) {
+    _checkChangeable();
+    final old = _cullingMask;
+    _cullingMask = value;
+    if (_write() case final failed?) {
+      _cullingMask = old;
+      failed.raise();
+    }
+  }
 
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
@@ -305,31 +361,14 @@ final class Camera extends Component {
     return ViewPoint((across + 1) / 2 * w, (1 - up) / 2 * h, width: w, height: h);
   }
 
-  /// Makes a change and writes it to the engine; undoes it if the engine
-  /// refuses it.
-  void _change(void Function() set) {
-    _checkChangeable();
-    final (fovY, near, far, clearColor, orthographic, size, cullingMask) = (
-      _fovY,
-      _near,
-      _far,
-      _clearColor,
-      _orthographic,
-      _orthographicSize,
-      _cullingMask,
-    );
-    set();
+  /// Writes it to the engine; what the engine refuses comes back, for the
+  /// setter to undo its change and throw.
+  _Failure? _write() {
     try {
       _live?._writeCamera(this);
-    } catch (_) {
-      _fovY = fovY;
-      _near = near;
-      _far = far;
-      _clearColor = clearColor;
-      _orthographic = orthographic;
-      _orthographicSize = size;
-      _cullingMask = cullingMask;
-      rethrow;
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
     }
   }
 
@@ -358,6 +397,20 @@ enum LightKind {
   /// A spotlight: a lamp that shines only in a cone around the object's
   /// forward, [Light.angle] across. Unity's `LightType.Spot`.
   spot,
+}
+
+/// What a light counts as against a frame's caps.
+enum _LightCount {
+  none,
+  sun,
+  lamp;
+
+  /// What a light of [kind] counts as.
+  static _LightCount of(LightKind kind) => switch (kind) {
+    LightKind.sun => sun,
+    LightKind.point || LightKind.spot => lamp,
+    LightKind.ambient => none,
+  };
 }
 
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
@@ -405,39 +458,90 @@ final class Light extends Component {
   ]) : super._();
 
   LightKind _kind;
+  // What the world counts it as ([World._countLight]): a sun, a lamp or
+  // neither.
+  _LightCount _counted = _LightCount.none;
   Color _color;
   double _intensity, _range, _angle, _softness;
   bool _shadows;
 
   /// What kind of light it is; it can change while it's on.
   LightKind get kind => _kind;
-  set kind(LightKind value) => _change(() => _kind = value);
+  set kind(LightKind value) {
+    _checkChangeable();
+    final old = _kind;
+    _kind = value;
+    if (_write() case final failed?) {
+      _kind = old;
+      failed.raise();
+    }
+  }
 
   /// The light's colour: white unless set.
   Color get color => _color;
-  set color(Color value) => _change(() => _color = value);
+  set color(Color value) {
+    _checkChangeable();
+    final old = _color;
+    _color = value;
+    if (_write() case final failed?) {
+      _color = old;
+      failed.raise();
+    }
+  }
 
   /// How bright it is, 0 to 1,000,000; 1 unless set. A sun of 1 lights a
   /// white, rough surface that faces it to exactly its material's colour.
   /// Out of range or NaN throws an [ArgumentError] and keeps the old
   /// value.
   double get intensity => _intensity;
-  set intensity(double value) => _change(() => _intensity = value);
+  set intensity(double value) {
+    _checkChangeable();
+    final old = _intensity;
+    _intensity = value;
+    if (_write() case final failed?) {
+      _intensity = old;
+      failed.raise();
+    }
+  }
 
   /// A point or spot light's reach in metres, 0 to 1,000,000; 10 unless
   /// set. The light fades smoothly to nothing there. A parent's scale
   /// doesn't change it.
   double get range => _range;
-  set range(double value) => _change(() => _range = value);
+  set range(double value) {
+    _checkChangeable();
+    final old = _range;
+    _range = value;
+    if (_write() case final failed?) {
+      _range = old;
+      failed.raise();
+    }
+  }
 
   /// A spot light's cone, edge to edge, 0 to 179°; 30° unless set.
   double get angle => _angle;
-  set angle(double value) => _change(() => _angle = value);
+  set angle(double value) {
+    _checkChangeable();
+    final old = _angle;
+    _angle = value;
+    if (_write() case final failed?) {
+      _angle = old;
+      failed.raise();
+    }
+  }
 
   /// How much of a spot light's cone fades, from its rim in, 0 to 1; 0.2
   /// unless set.
   double get softness => _softness;
-  set softness(double value) => _change(() => _softness = value);
+  set softness(double value) {
+    _checkChangeable();
+    final old = _softness;
+    _softness = value;
+    if (_write() case final failed?) {
+      _softness = old;
+      failed.raise();
+    }
+  }
 
   /// Whether what it shines on casts shadows: false unless set. A sun's
   /// reach [Quality]'s shadow distance from the camera (40, 60 or 100 m)
@@ -447,31 +551,24 @@ final class Light extends Component {
   /// shadows aren't drawn yet. A [MeshRenderer] can choose not to cast
   /// them, or not to receive them.
   bool get shadows => _shadows;
-  set shadows(bool value) => _change(() => _shadows = value);
-
-  void _change(void Function() set) {
+  set shadows(bool value) {
     _checkChangeable();
-    final (kind, color, intensity, range, angle, softness, shadows) = (
-      _kind,
-      _color,
-      _intensity,
-      _range,
-      _angle,
-      _softness,
-      _shadows,
-    );
-    set();
+    final old = _shadows;
+    _shadows = value;
+    if (_write() case final failed?) {
+      _shadows = old;
+      failed.raise();
+    }
+  }
+
+  /// Writes it to the engine; what the engine refuses comes back, for the
+  /// setter to undo its change and throw.
+  _Failure? _write() {
     try {
       _live?._writeLight(this);
-    } catch (_) {
-      _kind = kind;
-      _color = color;
-      _intensity = intensity;
-      _range = range;
-      _angle = angle;
-      _softness = softness;
-      _shadows = shadows;
-      rethrow;
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
     }
   }
 
@@ -511,7 +608,15 @@ final class MeshRenderer extends Component {
   /// The shape it draws; null draws nothing. A mesh can be on any number
   /// of renderers.
   Mesh? get mesh => _mesh;
-  set mesh(Mesh? value) => _change(() => _mesh = value);
+  set mesh(Mesh? value) {
+    _checkChangeable();
+    final old = _mesh;
+    _mesh = value;
+    if (_write() case final failed?) {
+      _mesh = old;
+      failed.raise();
+    }
+  }
 
   /// How its surface looks; null draws nothing. Shared: changing the
   /// material changes every object that uses it (as Unity's
@@ -519,38 +624,65 @@ final class MeshRenderer extends Component {
   /// renderer). For this object alone, set [color] or give it a
   /// [Material.copy].
   Material? get material => _material;
-  set material(Material? value) => _change(() => _material = value);
+  set material(Material? value) {
+    _checkChangeable();
+    final old = _material;
+    _material = value;
+    if (_write() case final failed?) {
+      _material = old;
+      failed.raise();
+    }
+  }
 
   /// This object's own base colour, in place of its material's, which
   /// stays as it is for the other objects that share it (Unity's
   /// `MaterialPropertyBlock`). Null, as at first, for the material's.
   /// `colorTo` tweens it.
   Color? get color => _color;
-  set color(Color? value) => _change(() => _color = value);
+  set color(Color? value) {
+    _checkChangeable();
+    final old = _color;
+    _color = value;
+    if (_write() case final failed?) {
+      _color = old;
+      failed.raise();
+    }
+  }
 
   /// Whether it blocks the light of lights with [Light.shadows]: true
   /// unless set. Off for what shouldn't darken the ground: water, a glow,
   /// a ghost.
   bool get castShadows => _castShadows;
-  set castShadows(bool value) => _change(() => _castShadows = value);
+  set castShadows(bool value) {
+    _checkChangeable();
+    final old = _castShadows;
+    _castShadows = value;
+    if (_write() case final failed?) {
+      _castShadows = old;
+      failed.raise();
+    }
+  }
 
   /// Whether shadows fall on it: true unless set.
   bool get receiveShadows => _receiveShadows;
-  set receiveShadows(bool value) => _change(() => _receiveShadows = value);
-
-  void _change(void Function() set) {
+  set receiveShadows(bool value) {
     _checkChangeable();
-    final (mesh, material, color, cast, receive) = (_mesh, _material, _color, _castShadows, _receiveShadows);
-    set();
+    final old = _receiveShadows;
+    _receiveShadows = value;
+    if (_write() case final failed?) {
+      _receiveShadows = old;
+      failed.raise();
+    }
+  }
+
+  /// Writes it to the engine; what the engine refuses comes back, for the
+  /// setter to undo its change and throw.
+  _Failure? _write() {
     try {
       _live?._writeMeshRenderer(this);
-    } catch (_) {
-      _mesh = mesh;
-      _material = material;
-      _color = color;
-      _castShadows = cast;
-      _receiveShadows = receive;
-      rethrow;
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
     }
   }
 
@@ -595,6 +727,9 @@ abstract class Behaviour extends Component with _Moving {
   @override
   bool get _holdsStill => !_enabledNow;
 
+  @override
+  bool get _loading => !_loaded && !_removed;
+
   /// Whether it gets its object's frames and pointers. A disabled behaviour
   /// waits to start until it's enabled. Setting it calls [onDisable] or
   /// [onEnable] when that changes whether it's enabled: only while it's
@@ -638,7 +773,7 @@ abstract class Behaviour extends Component with _Moving {
 
   /// Starts a routine, as [GameObject.startRoutine] does; it stops when this
   /// behaviour is removed or its object destroyed, and is paused while
-  /// the behaviour isn't enabled.
+  /// the behaviour isn't enabled, though not during its own load.
   Routine<T> startRoutine<T>(Future<T> Function() body) {
     if (_going) throw StateError('$this was removed, so it can\'t start a routine');
     return gameObject.world._start(this, gameObject, body);
@@ -757,4 +892,15 @@ abstract class Behaviour extends Component with _Moving {
 
   @override
   String toString() => _owner == null ? '$runtimeType' : '$runtimeType on $_owner';
+}
+
+/// What a component's write threw: its setter puts the old value back,
+/// then throws it. Made only when the engine refuses a value.
+final class _Failure {
+  _Failure(this.error, this.stack);
+
+  final Object error;
+  final StackTrace stack;
+
+  Never raise() => Error.throwWithStackTrace(error, stack);
 }

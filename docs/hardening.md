@@ -588,7 +588,18 @@ planned; neither needs anything here changed again.
   at the elbow (the guide has no nested ragdoll). P7: 1000 spawns and
   removes with 10,000 colliders in the world, 358 → 13 ms (JIT). P9 is
   unreachable today, so hardened without a test. Physics ABI 13.
-- [ ] Phase 3: the Dart frame
+- [x] Phase 3: the Dart frame (D1–D14; D11's second half left, see
+  Raised and left). Every bug row had a test that failed first, except
+  D3 (a timing test: destroying 3000 waiting objects now costs what 1000
+  do) and D10/D14 (alloc tests). Measured (JIT): D1, 2000 intensity sets
+  with 5000 other objects 118 ms, against 2.4 ms alone, now no longer
+  depends on the scene; D10, 1M `getInChildren` 1.27 → 0.30 s; D13, 1M
+  `name` reads 92 → 8 ms; D14, 1M light, colour and material sets 665 →
+  262 ms. The alloc harness counted the heap, not what was made, so a
+  collection inside its window hid the garbage and tests passed that
+  shouldn't: fixed in both packages, and what it then found (debug
+  drawing, `get`) fixed too. The done criterion's "tweened light and
+  colour" is held as "set every frame", see Raised and left.
 - [ ] Phase 4: the renderer
 - [ ] Phase 5: what a game writes
 - [ ] Phase 6: the hook and the guide
@@ -622,5 +633,22 @@ So they aren't raised again.
   anti-aliasing; texture compression**: real costs on Mali, none a bug.
   Phase 6 of stage 8 (which has to fit the Note10+) decides them with
   numbers, after R11.
+- **Skipping the hover raycast when nothing overrides a pointer handler**
+  (D11's second half): Dart can't tell at run time whether a class
+  overrides a method, short of codegen. Measured instead: a mouse moving
+  every frame costs 3 µs a frame with 100 cubes and 24 µs with 2,000
+  (JIT), against an 8.3 ms frame at 120 fps. A still mouse over a still
+  scene casts nothing.
+- **Tweens box doubles in the JIT** (phase 3's done criterion): a tween
+  calls its ease and lerp through closures and passes the time as double
+  arguments, about nine boxed doubles a frame for two tweens. Setting a
+  light, a colour or a material every frame makes nothing
+  (`calls_alloc_test`); the tween's own boxing is the motions' design,
+  not a setter's, and AOT unboxes most of it. Left for a motions pass
+  with numbers from a release build.
+- **The JIT boxes a defaulted double argument** in a call too big to
+  inline (found in `Debug.box` and `sphere`): an optional `double x = 0`
+  is unboxed on entry and boxed again where it's stored. Public calls
+  on per-frame paths take `double?` instead.
 - **Sound, particles, animation, prebuilt binaries, Linux hosts, an
   editor**: the stages after this plan, in their planned order.

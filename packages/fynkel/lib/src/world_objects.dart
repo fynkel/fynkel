@@ -440,6 +440,7 @@ extension _Objects on World {
         for (final c in object._components ?? const <Component>[]) {
           if (c._takenOff) continue;
           c._removed = true;
+          if (c is Light) _countLight(object, c, _LightCount.none);
           _unregister(c);
         }
       }
@@ -474,26 +475,40 @@ extension _Objects on World {
     }
   }
 
-  /// Says once, when more suns or lamps are put in the world than light a
-  /// frame, which are left out: past four suns, the ones made last; past
-  /// 64 point and spot lights in view, the ones furthest from the camera.
-  void _noteLights(GameObject object) {
-    final sun = object.get<Light>()?.kind == LightKind.sun;
-    if (sun ? _warnedSuns : _warnedLamps) return;
-    // The object itself, which may not be among the live ones yet.
-    var count = 1;
-    for (final other in _live) {
-      if (identical(other, object) || other._destroyed) continue;
-      final kind = other.get<Light>()?.kind;
-      if (kind == null || kind == LightKind.ambient || (kind == LightKind.sun) != sun) continue;
-      count++;
+  /// Counts [light], on [object], as [count] now: a sun, a lamp or
+  /// neither. Says once, in a debug build, when more suns or lamps are put
+  /// in the world than light a frame, which are left out: past four suns,
+  /// the ones made last; past 64 point and spot lights in view, the ones
+  /// furthest from the camera.
+  void _countLight(GameObject object, Light light, _LightCount count) {
+    final before = light._counted;
+    if (before == count) return;
+    light._counted = count;
+    switch (before) {
+      case _LightCount.sun:
+        _suns--;
+      case _LightCount.lamp:
+        _lamps--;
+      case _LightCount.none:
     }
-    final (cap, what) = sun
-        ? (4, 'suns: the first four made light the scene, the others are left out')
-        : (64, 'point and spot lights: at most 64 in view light a frame, the ones nearest the camera');
-    if (count <= cap) return;
-    sun ? _warnedSuns = true : _warnedLamps = true;
+    final int now;
+    switch (count) {
+      case _LightCount.sun:
+        now = ++_suns;
+        if (now <= 4 || _warnedSuns) return;
+        _warnedSuns = true;
+      case _LightCount.lamp:
+        now = ++_lamps;
+        if (now <= 64 || _warnedLamps) return;
+        _warnedLamps = true;
+      case _LightCount.none:
+        return;
+    }
+    if (const bool.fromEnvironment('dart.vm.product')) return;
+    final what = count == _LightCount.sun
+        ? 'suns: the first four made light the scene, the others are left out'
+        : 'point and spot lights: at most 64 in view light a frame, the ones nearest the camera';
     final named = object.name == null ? '$object' : '$object (${object.name})';
-    print('Fynkel: with $named, the world has $count $what.');
+    print('Fynkel: with $named, the world has $now $what.');
   }
 }

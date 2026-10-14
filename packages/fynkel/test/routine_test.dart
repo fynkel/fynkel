@@ -73,6 +73,27 @@ void main() {
     object.stopAllRoutines();
   });
 
+  test('stopping a routine costs the same however many others wait', () {
+    Duration destroy(int count, {required bool waiting}) {
+      // Each test's waits are counted from none.
+      world.update(0.25);
+      final objects = [for (var i = 0; i < count; i++) world.add(GameObject())];
+      for (final o in objects) {
+        if (waiting) o.startRoutine(() => wait(10)).done.ignore();
+      }
+      final watch = Stopwatch()..start();
+      for (final o in objects) {
+        o.destroy();
+      }
+      return watch.elapsed;
+    }
+
+    destroy(3000, waiting: true);
+    final few = destroy(1000, waiting: true);
+    final many = destroy(3000, waiting: true);
+    expect(many.inMicroseconds, lessThan(few.inMicroseconds * 5 + 2000), reason: '1000 in $few, 3000 in $many');
+  });
+
   test('a routine runs at once up to its first wait, then in the routines step: after updates, before late', () {
     object.startRoutine(() async {
       log.add('a');

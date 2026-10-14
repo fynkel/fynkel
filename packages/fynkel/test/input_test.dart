@@ -388,6 +388,32 @@ void main() {
       expect(input.mousePosition, isNull);
     });
 
+    test('leaving during a drag: it goes when the button comes up, unless it came back', () {
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
+      step();
+      input.simulate
+        ..fingerMove(-1, 250, 50)
+        ..leave(-1);
+      step();
+      expect(input.fingers, hasLength(1), reason: 'still dragging');
+      input.simulate.fingerUp(-1, 260, 50);
+      step();
+      expect(input.fingers, isEmpty, reason: 'it left the view');
+      expect(input.mousePosition, isNull);
+
+      input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse);
+      step();
+      input.simulate
+        ..fingerMove(-1, 250, 50)
+        ..leave(-1)
+        ..fingerMove(-1, 150, 50)
+        ..hover(-1, 150, 50);
+      step();
+      input.simulate.fingerUp(-1, 150, 50);
+      step();
+      expect(input.fingers, hasLength(1), reason: 'it came back');
+    });
+
     test('its buttons: which pressed, others pressed meanwhile, and their taps', () {
       input.simulate.fingerDown(-1, 50, 50, kind: FingerKind.mouse, buttons: 2);
       step();
@@ -760,6 +786,43 @@ void main() {
       final world = World();
       addTearDown(world.dispose);
       expect(() => world.input.update(frame), throwsStateError);
+    });
+  });
+
+  group('event times', () {
+    test('a finger held through a hitch, its down and up in one batch, is no tap', () {
+      input.simulate
+        ..fingerDown(1, 50, 50, at: const Duration(seconds: 100))
+        ..fingerUp(1, 50, 50, at: const Duration(seconds: 101));
+      step();
+      expect(heard, ['down 1', 'up 1'], reason: 'held 1 s by its own clock');
+    });
+
+    test('a swipe\'s speed is from its events\' times, not the frame\'s', () {
+      double? speed;
+      input.onSwipe.listen((s) => speed = s.speed);
+      input.simulate.fingerDown(1, 10, 50, at: const Duration(milliseconds: 1000));
+      for (var i = 1; i <= 10; i++) {
+        input.simulate.fingerMove(1, 10.0 + i * 10, 50, at: Duration(milliseconds: 1000 + i * 10));
+      }
+      input.simulate.fingerUp(1, 110, 50, at: const Duration(milliseconds: 1100));
+      step();
+      expect(speed, closeTo(1000, 1), reason: '100 px in 0.1 s');
+    });
+
+    test('in a world, a finger held through a long frame is no tap', () {
+      final world = World();
+      addTearDown(world.dispose);
+      final taps = <Finger>[];
+      world.input
+        ..simulate.resize(100, 100)
+        ..onTap.listen(taps.add);
+      world.input.simulate.fingerDown(1, 50, 50);
+      world.update(1 / 60);
+      world.update(1.0);
+      world.input.simulate.fingerUp(1, 50, 50);
+      world.update(1 / 60);
+      expect(taps, isEmpty, reason: 'held 1 s, though the game counted 1/3 s');
     });
   });
 }

@@ -156,9 +156,13 @@ extension _Resources on World {
   }
 
   void _writeMaterial(Material material) {
-    int texture(Texture2D? t) => t == null ? 0 : _textureId(t);
     // Textures first: adding one can fail, and then nothing was written.
-    final textures = material._textures.map(texture).toList();
+    final textures = material._textures;
+    final base = _textureOrNone(textures[0]);
+    final normal = _textureOrNone(textures[1]);
+    final metallicRoughness = _textureOrNone(textures[2]);
+    final occlusion = _textureOrNone(textures[3]);
+    final emissive = _textureOrNone(textures[4]);
     final m = scratch.material.ref;
     m.base_color.write(material.color);
     m.metallic = material.metallic;
@@ -173,10 +177,12 @@ extension _Resources on World {
       ..y = material.uvOffset.y;
     m.alpha_cutoff = material.alphaCutoff;
     m.double_sided = material.doubleSided;
-    m.base_color_texture = textures[0];
-    m.normal_texture = textures[1];
-    m.metallic_roughness_texture = textures[2];
-    m.occlusion_texture = textures[3];
-    m.emissive_texture = textures[4];
+    m.base_color_texture = base;
+    m.normal_texture = normal;
+    m.metallic_roughness_texture = metallicRoughness;
+    m.occlusion_texture = occlusion;
+    m.emissive_texture = emissive;
   }
+
+  int _textureOrNone(Texture2D? texture) => texture == null ? 0 : _textureId(texture);
 }

@@ -24,6 +24,28 @@ class Shot extends GameObject {
   }
 }
 
+/// Listens to [Listener.ping] once on load and again each time it's
+/// shown, as the guide's pooling section suggests.
+class Listener extends GameObject {
+  Listener() : super(name: 'listener');
+
+  static final ping = Signal<int>();
+  var heardLoaded = 0;
+  var heardShown = 0;
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    on(ping, (_) => heardLoaded++);
+  }
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    on(ping, (_) => heardShown++);
+  }
+}
+
 class Ticker extends Behaviour {
   var ticks = 0;
 }
@@ -226,5 +248,20 @@ void main() {
     made[3].destroy();
     expect((copy.length, shots.countActive), (1, 0), reason: 'a destroyed one leaves; the copy stays');
     expect(() => shots.activeAt(0), throwsRangeError);
+  });
+
+  test('a release cancels what was listened to while shown, and keeps what was listened to on load', () {
+    final pool = Pool(root, Listener.new);
+    final a = pool.get();
+    world.update(0);
+    for (var i = 0; i < 5; i++) {
+      pool.release(a);
+      expect(pool.get(), same(a));
+    }
+    Listener.ping.emit(1);
+    expect((a.heardShown, a.heardLoaded), (1, 1), reason: 'one handler from the last onEnable, one from the load');
+    pool.release(a);
+    Listener.ping.emit(2);
+    expect((a.heardShown, a.heardLoaded), (1, 2), reason: 'released: only the load\'s handler still hears');
   });
 }
