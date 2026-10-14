@@ -290,7 +290,7 @@ impl Extract {
             if r.own_color {
                 material.base_color = r.color.to_linear();
             }
-            scene.draws.push(Draw { mesh: mesh_key(mesh), model, material });
+            scene.draws.push(Draw { mesh: mesh_key(mesh), model, material, cast_shadows: true, receive_shadows: true });
         });
 
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));

@@ -45,6 +45,8 @@ fn scene(n: u32, lamps: u32, t: f32) -> RenderScene {
                     ),
                 ),
                 material,
+                cast_shadows: true,
+                receive_shadows: true,
             })
             .collect(),
     }

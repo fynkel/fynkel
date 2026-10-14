@@ -28,6 +28,8 @@ fn wall(size: f32, lights: Vec<Light>, quality: Quality) -> RenderScene {
                 roughness: 1.0,
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         }],
     }
 }

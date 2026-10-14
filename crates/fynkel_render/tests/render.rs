@@ -101,6 +101,8 @@ fn light_units_match_the_documented_maths() {
             roughness: 1.0,
             ..PbrMaterial::DEFAULT
         },
+        cast_shadows: true,
+        receive_shadows: true,
     };
     let surface = Surface { albedo, metallic: 0.0, roughness: 1.0 };
     let (n, v) = (Vec3::Z, Vec3::Z); // at the centre pixel
@@ -163,6 +165,8 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
                     roughness: 0.6,
                     ..PbrMaterial::DEFAULT
                 },
+                cast_shadows: true,
+                receive_shadows: true,
             }],
         };
         let (image, _) = render(&gpu, &mut r, &scene, 128, 128);
@@ -223,11 +227,41 @@ fn draws_sharing_a_mesh_are_instanced_together() {
     let at = |x: f32, z: f32| Mat4::from_translation(Vec3::new(x, 0.0, z));
     // Interleaved meshes and materials: cube, sphere, cube, sphere, cube.
     scene.draws = vec![
-        Draw { mesh: CUBE, model: at(-2.0, 0.0), material: material(0xFFE0613A, 0.0) },
-        Draw { mesh: SPHERE, model: at(-1.0, 1.0), material: material(0xFF3A8EE0, 0.0) },
-        Draw { mesh: CUBE, model: at(0.0, 0.0), material: material(0xFF4CC26B, 1.0) },
-        Draw { mesh: SPHERE, model: at(1.0, 1.0), material: material(0xFFE0D23A, 1.0) },
-        Draw { mesh: CUBE, model: at(2.0, 0.0), material: material(0xFFB03AE0, 0.0) },
+        Draw {
+            mesh: CUBE,
+            model: at(-2.0, 0.0),
+            material: material(0xFFE0613A, 0.0),
+            cast_shadows: true,
+            receive_shadows: true,
+        },
+        Draw {
+            mesh: SPHERE,
+            model: at(-1.0, 1.0),
+            material: material(0xFF3A8EE0, 0.0),
+            cast_shadows: true,
+            receive_shadows: true,
+        },
+        Draw {
+            mesh: CUBE,
+            model: at(0.0, 0.0),
+            material: material(0xFF4CC26B, 1.0),
+            cast_shadows: true,
+            receive_shadows: true,
+        },
+        Draw {
+            mesh: SPHERE,
+            model: at(1.0, 1.0),
+            material: material(0xFFE0D23A, 1.0),
+            cast_shadows: true,
+            receive_shadows: true,
+        },
+        Draw {
+            mesh: CUBE,
+            model: at(2.0, 0.0),
+            material: material(0xFFB03AE0, 0.0),
+            cast_shadows: true,
+            receive_shadows: true,
+        },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 160);
     assert_eq!(
@@ -252,7 +286,13 @@ fn an_orthographic_camera_keeps_sizes_at_any_distance() {
     scene.camera = Some(camera);
     let material = scene.draws[0].material;
     scene.draws = [(-2.5, 0.0), (0.0, -5.0), (2.5, -20.0)]
-        .map(|(x, z)| Draw { mesh: CUBE, model: Mat4::from_translation(Vec3::new(x, 0.0, z)), material })
+        .map(|(x, z)| Draw {
+            mesh: CUBE,
+            model: Mat4::from_translation(Vec3::new(x, 0.0, z)),
+            material,
+            cast_shadows: true,
+            receive_shadows: true,
+        })
         .to_vec();
     let (image, _) = render(&gpu, &mut r, &scene, 256, 128);
     // Across the middle row: where each cube starts, and how wide it is.
@@ -289,7 +329,13 @@ fn draws_outside_the_view_are_culled() {
     let mut r = renderer(&gpu, SRGB);
     let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
     camera.clear_color = [0.0; 3];
-    let cube = |model: Mat4| Draw { mesh: CUBE, model, material: PbrMaterial::DEFAULT };
+    let cube = |model: Mat4| Draw {
+        mesh: CUBE,
+        model,
+        material: PbrMaterial::DEFAULT,
+        cast_shadows: true,
+        receive_shadows: true,
+    };
     let at = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
     // At 5 away the view is 2.89 either side of the middle (60°, square).
     let draws = vec![
@@ -384,6 +430,8 @@ fn frames_in_flight_keep_their_own_data() {
                 roughness: 0.5,
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         })
         .collect();
     let mut empty = stage1_scene();
@@ -444,6 +492,8 @@ fn non_uniform_scale_keeps_normals_right() {
                 roughness: 1.0,
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         }],
     };
     let got = render(&gpu, &mut r, &scene, 64, 64).0.pixel(32, 32);

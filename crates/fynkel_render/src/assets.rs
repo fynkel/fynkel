@@ -11,6 +11,7 @@ use glam::Vec3;
 use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
 use crate::scene::{ColorSpace, MeshKey, Quality, TextureKey};
+use crate::shadows::ShadowKit;
 use crate::texture::{TextureKit, Textures};
 use fynkel_mesh::MeshData;
 
@@ -25,6 +26,8 @@ pub struct Kit {
     /// The last pass's input: the scene's half-float image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
     pub(crate) textures: TextureKit,
+    /// Shadow maps' layouts, sampler and pipelines.
+    pub(crate) shadows: ShadowKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
 }
 
@@ -63,12 +66,14 @@ impl Kit {
                 count: None,
             }],
         });
+        let textures = TextureKit::new(gpu);
         Arc::new(Self {
+            shadows: ShadowKit::new(&gpu.device, &textures.layout),
             gpu: gpu.clone(),
             quality: Quality::for_adapter(&gpu.adapter.get_info()),
             frame_layout,
             image_layout,
-            textures: TextureKit::new(gpu),
+            textures,
             pipelines: Mutex::default(),
         })
     }

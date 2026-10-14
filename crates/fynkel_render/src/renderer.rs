@@ -12,6 +12,12 @@
 //! reach it, brightest at it first, up to [`Quality::lights_per_object`],
 //! and its shader loops over just those.
 //!
+//! Shadows (`shadows`): the first sun with shadows casts them through
+//! [`ShadowLevel::cascades`](crate::ShadowLevel) maps fitted to the view,
+//! and the spot lights with shadows nearest the camera through a map each,
+//! up to the level's [`ShadowLevel::spot_maps`](crate::ShadowLevel).
+//!
+//! 0. The shadow maps: each one's casters' depth, as its light sees them.
 //! 1. The scene: every draw, then the debug lines on top. Above
 //!    [`Quality::Low`] it is drawn into a half-float image (the scene
 //!    image); at low, straight into the view.
@@ -26,7 +32,8 @@ use glam::{Mat3, Mat4, Vec3, Vec4};
 use crate::assets::{self, Assets, Kit, SharedAssets};
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
-use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, TextureKey};
+use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, TextureKey};
+use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
 use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
@@ -50,6 +57,10 @@ pub struct FrameStats {
     /// lights in view past [`Renderer::MAX_LIGHTS`] (the furthest from the
     /// camera).
     pub lights_left_out: u32,
+    /// Shadow maps drawn: the sun's cascades and the spot lights'.
+    pub shadow_maps: u32,
+    /// Draws into shadow maps: one per caster per map it falls in.
+    pub shadow_casters: u32,
 }
 
 /// `Frame` in forward.wgsl.
@@ -59,11 +70,38 @@ struct FrameUniforms {
     view_proj: [[f32; 4]; 4],
     camera_position: [f32; 4],
     ambient: [f32; 4],
-    /// x: how many of `suns` are used.
+    /// x: how many of `suns` are used. y: the one that casts shadows, or
+    /// [`NO_SHADOWS`].
     counts: [u32; 4],
     suns: [SunUniform; MAX_SUNS],
     lights: [LightUniform; MAX_LIGHTS],
+    shadows: ShadowUniforms,
 }
+
+/// `Shadows` in forward.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ShadowUniforms {
+    /// World to each cascade's map.
+    cascades: [[[f32; 4]; 4]; MAX_CASCADES],
+    /// World to each spot map.
+    spots: [[[f32; 4]; 4]; MAX_SPOT_MAPS],
+    /// xyz: how far along the view each cascade ends. w: where the shadows
+    /// start fading out.
+    splits: [f32; 4],
+    /// x: cascades, y: the filter (0 hard, 1 soft, 2 softer), z: 1 / the
+    /// cascades' size, w: 1 / the spot maps'.
+    params: [f32; 4],
+    /// Each cascade's texel, in metres.
+    texels: [f32; 4],
+    /// xyz: the way the camera looks. w: how far the shadows reach.
+    camera_forward: [f32; 4],
+    /// xyz: where the camera is (an orthographic one's too).
+    camera_at: [f32; 4],
+}
+
+/// `FrameUniforms::counts.y` when no sun casts shadows.
+const NO_SHADOWS: u32 = u32::MAX;
 
 /// `Sun` in forward.wgsl.
 #[repr(C)]
@@ -85,6 +123,7 @@ struct LightUniform {
     direction: [f32; 4],
     /// x, y: the cone's fade as a scale and an offset on the cosine of the
     /// angle from the axis. A point light's (0, 1) lights every way.
+    /// z: its spot map, or -1. w: a texel of that map, per metre away.
     cone: [f32; 4],
 }
 
@@ -104,7 +143,7 @@ struct Instance {
     base_color: [f32; 4],
     /// Metallic, roughness, alpha cutoff, and -1 when the model mirrors.
     params: [f32; 4],
-    /// Emission (w unused).
+    /// Emission; w: 1 if shadows fall on it, 0 if not.
     emissive: [f32; 4],
     /// UV scale (xy), then offset (zw).
     uv: [f32; 4],
@@ -185,6 +224,23 @@ struct Batch {
     count: u32,
 }
 
+/// Draws into one shadow map: `count` casters of `mesh` from caster
+/// `first`, opaque or cut out with `textures`. `map` is a cascade's index,
+/// or [`MAX_CASCADES`] plus a spot map's.
+#[derive(Clone, Copy)]
+struct CasterBatch {
+    map: u8,
+    cutout: bool,
+    textures: MaterialTextures,
+    mesh: MeshKey,
+    first: u32,
+    count: u32,
+}
+
+/// A caster's sort key: its map, cut out or not, its textures (a cut-out's
+/// only) and its mesh.
+type CasterKey = (u8, bool, MaterialTextures, u64);
+
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
 pub(crate) struct Pipelines {
@@ -228,6 +284,20 @@ pub struct Renderer {
     /// The frame's point and spot lights, in the order of
     /// [`FrameUniforms::lights`].
     frame_lights: Vec<Reach>,
+    /// Draws that cast shadows: their bounding sphere and their index.
+    shadow_candidates: Vec<(Vec3, f32, u32)>,
+    /// Each caster in each map, sorted as they're drawn.
+    caster_order: Vec<(CasterKey, u32)>,
+    casters: Vec<Caster>,
+    caster_batches: Vec<CasterBatch>,
+    /// Each map's view matrix, at its index times the view stride.
+    shadow_views: Vec<u8>,
+    /// The cascades drawn this frame, and the spot maps.
+    shadow_maps_drawn: (u8, u8),
+    /// The maps this frame needs, by size and layers: the cascades, then
+    /// the spot maps; `None` where it needs none.
+    shadow_shape: [Option<(u32, u32)>; 2],
+    shadow_maps: Option<ShadowMaps>,
     clear: wgpu::Color,
     size: (u32, u32),
     /// This frame's level: the scene's, or the device's.
@@ -278,12 +348,11 @@ impl Renderer {
             pipelines: kit.pipelines(format),
             frame_data: FrameRing::new(
                 &kit.gpu.device,
-                kit.frame_layout.clone(),
-                FRAME_UNIFORMS_SIZE,
+                (kit.frame_layout.clone(), FRAME_UNIFORMS_SIZE),
+                (kit.shadows.view_layout.clone(), kit.shadows.view_stride, MAX_MAPS as u64 * kit.shadows.view_stride),
                 64 * INSTANCE_SIZE,
             ),
             quality: kit.quality(),
-            kit,
             format,
             image_pipelines: None,
             assets,
@@ -296,8 +365,17 @@ impl Renderer {
             seen: Vec::new(),
             in_view_lights: Vec::new(),
             frame_lights: Vec::new(),
+            shadow_candidates: Vec::new(),
+            caster_order: Vec::new(),
+            casters: Vec::new(),
+            caster_batches: Vec::new(),
+            shadow_views: vec![0; MAX_MAPS * kit.shadows.view_stride as usize],
+            shadow_maps_drawn: (0, 0),
+            shadow_shape: [None; 2],
+            shadow_maps: None,
             clear: wgpu::Color::BLACK,
             size: (0, 0),
+            kit,
         }
     }
 
@@ -357,6 +435,12 @@ impl Renderer {
         self.instances.clear();
         self.batches.clear();
         self.line_vertices.clear();
+        self.shadow_candidates.clear();
+        self.caster_order.clear();
+        self.casters.clear();
+        self.caster_batches.clear();
+        self.shadow_maps_drawn = (0, 0);
+        self.shadow_shape = [None; 2];
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
@@ -395,6 +479,7 @@ impl Renderer {
         // The suns, in the scene's order; one with no direction lights
         // nothing.
         let mut suns = 0;
+        let mut shadow_sun = None;
         for light in &scene.lights {
             let LightKind::Sun { direction } = light.kind else { continue };
             let to_sun = (-direction).normalize_or_zero();
@@ -406,9 +491,12 @@ impl Renderer {
                 continue;
             }
             u.suns[suns] = SunUniform { to_sun: to_sun.extend(0.0).into(), color: light.color.extend(0.0).into() };
+            if light.shadows && shadow_sun.is_none() {
+                shadow_sun = Some((suns, -to_sun));
+            }
             suns += 1;
         }
-        u.counts = [suns as u32, 0, 0, 0];
+        u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), 0, 0];
 
         // The point and spot lights that can light what's seen: their reach
         // is in view, and they give some light. Past the cap, the ones
@@ -449,6 +537,10 @@ impl Renderer {
                 continue;
             };
             let (at, radius) = bounds(draw.model, mesh.centre, mesh.radius);
+            // Out of view, it can still shadow what's in it.
+            if draw.cast_shadows {
+                self.shadow_candidates.push((at, radius, i as u32));
+            }
             if !in_view(&planes, at, radius) {
                 stats.culled += 1;
                 continue;
@@ -478,7 +570,7 @@ impl Renderer {
                 normal: normal.to_cols_array_2d(),
                 base_color: m.base_color,
                 params: [m.metallic, m.roughness, m.alpha_cutoff, if mirrored { -1.0 } else { 1.0 }],
-                emissive: [er, eg, eb, 0.0],
+                emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
                 uv: [su, sv, ou, ov],
                 lights,
             });
@@ -488,10 +580,128 @@ impl Renderer {
                 self.line_vertices.push(LineVertex { position: end.into(), color: line.color });
             }
         }
+        self.prepare_shadows(scene, &camera, aspect, shadow_sun.map(|(_, direction)| direction), &mut stats);
         stats.lines = scene.lines.len() as u32;
         stats.draws = self.instances.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
         stats
+    }
+
+    /// The shadow maps of a frame `prepare` has lit and culled: the sun's
+    /// cascades (`sun` is the way its light travels), and the nearest spot
+    /// lights' maps, each with the casters that fall in it, sorted and
+    /// batched as they're drawn.
+    fn prepare_shadows(
+        &mut self,
+        scene: &RenderScene,
+        camera: &crate::CameraView,
+        aspect: f32,
+        sun: Option<Vec3>,
+        stats: &mut FrameStats,
+    ) {
+        let level = self.quality.shadows();
+        let stride = self.kit.shadows.view_stride as usize;
+        let u = &mut self.uniforms;
+        u.shadows = ShadowUniforms::zeroed();
+        let sh = &mut u.shadows;
+        let filter = match level.filter {
+            ShadowFilter::Hard => 0.0,
+            ShadowFilter::Soft => 1.0,
+            ShadowFilter::Softer => 2.0,
+        };
+        sh.params = [0.0, filter, 1.0 / level.map_size as f32, 1.0 / level.spot_map_size as f32];
+        let view = |map: usize, matrix: Mat4, views: &mut Vec<u8>| {
+            views[map * stride..map * stride + 64].copy_from_slice(bytemuck::bytes_of(&matrix.to_cols_array()));
+        };
+
+        // The sun's cascades. Each takes the casters that overlap it, which
+        // also stretch it back towards the sun to hold them.
+        if let Some(direction) = sun {
+            let count = level.cascades.clamp(1, MAX_CASCADES);
+            let basis = shadows::light_basis(direction);
+            let (mut cascades, splits) = shadows::cascades(camera, aspect, &level, &basis);
+            for &(at, r, i) in &self.shadow_candidates {
+                for (c, cascade) in cascades[..count].iter_mut().enumerate() {
+                    if cascade.reach(&basis, at, r) {
+                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize]), i));
+                    }
+                }
+            }
+            for (c, cascade) in cascades[..count].iter().enumerate() {
+                let matrix = cascade.matrix(&basis);
+                sh.cascades[c] = matrix.to_cols_array_2d();
+                sh.texels[c] = cascade.texel(level.map_size);
+                view(c, matrix, &mut self.shadow_views);
+            }
+            let distance = shadows::shadow_distance(camera, &level);
+            sh.splits = [splits[0], splits[1], splits[2], distance * 0.9];
+            sh.params[0] = count as f32;
+            sh.camera_forward = shadows::camera_forward(camera).extend(distance).into();
+            sh.camera_at = camera.position.extend(1.0).into();
+            self.shadow_maps_drawn.0 = count as u8;
+            self.shadow_shape[0] = Some((level.map_size, count as u32));
+        }
+
+        // The spot lights that cast shadows, a map each, the nearest the
+        // camera first: their slots in the frame's list.
+        let cap = level.spot_maps.min(MAX_SPOT_MAPS);
+        let mut nearest = [(f32::INFINITY, 0usize); MAX_SPOT_MAPS];
+        for (slot, &(distance, i)) in self.in_view_lights.iter().enumerate() {
+            let light = &scene.lights[i as usize];
+            if light.shadows && matches!(light.kind, LightKind::Spot { .. }) && cap > 0 && distance < nearest[cap - 1].0
+            {
+                let mut k = cap - 1;
+                while k > 0 && nearest[k - 1].0 > distance {
+                    nearest[k] = nearest[k - 1];
+                    k -= 1;
+                }
+                nearest[k] = (distance, slot);
+            }
+        }
+        let mut spots = 0;
+        for &(distance, slot) in &nearest[..cap] {
+            if distance == f32::INFINITY {
+                break;
+            }
+            let light = &scene.lights[self.in_view_lights[slot].1 as usize];
+            let LightKind::Spot { position, direction, range, angle, .. } = light.kind else { continue };
+            let (matrix, texel) = shadows::spot_view(position, direction, angle, range, level.spot_map_size);
+            u.lights[slot].cone[2] = spots as f32;
+            u.lights[slot].cone[3] = texel;
+            u.shadows.spots[spots] = matrix.to_cols_array_2d();
+            let map = MAX_CASCADES + spots;
+            view(map, matrix, &mut self.shadow_views);
+            let planes = frustum_planes(matrix);
+            for &(at, r, d) in &self.shadow_candidates {
+                if in_view(&planes, at, r) {
+                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize]), d));
+                }
+            }
+            spots += 1;
+        }
+        if spots > 0 {
+            self.shadow_maps_drawn.1 = spots as u8;
+            self.shadow_shape[1] = Some((level.spot_map_size, level.spot_maps.min(MAX_SPOT_MAPS) as u32));
+        }
+
+        self.caster_order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        for &(key @ (map, cutout, textures, _), i) in &self.caster_order {
+            let draw = &scene.draws[i as usize];
+            let m = &draw.material;
+            let first = self.casters.len() as u32;
+            match self.caster_batches.last_mut() {
+                Some(b) if (b.map, b.cutout, b.textures, b.mesh.0) == key => b.count += 1,
+                _ => self.caster_batches.push(CasterBatch { map, cutout, textures, mesh: draw.mesh, first, count: 1 }),
+            }
+            let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
+            self.casters.push(Caster {
+                model: draw.model.to_cols_array_2d(),
+                uv: [su, sv, ou, ov],
+                alpha: [m.base_color[3], m.alpha_cutoff, 0.0, 0.0],
+            });
+        }
+        stats.shadow_maps = u32::from(self.shadow_maps_drawn.0) + u32::from(self.shadow_maps_drawn.1);
+        stats.shadow_casters = self.casters.len() as u32;
     }
 
     /// The GPU half: writes what [`Renderer::prepare`] built where the GPU
@@ -514,8 +724,17 @@ impl Renderer {
         {
             self.image_pipelines = Some(self.kit.pipelines(format));
         }
-        let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, .. } = self;
+        // The shadow maps, remade when a level needs others. A kind of map
+        // the frame doesn't use keeps what it had, so a spot light coming
+        // into view doesn't make new ones.
+        let had = self.shadow_maps.as_ref().map_or([(1, 0); 2], |m| m.shape);
+        let shape = [0, 1].map(|k| self.shadow_shape[k].unwrap_or(had[k]));
+        if self.shadow_maps.is_none() || shape != had {
+            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, shape));
+        }
+        let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, .. } = self;
         let targets = targets.as_ref().expect("made above");
+        let shadow_maps = shadow_maps.as_ref().expect("made above");
 
         // Bind groups for texture sets not seen before. A steady frame only
         // looks them up. The world's other views wait while this one
@@ -526,12 +745,55 @@ impl Renderer {
         for batch in &self.batches {
             textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
         }
+        for batch in self.caster_batches.iter().filter(|b| b.cutout) {
+            textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
+        }
         let frame = frame_data.write(
             &kit.gpu.device,
             bytemuck::bytes_of(&self.uniforms),
+            &self.shadow_views,
             bytemuck::cast_slice(&self.instances),
             bytemuck::cast_slice(&self.line_vertices),
+            bytemuck::cast_slice(&self.casters),
         );
+
+        // 0. The shadow maps: each cleared, then its casters' depth.
+        let (cascades, spots) = self.shadow_maps_drawn;
+        let maps = (0..cascades).map(|c| (c, false, c)).chain((0..spots).map(|k| (MAX_CASCADES as u8 + k, true, k)));
+        let mut batches = self.caster_batches.iter().peekable();
+        for (map, spot, layer) in maps {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some(if spot { "spot shadow map" } else { "sun shadow map" }),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: shadow_maps.layer(spot, layer.into()),
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_bind_group(0, frame.views, &[(u64::from(map) * kit.shadows.view_stride) as u32]);
+            pass.set_vertex_buffer(1, frame.buffer.slice(frame.casters..));
+            let mut last: Option<&CasterBatch> = None;
+            while let Some(batch) = batches.next_if(|b| b.map == map) {
+                let Some(mesh) = meshes.get(&batch.mesh) else { continue };
+                if batch.cutout {
+                    let Some(bind_group) = textures.bind_group(&batch.textures) else { continue };
+                    if last.is_none_or(|l| l.textures != batch.textures || !l.cutout) {
+                        pass.set_bind_group(1, bind_group, &[]);
+                    }
+                }
+                if last.is_none_or(|l| l.cutout != batch.cutout) {
+                    pass.set_pipeline(kit.shadows.pipeline(spot, batch.cutout));
+                }
+                last = Some(batch);
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            }
+        }
 
         // 1. The scene, into the scene image or straight into the view.
         let (scene_pipelines, resolve) = match &targets.image {
@@ -561,6 +823,9 @@ impl Renderer {
             });
             if !self.batches.is_empty() || !self.line_vertices.is_empty() {
                 pass.set_bind_group(0, frame.bind_group, &[]);
+            }
+            if !self.batches.is_empty() {
+                pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
             }
             if !self.batches.is_empty() {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
@@ -686,7 +951,7 @@ impl Pipelines {
 
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("forward"),
-            bind_group_layouts: &[Some(frame_layout), Some(&kit.textures.layout)],
+            bind_group_layouts: &[Some(frame_layout), Some(&kit.textures.layout), Some(&kit.shadows.maps_layout)],
             immediate_size: 0,
         });
         // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
@@ -872,6 +1137,14 @@ fn normal_matrix(model: Mat4) -> (Mat3, bool) {
     (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
 }
 
+/// Where a draw goes among `map`'s casters: opaque ones need no textures,
+/// so they group by mesh alone.
+fn caster_key(map: u8, draw: &crate::Draw) -> CasterKey {
+    let m = &draw.material;
+    let cutout = m.alpha_cutoff > 0.0;
+    (map, cutout, if cutout { m.textures } else { MaterialTextures::default() }, draw.mesh.0)
+}
+
 /// A draw's sort key: cut out or not, which faces, its textures and its
 /// mesh, in the order draws are grouped.
 type SortKey = (bool, Faces, MaterialTextures, u64);
@@ -920,7 +1193,7 @@ fn light_uniform(light: &crate::Light) -> LightUniform {
         position: position.extend(1.0 / (range * range)).into(),
         color: light.color.extend(0.0).into(),
         direction: direction.extend(0.0).into(),
-        cone: [cone[0], cone[1], 0.0, 0.0],
+        cone: [cone[0], cone[1], -1.0, 0.0],
     }
 }
 
