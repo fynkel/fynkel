@@ -139,15 +139,16 @@ extension _Loop on World {
     _microtasks.clear();
   }
 
-  /// Unwinds [routine] from what it waits for.
+  /// Unwinds [routine] from what it waits for. The world's lists let go
+  /// of the waits at their next routines step.
   void _failWaits(Routine<Object?> routine) {
-    for (final waits in [_waits, _fixedWaits]) {
-      for (var i = 0; i < waits.length; i++) {
-        final wait = waits[i];
-        if (wait.over || !identical(wait.routine, routine)) continue;
-        wait.over = true;
-        wait.fail(RoutineStopped._(), StackTrace.current);
-      }
+    final waits = routine._waits;
+    if (waits == null) return;
+    routine._waits = null;
+    for (final wait in waits) {
+      if (wait.over) continue;
+      wait.over = true;
+      wait.fail(RoutineStopped._(), StackTrace.current);
     }
   }
 

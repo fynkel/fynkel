@@ -103,6 +103,7 @@ final class Signal<T> {
     final wait = _NextWait<T>(routine, world.time._frame);
     wait.subscription = listen(wait.fire);
     world._waits.add(wait);
+    (routine._waits ??= []).add(wait);
     final future = wait.values.future;
     _waitOf[future] = wait;
     return future;
