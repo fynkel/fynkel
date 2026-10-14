@@ -106,6 +106,60 @@ The things the rest stands on, changing nothing on screen.
 *Done when* every golden image is unchanged, and the cost of the HDR
 image and the extra pass is measured on all three devices.
 
+**Done** (2026-10-14):
+
+- **Passes.** The renderer records its passes in order (`renderer.rs`):
+  the scene, then the last pass when there is an image to finish.
+- **The scene image.** Above low, the scene's 4× MSAA colour is resolved
+  into a half-float image (`Rgba16Float`), and a last pass
+  (`finish.wgsl`) copies it onto the view. Tone mapping stays in the
+  scene's shader, on each sample: then the resolve averages what the
+  screen shows, and edges stay exactly as they were. Resolving the light
+  values and tone mapping after would change the edges between bright
+  and dark surfaces, and the goldens with them. The tone mapping
+  (Khronos PBR Neutral) can be undone exactly, so bloom (phase 6) gets
+  the light values back in the last pass. Very bright values come back
+  less precisely (about 4 % at ten times white, in half floats); phase 6
+  says whether that matters for bloom.
+- **Low keeps one pass**, straight to the view, as decision 5
+  recommended. The measures below don't need it, but low is for GPUs
+  nothing is known about; phase 6 decides whether low gets bloom.
+- **A light list.** `RenderScene.lights` carries every sun, in id order;
+  the renderer still lights with the first. Dart still warns about a
+  second sun.
+- **Quality levels.** `Quality.low`, `medium`, `high` in the renderer and
+  in Dart: `world.quality` (null for the device's pick), `Quality.device`.
+  The device picks from its GPU: Apple's and desktops' high, Mali and
+  Adreno medium, a software GPU or one not known low (a test covers each).
+  ABI 21: `fy_world_quality_set`, `fy_quality_auto`.
+- **Every golden is unchanged at every level.** The cube, the debug
+  lines, the textured materials (a cut-out, a normal map, a glow) and the
+  glTF cut-outs are each checked at all three levels, and a renderer
+  switching level between frames.
+- **The lab's look scene** ("Look: quality levels"): metal and plastic
+  spheres from smooth to rough, a ring of pillars, a glowing cube, a
+  turning camera, and buttons for each level and the device's pick.
+  `--dart-define=LAB_QUALITY=low` starts it at a level. The guide's §5
+  has quality levels, and §18 a line on low for older phones.
+- **Measured**, the look scene, 60 s each, alone, under `caffeinate`:
+
+  | | low | the device's level |
+  |---|---|---|
+  | Mac (840×1088 view) | 120 fps (min 116) | high: 120 fps (min 119) |
+  | iPhone (1320×1309 view) | 120 fps (min 108 in one second) | high: 120 fps (min 119) |
+  | Note10+ (1080×1068 view) | 60 fps (min 59.9) | medium: 60 fps (min 58.9) |
+
+  No device loses frames to the image and the extra pass. What they cost
+  is seen on the Mac's GPU alone (the renderer's bench, a whole frame,
+  best of 50): **+0.13 to +0.16 ms a frame** at an iPhone Pro Max's
+  2796×1290, the same with 1 cube or 10,000, of the 8.3 ms a 120 Hz
+  frame has. At 1280×720 it's lost in the noise.
+- **Not done: timing the GPU on devices.** Timestamps around the passes
+  would give each phase a GPU time on the phones. Tried: on the Mac
+  (Metal, wgpu 30) the end-of-pass timestamp came back stale, before the
+  begin, so it was taken out rather than kept giving wrong numbers. The
+  phones are measured by their frame rates, as before.
+
 ### Phase 2: lights
 
 - `Light.point(range:)` and `Light.spot(range:, angle:, softness:)`,
@@ -236,7 +290,7 @@ say otherwise.
 
 ## 5. Checklist
 
-- [ ] Phase 1: groundwork
+- [x] Phase 1: groundwork
 - [ ] Phase 2: lights
 - [ ] Phase 3: shadows
 - [ ] Phase 4: the sky and what reflects it
