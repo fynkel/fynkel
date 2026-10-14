@@ -404,9 +404,30 @@ void main() {
       }
       await tester.pumpWidget(sized(FynkelView.world(world), width: 50, height: 100));
       await tester.pump(const Duration(milliseconds: 8));
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(calls, ['register 300x150', 'resize 7 180x120'], reason: 'a new size waits until it holds still');
+      await tester.pump(const Duration(milliseconds: 8));
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump();
       expect(calls, ['register 300x150', 'resize 7 180x120', 'resize 7 150x300', 'unregister 7']);
+    });
+
+    testWidgets('a drag that changes the size every frame sends only the size it ends at', (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await tester.pump(const Duration(milliseconds: 8));
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(calls, ['register 300x150']);
+      for (var width = 101; width <= 120; width++) {
+        await tester.pumpWidget(sized(FynkelView.world(world), width: width.toDouble(), height: 50));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150'], reason: 'one new surface per drag, not one a frame');
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150', 'resize 7 360x150']);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
     });
 
     testWidgets('a failed resize brings a new view at the new size, and the frames go on', (tester) async {

@@ -328,9 +328,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   FocusNode? _ownFocus;
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
-  /// The size the next frame is drawn at, from the last layout; 0 while it
-  /// is empty.
+  /// The size the last layout gave, in pixels; 0 while it is empty.
+  int _layoutWidth = 0, _layoutHeight = 0;
+
+  /// The size the next frame is drawn at: the layout's once it has held
+  /// for [_settleFrames] frames (at once for the first), so a window drag
+  /// or a split-view animation makes one new set of surfaces, not one a
+  /// frame. Meanwhile the last picture is stretched to fit.
   int _width = 0, _height = 0;
+  int _steadyFrames = 0;
+  static const _settleFrames = 3;
 
   WorldView? _view;
   Future<int?>? _registration;
@@ -594,6 +601,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final world = this.world;
     if (!world.isDisposed) _WorldClock.of(world).update(world);
     _ticks.tick();
+    _settle();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_noPicture || _width == 0 || _height == 0) return;
@@ -631,6 +639,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _windowStartMicros = micros;
       _windowTicks = 0;
       _windowStart = now;
+    }
+  }
+
+  void _settle() {
+    if (_layoutWidth == _width && _layoutHeight == _height) {
+      _steadyFrames = 0;
+      return;
+    }
+    if (_width == 0 || _height == 0 || ++_steadyFrames >= _settleFrames) {
+      _width = _layoutWidth;
+      _height = _layoutHeight;
+      _steadyFrames = 0;
     }
   }
 
@@ -814,8 +834,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           _input.resize(size);
           world.input.camera = widget.camera;
         }
-        _width = (size.width * ratio).round().clamp(0, 16384);
-        _height = (size.height * ratio).round().clamp(0, 16384);
+        final width = (size.width * ratio).round().clamp(0, 16384);
+        final height = (size.height * ratio).round().clamp(0, 16384);
+        if (width != _layoutWidth || height != _layoutHeight) _steadyFrames = 0;
+        _layoutWidth = width;
+        _layoutHeight = height;
         final texture = _texture;
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },
