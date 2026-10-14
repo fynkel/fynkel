@@ -190,4 +190,51 @@ void main() {
       expect(body.position.x, closeTo(3, 1e-4));
     });
   });
+
+  group('P4: a character controller meets triggers before it moves', () {
+    test('made inside a trigger, it enters without a move, and stays in', () {
+      final world = newWorld();
+      final zone = world.add(Zone(components: [SphereCollider(radius: 3, isTrigger: true)]));
+      world.add(GameObject(name: 'player', components: [CharacterController()]));
+      for (var i = 0; i < 5; i++) {
+        world.update(step);
+      }
+      expect(zone.entered, 1);
+      expect(zone.exited, 0);
+    });
+
+    test('moved onto another rigidbody by a new parent, it stays in', () {
+      final world = newWorld();
+      final zone = world.add(Zone(components: [SphereCollider(radius: 3, isTrigger: true)]));
+      final controller = CharacterController();
+      final player = world.add(GameObject(name: 'player', components: [controller]));
+      controller.move(const Vec3(0.1, 0, 0));
+      world.update(step);
+      world.update(step);
+      expect(zone.entered, 1);
+      final platform = world.add(GameObject(name: 'platform', components: [Rigidbody(isKinematic: true)]));
+      player.parent = platform;
+      for (var i = 0; i < 5; i++) {
+        world.update(step);
+      }
+      expect(zone.exited, 0, reason: 'a new body under it is no reason to leave');
+    });
+  });
+}
+
+class Zone extends GameObject with Triggers {
+  Zone({super.components}) : super(name: 'zone');
+
+  var entered = 0;
+  var exited = 0;
+
+  @override
+  void onTriggerEnter(Collider other) {
+    if (other is CharacterController) entered++;
+  }
+
+  @override
+  void onTriggerExit(Collider other) {
+    if (other is CharacterController) exited++;
+  }
 }

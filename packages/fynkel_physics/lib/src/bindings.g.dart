@@ -375,7 +375,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 12;
+const int FP_ABI_VERSION = 13;
 
 const int FP_COLLIDED_ABOVE = 2;
 
@@ -539,6 +539,9 @@ final class FpColliderSpec extends ffi.Struct {
 
   @ffi.Uint32()
   external int convex;
+
+  @ffi.Uint32()
+  external int character;
 }
 
 sealed class FpCombine {

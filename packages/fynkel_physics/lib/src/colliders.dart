@@ -179,7 +179,8 @@ sealed class Collider extends Behaviour {
     spec
       ..is_trigger = _isTrigger ? 1 : 0
       ..layer = _layer
-      ..listens = listens;
+      ..listens = listens
+      ..character = this is CharacterController ? 1 : 0;
     spec.material
       ..friction = _material.dynamicFriction
       ..bounciness = _material.bounciness
