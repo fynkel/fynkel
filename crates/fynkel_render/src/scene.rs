@@ -380,8 +380,8 @@ pub struct RenderScene {
     /// [`Renderer::MAX_SUNS`](crate::Renderer::MAX_SUNS) of them in order.
     /// Point and spot lights light the objects they reach: up to
     /// [`Renderer::MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS) a frame, the
-    /// ones nearest the camera, and each object the ones brightest at it,
-    /// up to [`Quality::lights_per_object`].
+    /// ones nearest the camera, and each part of the view the ones
+    /// brightest at it, up to [`Quality::lights_per_cell`].
     pub lights: Vec<Light>,
     /// Linear radiance arriving equally from every direction. 1.0 alone
     /// shows a rough surface at its albedo.

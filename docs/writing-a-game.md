@@ -517,13 +517,12 @@ GameObject handTorch() => GameObject(
   **`softness`** is how much of it fades, from the rim in: 0 is a hard
   edge, 1 fades all the way to the middle.
 - **Every sun lights everything**, up to four of them.
-- **Each object is lit by the lamps that light it most**: up to 4 at low
-  and medium quality, 8 at high. Among lamps alike, those are the nearest.
-  A spotlight counts only for what's in its cone, and a lamp only for
-  what it reaches. So a big floor under many lamps gets only the few that
-  light its middle most: make it of tiles a lamp's range or less across,
-  and each tile gets its own. The lab's 'Look: lamps' scene is a room
-  of 1 m tiles.
+- **A lamp lights everything it reaches**, whatever it falls on: a big
+  floor, terrain or a room in one piece is lit by every lamp over it.
+  Where many lamps overlap, each part of the view takes the ones that
+  light it most: up to 8 at low and medium quality, 16 at high (among
+  lamps alike, the nearest). A spotlight counts only for what's in its
+  cone.
 - **A frame takes 64 lamps** in view, the ones nearest the camera. A
   world with more than 64 point and spot lights, or more than four suns,
   says so once.

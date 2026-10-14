@@ -4,6 +4,7 @@
 //! platforms, Flutter or Dart.
 
 mod assets;
+mod clusters;
 mod frame_ring;
 mod gpu;
 mod renderer;

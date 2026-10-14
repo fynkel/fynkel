@@ -21,19 +21,24 @@ use std::sync::atomic::{AtomicU8, Ordering};
 pub(crate) const SLOTS: usize = 3;
 
 /// Where a buffer's parts start: the uniforms at 0, then the shadow maps'
-/// view matrices, each at its own dynamic offset, then the instances.
+/// view matrices, each at its own dynamic offset, then the view's cells
+/// (`clusters`), then the instances.
 #[derive(Clone, Copy)]
 struct Layout {
     uniforms: u64,
     views_at: u64,
     views: u64,
+    cells_at: u64,
     instances_at: u64,
 }
 
 impl Layout {
     fn new(uniforms: u64, view_stride: u64, views: u64) -> Self {
         let views_at = uniforms.next_multiple_of(view_stride);
-        Self { uniforms, views_at, views, instances_at: (views_at + views).next_multiple_of(wgpu::VERTEX_ALIGNMENT) }
+        // Storage offsets need 256 at most.
+        let cells_at = (views_at + views).next_multiple_of(256);
+        let instances_at = (cells_at + crate::clusters::BYTES).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
+        Self { uniforms, views_at, views, cells_at, instances_at }
     }
 }
 
@@ -64,6 +69,18 @@ pub(crate) struct Written<'a> {
     pub(crate) instances: u64,
     pub(crate) lines: u64,
     pub(crate) casters: u64,
+}
+
+/// A frame's data, as [`FrameRing::write`] writes it: the `uniforms`,
+/// shadow `views`, `instances`, `lines` (vertices, straight after the
+/// instances), shadow `casters` (after the lines) and the view's `cells`.
+pub(crate) struct Parts<'a> {
+    pub(crate) uniforms: &'a [u8],
+    pub(crate) views: &'a [u8],
+    pub(crate) instances: &'a [u8],
+    pub(crate) lines: &'a [u8],
+    pub(crate) casters: &'a [u8],
+    pub(crate) cells: &'a [u8],
 }
 
 /// The three buffers. The uniforms are bound with `layout`'s binding 0,
@@ -104,20 +121,33 @@ impl FrameRing {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame data"),
             size: self.parts.instances_at + instance_bytes.max(wgpu::COPY_BUFFER_ALIGNMENT),
-            usage: wgpu::BufferUsages::MAP_WRITE | wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::VERTEX,
+            usage: wgpu::BufferUsages::MAP_WRITE
+                | wgpu::BufferUsages::UNIFORM
+                | wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::VERTEX,
             mapped_at_creation: true,
         });
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("frame"),
             layout: &self.layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buffer,
-                    offset: 0,
-                    size: wgpu::BufferSize::new(self.parts.uniforms),
-                }),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: 0,
+                        size: wgpu::BufferSize::new(self.parts.uniforms),
+                    }),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: self.parts.cells_at,
+                        size: wgpu::BufferSize::new(crate::clusters::BYTES),
+                    }),
+                },
+            ],
         });
         let views = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow views"),
@@ -134,23 +164,15 @@ impl FrameRing {
         Slot { buffer, bind_group, views, state: Arc::new(AtomicU8::new(MAPPED)) }
     }
 
-    /// Writes a frame's `uniforms`, shadow `views`, `instances`, `lines`
-    /// (vertices, straight after the instances) and shadow `casters`
-    /// (after the lines) into the next buffer,
+    /// Writes a frame's `parts` into the next buffer,
     /// waiting for the GPU if it still reads all three. The frame that
     /// binds what this returns must be submitted before the next `write`,
     /// which maps its buffer again.
-    pub(crate) fn write(
-        &mut self,
-        device: &wgpu::Device,
-        uniforms: &[u8],
-        views: &[u8],
-        instances: &[u8],
-        lines: &[u8],
-        casters: &[u8],
-    ) -> Written<'_> {
+    pub(crate) fn write(&mut self, device: &wgpu::Device, parts: Parts<'_>) -> Written<'_> {
+        let Parts { uniforms, views, instances, lines, casters, cells } = parts;
         debug_assert_eq!(uniforms.len() as u64, self.parts.uniforms);
         debug_assert!(views.len() as u64 <= self.parts.views);
+        debug_assert_eq!(cells.len() as u64, crate::clusters::BYTES);
         if let Some(last) = self.last.take() {
             let slot = &self.slots[last];
             slot.state.store(MAPPING, Ordering::Relaxed);
@@ -179,6 +201,8 @@ impl FrameRing {
             view.slice(..uniforms.len()).copy_from_slice(uniforms);
             let views_at = self.parts.views_at as usize;
             view.slice(views_at..views_at + views.len()).copy_from_slice(views);
+            let cells_at = self.parts.cells_at as usize;
+            view.slice(cells_at..cells_at + cells.len()).copy_from_slice(cells);
             view.slice(at as usize..lines_at as usize).copy_from_slice(instances);
             view.slice(lines_at as usize..lines_at as usize + lines.len()).copy_from_slice(lines);
             view.slice(casters_at as usize..casters_at as usize + casters.len()).copy_from_slice(casters);

@@ -64,9 +64,26 @@ struct Frame {
     suns: array<Sun, 4>,
     lamps: array<Lamp, 64>,
     shadows: Shadows,
+    // The view's cells (clusters.rs). x, y: cells across and down per
+    // pixel. z, w: a point's slice is its depth along the view (its
+    // logarithm, for a perspective camera) times z plus w.
+    cells: vec4<f32>,
+    // xyz: where the camera is. w: 1 perspective, 0 orthographic.
+    cells_eye: vec4<f32>,
+    // xyz: the way the camera looks.
+    cells_forward: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
+// Each cell's word, the byte its list starts at (above the low 8 bits) and
+// how many lamps it holds (the low 8), then the lists: indices into
+// `frame.lamps`, a byte each.
+@group(0) @binding(1) var<storage, read> cells: array<u32>;
+
+// clusters.rs: TILES_X, TILES_Y, SLICES.
+const CELLS_ACROSS: u32 = 16u;
+const CELLS_DOWN: u32 = 9u;
+const SLICES: u32 = 16u;
 
 // Set by the pipeline for double-sided materials, whose triangles are
 // drawn from both sides: seen from behind, the normal is turned round so
@@ -117,9 +134,6 @@ struct VertexIn {
     @location(9) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
     @location(10) uv_transform: vec4<f32>,
-    // The lamps that light it: indices into `frame.lamps`, a byte each,
-    // nearest first, 0xFF after the last.
-    @location(11) lamps: vec2<u32>,
 };
 
 struct VertexOut {
@@ -133,7 +147,6 @@ struct VertexOut {
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) emissive: vec4<f32>,
-    @location(7) @interpolate(flat) lamps: vec2<u32>,
 };
 
 @vertex
@@ -161,7 +174,6 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.base_color = in.base_color;
     out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
-    out.lamps = in.lamps;
     return out;
 }
 
@@ -345,6 +357,17 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
 
 // Linear radiance and alpha. `front_facing` is the builtin: whether the
 // triangle is counter-clockwise on screen.
+// The cell a pixel at `pixel` (framebuffer coordinates) and `p` (world) is
+// in: its word's index in `cells`.
+fn cell_of(pixel: vec2<f32>, p: vec3<f32>) -> u32 {
+    let depth = max(dot(p - frame.cells_eye.xyz, frame.cells_forward.xyz), 1e-6);
+    let along = select(depth, log(depth), frame.cells_eye.w > 0.5);
+    let k = u32(clamp(along * frame.cells.z + frame.cells.w, 0.0, f32(SLICES - 1u)));
+    let x = min(u32(pixel.x * frame.cells.x), CELLS_ACROSS - 1u);
+    let y = min(u32(pixel.y * frame.cells.y), CELLS_DOWN - 1u);
+    return (k * CELLS_DOWN + y) * CELLS_ACROSS + x;
+}
+
 fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
@@ -403,12 +426,12 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         }
         color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
     }
-    for (var i = 0u; i < 8u; i++) {
-        let index = (in.lamps[i / 4u] >> ((i % 4u) * 8u)) & 0xFFu;
-        if index == 0xFFu {
-            break;
-        }
-        // Its position first: past its range (the object is reached, not
+    let cell = cells[cell_of(in.clip.xy, in.world_position)];
+    let first = CELLS_ACROSS * CELLS_DOWN * SLICES * 4u + (cell >> 8u);
+    for (var i = 0u; i < (cell & 0xFFu); i++) {
+        let byte = first + i;
+        let index = (cells[byte / 4u] >> ((byte % 4u) * 8u)) & 0xFFu;
+        // Its position first: past its range (the cell is reached, not
         // every pixel of it), the rest isn't read.
         let position = frame.lamps[index].position;
         let to_lamp = position.xyz - in.world_position;
