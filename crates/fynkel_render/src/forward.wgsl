@@ -101,26 +101,21 @@ struct VertexIn {
     // (0, 0) is the image's top-left.
     @location(3) uv: vec2<f32>,
     // Per draw (instance step):
+    // The model matrix's three rows (its last is always 0, 0, 0, 1).
     @location(4) model_0: vec4<f32>,
     @location(5) model_1: vec4<f32>,
     @location(6) model_2: vec4<f32>,
-    @location(7) model_3: vec4<f32>,
-    // The inverse-transpose of the model matrix's upper 3×3, so normals
-    // stay perpendicular under non-uniform scale.
-    @location(8) normal_0: vec3<f32>,
-    @location(9) normal_1: vec3<f32>,
-    @location(10) normal_2: vec3<f32>,
-    @location(11) base_color: vec4<f32>,
-    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: 1, or
-    // -1 when the model matrix mirrors (which flips the bitangent).
-    @location(12) params: vec4<f32>,
+    @location(7) base_color: vec4<f32>,
+    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: unused
+    // (the vertex shader puts the mirroring sign there).
+    @location(8) params: vec4<f32>,
     // rgb: linear emission. w: 1 if shadows fall on it.
-    @location(13) emissive: vec4<f32>,
+    @location(9) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
-    @location(14) uv_transform: vec4<f32>,
+    @location(10) uv_transform: vec4<f32>,
     // The lamps that light it: indices into `frame.lamps`, a byte each,
     // nearest first, 0xFF after the last.
-    @location(15) lamps: vec2<u32>,
+    @location(11) lamps: vec2<u32>,
 };
 
 struct VertexOut {
@@ -128,6 +123,8 @@ struct VertexOut {
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) base_color: vec4<f32>,
+    // As the instance's, with w 1, or -1 when the model matrix mirrors
+    // (which flips the bitangent and the front face).
     @location(3) @interpolate(flat) params: vec4<f32>,
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
@@ -137,20 +134,28 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let model = mat4x4<f32>(in.model_0, in.model_1, in.model_2, in.model_3);
-    let normal_matrix = mat3x3<f32>(in.normal_0, in.normal_1, in.normal_2);
-    let world = model * vec4<f32>(in.position, 1.0);
+    let p = vec4<f32>(in.position, 1.0);
+    let world = vec4<f32>(dot(in.model_0, p), dot(in.model_1, p), dot(in.model_2, p), 1.0);
+    // The upper 3×3's columns.
+    let c0 = vec3<f32>(in.model_0.x, in.model_1.x, in.model_2.x);
+    let c1 = vec3<f32>(in.model_0.y, in.model_1.y, in.model_2.y);
+    let c2 = vec3<f32>(in.model_0.z, in.model_1.z, in.model_2.z);
+    // Normals turn by the inverse-transpose, so they stay perpendicular
+    // under non-uniform scale. The cofactor matrix is that times the
+    // determinant: its sign keeps a mirrored object's normals pointing
+    // out, and the fragment shader normalises away its size.
+    let cofactor = mat3x3<f32>(cross(c1, c2), cross(c2, c0), cross(c0, c1));
+    let mirror = select(1.0, -1.0, dot(c0, cross(c1, c2)) < 0.0);
     var out: VertexOut;
     out.clip = frame.view_proj * world;
     out.world_position = world.xyz;
-    out.normal = normal_matrix * in.normal;
+    out.normal = cofactor * in.normal * mirror;
     // A tangent lies along the surface, so it turns with the model matrix
     // itself (unlike the normal).
-    out.tangent = vec4<f32>(mat3x3<f32>(in.model_0.xyz, in.model_1.xyz, in.model_2.xyz) * in.tangent.xyz,
-        in.tangent.w * in.params.w);
+    out.tangent = vec4<f32>(mat3x3<f32>(c0, c1, c2) * in.tangent.xyz, in.tangent.w * mirror);
     out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.base_color = in.base_color;
-    out.params = in.params;
+    out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
     out.lamps = in.lamps;
     return out;

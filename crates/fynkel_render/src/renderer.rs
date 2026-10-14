@@ -138,10 +138,11 @@ const NO_LIGHT: u8 = 0xFF;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
-    model: [[f32; 4]; 4],
-    normal: [[f32; 3]; 3],
+    /// The model matrix's rows, but its last (0, 0, 0, 1). The shader works
+    /// out the normals' matrix and whether it mirrors.
+    model: [[f32; 4]; 3],
     base_color: [f32; 4],
-    /// Metallic, roughness, alpha cutoff, and -1 when the model mirrors.
+    /// Metallic, roughness, alpha cutoff, and 0.
     params: [f32; 4],
     /// Emission; w: 1 if shadows fall on it, 0 if not.
     emissive: [f32; 4],
@@ -275,9 +276,9 @@ pub struct Renderer {
     line_vertices: Vec<LineVertex>,
     /// The scene's draws that are seen, each with its sort key, sorted.
     order: Vec<(SortKey, u32)>,
-    /// Each seen draw's normal matrix, whether it mirrors, and its lights
-    /// (as [`Instance::lights`]), by its index in the scene.
-    seen: Vec<(Mat3, bool, [u32; 2])>,
+    /// Each seen draw's lights (as [`Instance::lights`]), by its index in
+    /// the scene.
+    seen: Vec<[u32; 2]>,
     /// Point and spot lights in view: how far each is from the camera
     /// (squared) and its index in the scene.
     in_view_lights: Vec<(f32, u32)>,
@@ -529,7 +530,7 @@ impl Renderer {
         // The sort is in place and the buffers reused, so a steady frame
         // allocates nothing.
         self.order.clear();
-        self.seen.resize(scene.draws.len(), (Mat3::ZERO, false, [0; 2]));
+        self.seen.resize(scene.draws.len(), [0; 2]);
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
@@ -545,8 +546,8 @@ impl Renderer {
                 stats.culled += 1;
                 continue;
             }
-            let (normal, mirrored) = normal_matrix(draw.model);
-            self.seen[i] = (normal, mirrored, brightest_lights(&self.frame_lights, at, radius, per_object));
+            let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
+            self.seen[i] = brightest_lights(&self.frame_lights, at, radius, per_object);
             let m = &draw.material;
             let key = (m.alpha_cutoff > 0.0, Faces::of(m, mirrored), m.textures, draw.mesh.0);
             self.order.push((key, i as u32));
@@ -557,7 +558,7 @@ impl Renderer {
         for &((cutout, faces, textures, mesh), i) in &self.order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
-            let (normal, mirrored, lights) = self.seen[i as usize];
+            let lights = self.seen[i as usize];
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
                 Some(b) if (b.cutout, b.faces, b.textures, b.mesh.0) == (cutout, faces, textures, mesh) => b.count += 1,
@@ -566,10 +567,12 @@ impl Renderer {
             let [er, eg, eb] = m.emissive;
             let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
             self.instances.push(Instance {
-                model: draw.model.to_cols_array_2d(),
-                normal: normal.to_cols_array_2d(),
+                model: {
+                    let rows = draw.model.transpose();
+                    [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
+                },
                 base_color: m.base_color,
-                params: [m.metallic, m.roughness, m.alpha_cutoff, if mirrored { -1.0 } else { 1.0 }],
+                params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
                 emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
                 uv: [su, sv, ou, ov],
                 lights,
@@ -958,10 +961,9 @@ impl Pipelines {
         let vertex_attributes =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
         let instance_attributes = wgpu::vertex_attr_array![
-            4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
-            8 => Float32x3, 9 => Float32x3, 10 => Float32x3,
-            11 => Float32x4, 12 => Float32x4, 13 => Float32x4, 14 => Float32x4,
-            15 => Uint32x2,
+            4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
+            7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
+            11 => Uint32x2,
         ];
         let buffers = [
             Some(wgpu::VertexBufferLayout {
@@ -1124,17 +1126,6 @@ impl Pipelines {
             lines,
         }
     }
-}
-
-/// The inverse-transpose of the upper 3×3: keeps normals perpendicular to
-/// their surface under non-uniform scale. Rotation-only matrices give
-/// themselves back. A degenerate (zero-scale) matrix gives zero, so the
-/// object draws unlit instead of NaN. Also whether the matrix mirrors (a
-/// negative determinant), which flips the bitangent.
-fn normal_matrix(model: Mat4) -> (Mat3, bool) {
-    let m = Mat3::from_mat4(model);
-    let det = m.determinant();
-    (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
 }
 
 /// Where a draw goes among `map`'s casters: opaque ones need no textures,
