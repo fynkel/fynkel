@@ -168,7 +168,9 @@ class SheepdogGame extends GameObject {
     _sun = add(
       GameObject(
         transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.6))),
-        components: [Light.sun()],
+        // The sun's (and the moon's) shadows: the sheep and the dog on the
+        // grass, the fences across it.
+        components: [Light.sun(shadows: true)],
       ),
     ).get<Light>()!;
     _ambient = add(GameObject(components: [Light.ambient()])).get<Light>()!;
@@ -276,7 +278,9 @@ class Round extends GameObject {
       GameObject(
         name: 'field',
         transform: Transform(scale: Vec3(2 * size, 1, 2 * size)),
-        components: [MeshRenderer(Mesh.plane(), game.grass)],
+        // Flat on the ground: it shadows nothing, so it isn't drawn into
+        // the shadow maps.
+        components: [MeshRenderer(Mesh.plane(), game.grass)..castShadows = false],
       ),
     );
     // A low fence around the field, and the pen's three sides.
@@ -491,7 +495,12 @@ class Dog extends GameObject {
       GameObject(
         transform: Transform(position: Vec3(position.x, 0.05, position.z), scale: Vec3(0.5, 0.02, 0.5)),
         layer: effects,
-        components: [MeshRenderer(Mesh.cylinder(), _ring)],
+        // A flash on the grass, not a thing: no shadows from it or on it.
+        components: [
+          MeshRenderer(Mesh.cylinder(), _ring)
+            ..castShadows = false
+            ..receiveShadows = false,
+        ],
       ),
     );
     ring
