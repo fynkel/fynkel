@@ -135,7 +135,8 @@ Done so far (PRs #95, #96):
 - The lab's minimap and split screen: 120 fps in every view on the Mac.
   On the iPhone, the minimap holds 120 and the split screen holds 120
   with short dips to 107–118.
-- **Owed:** the Note10+, for this phase and phase 3.
+- The Note10+ (2026-10-14): the minimap and split screen hold its 60 fps
+  in every view, and the arena's 100 bars hold 60 too (the report).
 
 ### Phase 6: the leftovers
 
@@ -217,7 +218,8 @@ Done so far (PR #98):
   (min 119, no slow frame); **iPhone 120 fps** (min 114, no slow frame,
   267 MB). After the rework, at level 3 with its wolves: **Mac 120 fps**
   (min 90.2 in one window, no slow frame, 401 MB); **iPhone 120 fps**
-  (min 119, no slow frame, 268 MB). **Owed:** the Note10+.
+  (min 119, no slow frame, 268 MB); **Note10+ 60 fps**, its screen's
+  rate (min 57.9, 117 MB).
 - What it found: a second `FynkelView(root:)` of a root another view had
   added threw "already added" outside a `FynkelGame`. Now it shows that
   world and leaves it to the view that made it (a test). The first
@@ -248,8 +250,8 @@ Done so far (PR #98):
 
 - [x] Phase 1: groundwork (PR #90)
 - [x] Phase 2: one look for the app and the game (PR #91)
-- [ ] Phase 3: widgets in the world (PR #92; the Note10+ measure is owed)
+- [x] Phase 3: widgets in the world (PR #92)
 - [x] Phase 4: menus, pop-ups and navigation (PRs #93, #94)
-- [ ] Phase 5: several views (PRs #95, #96; the Note10+ measure is owed)
+- [x] Phase 5: several views (PRs #95, #96)
 - [x] Phase 6: the leftovers (PR #97)
-- [ ] Phase 7: a real game, and the report (PR #98; the Note10+ measure is owed)
+- [x] Phase 7: a real game, and the report (PR #98)
