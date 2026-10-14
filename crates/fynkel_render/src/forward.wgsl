@@ -273,20 +273,22 @@ fn offset_position(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>, texel: f32) -> vec
 
 // How much of the sun reaches `p`, 0 to 1, from its cascades. Past the
 // shadow distance all of it does; the last tenth fades there.
+// Reads `frame.shadows` in place: copying it into a local first (`let s =
+// frame.shadows`) loses the Android emulator's device.
 fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
-    let s = frame.shadows;
-    let along = dot(p - s.camera_at.xyz, s.camera_forward.xyz);
-    if along >= s.camera_forward.w {
+    let along = dot(p - frame.shadows.camera_at.xyz, frame.shadows.camera_forward.xyz);
+    if along >= frame.shadows.camera_forward.w {
         return 1.0;
     }
-    let count = u32(s.params.x);
+    let count = u32(frame.shadows.params.x);
     var c = 0u;
-    while c + 1u < count && along > s.splits[c] {
+    while c + 1u < count && along > frame.shadows.splits[c] {
         c++;
     }
-    let q = s.cascades[c] * vec4<f32>(offset_position(p, ng, l, s.texels[c]), 1.0);
-    let lit = filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, s.params.z);
-    let fade = saturate((along - s.splits.w) / max(s.camera_forward.w - s.splits.w, 1e-4));
+    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
+    let lit = filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
+    let fading = frame.shadows.splits.w;
+    let fade = saturate((along - fading) / max(frame.shadows.camera_forward.w - fading, 1e-4));
     return mix(lit, 1.0, fade);
 }
 
