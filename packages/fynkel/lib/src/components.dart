@@ -455,7 +455,14 @@ final class Light extends Component {
     this._angle = 30 * math.pi / 180,
     this._softness = 0.2,
     this._shadows = false,
-  ]) : super._();
+  ]) : super._() {
+    if (_refused() case final error?) throw error;
+  }
+
+  /// The widest spot light that casts shadows: its map is at most 160°
+  /// across, a little wider than its cone, and outside the map a surface
+  /// is lit as if nothing stood in the way.
+  static const _widestShadowedSpot = 150 * math.pi / 180;
 
   LightKind _kind;
   // What the world counts it as ([World._countLight]): a sun, a lamp or
@@ -518,7 +525,9 @@ final class Light extends Component {
     }
   }
 
-  /// A spot light's cone, edge to edge, 0 to 179°; 30° unless set.
+  /// A spot light's cone, edge to edge, 0 to 179°; 30° unless set. One
+  /// with [shadows] is at most 150°: wider is refused with an
+  /// [ArgumentError].
   double get angle => _angle;
   set angle(double value) {
     _checkChangeable();
@@ -547,7 +556,8 @@ final class Light extends Component {
   /// reach [Quality]'s shadow distance from the camera (40, 60 or 100 m)
   /// and fade out there; only the first sun made with shadows casts them.
   /// A spot light's reach its [range]; each level gives a few spot lights
-  /// shadows (1, 2 or 4), the ones nearest the camera. A point light's
+  /// shadows (1, 2 or 4), the ones nearest the camera, if they're at most
+  /// 150° across ([angle]). A point light's
   /// shadows aren't drawn yet. A [MeshRenderer] can choose not to cast
   /// them, or not to receive them.
   bool get shadows => _shadows;
@@ -564,6 +574,7 @@ final class Light extends Component {
   /// Writes it to the engine; what the engine refuses comes back, for the
   /// setter to undo its change and throw.
   _Failure? _write() {
+    if (_refused() case final error?) return _Failure(error, StackTrace.current);
     try {
       _live?._writeLight(this);
       return null;
@@ -571,6 +582,14 @@ final class Light extends Component {
       return _Failure(error, stack);
     }
   }
+
+  /// Why it can't be as it is, if it can't.
+  ArgumentError? _refused() => _kind == LightKind.spot && _shadows && _angle > _widestShadowedSpot + 1e-9
+      ? ArgumentError(
+          'a spot light casts shadows up to 150° across (its shadow map is at most 160°); this one is '
+          '${_angle.inDegrees.toStringAsFixed(1)}°. Narrow it, or turn its shadows off',
+        )
+      : null;
 
   @override
   String toString() {
