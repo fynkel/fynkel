@@ -178,7 +178,7 @@ impl Android {
 pub struct Frame {
     texture: wgpu::SurfaceTexture,
     view: wgpu::TextureView,
-    _lease: Lease<Live>,
+    lease: Lease<Live>,
 }
 
 impl std::fmt::Debug for Frame {
@@ -270,7 +270,7 @@ impl Target for Android {
         let view =
             texture.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(FORMAT), ..Default::default() });
         self.size = (live.config.width, live.config.height);
-        Some(Frame { texture, view, _lease: live })
+        Some(Frame { texture, view, lease: live })
     }
 
     fn view<'a>(&'a self, frame: &'a Frame) -> &'a wgpu::TextureView {
@@ -286,16 +286,27 @@ impl Target for Android {
         // waiting behind the GPU: on the Note10+, 10,000 objects went from
         // 12.7 to 27–36 fps. A GPU that takes over a second is presented all the
         // same, and that wait falls on Flutter as before.
-        let _ = self.shared.device.poll(wgpu::PollType::Wait {
-            submission_index: Some(submitted),
-            timeout: Some(std::time::Duration::from_secs(1)),
-        });
-        let Frame { texture, view, _lease } = frame;
+        //
+        // The platform thread waits for the lease to give the surface up
+        // (a resize, the app going to the background): then the frame is
+        // presented at once and the rest of the wait falls on Flutter, so
+        // that thread waits for no GPU work.
+        let start = std::time::Instant::now();
+        while start.elapsed() < std::time::Duration::from_secs(1) && !frame.lease.wanted() {
+            let waited = self.shared.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submitted.clone()),
+                timeout: Some(std::time::Duration::from_millis(2)),
+            });
+            if !matches!(waited, Err(wgpu::PollError::Timeout)) {
+                break;
+            }
+        }
+        let Frame { texture, view, lease } = frame;
         drop(view);
         self.queue.present(texture);
         self.shared.presented.fetch_add(1, Ordering::Relaxed);
         // The lease ends last, after the present.
-        drop(_lease);
+        drop(lease);
     }
 
     /// The size comes with each surface ([`AndroidPresenter::attach`]), so

@@ -17,6 +17,8 @@ struct State<T> {
     current: Option<Arc<T>>,
     /// A [`Lease`] is out.
     leased: bool,
+    /// Threads in [`Handoff::put`] or [`Handoff::take`] waiting for it.
+    waiting: usize,
 }
 
 /// The current value, for one frame. While it lives, [`Handoff::put`] and
@@ -28,7 +30,7 @@ pub(crate) struct Lease<T> {
 
 impl<T> Handoff<T> {
     pub(crate) fn new() -> Self {
-        Self { state: Mutex::new(State { current: None, leased: false }), idle: Condvar::new() }
+        Self { state: Mutex::new(State { current: None, leased: false, waiting: 0 }), idle: Condvar::new() }
     }
 
     fn state(&self) -> MutexGuard<'_, State<T>> {
@@ -39,9 +41,11 @@ impl<T> Handoff<T> {
     /// Waits until no lease is out, then hands the lock back.
     fn idle(&self) -> MutexGuard<'_, State<T>> {
         let mut state = self.state();
+        state.waiting += 1;
         while state.leased {
             state = self.idle.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
+        state.waiting -= 1;
         state
     }
 
@@ -65,6 +69,14 @@ impl<T> Handoff<T> {
         let value = state.current.clone()?;
         state.leased = true;
         Some(Lease { handoff: self.clone(), value })
+    }
+}
+
+impl<T> Lease<T> {
+    /// Whether another thread waits to put or take the value: the lease
+    /// should end soon.
+    pub(crate) fn wanted(&self) -> bool {
+        self.handoff.state().waiting > 0
     }
 }
 
@@ -119,12 +131,14 @@ mod tests {
             let (done, finished) = mpsc::channel();
             thread::scope(|scope| {
                 let lease = handoff.lease().unwrap();
+                assert!(!lease.wanted());
                 scope.spawn(|| {
                     let old = if replace { handoff.put(2) } else { handoff.take() };
                     done.send(old.map(|old| *old)).unwrap();
                 });
                 // Still drawing: the other thread must still be waiting.
                 assert!(finished.recv_timeout(Duration::from_millis(200)).is_err(), "didn't wait for the frame");
+                assert!(lease.wanted(), "the frame can see it's waited for");
                 drop(lease);
                 assert_eq!(finished.recv_timeout(Duration::from_secs(5)).unwrap(), Some(1));
             });
