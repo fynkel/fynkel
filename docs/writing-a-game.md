@@ -939,7 +939,9 @@ Escape work. Keys for the app rather than the game go in `FynkelApp`'s
 no fixed steps; updates still run, with `unscaledDelta`), held keys,
 fingers and actions let go, and input that comes while paused is dropped.
 The view claims no keys then, so the pause menu's shortcuts get every one.
-The first frame after it counts no time, however long the pause was:
+When it ends, the keys still down on the keyboard are held again (and
+`wasPressed` that frame). The first frame after it counts no time, however
+long the pause was:
 
 ```dart
 // lib/paused_app.dart
@@ -2286,6 +2288,9 @@ For code written before: each change that breaks it, newest first.
   - A still finger or mouse gets `onPointerExit` when what was under it
     moves away or is hidden, and `onPointerEnter` when something comes
     under it, at the next frame's input step; before, only when it moved.
+  - Keys still down when a pause ends, or when the view gets focus back,
+    are held again; they stayed up until pressed again.
+  - `World.dispose` closes `world.errors`.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

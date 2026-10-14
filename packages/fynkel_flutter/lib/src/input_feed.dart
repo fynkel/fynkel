@@ -101,7 +101,9 @@ class InputFeed {
     if (key == null) return KeyEventResult.ignored;
     final input = _input();
     final used = switch (e) {
-      KeyDownEvent() => input.simulate.keyDown(key),
+      // A repeat holds a key the game let go meanwhile (the view lost focus,
+      // or the game paused); for one it holds, it's nothing.
+      KeyDownEvent() || KeyRepeatEvent() => input.simulate.keyDown(key),
       KeyUpEvent() => input.simulate.keyUp(key),
       _ => input.simulate.claims(key),
     };
@@ -110,6 +112,15 @@ class InputFeed {
 
   /// The view lost focus: its keys won't come up here, so they're let go.
   void releaseKeys() => _input().simulate.releaseKeys();
+
+  /// Holds the keys the keyboard holds now: after a pause, or when the view
+  /// gets focus back, those still down weren't told again.
+  void holdKeys() {
+    final input = _input().simulate;
+    for (final physical in HardwareKeyboard.instance.physicalKeysPressed) {
+      if (keyCodes[physical] case final key?) input.keyDown(key);
+    }
+  }
 }
 
 /// The game's key for a Flutter [KeyEvent], or null for one it has none

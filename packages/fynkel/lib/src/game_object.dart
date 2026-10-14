@@ -570,15 +570,25 @@ class GameObject with _Moving {
   String? get name {
     if (_described case final d?) return d.name;
     final w = _engine('its name can\'t be read');
+    if (_nameKnown) return _name;
     final capacity = scratch.byteCapacity;
     check(fy_name_get(w, id, scratch.bytes(), capacity, scratch.count));
     final length = scratch.count.value;
-    if (length == 0) return null;
+    if (length == 0) {
+      _nameKnown = true;
+      return _name = null;
+    }
     if (length > capacity) {
       check(fy_name_get(w, id, scratch.bytes(length), length, scratch.count));
     }
-    return const Utf8Decoder().convert(scratch.bytes().asTypedList(length));
+    _nameKnown = true;
+    return _name = const Utf8Decoder().convert(scratch.bytes().asTypedList(length));
   }
+
+  // The name as the engine has it, once read or written: only this object
+  // changes it.
+  String? _name;
+  bool _nameKnown = false;
 
   set name(String? value) {
     if (_described case final d?) {
@@ -591,12 +601,16 @@ class GameObject with _Moving {
   void _writeName(String value) {
     final length = scratch.utf8(value);
     check(fy_name_set(_engine('its name can\'t be set'), id, scratch.bytes(), length));
+    _name = value == '' ? null : value;
+    _nameKnown = true;
   }
 
   /// The first object below this one named [name], searching depth first
   /// in [children] order, or null. This object itself isn't searched.
   /// Unlike Unity's `Transform.Find`, which looks only at the direct
-  /// children and takes `'a/b'` paths, this searches every descendant.
+  /// children and takes `'a/b'` paths, this searches every descendant: find
+  /// once (in onLoad or onStart) and keep what it gives, rather than each
+  /// frame.
   GameObject? find(String name) {
     final w = _engine('nothing can be found below it');
     final length = scratch.utf8(name);

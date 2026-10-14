@@ -176,6 +176,18 @@ void main() {
     expect(() => other.add(GameObject()), throwsStateError);
   });
 
+  test('dispose closes errors, after what the objects\' onDestroy reported', () async {
+    final other = World();
+    final heard = <Object>[];
+    var closed = false;
+    other.errors.listen((e) => heard.add(e.error), onDone: () => closed = true);
+    other.add(_Throws());
+    other.dispose();
+    await pumpEventQueue();
+    expect(heard.map((e) => '$e'), [contains('in onDestroy')]);
+    expect(closed, isTrue);
+  });
+
   test('dispose destroys every object first: onDisable and onDestroy run, roots in order, children first', () {
     final other = World();
     final heard = <String>[];
@@ -340,13 +352,15 @@ void main() {
       expect(leg.name, long);
       expect(root.find(long), leg);
 
-      // A name set by the engine (as glTF names will be) can be longer than
-      // the buffer Dart has so far, so reading it asks twice.
+      // A name set by the engine (as glTF names are, before Dart reads them)
+      // can be longer than the buffer Dart has so far, so reading it asks
+      // twice.
       final engineName = 'n' * (scratch.byteCapacity + 100);
+      final named = world.add(GameObject());
       final bytes = engineName.toNativeUtf8();
-      check(fy_name_set(world.pointer, leg.id, bytes.cast(), bytes.length));
+      check(fy_name_set(world.pointer, named.id, bytes.cast(), bytes.length));
       malloc.free(bytes);
-      expect(leg.name, engineName);
+      expect(named.name, engineName);
 
       leg.name = null;
       expect(leg.name, isNull);
@@ -416,5 +430,13 @@ class _NotedBehaviour extends Behaviour {
   void onDestroy() {
     super.onDestroy();
     heard.add('$name destroy');
+  }
+}
+
+class _Throws extends GameObject {
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    throw StateError('in onDestroy');
   }
 }

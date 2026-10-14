@@ -164,6 +164,8 @@ final class World implements Finalizable {
     _unsent.clear();
     _assets.clear();
     _free(owned, null);
+    // What a disposed world reports from here goes to the zone.
+    _errors.close();
   }
 
   // --- Errors ---
@@ -198,7 +200,7 @@ final class World implements Finalizable {
   }
 
   void _report(GameObject? object, Object error, StackTrace stack) {
-    if (_errors.hasListener) {
+    if (_errors.hasListener && !_errors.isClosed) {
       _errors.add(ObjectError._(object, error, stack));
     } else {
       Zone.current.handleUncaughtError(error, stack);

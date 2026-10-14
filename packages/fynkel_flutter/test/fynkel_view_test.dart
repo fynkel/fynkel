@@ -1089,6 +1089,25 @@ void main() {
       expect(world.input.isPressed(KeyCode.f5), isTrue);
       await tester.sendKeyUpEvent(LogicalKeyboardKey.f5);
     });
+
+    testWidgets('a key held through a pause is held again when it ends', (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await tester.pump();
+      world.input.bindAction('dash', [KeyCode.w]);
+      await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(world.input.isPressed(KeyCode.w), isTrue);
+      world.paused = true;
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(world.input.isPressed(KeyCode.w), isFalse, reason: 'a pause lets go');
+      world.paused = false;
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(world.input.isPressed(KeyCode.w), isTrue, reason: 'still held on the keyboard');
+      await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(world.input.isPressed(KeyCode.w), isFalse);
+    });
   });
 
   group('several views', () {
