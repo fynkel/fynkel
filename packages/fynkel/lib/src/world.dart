@@ -475,7 +475,7 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
 
     input
-      .._now = time._unscaledSinceStart
+      .._now += dt
       .._step();
 
     var kept = 0;

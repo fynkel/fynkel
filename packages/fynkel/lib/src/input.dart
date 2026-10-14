@@ -62,9 +62,17 @@ final class Input {
   /// The view's height, in logical pixels: 0 until a view gives it.
   double get height => _height;
 
-  // The unscaled seconds since the first frame, and frames so far.
+  // The seconds since the first frame, not limited by Time.maxDelta (a
+  // finger held through a long frame was held that long), and frames so
+  // far.
   double _now = 0;
   int _frame = 0;
+
+  // When the event being handled happened, on [_now]'s clock: from its
+  // own time where it has one, so a down and an up in one frame's events
+  // are as far apart as they were; else [_now]. And the last one's, as
+  // they never go back.
+  double _eventAt = 0, _lastEventAt = double.negativeInfinity;
 
   final _queue = <_Raw>[];
 
@@ -397,11 +405,25 @@ final class Input {
     }
     // Events a handler feeds meanwhile wait for the next frame.
     final n = _queue.length;
+    // The newest event happened now; the others as long before it as
+    // their own times say.
+    var newest = double.negativeInfinity;
+    for (var i = 0; i < n; i++) {
+      final at = _queue[i].at;
+      if (at != null && at > newest) newest = at;
+    }
+    final offset = _now - newest;
     try {
       for (var i = 0; i < n; i++) {
-        _handle(_queue[i]);
+        final raw = _queue[i];
+        final at = raw.at;
+        var t = at == null ? _now : at + offset;
+        if (t < _lastEventAt) t = _lastEventAt;
+        _eventAt = _lastEventAt = t;
+        _handle(raw);
       }
     } finally {
+      _eventAt = _now;
       if (n > 0) _queue.removeRange(0, n);
     }
     _gestures();
@@ -555,7 +577,9 @@ final class Input {
     if (x == finger._x && y == finger._y) return;
     finger._place(x, y);
     finger._moved = true;
-    if (!finger._down || finger._dragging) return;
+    if (!finger._down) return;
+    finger._sample();
+    if (finger._dragging) return;
     final dx = x - finger._startX, dy = y - finger._startY;
     if (dx * dx + dy * dy > finger._slop * finger._slop) {
       finger._dragging = true;
@@ -586,9 +610,9 @@ final class Input {
     _flush(finger);
     finger._sample();
     finger._down = false;
-    finger._upAt = _now;
+    finger._upAt = _eventAt;
     finger._cancelled = cancelled;
-    if (cancelled || _now - finger._downAt > settings.tapTime) finger._tapping = false;
+    if (cancelled || _eventAt - finger._downAt > settings.tapTime) finger._tapping = false;
     final mouse = finger.kind == FingerKind.mouse;
     if (!mouse) {
       _fingers.remove(finger);
@@ -605,7 +629,7 @@ final class Input {
           finger.kind == _lastTapKind &&
           finger.button == _lastTapButton;
       finger._tapCount = again ? _lastTapCount + 1 : 1;
-      _lastTapAt = _now;
+      _lastTapAt = _eventAt;
       _lastTapX = finger._x;
       _lastTapY = finger._y;
       _lastTapCount = finger._tapCount;
@@ -885,7 +909,7 @@ final class Finger {
     _place(x, y);
     _startX = _lastX = x;
     _startY = _lastY = y;
-    _downAt = input._now;
+    _downAt = input._eventAt;
     _upAt = null;
     _downFrame = input._frame;
     _buttons = kind == FingerKind.mouse ? buttons : MouseButton.left.bit;
@@ -906,8 +930,8 @@ final class Finger {
   }
 
   void _sample() {
-    final at = _input._now;
-    // A second sample in the same frame replaces the first.
+    final at = _input._eventAt;
+    // A second sample at the same time replaces the first.
     final last = (_sampled - 1) % _sampleCount;
     final i = _sampled > 0 && _samples[last * 3] == at ? last : _sampled++ % _sampleCount;
     _samples
@@ -1214,7 +1238,8 @@ final class _Raw {
     this.pressure,
     this.key,
     this.action,
-  });
+    Duration? at,
+  }) : at = at == null ? null : at.inMicroseconds / 1e6;
 
   final _RawKind kind;
   final int id;
@@ -1224,6 +1249,10 @@ final class _Raw {
   final double? pressure;
   final KeyCode? key;
   final InputAction? action;
+
+  // When it happened, in seconds on the events' own clock (Flutter's
+  // `PointerEvent.timeStamp`), or null for the frame's time.
+  final double? at;
 }
 
 /// What feeds an [Input] ([Input.simulate]): package:fynkel_flutter's view
@@ -1232,8 +1261,12 @@ final class _Raw {
 /// next frame's input step handles them in order.
 ///
 /// Positions are in the view's logical pixels from its top-left corner
-/// ([resize] gives its size); times are the world's unscaled frame times,
-/// so a test's `world.update(0.6)` holds a finger down for 0.6 seconds.
+/// ([resize] gives its size). Times are the frames' (`world.update`'s
+/// seconds, not limited by [Time.maxDelta]), so a test's
+/// `world.update(0.6)` holds a finger down for 0.6 seconds; a finger's
+/// events may also say when they happened (`at:`, the view gives
+/// Flutter's `timeStamp`), and then those in one frame are as far apart
+/// as they say, the newest at the frame's time.
 final class InputSimulation {
   InputSimulation._(this._input);
 
@@ -1255,23 +1288,25 @@ final class InputSimulation {
     FingerKind kind = FingerKind.touch,
     int buttons = 1,
     double pressure = 1,
-  }) => _input._queue.add(_Raw(_RawKind.down, id, x, y, fingerKind: kind, buttons: buttons, pressure: pressure));
+    Duration? at,
+  }) =>
+      _input._queue.add(_Raw(_RawKind.down, id, x, y, fingerKind: kind, buttons: buttons, pressure: pressure, at: at));
 
   /// Finger [id], down, moved to ([x], [y]). A mouse's [buttons] may change
   /// while it's down.
-  void fingerMove(int id, double x, double y, {int? buttons, double? pressure}) =>
-      _input._queue.add(_Raw(_RawKind.move, id, x, y, buttons: buttons, pressure: pressure));
+  void fingerMove(int id, double x, double y, {int? buttons, double? pressure, Duration? at}) =>
+      _input._queue.add(_Raw(_RawKind.move, id, x, y, buttons: buttons, pressure: pressure, at: at));
 
   /// Finger [id] went up at ([x], [y]).
-  void fingerUp(int id, double x, double y) => _input._queue.add(_Raw(_RawKind.up, id, x, y));
+  void fingerUp(int id, double x, double y, {Duration? at}) => _input._queue.add(_Raw(_RawKind.up, id, x, y, at: at));
 
   /// Finger [id] was taken away (by the system, or a widget over the
   /// view): it goes without tapping or swiping.
-  void fingerCancel(int id) => _input._queue.add(_Raw(_RawKind.cancel, id, 0, 0));
+  void fingerCancel(int id, {Duration? at}) => _input._queue.add(_Raw(_RawKind.cancel, id, 0, 0, at: at));
 
   /// The mouse (or a pen) [id] moved over the view with nothing pressed.
-  void hover(int id, double x, double y, {FingerKind kind = FingerKind.mouse}) =>
-      _input._queue.add(_Raw(_RawKind.hover, id, x, y, fingerKind: kind));
+  void hover(int id, double x, double y, {FingerKind kind = FingerKind.mouse, Duration? at}) =>
+      _input._queue.add(_Raw(_RawKind.hover, id, x, y, fingerKind: kind, at: at));
 
   /// The mouse (or a pen) [id] left the view.
   void leave(int id) => _input._queue.add(_Raw(_RawKind.leave, id, 0, 0));

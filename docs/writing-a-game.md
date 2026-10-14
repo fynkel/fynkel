@@ -2279,6 +2279,10 @@ For code written before: each change that breaks it, newest first.
   - `wasPressed` and `wasReleased` in `onFixedUpdate` mean since the
     last fixed step, where they meant this frame: a press is seen by one
     fixed step, not by each of the frame's, nor by none.
+  - A finger's times (a tap's, a long press's, `age`, `velocity`) are
+    its events' own, from Flutter, and not limited by `time.maxDelta`:
+    a 1 s hold through a hitch is no longer a tap, and a swipe's speed
+    is no longer overstated.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

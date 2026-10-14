@@ -43,6 +43,7 @@ class InputFeed {
     kind: _kind(e.kind),
     buttons: e.buttons,
     pressure: _pressure(e),
+    at: e.timeStamp,
   );
 
   /// A pressed finger, mouse or pen moves.
@@ -52,18 +53,20 @@ class InputFeed {
     e.localPosition.dy,
     buttons: e.buttons,
     pressure: _pressure(e),
+    at: e.timeStamp,
   );
 
   /// A finger, mouse button or pen lifts.
-  void pointerUp(PointerUpEvent e) => _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy);
+  void pointerUp(PointerUpEvent e) =>
+      _input().simulate.fingerUp(_id(e), e.localPosition.dx, e.localPosition.dy, at: e.timeStamp);
 
   /// Flutter took a pointer away (a gesture won elsewhere, say): it ends
   /// without a lift.
-  void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e));
+  void pointerCancel(PointerCancelEvent e) => _input().simulate.fingerCancel(_id(e), at: e.timeStamp);
 
   /// A mouse or pen over the view with nothing pressed, or coming in.
   void hover(PointerEvent e) =>
-      _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind));
+      _input().simulate.hover(_id(e), e.localPosition.dx, e.localPosition.dy, kind: _kind(e.kind), at: e.timeStamp);
 
   /// A mouse or pen leaves the view.
   void exit(PointerExitEvent e) => _input().simulate.leave(_id(e));
