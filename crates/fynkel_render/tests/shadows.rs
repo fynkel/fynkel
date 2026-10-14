@@ -2,12 +2,17 @@
 //! where something stands between them and a surface; a draw can choose
 //! not to cast them, or not to receive them; and each level draws its own
 //! number of maps. That a still shadow doesn't shimmer as the camera moves
-//! is checked on the maps' maths, in `shadows.rs`.
+//! is checked on the maps' maths, in `shadows.rs`, and here on the GPU.
+//!
+//! The pictures (hardening R5) hold what the counts can't: acne, a shadow
+//! that floats off its caster, a cut-out's holes, the seam between two
+//! cascades and a spot's cone. A shadow's edge is a few pixels wide, so
+//! they allow a few pixels, not 0.1 % of the image.
 
 mod common;
 
 use common::*;
-use fynkel_render::glam::{Mat4, Vec3};
+use fynkel_render::glam::{Mat4, Quat, Vec3};
 use fynkel_render::*;
 
 const SRGB: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
@@ -135,4 +140,173 @@ fn each_level_draws_its_own_number_of_maps() {
     lights.iter_mut().for_each(|l| l.shadows = false);
     let (_, stats) = render(&gpu, &mut r, &stage(lights, Quality::High), SIZE, SIZE);
     assert_eq!((stats.shadow_maps, stats.shadow_casters), (0, 0));
+}
+
+// --- Pictures ------------------------------------------------------------------
+
+const PICTURE: u32 = 256;
+
+/// At most this many of a picture's pixels may differ from its golden.
+const PICTURE_PIXELS: usize = 8;
+
+fn picture(gpu: &Gpu, r: &mut Renderer, name: &str, scene: &RenderScene) {
+    let (image, _) = render(gpu, r, scene, PICTURE, PICTURE);
+    assert_golden_within(name, &image, PICTURE_PIXELS);
+}
+
+fn level_name(quality: Quality) -> &'static str {
+    match quality {
+        Quality::Low => "low",
+        Quality::Medium => "medium",
+        Quality::High => "high",
+    }
+}
+
+/// A cube standing on the floor, close up, under a low sun: acne shows as
+/// stripes on the lit floor and the cube's lit faces, and a shadow that
+/// floats shows as a lit gap where the cube meets the floor.
+#[test]
+fn picture_a_cube_on_the_floor() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let mut scene = stage(vec![Light::sun(Vec3::new(1.0, -0.6, 0.4), Vec3::ONE).with_shadows(true)], quality);
+        scene.camera = Some(CameraView::looking_at(Vec3::new(-1.5, 2.0, 3.0), Vec3::new(0.5, 0.3, 0.0)));
+        scene.draws[1].model = Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0));
+        picture(&gpu, &mut r, &format!("shadow_contact_{}", level_name(quality)), &scene);
+    }
+}
+
+/// A standing square, cut out in a 4 × 4 checker, between the sun and the
+/// floor: its shadow has the checker's holes.
+#[test]
+fn picture_a_cutout_casts_its_holes() {
+    const CHECKER: TextureKey = TextureKey(1);
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let checker: Vec<u8> = (0..4u32)
+        .flat_map(|y| (0..4u32).map(move |x| (x, y)))
+        .flat_map(|(x, y)| [255, 255, 255, if (x + y) % 2 == 0 { 255 } else { 0 }])
+        .collect();
+    r.upload_texture(CHECKER, ColorSpace::Srgb, 4, 4, &checker);
+    let mut scene = stage(vec![Light::sun(Vec3::new(0.3, -1.0, 0.9), Vec3::ONE).with_shadows(true)], Quality::Medium);
+    scene.camera = Some(CameraView::looking_at(Vec3::new(0.0, 5.0, 5.0), Vec3::new(0.0, 0.0, 1.0)));
+    scene.draws[1] = Draw::new(
+        PLANE,
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            Quat::from_rotation_x(90f32.to_radians()),
+            Vec3::new(0.0, 1.5, 0.0),
+        ),
+        PbrMaterial {
+            alpha_cutoff: 0.5,
+            double_sided: true,
+            textures: MaterialTextures { base_color: Some(CHECKER), ..MaterialTextures::NONE },
+            ..material(0.5)
+        },
+    );
+    picture(&gpu, &mut r, "shadow_cutout", &scene);
+}
+
+/// A row of posts down a long floor, seen low along it: the posts' shadows
+/// cross from one cascade into the next.
+#[test]
+fn picture_the_cascades_meet() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    for quality in [Quality::Medium, Quality::High] {
+        let mut draws = vec![Draw::new(PLANE, Mat4::from_scale(Vec3::new(12.0, 1.0, 120.0)), material(0.7))];
+        for i in 0..24 {
+            let z = -2.0 - i as f32 * 2.5;
+            draws.push(Draw::new(
+                CUBE,
+                Mat4::from_scale_rotation_translation(
+                    Vec3::new(0.3, 3.0, 0.3),
+                    Quat::IDENTITY,
+                    Vec3::new(-1.0, 1.5, z),
+                ),
+                material(0.5),
+            ));
+        }
+        let scene = RenderScene {
+            camera: Some(CameraView::looking_at(Vec3::new(1.5, 2.5, 4.0), Vec3::new(-1.0, 0.0, -20.0))),
+            lights: vec![Light::sun(Vec3::new(1.0, -0.8, -0.2), Vec3::ONE).with_shadows(true)],
+            quality: Some(quality),
+            ambient: Vec3::splat(0.1),
+            lines: Vec::new(),
+            draws,
+        };
+        picture(&gpu, &mut r, &format!("shadow_cascades_{}", level_name(quality)), &scene);
+    }
+}
+
+/// A spot light with a hard edge over the cube: the cube's shadow, and the
+/// cone's rim on the floor.
+#[test]
+fn picture_a_spot_lights_cone() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let from = Vec3::new(-1.0, 4.0, 0.5);
+    let spot = Light::spot(from, Vec3::new(0.5, 0.0, 0.0) - from, 12.0, 1.0, 0.0, Vec3::splat(6.0));
+    let scene = stage(vec![spot.with_shadows(true)], Quality::Medium);
+    picture(&gpu, &mut r, "shadow_spot", &scene);
+}
+
+// --- Shimmer ---------------------------------------------------------------------
+
+/// Half the shimmer camera's view, in metres, and its image's side: a
+/// pixel is 6/256 m, exact in binary, so a camera slid by whole pixels
+/// sees the floor's points at the same places in its pixels.
+const SHIMMER_HALF: f32 = 3.0;
+const SHIMMER_SIDE: u32 = 256;
+
+/// The floor's pixels in a still shadow, seen from straight above by a
+/// camera slid `shift` whole pixels to the right: each as its column and
+/// row on the floor, so a still shadow gives the same set however far the
+/// camera has slid.
+fn shadow_pixels(gpu: &Gpu, r: &mut Renderer, quality: Quality, shift: i32) -> std::collections::BTreeSet<(i32, u32)> {
+    let metres = 2.0 * SHIMMER_HALF / SHIMMER_SIDE as f32;
+    let x = shift as f32 * metres;
+    let mut camera = CameraView::looking_at(Vec3::new(x, 10.0, 0.0), Vec3::new(x, 0.0, 0.0));
+    camera.view =
+        fynkel_render::glam::camera::rh::view::look_at_mat4(camera.position, Vec3::new(x, 0.0, 0.0), Vec3::NEG_Z);
+    camera.orthographic = Some(SHIMMER_HALF);
+    camera.far = 20.0;
+    let mut scene = stage(vec![Light::sun(Vec3::new(0.7, -1.0, 0.3), Vec3::ONE).with_shadows(true)], quality);
+    scene.camera = Some(camera);
+    let (image, _) = render(gpu, r, &scene, SHIMMER_SIDE, SHIMMER_SIDE);
+    // The lit floor in a corner; its shadow is below half that.
+    let lit = brightness(&image, (2, 2));
+    let mut dark = std::collections::BTreeSet::new();
+    for y in 0..SHIMMER_SIDE {
+        for column in 0..SHIMMER_SIDE {
+            if brightness(&image, (column, y)) * 2 < lit {
+                dark.insert((column as i32 + shift, y));
+            }
+        }
+    }
+    assert!(dark.len() > 100, "{quality:?}: a shadow under the cube ({} pixels)", dark.len());
+    dark
+}
+
+/// A still shadow keeps its place on the GPU while the camera slides:
+/// by whole pixels, but fractions of a shadow texel, so a map that slid
+/// with the camera would move the shadow's edge across the floor's pixels.
+#[test]
+fn a_still_shadow_stays_still_as_the_camera_moves() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    for quality in [Quality::Low, Quality::High] {
+        let first = shadow_pixels(&gpu, &mut r, quality, 0);
+        for step in 1..10 {
+            let shift = step * 3;
+            let now = shadow_pixels(&gpu, &mut r, quality, shift);
+            let changed = first.symmetric_difference(&now).count();
+            assert!(
+                changed <= 4,
+                "{quality:?}: slid {shift} pixels, {changed} of the shadow's {} changed",
+                first.len()
+            );
+        }
+    }
 }
