@@ -16,6 +16,10 @@ import '../lab.dart';
 /// that level, for measuring; the device's own pick otherwise.
 const _startQuality = String.fromEnvironment('LAB_QUALITY');
 
+/// `--dart-define=LAB_SHADOWS=false` starts the scene with no shadows, for
+/// measuring what they cost.
+const _startShadows = bool.fromEnvironment('LAB_SHADOWS', defaultValue: true);
+
 class ShadowsScene extends LabScene {
   @override
   String get title => 'Look: shadows';
@@ -44,7 +48,7 @@ class ShadowsScene extends LabScene {
     final sun = find('sun')!..rotation = Quat.lookRotation(Vec3(-0.6, -0.7, -0.45));
     _sun = sun.get<Light>()!
       ..intensity = 2.2
-      ..shadows = true;
+      ..shadows = _startShadows;
     find('floor')!.active = false;
     add(shape('lawn', Mesh.plane(), const Color(0xFF6E8A5A), size: Vec3(240, 1, 240)));
 
@@ -104,7 +108,7 @@ class ShadowsScene extends LabScene {
         name: 'torch',
         transform: Transform(position: Vec3(4.2, 4.1, 4.3), rotation: Quat.lookRotation(Vec3(-0.35, -1, 0.45))),
         components: [
-          Light.spot(color: const Color(0xFFFFD9A0), intensity: 40, range: 12, angle: 70.deg, shadows: true),
+          Light.spot(color: const Color(0xFFFFD9A0), intensity: 40, range: 12, angle: 70.deg, shadows: _startShadows),
         ],
       ),
     );
