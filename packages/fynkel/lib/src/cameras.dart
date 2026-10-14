@@ -530,7 +530,7 @@ final class Cameras {
       _blend = blend;
       _blendTime = 0;
     }
-    onLiveChanged.emit(best);
+    _world._emit(onLiveChanged, best);
   }
 
   _Pose _poseNow(VirtualCamera live, double dt) {

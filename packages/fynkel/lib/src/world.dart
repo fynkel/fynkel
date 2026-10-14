@@ -187,6 +187,16 @@ final class World implements Finalizable {
   /// rethrow to stop.
   Stream<ObjectError> get errors => _errors.stream;
 
+  /// Emits [value] on one of the world's signals, sending what an owner-less
+  /// listener throws to [errors]: it mustn't escape the frame.
+  void _emit<T>(Signal<T> signal, T value) {
+    try {
+      signal.emit(value);
+    } catch (error, stack) {
+      _report(null, error, stack);
+    }
+  }
+
   void _report(GameObject? object, Object error, StackTrace stack) {
     if (_errors.hasListener) {
       _errors.add(ObjectError._(object, error, stack));
@@ -300,7 +310,7 @@ final class World implements Finalizable {
     input._pausing = value;
     time._paused = value;
     if (!value) time._skip = true;
-    onPausedChanged.emit(value);
+    _emit(onPausedChanged, value);
   }
 
   var _paused = false;

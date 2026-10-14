@@ -176,6 +176,19 @@ class ThrowingSystem extends WorldSystem {
   }
 }
 
+/// Counts its afterFrame calls: the frame got to its end.
+class FrameEnds extends WorldSystem {
+  FrameEnds(super.world);
+
+  var ends = 0;
+
+  @override
+  void afterFrame() {
+    super.afterFrame();
+    ends++;
+  }
+}
+
 /// Counts what it gets: the game going on.
 class Witness extends GameObject {
   var updates = 0, lates = 0, fixed = 0, waits = 0;
@@ -290,5 +303,23 @@ void main() {
     world.update(1 / 60);
     await pumpEventQueue();
     expect(errors, contains('behaviour onDestroy'));
+  });
+
+  test('a throwing listener of the live camera or of the pause goes to errors, and the frame ends', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final errors = <Object>[];
+    world.errors.listen((e) => errors.add(e.error));
+    final ends = world.system(FrameEnds.new);
+    world.add(GameObject(components: [Camera()]));
+    world.cameras.onLiveChanged.listen((_) => throw StateError('live'));
+    world.onPausedChanged.listen((_) => throw StateError('paused'));
+    world.add(GameObject(components: [VirtualCamera()]));
+    expect(() => world.update(1 / 60), returnsNormally);
+    expect(ends.ends, 1, reason: 'afterFrame still ran');
+    expect(() => world.paused = true, returnsNormally);
+    expect(world.paused, isTrue);
+    await pumpEventQueue();
+    expect(errors.map((e) => (e as StateError).message), ['live', 'paused']);
   });
 }
