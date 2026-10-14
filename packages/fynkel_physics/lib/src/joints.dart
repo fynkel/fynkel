@@ -156,10 +156,12 @@ sealed class Joint extends Behaviour {
   bool get isJoined => _id != 0;
 
   // Its world's physics while it's enabled, its id there (0 while it
-  // waits), its key, and the rigidbody it's on.
+  // waits), its key, where it is in the physics' list, and the rigidbody
+  // it's on.
   Physics? _physics;
   int _id = 0;
   int _key = -1;
+  int _index = 0;
   Rigidbody? _body;
 
   int get _kind;

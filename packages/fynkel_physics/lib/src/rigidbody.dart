@@ -339,6 +339,8 @@ final class Rigidbody extends Behaviour {
   int _id = 0;
   int _key = 0;
   int _index = 0;
+  // Where it is in the physics' interpolated list, or -1.
+  int _interpolatedAt = -1;
   final _colliders = <Collider>[];
   final _place = _Place();
 
