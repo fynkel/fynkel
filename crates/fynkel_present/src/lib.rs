@@ -23,7 +23,7 @@ pub use android::{Android, AndroidError, AndroidPresenter};
 pub use apple::{Apple, AppleError, ApplePresenter, FrameReady, Presented};
 pub use headless::{Headless, HeadlessFrames, ReadError};
 pub use ring::{MAX_IN_FLIGHT, MAX_QUEUED, Ring, RingError, RingStats, SLOTS, Shown, SlotState, Ticket};
-pub use target::Target;
+pub use target::{Target, Wake};
 pub use wgpu;
 
 /// Runs `f` inside an autorelease pool on Apple platforms, and as is

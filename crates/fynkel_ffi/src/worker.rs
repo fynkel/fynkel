@@ -97,6 +97,14 @@ struct Mailbox {
     panic: bool,
     /// The worker stopped and dropped everything it owned.
     finished: bool,
+    /// `pending` is a scene the target had no room for, waiting for a
+    /// frame to free one ([`Target::on_free`]).
+    blocked: bool,
+    /// Whether `pending` was put back after the target had no room: if a
+    /// newer scene replaces it, it counts as skipped, not coalesced.
+    retried: bool,
+    /// Frames the target finished and freed room with, so far.
+    freed: u64,
     /// Why the worker stopped, if it did on its own: it panicked or the GPU
     /// reported an error in its frame ([`FyStatus::WorkerFailed`]), or the
     /// device was lost or reported an error elsewhere
@@ -197,8 +205,13 @@ impl Worker {
         mailbox.stats.posted += 1;
         if let Some((_, replaced)) = mailbox.pending.replace((number, scene)) {
             mailbox.spare.push(replaced);
-            mailbox.stats.coalesced += 1;
+            if mailbox.retried {
+                mailbox.stats.skipped += 1;
+            } else {
+                mailbox.stats.coalesced += 1;
+            }
         }
+        mailbox.retried = false;
         drop(mailbox);
         self.shared.wake.notify_one();
         Ok(())
@@ -350,11 +363,24 @@ impl Shared {
 }
 
 /// Draws until stopped. Fails when the target can't take a new size.
-fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
+fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
     let gpu = &world.device.gpu;
     let mut ops = Vec::new();
+    // A scene the target has no room for waits for a frame to free some.
+    let waits = target.on_free(Arc::new({
+        let shared = Arc::downgrade(shared);
+        move || {
+            if let Some(shared) = shared.upgrade() {
+                let mut mailbox = shared.lock();
+                mailbox.freed += 1;
+                mailbox.blocked = false;
+                drop(mailbox);
+                shared.wake.notify_one();
+            }
+        }
+    }));
     loop {
-        let (number, scene, size) = {
+        let (number, scene, size, freed) = {
             let mut mailbox = shared.lock();
             loop {
                 if mailbox.stop || mailbox.failure.is_some() {
@@ -371,8 +397,11 @@ fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut
                     world.device.destroy();
                     return Ok(());
                 }
-                if let Some((number, scene)) = mailbox.pending.take() {
-                    break (number, scene, mailbox.size.take());
+                if !mailbox.blocked
+                    && let Some((number, scene)) = mailbox.pending.take()
+                {
+                    mailbox.retried = false;
+                    break (number, scene, mailbox.size.take(), mailbox.freed);
                 }
                 mailbox = shared.wake.wait(mailbox).unwrap_or_else(PoisonError::into_inner);
             }
@@ -435,10 +464,17 @@ fn run<T: Target>(shared: &Shared, world: &WorldGpu, mut renderer: Renderer, mut
         })?;
 
         let mut mailbox = shared.lock();
-        mailbox.spare.push(scene);
         if drawn {
+            mailbox.spare.push(scene);
             mailbox.stats.rendered += 1;
+        } else if waits && mailbox.pending.is_none() {
+            // Drawn when a frame frees room (unless a newer scene comes
+            // meanwhile): at once if one already has.
+            mailbox.pending = Some((number, scene));
+            mailbox.retried = true;
+            mailbox.blocked = mailbox.freed == freed;
         } else {
+            mailbox.spare.push(scene);
             mailbox.stats.skipped += 1;
         }
     }

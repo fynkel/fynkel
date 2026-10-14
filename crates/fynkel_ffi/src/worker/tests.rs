@@ -237,6 +237,76 @@ fn a_gpu_error_stops_the_worker_rather_than_panic() {
     assert!(failure.message.starts_with("the GPU reported an error"), "{}", failure.message);
 }
 
+/// A target with no room for its first frame, which frees some from
+/// another thread a little later, as Metal's completion does.
+struct Full {
+    inner: Headless,
+    full: bool,
+    wake: Arc<Mutex<Option<fynkel_present::Wake>>>,
+}
+
+impl Target for Full {
+    type Frame = <Headless as Target>::Frame;
+    fn format(&self) -> wgpu::TextureFormat {
+        self.inner.format()
+    }
+    fn size(&self) -> (u32, u32) {
+        self.inner.size()
+    }
+    fn begin(&mut self) -> Option<Self::Frame> {
+        if std::mem::take(&mut self.full) {
+            return None;
+        }
+        self.inner.begin()
+    }
+    fn view<'a>(&'a self, frame: &'a Self::Frame) -> &'a wgpu::TextureView {
+        self.inner.view(frame)
+    }
+    fn finish(&mut self, frame: Self::Frame, encoder: wgpu::CommandEncoder, number: u64) {
+        self.inner.finish(frame, encoder, number);
+    }
+    fn on_free(&mut self, wake: fynkel_present::Wake) -> bool {
+        *self.wake.lock().unwrap() = Some(wake);
+        true
+    }
+    fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
+        self.inner.resize(width, height)
+    }
+}
+
+fn full(gpu: &Gpu) -> (Worker, HeadlessFrames, Arc<Mutex<Option<fynkel_present::Wake>>>) {
+    let (inner, frames) = headless(gpu);
+    let wake = Arc::default();
+    (start(gpu, Full { inner, full: true, wake: Arc::clone(&wake) }), frames, wake)
+}
+
+#[test]
+fn a_scene_with_no_room_is_drawn_when_a_frame_frees_some() {
+    let gpu = gpu();
+    let (worker, frames, wake) = full(&gpu);
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    thread::sleep(Duration::from_millis(50));
+    assert_eq!(worker.stats().rendered, 0, "waits for room");
+    let wake = wake.lock().unwrap().clone().expect("the worker asked to be woken");
+    wake();
+    assert_eq!(frames.read(1, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]), Ok(1), "without a new post");
+    let stats = wait_for(&worker, |stats| stats.rendered == 1);
+    assert_eq!((stats.posted, stats.skipped, stats.coalesced), (1, 0, 0));
+}
+
+#[test]
+fn a_newer_scene_replaces_one_waiting_for_room_which_counts_as_skipped() {
+    let gpu = gpu();
+    let (worker, frames, wake) = full(&gpu);
+    worker.post(1, worker.scene(), &mut Vec::new()).unwrap();
+    thread::sleep(Duration::from_millis(50));
+    worker.post(2, worker.scene(), &mut Vec::new()).unwrap();
+    wake.lock().unwrap().clone().expect("the worker asked to be woken")();
+    assert_eq!(frames.read(2, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]), Ok(2));
+    let stats = wait_for(&worker, |stats| stats.rendered == 1);
+    assert_eq!((stats.posted, stats.skipped, stats.coalesced), (2, 1, 0));
+}
+
 /// A target whose frames make a GPU error on the render thread.
 struct Faulty(Headless, wgpu::Device);
 

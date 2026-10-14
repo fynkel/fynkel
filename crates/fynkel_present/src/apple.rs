@@ -33,7 +33,7 @@ use objc2_metal::{
     MTLTextureUsage,
 };
 
-use crate::{Ring, RingStats, SLOTS, Target, Ticket};
+use crate::{Ring, RingStats, SLOTS, Target, Ticket, Wake};
 
 /// The views' format. The surfaces hold BGRA bytes, as CoreVideo and Flutter
 /// expect; drawing through an sRGB texture encodes them in hardware.
@@ -89,6 +89,17 @@ struct Shared {
     /// ring's reset, under this lock.
     surfaces: Mutex<Vec<Surface>>,
     callback: Mutex<Option<Callback>>,
+    /// The render worker's, called when a frame frees its slot.
+    wake: WakeSlot,
+}
+
+#[derive(Default)]
+struct WakeSlot(Mutex<Option<Wake>>);
+
+impl std::fmt::Debug for WakeSlot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("WakeSlot")
+    }
 }
 
 /// An IOSurface. They are thread-safe objects.
@@ -123,7 +134,12 @@ impl Apple {
         let metal = Metal::of(device, queue)?;
         let (width, height) = (width.max(1), height.max(1));
         let (views, surfaces) = make_slots(device, &metal.device, width, height)?;
-        let shared = Arc::new(Shared { ring: Ring::new(), surfaces: Mutex::new(surfaces), callback: Mutex::new(None) });
+        let shared = Arc::new(Shared {
+            ring: Ring::new(),
+            surfaces: Mutex::new(surfaces),
+            callback: Mutex::new(None),
+            wake: WakeSlot::default(),
+        });
         let presenter = ApplePresenter { shared: shared.clone() };
         let target = Self { device: device.clone(), queue: queue.clone(), metal, views, size: (width, height), shared };
         Ok((target, presenter))
@@ -152,8 +168,17 @@ impl Shared {
         self.callback.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
-    /// On a Metal thread: the frame's GPU work is done.
+    /// On a Metal thread: the frame's GPU work is done, and its slot free
+    /// for the next (the worker is told, after Flutter).
     fn finished(&self, ticket: Ticket) {
+        self.complete(ticket);
+        let wake = self.wake.0.lock().unwrap_or_else(PoisonError::into_inner).clone();
+        if let Some(wake) = wake {
+            wake();
+        }
+    }
+
+    fn complete(&self, ticket: Ticket) {
         // Stale (a resize made new surfaces meanwhile) is expected; the
         // frame is just not shown. Anything else is a ring bug, which its
         // own tests cover.
@@ -215,6 +240,11 @@ impl Target for Apple {
             unsafe { marker.addCompletedHandler(RcBlock::as_ptr(&handler)) };
             marker.commit();
         });
+    }
+
+    fn on_free(&mut self, wake: Wake) -> bool {
+        *self.shared.wake.0.lock().unwrap_or_else(PoisonError::into_inner) = Some(wake);
+        true
     }
 
     fn resize(&mut self, width: u32, height: u32) -> Result<(), String> {
