@@ -56,20 +56,34 @@ Future<Map<String, int>> Function(World world, int frames, {int tries}) allocati
 
   /// Counts [frames] frames' allocations, beyond those of no frames: the
   /// classes made at least [minimum] times.
+  ///
+  /// The count is of the objects in the heap, so garbage a collection
+  /// frees in the window isn't seen: when one ran, the frames are counted
+  /// again, a quarter as many each time, and scaled back to [frames]. A
+  /// frame that allocates nothing never needs a collection; one still
+  /// running at the fewest frames, with no class seen, is reported as a
+  /// class of its own.
   Future<Map<String, int>> made(World world, int frames, num minimum) async {
-    await ask<void>(['mark']);
-    await ask<void>(['zero']);
-    for (var i = 0; i < frames; i++) {
-      world.update(_dt);
+    for (var window = frames; ; window = window ~/ 4) {
+      await ask<void>(['mark']);
+      await ask<void>(['zero']);
+      for (var i = 0; i < window; i++) {
+        world.update(_dt);
+      }
+      final [collections as int, counts as Map<Object?, Object?>] = await ask<List<Object?>>([
+        'count',
+        minimum * window / frames,
+      ]);
+      if (collections > 0 && window >= 16) continue;
+      final made = <String, int>{};
+      for (final MapEntry(:key, :value) in counts.entries) {
+        final [id as String, instances as int] = value! as List<Object?>;
+        classIds[key! as String] = id;
+        made[key as String] = instances * frames ~/ window;
+      }
+      if (collections > 0 && made.isEmpty) made['(garbage collected $collections times in $window frames)'] = 0;
+      return made;
     }
-    final counts = await ask<Map<Object?, Object?>>(['count', minimum]);
-    final made = <String, int>{};
-    for (final MapEntry(:key, :value) in counts.entries) {
-      final [id as String, instances as int] = value! as List<Object?>;
-      classIds[key! as String] = id;
-      made[key as String] = instances;
-    }
-    return made;
   }
 
   /// Prints where [frames] frames make [classes], from the VM's allocation
