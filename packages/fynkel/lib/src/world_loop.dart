@@ -269,6 +269,7 @@ extension _Loop on World {
         time._fixedTime += time._fixedDelta;
         time._fixedSteps++;
         time._inFixed = true;
+        input._inFixed = true;
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
           if (system._off) continue;
@@ -289,10 +290,12 @@ extension _Loop on World {
           }
         }
         _runRoutines(fixed: true);
+        input._fixedStepDone();
         if (_disposeAsked) return;
       }
     } finally {
       time._inFixed = false;
+      input._inFixed = false;
     }
   }
 

@@ -79,6 +79,18 @@ final class Input {
   // or a pen down holds the left one.
   int _buttons = 0, _pressedButtons = 0, _releasedButtons = 0;
 
+  // The edges since the last fixed step, for those asked in one: each
+  // fixed step sees a press once, however many the frame runs, and a
+  // frame that runs none passes it to the next.
+  final _fixedPressedKeys = <KeyCode>{};
+  final _fixedReleasedKeys = <KeyCode>{};
+  int _fixedPressedButtons = 0, _fixedReleasedButtons = 0;
+
+  // In a world's fixed step; and how many fixed steps have run, which an
+  // action's press and release stamp.
+  bool _inFixed = false;
+  int _fixedStep = 0;
+
   double _scrollX = 0, _scrollY = 0;
   Vec2 _scroll = Vec2.zero;
 
@@ -187,17 +199,29 @@ final class Input {
     final MouseButton m => _buttons & m.bit != 0,
   };
 
-  /// Whether a key or mouse button went down this frame.
+  /// Whether a key or mouse button went down this frame. In a fixed step
+  /// ([GameObject.onFixedUpdate]): since the last fixed step, so a press
+  /// is seen by one fixed step, however many a frame runs.
   bool wasPressed(InputButton button) => switch (button) {
-    final KeyCode key => _use(key) && _pressedKeys.contains(key),
-    final MouseButton m => _pressedButtons & m.bit != 0,
+    final KeyCode key => _use(key) && (_inFixed ? _fixedPressedKeys : _pressedKeys).contains(key),
+    final MouseButton m => (_inFixed ? _fixedPressedButtons : _pressedButtons) & m.bit != 0,
   };
 
-  /// Whether a key or mouse button went up this frame.
+  /// Whether a key or mouse button went up this frame; in a fixed step,
+  /// since the last one, as [wasPressed].
   bool wasReleased(InputButton button) => switch (button) {
-    final KeyCode key => _use(key) && _releasedKeys.contains(key),
-    final MouseButton m => _releasedButtons & m.bit != 0,
+    final KeyCode key => _use(key) && (_inFixed ? _fixedReleasedKeys : _releasedKeys).contains(key),
+    final MouseButton m => (_inFixed ? _fixedReleasedButtons : _releasedButtons) & m.bit != 0,
   };
+
+  /// A fixed step is over: the next sees only what comes after it.
+  void _fixedStepDone() {
+    _fixedStep++;
+    if (_fixedPressedKeys.isNotEmpty) _fixedPressedKeys.clear();
+    if (_fixedReleasedKeys.isNotEmpty) _fixedReleasedKeys.clear();
+    _fixedPressedButtons = 0;
+    _fixedReleasedButtons = 0;
+  }
 
   /// Whether the game uses [key]: it's bound to an axis or an action, or
   /// the game asked about it ([isPressed], [wasPressed], [wasReleased]).
@@ -362,6 +386,8 @@ final class Input {
       if (_pausing) {
         _pausing = false;
         _letGo();
+        // No fixed step runs while paused; the next one starts clean.
+        _fixedStepDone();
       }
       if (_queue.isNotEmpty) _queue.clear();
       _scrollX = _scrollY = 0;
@@ -451,6 +477,7 @@ final class Input {
         final key = raw.key!;
         if (!_keys.add(key)) return;
         _pressedKeys.add(key);
+        _fixedPressedKeys.add(key);
         _emit(onKeyDown, KeyPress._(key, _keys));
       case _RawKind.keyUp:
         _keyUp(raw.key!);
@@ -463,14 +490,15 @@ final class Input {
         if (action._held) return;
         action._held = true;
         action._pressedAt = _frame;
+        action._pressedStep = _fixedStep;
       case _RawKind.actionUp:
         final action = raw.action!;
         if (!action._held) return;
         action._held = false;
-        action._releasedAt = _frame;
+        action._released();
       case _RawKind.actionDropped:
         final action = raw.action!;
-        if (!action.isPressed) action._releasedAt = _frame;
+        if (!action.isPressed) action._released();
     }
   }
 
@@ -486,7 +514,7 @@ final class Input {
     for (final action in _actions.values) {
       if (action._held) {
         action._held = false;
-        action._releasedAt = _frame;
+        action._released();
       }
     }
   }
@@ -494,6 +522,7 @@ final class Input {
   void _keyUp(KeyCode key) {
     if (!_keys.remove(key)) return;
     _releasedKeys.add(key);
+    _fixedReleasedKeys.add(key);
     _emit(onKeyUp, KeyPress._(key, _keys));
   }
 
@@ -612,6 +641,8 @@ final class Input {
     }
     _pressedButtons |= now & ~_buttons;
     _releasedButtons |= _buttons & ~now;
+    _fixedPressedButtons |= now & ~_buttons;
+    _fixedReleasedButtons |= _buttons & ~now;
     _buttons = now;
   }
 
@@ -1089,6 +1120,12 @@ final class InputAction {
   // Held from outside, and the input frames that pressed and let go of it.
   bool _held = false;
   int _pressedAt = -1, _releasedAt = -1;
+  int _pressedStep = -1, _releasedStep = -1;
+
+  void _released() {
+    _releasedAt = _input._frame;
+    _releasedStep = _input._fixedStep;
+  }
 
   /// Holds it down from outside the keys, as a Flutter button does when
   /// pressed, until [release]: from the next frame's input step, as a
@@ -1104,9 +1141,11 @@ final class InputAction {
   bool get isPressed => _held || _input._anyDown(buttons);
 
   /// Whether it went down this frame: one of its buttons did, or [press],
-  /// and nothing already held it.
+  /// and nothing already held it. In a fixed step, since the last one, as
+  /// [Input.wasPressed].
   bool get wasPressed {
-    var pressed = _pressedAt == _input._frame;
+    final input = _input;
+    var pressed = input._inFixed ? _pressedStep == input._fixedStep : _pressedAt == input._frame;
     if (_held && !pressed) return false;
     for (var i = 0; i < buttons.length; i++) {
       final b = buttons[i];
@@ -1120,10 +1159,11 @@ final class InputAction {
   }
 
   /// Whether it went up this frame: one of its buttons did, or [release],
-  /// and nothing holds it.
+  /// and nothing holds it. In a fixed step, since the last one.
   bool get wasReleased {
     if (_held) return false;
-    var released = _releasedAt == _input._frame;
+    final input = _input;
+    var released = input._inFixed ? _releasedStep == input._fixedStep : _releasedAt == input._frame;
     for (var i = 0; i < buttons.length; i++) {
       final b = buttons[i];
       if (_input.isPressed(b)) return false;

@@ -921,6 +921,12 @@ and stays until set again), and a button calls `input.action('jump')
 .press()` when it goes down and `.release()` when it comes up (or both at
 once for a tap).
 
+**In `onFixedUpdate`**, `wasPressed` and `wasReleased` (an action's too)
+mean since the last fixed step, so each press is seen once there: a frame
+that runs two fixed steps doesn't jump twice, and one that runs none
+passes the press to the next. Unity's `GetKeyDown` in `FixedUpdate`
+misses or repeats presses; here it doesn't.
+
 **Keys and Flutter.** The view hears every key and gives each to the game
 (`onKeyDown` hears them all), but it keeps from Flutter only the keys the
 game uses: those bound to an axis or an action, and those it has asked
@@ -2270,6 +2276,9 @@ For code written before: each change that breaks it, newest first.
     once more per reuse.
   - An object's or behaviour's routines and tweens run during its own
     load, so an `onLoad` that awaits one finishes; they hung there.
+  - `wasPressed` and `wasReleased` in `onFixedUpdate` mean since the
+    last fixed step, where they meant this frame: a press is seen by one
+    fixed step, not by each of the frame's, nor by none.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

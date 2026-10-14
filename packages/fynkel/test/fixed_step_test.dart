@@ -8,6 +8,21 @@ import 'package:test/test.dart';
 /// Every call, in order.
 final log = <String>[];
 
+/// Counts the presses and releases its fixed steps see, of space, the
+/// left mouse button and the 'jump' action.
+class FixedPresses extends GameObject {
+  var keys = 0, keyUps = 0, buttons = 0, actions = 0;
+
+  @override
+  void onFixedUpdate() {
+    super.onFixedUpdate();
+    if (input.wasPressed(KeyCode.space)) keys++;
+    if (input.wasReleased(KeyCode.space)) keyUps++;
+    if (input.wasPressed(MouseButton.left)) buttons++;
+    if (input.action('jump').wasPressed) actions++;
+  }
+}
+
 class Ticks extends GameObject {
   Ticks(String name, {super.components, super.children}) : super(name: name);
 
@@ -417,6 +432,32 @@ void main() {
       await pumpEventQueue();
       expect(errors.single.gameObject, same(object));
     });
+  });
+
+  test('a press is seen by exactly one fixed step, however many the frame runs', () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.input.simulate.resize(100, 100);
+    final presses = world.add(FixedPresses());
+    world.input.bindAction('jump', [KeyCode.j]);
+    world.update(0);
+    // A frame of two steps.
+    world.input.simulate
+      ..keyDown(KeyCode.space)
+      ..keyDown(KeyCode.j)
+      ..fingerDown(1, 50, 50, kind: FingerKind.mouse);
+    world.update(2 / 50);
+    expect((presses.keys, presses.buttons, presses.actions), (1, 1, 1), reason: 'not twice');
+    // Frames of no step: the release waits for the next one.
+    world.input.simulate.keyUp(KeyCode.space);
+    world.update(0.25 / 50);
+    world.input.simulate.keyDown(KeyCode.space);
+    world.update(0.25 / 50);
+    expect((presses.keys, presses.keyUps), (1, 0));
+    world.update(0.5 / 50);
+    expect((presses.keys, presses.keyUps), (2, 1), reason: 'not never');
+    world.update(1 / 50);
+    expect((presses.keys, presses.keyUps), (2, 1));
   });
 }
 
