@@ -28,8 +28,28 @@ struct Lamp {
     // xyz: the unit vector a spot light shines along.
     direction: vec4<f32>,
     // The cone's fade: saturate(cos(angle from the axis) * x + y), squared.
-    // A point light's (0, 1) is 1 every way.
+    // A point light's (0, 1) is 1 every way. z: its shadow map, or -1. w: a
+    // texel of that map, per metre from the light.
     cone: vec4<f32>,
+};
+
+// Where the shadow maps look from (shadows.rs).
+struct Shadows {
+    // World to each cascade's map, then to each spot map: x and y from -1
+    // to 1 across, depth from 0 (nearest the light) to 1.
+    cascades: array<mat4x4<f32>, 3>,
+    spots: array<mat4x4<f32>, 4>,
+    // xyz: how far along the view each cascade ends. w: where the sun's
+    // shadows start fading out.
+    splits: vec4<f32>,
+    // x: cascades, y: the filter (0 hard, 1 soft, 2 softer), z: 1 / the
+    // cascades' size, w: 1 / the spot maps'.
+    params: vec4<f32>,
+    // Each cascade's texel, in metres.
+    texels: vec4<f32>,
+    // xyz: the way the camera looks. w: how far the sun's shadows reach.
+    camera_forward: vec4<f32>,
+    camera_at: vec4<f32>,
 };
 
 struct Frame {
@@ -38,10 +58,12 @@ struct Frame {
     // towards the camera, the same everywhere.
     camera_position: vec4<f32>,
     ambient: vec4<f32>,
-    // x: how many suns there are.
+    // x: how many suns there are. y: the one that casts shadows, or
+    // 0xFFFFFFFF.
     counts: vec4<u32>,
     suns: array<Sun, 4>,
     lamps: array<Lamp, 64>,
+    shadows: Shadows,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -63,6 +85,12 @@ override double_sided: bool = false;
 @group(1) @binding(3) var occlusion_texture: texture_2d<f32>;
 @group(1) @binding(4) var emissive_texture: texture_2d<f32>;
 @group(1) @binding(5) var material_sampler: sampler;
+
+// The shadow maps: the sun's cascades, the spot lights' maps, each a layer,
+// and a sampler that compares a depth against them, smoothed across texels.
+@group(2) @binding(0) var cascade_maps: texture_depth_2d_array;
+@group(2) @binding(1) var spot_maps: texture_depth_2d_array;
+@group(2) @binding(2) var shadow_sampler: sampler_comparison;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -86,7 +114,7 @@ struct VertexIn {
     // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: 1, or
     // -1 when the model matrix mirrors (which flips the bitangent).
     @location(12) params: vec4<f32>,
-    // rgb: linear emission.
+    // rgb: linear emission. w: 1 if shadows fall on it.
     @location(13) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
     @location(14) uv_transform: vec4<f32>,
@@ -103,7 +131,7 @@ struct VertexOut {
     @location(3) @interpolate(flat) params: vec4<f32>,
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
-    @location(6) @interpolate(flat) emissive: vec3<f32>,
+    @location(6) @interpolate(flat) emissive: vec4<f32>,
     @location(7) @interpolate(flat) lamps: vec2<u32>,
 };
 
@@ -123,7 +151,7 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.base_color = in.base_color;
     out.params = in.params;
-    out.emissive = in.emissive.rgb;
+    out.emissive = in.emissive;
     out.lamps = in.lamps;
     return out;
 }
@@ -208,6 +236,74 @@ fn reflected(s: Surface, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
     return (s.diffuse / PI + specular) * irradiance * n_dot_l;
 }
 
+// How lit `uv` is at `depth` in `layer` of `map`, 0 to 1, by the frame's
+// filter: one compare (smoothed across a texel by the sampler), 4 half a
+// texel apart, or 9 a texel apart. `texel` is 1 / the map's size. Outside
+// the map is lit.
+fn filtered(map: texture_depth_2d_array, layer: u32, uv: vec2<f32>, depth: f32, texel: f32) -> f32 {
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || depth >= 1.0 {
+        return 1.0;
+    }
+    let taps = u32(frame.shadows.params.y);
+    if taps == 0u {
+        return textureSampleCompareLevel(map, shadow_sampler, uv, layer, depth);
+    }
+    if taps == 1u {
+        let d = 0.5 * texel;
+        return 0.25 * (textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(-d, -d), layer, depth)
+            + textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(d, -d), layer, depth)
+            + textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(-d, d), layer, depth)
+            + textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(d, d), layer, depth));
+    }
+    var sum = 0.0;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            sum += textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(f32(x), f32(y)) * texel, layer, depth);
+        }
+    }
+    return sum / 9.0;
+}
+
+// Where a lookup is made from: out along the surface's own normal `ng` by
+// about a texel (`texel`, in metres), more where the light grazes it, so a
+// surface doesn't shadow itself (acne).
+fn offset_position(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>, texel: f32) -> vec3<f32> {
+    return p + ng * texel * (0.75 + 1.5 * (1.0 - saturate(dot(ng, l))));
+}
+
+// How much of the sun reaches `p`, 0 to 1, from its cascades. Past the
+// shadow distance all of it does; the last tenth fades there.
+// Reads `frame.shadows` in place: copying it into a local first (`let s =
+// frame.shadows`) loses the Android emulator's device.
+fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
+    let along = dot(p - frame.shadows.camera_at.xyz, frame.shadows.camera_forward.xyz);
+    if along >= frame.shadows.camera_forward.w {
+        return 1.0;
+    }
+    let count = u32(frame.shadows.params.x);
+    var c = 0u;
+    while c + 1u < count && along > frame.shadows.splits[c] {
+        c++;
+    }
+    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
+    let lit = filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
+    let fading = frame.shadows.splits.w;
+    let fade = saturate((along - fading) / max(frame.shadows.camera_forward.w - fading, 1e-4));
+    return mix(lit, 1.0, fade);
+}
+
+// How much of a spot light reaches `p`, 0 to 1, from its map. `distance`
+// is how far the light is.
+fn spot_shadow(lamp: Lamp, p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>, distance: f32) -> f32 {
+    let k = u32(lamp.cone.z);
+    let q = frame.shadows.spots[k] * vec4<f32>(offset_position(p, ng, l, lamp.cone.w * distance), 1.0);
+    if q.w <= 0.0 {
+        return 1.0;
+    }
+    let m = q.xyz / q.w;
+    return filtered(spot_maps, k, m.xy * vec2<f32>(0.5, -0.5) + 0.5, m.z, frame.shadows.params.w);
+}
+
 // The surface's normal: the interpolated one, bent by the normal map.
 // The map stores tangent-space x (along +u), y (up the image) and z (out
 // of the surface) as 0–1. Without a usable tangent, the map is ignored.
@@ -242,12 +338,17 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     let alpha = roughness * roughness;
 
     var n = surface_normal(in, normal_sample);
+    // The surface's own normal, without the map: shadow lookups move out
+    // along it.
+    var ng = normalize(in.normal);
     // Mirroring turns triangles clockwise, so for a mirrored object the
     // front is the clockwise side. Turning the final normal round turns
     // the whole tangent frame, as the back's normal map needs.
     if double_sided && front_facing == (in.params.w < 0.0) {
         n = -n;
+        ng = -ng;
     }
+    let receives = in.emissive.w > 0.5;
     // w = 0: an orthographic camera, and xyz is the way to it.
     let v = select(normalize(frame.camera_position.xyz - in.world_position), frame.camera_position.xyz, frame.camera_position.w == 0.0);
     let n_dot_v = max(dot(n, v), 1e-4);
@@ -261,7 +362,11 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     let surface = Surface(n, v, n_dot_v, f0, diffuse_color, alpha);
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
-        color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * PI);
+        var lit = 1.0;
+        if i == frame.counts.y && receives {
+            lit = sun_shadow(in.world_position, ng, sun.to_sun.xyz);
+        }
+        color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
     }
     for (var i = 0u; i < 8u; i++) {
         let index = (in.lamps[i / 4u] >> ((i % 4u) * 8u)) & 0xFFu;
@@ -283,10 +388,13 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         // isn't infinitely bright.
         let reach = 1.0 - near * near;
         let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
-        let falloff = reach * reach * cone * cone / max(distance2, 0.01);
+        var falloff = reach * reach * cone * cone / max(distance2, 0.01);
+        if lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
+            falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
+        }
         color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
     }
-    color += in.emissive * emissive_sample;
+    color += in.emissive.rgb * emissive_sample;
     return vec4<f32>(color, base.a);
 }
 

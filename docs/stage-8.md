@@ -264,6 +264,88 @@ by more than its cap is lit by the nearest ones, with a test.
 don't shimmer while the camera moves (a test checks it), and the budget
 holds at each level.
 
+**Done** (2026-10-14), except the Note10+ at medium and high (below):
+
+- **The sun's shadows.** `Light.sun(shadows: true)`, or `light.shadows`
+  at any time; the first sun with shadows casts them. Cascades fitted to
+  the slice of view each covers (a sphere around it, so turning the
+  camera doesn't resize them), their centres snapped to whole texels,
+  and stretched back towards the sun to hold casters outside the view.
+  They reach the level's distance from the camera (or the camera's
+  `far`, if nearer) and fade out over the last tenth.
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | cascades | 1 at 1024² | 2 at 2048² | 3 at 2048² |
+  | filter | 1 tap (smoothed across a texel) | 4 taps | 9 taps |
+  | spot maps | 1 at 512² | 2 at 1024² | 4 at 1024² |
+  | distance | 40 m | 60 m | 100 m |
+
+- **No shimmer**: a unit test moves and turns the camera over 40 frames
+  and checks that a still point keeps its place within its texel in
+  every cascade, and that no cascade changes size. With the snapping
+  taken out, it fails.
+- **Spotlights' shadows**: `Light.spot(shadows: true)`; the level's
+  number of spot maps go to the spotlights with shadows nearest the
+  camera. *Changed from the plan:* the maps are layers of one texture
+  array, not tiles of an atlas: the same memory, and no tile edges to
+  clamp lookups to.
+- **Point lights** cast none (this stage, as planned); one asked to is
+  ignored.
+- **`castShadows` and `receiveShadows`** on `MeshRenderer`, true unless
+  set, as in Unity. *Changed from the plan:* they're properties
+  (`MeshRenderer(mesh, material)..castShadows = false`), not constructor
+  arguments, since Dart doesn't allow named arguments after the optional
+  positional ones it already has.
+- **Acne and peter-panning**: depth bias in the shadow pass, and each
+  lookup moved out along the surface's own normal by about a texel, more
+  where the light grazes it.
+- ABI 23: `FyLight.shadows`, `FyMeshRenderer.cast_shadows` and
+  `receive_shadows`. `FrameStats` counts the shadow maps drawn and the
+  casters drawn into them.
+- **The lab** ("Look: shadows"): a garden under a low sun (pillars, an
+  arch, a picket fence, trees, an avenue running off 90 m) and a lamp
+  post's spotlight, with the camera drifting. Switches for each light's
+  shadows and for night, buttons for each level. `LAB_SHADOWS=false`
+  starts it without shadows, for measuring.
+- **Sheepdog**'s sun (and moon) casts shadows; its field and the bark's
+  ring cast none.
+- **The guide**: §5 "Shadows".
+- **Measured**, the shadows scene, 60 s each, alone, under `caffeinate`:
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | Mac (840×1088) | 60 fps (min 59) | 60 (min 60) | 60 (min 60) |
+  | iPhone (1320×1309) | 120 (min 119) | 120 (min 119) | 120 (min 120) |
+  | Note10+ (1080×1068) | 59.8 (min 55.9) | **55.2 (min 45.9)** | **51.5 (min 37.9)** |
+  | Note10+, shadows off | 59.9 (min 58.9) | 58.0 (min 50.9) | 58.1 (min 52.9) |
+
+  The Mac is now on a 60 Hz display, which caps every scene there at 60
+  (phase 2's lamps scene too), so its budget is from the renderer's
+  bench instead (M3 Max, a whole frame, best of 50, 1280×720): the sun's
+  shadows over 1,000 cubes take a frame from 0.58 to 0.86 ms at low,
+  1.03 at medium and 1.02 at high; over 10,000, from 1.3 to 1.9–2.1 ms.
+  Far inside 8.3 ms.
+- **Not done: the Note10+ at medium and high.** At medium the scene is
+  already under 60 without shadows (58.0: phase 2's open medium-path
+  cost), and shadows take about 3 fps more. What was tried at medium,
+  each a 60 s run:
+
+  | medium on the Note10+ | fps (min) |
+  |---|---|
+  | 2 cascades at 2048², 4 taps (the level) | 55.2 (45.9) |
+  | 2 cascades at 1024² | 54.9 (43.9) |
+  | 1 tap | 54.6 (44.9) |
+  | 1 cascade | 55.9 (43.9) |
+  | no shadows | 58.0 (50.9) |
+
+  Neither the maps' size, nor the filter, nor the number of cascades
+  moves it, and its game ticks hold 60: the cost is fixed, on the medium
+  path, like phase 2's lamps. Phase 6 reworks that path and takes both
+  up. High was never meant for the Note10+; it's listed for the record.
+  A game for that class of phone that wants shadows today can use low,
+  which holds 60.
+
 ### Phase 4: the sky and what reflects it
 
 - `world.sky`: one of
@@ -362,7 +444,7 @@ say otherwise.
 
 - [x] Phase 1: groundwork
 - [x] Phase 2: lights (the Note10+ at medium left to phase 6)
-- [ ] Phase 3: shadows
+- [x] Phase 3: shadows (the Note10+ at medium left to phase 6)
 - [ ] Phase 4: the sky and what reflects it
 - [ ] Phase 5: see-through
 - [ ] Phase 6: bloom, and a light AO

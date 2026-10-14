@@ -138,6 +138,52 @@ void main() {
     expect(pixel(4, 4), [0, 0, 0]);
   });
 
+  test('a sun with shadows darkens the floor under a cube, unless the cube casts none or the floor takes none', () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 6, 4), rotation: Quat.lookRotation(Vec3(0, -6, -4))),
+        components: [Camera()],
+      ),
+    );
+    final grey = Material(color: Color.rgb(0.7, 0.7, 0.7), roughness: 1);
+    final floor = world.add(
+      GameObject(
+        transform: Transform(scale: Vec3.one * 12),
+        components: [MeshRenderer(Mesh.plane(), grey)],
+      ),
+    );
+    final cube = world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), grey)],
+      ),
+    );
+    final sun = world.add(
+      GameObject(
+        transform: Transform(rotation: Quat.lookRotation(Vec3(1, -2, 0))),
+        components: [Light.sun(shadows: true)],
+      ),
+    );
+    final view = HeadlessView(world, width: 64, height: 64);
+    addTearDown(view.dispose);
+    int light() => view.read(view.frame()).rgba.fold(0, (sum, v) => sum + v);
+
+    final shadowed = light();
+    sun.get<Light>()!.shadows = false;
+    final plain = light();
+    expect(shadowed, lessThan(plain), reason: 'the cube shadows the floor');
+    sun.get<Light>()!.shadows = true;
+    cube.get<MeshRenderer>()!.castShadows = false;
+    expect(light(), plain, reason: 'a cube that casts none');
+    cube.get<MeshRenderer>()!.castShadows = true;
+    floor.get<MeshRenderer>()!.receiveShadows = false;
+    expect(light(), plain, reason: 'a floor that takes none');
+    floor.get<MeshRenderer>()!.receiveShadows = true;
+    expect(light(), shadowed);
+  });
+
   test('changing a material changes the objects that use it', () {
     final scene = stage1();
     final view = HeadlessView(scene.world, width: 64, height: 64);

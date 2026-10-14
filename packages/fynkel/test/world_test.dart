@@ -1,4 +1,5 @@
 import 'dart:ffi';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
@@ -92,6 +93,27 @@ void main() {
     expect(() => spot.softness = 2, throwsArgumentError);
     spot.kind = LightKind.point;
     expect(spot.kind, LightKind.point);
+  });
+
+  test('shadow settings go in, and an engine-made renderer reads back casting and receiving them', () async {
+    final sun = Light.sun(shadows: true);
+    final spot = Light.spot(shadows: true);
+    expect((sun.shadows, spot.shadows, Light.sun().shadows, Light.point().shadows), (true, true, false, false));
+    expect(sun.toString(), contains('shadows: true'));
+    world.add(GameObject(components: [sun]));
+    world.add(GameObject(components: [spot]));
+    spot.shadows = false;
+    expect(spot.shadows, isFalse);
+
+    final renderer = MeshRenderer(Mesh.cube(), Material())..castShadows = false;
+    world.add(GameObject(components: [renderer]));
+    renderer.receiveShadows = false;
+    expect((renderer.castShadows, renderer.receiveShadows), (false, false));
+
+    final file = File.fromUri(Directory.current.uri.resolve('../../tests/assets/gltf/CesiumMilkTruck.glb'));
+    final truck = world.add((await Model.load(file.readAsBytesSync())).instantiate());
+    final part = truck.getInChildren<MeshRenderer>()!;
+    expect((part.castShadows, part.receiveShadows), (true, true), reason: "as the engine's MeshRenderer has them");
   });
 
   test('a missing component is null, and removeComponent takes one away', () {

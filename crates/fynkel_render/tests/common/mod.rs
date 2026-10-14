@@ -129,6 +129,8 @@ pub fn stage1_scene() -> RenderScene {
                 roughness: 0.5,
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         }],
     }
 }

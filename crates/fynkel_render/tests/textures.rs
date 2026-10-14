@@ -33,6 +33,8 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(2.0)),
             material,
+            cast_shadows: true,
+            receive_shadows: true,
         }],
     }
 }
@@ -225,6 +227,8 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
                     textures: MaterialTextures { emissive: Some(texture), ..MaterialTextures::NONE },
                     ..PbrMaterial::DEFAULT
                 },
+                cast_shadows: true,
+                receive_shadows: true,
             }],
         }
     };
@@ -367,7 +371,13 @@ fn draws_are_batched_by_textures_too() {
     scene.draws = [(Some(A), 0.0), (Some(B), 0.0), (Some(A), 0.0), (None, 0.0), (Some(A), 0.5)]
         .into_iter()
         .enumerate()
-        .map(|(i, (key, cutoff))| Draw { mesh: CUBE, model: at(i as f32 - 2.0), material: with(key, cutoff) })
+        .map(|(i, (key, cutoff))| Draw {
+            mesh: CUBE,
+            model: at(i as f32 - 2.0),
+            material: with(key, cutoff),
+            cast_shadows: true,
+            receive_shadows: true,
+        })
         .collect();
     let (_, stats) = render(&gpu, &mut r, &scene, 64, 64);
     // A ×2, B, none, and A cut out.
@@ -448,6 +458,8 @@ fn textured_materials_match_their_golden() {
             mesh: CUBE,
             model: place(-1.9, 0.5, Vec3::ONE),
             material: PbrMaterial { textures: textures(|t| t.base_color = Some(GRID)), ..PbrMaterial::DEFAULT },
+            cast_shadows: true,
+            receive_shadows: true,
         },
         Draw {
             mesh: SPHERE,
@@ -458,6 +470,8 @@ fn textured_materials_match_their_golden() {
                 textures: textures(|t| t.normal = Some(BUMPS)),
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         },
         Draw {
             mesh: PLANE,
@@ -470,6 +484,8 @@ fn textured_materials_match_their_golden() {
                 textures: textures(|t| t.base_color = Some(LEAF)),
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         },
         Draw {
             mesh: CUBE,
@@ -480,6 +496,8 @@ fn textured_materials_match_their_golden() {
                 textures: textures(|t| t.emissive = Some(GLOW)),
                 ..PbrMaterial::DEFAULT
             },
+            cast_shadows: true,
+            receive_shadows: true,
         },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 320, 180);

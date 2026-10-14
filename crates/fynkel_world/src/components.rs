@@ -99,17 +99,30 @@ impl Component for Transform {}
 /// draws nothing. With `own_color`, `color` replaces the material's base
 /// colour for this object alone, as a Unity `MaterialPropertyBlock` does:
 /// a hit flash on one enemy leaves the others, which share its material.
+/// It casts shadows and shadows fall on it unless told otherwise, as in
+/// Unity.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct MeshRenderer {
     pub mesh: Option<MeshId>,
     pub material: Option<MaterialId>,
     pub own_color: bool,
     pub color: Color,
+    /// Whether it blocks lights that cast shadows.
+    pub cast_shadows: bool,
+    /// Whether shadows fall on it.
+    pub receive_shadows: bool,
 }
 
 impl Default for MeshRenderer {
     fn default() -> Self {
-        Self { mesh: None, material: None, own_color: false, color: Color::WHITE }
+        Self {
+            mesh: None,
+            material: None,
+            own_color: false,
+            color: Color::WHITE,
+            cast_shadows: true,
+            receive_shadows: true,
+        }
     }
 }
 
@@ -122,6 +135,8 @@ impl Describe for MeshRenderer {
             Field::new("material", FieldKind::Material, Value::Material(None)),
             Field::new("own_color", FieldKind::Bool, Value::Bool(false)),
             Field::new("color", FieldKind::Color, Value::Color(Color::WHITE)),
+            Field::new("cast_shadows", FieldKind::Bool, Value::Bool(true)),
+            Field::new("receive_shadows", FieldKind::Bool, Value::Bool(true)),
         ];
         FIELDS
     }
@@ -132,6 +147,8 @@ impl Describe for MeshRenderer {
             1 => Value::Material(self.material),
             2 => Value::Bool(self.own_color),
             3 => Value::Color(self.color),
+            4 => Value::Bool(self.cast_shadows),
+            5 => Value::Bool(self.receive_shadows),
             _ => return None,
         })
     }
@@ -142,6 +159,8 @@ impl Describe for MeshRenderer {
             (1, Value::Material(m)) => self.material = m,
             (2, Value::Bool(b)) => self.own_color = b,
             (3, Value::Color(c)) => self.color = c,
+            (4, Value::Bool(b)) => self.cast_shadows = b,
+            (5, Value::Bool(b)) => self.receive_shadows = b,
             _ => unreachable!("validated by Describe::set"),
         }
     }
@@ -276,6 +295,10 @@ pub struct Light {
     /// Spot lights: how much of the cone, from its edge in, fades: 0 for
     /// a hard edge, 1 to fade all the way to the centre.
     pub softness: f32,
+    /// Whether it casts shadows: a directional light's (the first one
+    /// with shadows, if there are more) or a spot light's. Point lights
+    /// don't cast them yet.
+    pub shadows: bool,
 }
 
 impl Light {
@@ -286,6 +309,7 @@ impl Light {
         range: 10.0,
         spot_angle: 30.0,
         softness: 0.2,
+        shadows: false,
     };
 
     pub const fn directional(color: Color, intensity: f32) -> Self {
@@ -301,7 +325,12 @@ impl Light {
     }
 
     pub const fn spot(color: Color, intensity: f32, range: f32, spot_angle: f32, softness: f32) -> Self {
-        Self { kind: LightKind::Spot, color, intensity, range, spot_angle, softness }
+        Self { kind: LightKind::Spot, color, intensity, range, spot_angle, softness, shadows: false }
+    }
+
+    /// This light, casting shadows or not.
+    pub const fn with_shadows(self, shadows: bool) -> Self {
+        Self { shadows, ..self }
     }
 }
 
@@ -323,6 +352,7 @@ impl Describe for Light {
             Field::new("range", FieldKind::F32, Value::F32(D.range)).range(0.0, 1e6),
             Field::new("spot_angle", FieldKind::F32, Value::F32(D.spot_angle)).range(0.0, 179.0),
             Field::new("softness", FieldKind::F32, Value::F32(D.softness)).range(0.0, 1.0),
+            Field::new("shadows", FieldKind::Bool, Value::Bool(D.shadows)),
         ];
         FIELDS
     }
@@ -335,6 +365,7 @@ impl Describe for Light {
             3 => Value::F32(self.range),
             4 => Value::F32(self.spot_angle),
             5 => Value::F32(self.softness),
+            6 => Value::Bool(self.shadows),
             _ => return None,
         })
     }
@@ -350,6 +381,7 @@ impl Describe for Light {
             (3, Value::F32(v)) => self.range = v,
             (4, Value::F32(v)) => self.spot_angle = v,
             (5, Value::F32(v)) => self.softness = v,
+            (6, Value::Bool(b)) => self.shadows = b,
             _ => unreachable!("validated by Describe::set"),
         }
     }

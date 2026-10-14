@@ -780,9 +780,11 @@ class GameObject with _Moving {
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
         MeshRenderer(
-          world._meshes[scratch.meshRenderer.ref.mesh]?.target,
-          world._materials[scratch.meshRenderer.ref.material]?.target,
-        ),
+            world._meshes[scratch.meshRenderer.ref.mesh]?.target,
+            world._materials[scratch.meshRenderer.ref.material]?.target,
+          )
+          .._castShadows = scratch.meshRenderer.ref.cast_shadows
+          .._receiveShadows = scratch.meshRenderer.ref.receive_shadows,
     ];
     for (final c in found) {
       c._owner = this;
@@ -799,7 +801,7 @@ class GameObject with _Moving {
       FY_LIGHT_SPOT => LightKind.spot,
       final kind => throw StateError('the engine returned light kind $kind, which this package:fynkel predates'),
     };
-    return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness);
+    return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness, l.shadows);
   }
 
   void _write(Component component) => switch (component) {
@@ -914,6 +916,7 @@ class GameObject with _Moving {
     l.range = value.range;
     l.spot_angle = value.angle.inDegrees;
     l.softness = value.softness;
+    l.shadows = value.shadows;
     check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
     if (value.kind != LightKind.ambient) world._noteLights(this);
   }
@@ -926,7 +929,9 @@ class GameObject with _Moving {
     final r = scratch.meshRenderer.ref
       ..mesh = mesh
       ..material = material
-      ..own_color = value.color != null;
+      ..own_color = value.color != null
+      ..cast_shadows = value.castShadows
+      ..receive_shadows = value.receiveShadows;
     r.color.write(value.color ?? Color.white);
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
   }

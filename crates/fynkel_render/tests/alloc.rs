@@ -60,11 +60,19 @@ fn busy_scene(t: f32) -> RenderScene {
     // High above the 40 × 25 grid, so every cube is seen.
     scene.camera = Some(CameraView::looking_at(Vec3::new(20.0, 60.0, 30.0), Vec3::new(20.0, 0.0, 12.0)));
     let material = scene.draws[0].material;
+    // Shadows from the sun and a spot light: their maps and casters too.
+    scene.lights = vec![
+        Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(true),
+        Light::spot(Vec3::new(20.0, 8.0, 12.0), Vec3::NEG_Y, 20.0, 1.2, 0.2, Vec3::splat(5.0)).with_shadows(true),
+    ];
+    scene.quality = Some(Quality::High);
     scene.draws = (0..1000)
         .map(|i| Draw {
             mesh: CUBE,
             model: Mat4::from_translation(Vec3::new((i % 40) as f32, (t + i as f32).sin(), (i / 40) as f32)),
             material,
+            cast_shadows: true,
+            receive_shadows: true,
         })
         .collect();
     scene
@@ -96,6 +104,7 @@ fn a_steady_frame_allocates_nothing_in_prepare() {
     for scene in &scenes {
         let (stats, prepare_allocs) = count(|| r.prepare(scene, 256, 256));
         assert_eq!(stats.draws, 1000);
+        assert_eq!(stats.shadow_maps, 4, "three cascades and a spot map");
         assert_eq!(prepare_allocs, 0, "prepare allocated {prepare_allocs} times in a steady frame");
 
         let (_, n) = count(|| {

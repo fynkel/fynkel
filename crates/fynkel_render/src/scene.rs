@@ -114,6 +114,10 @@ pub struct Light {
     /// point or spot light 1 m away.
     pub color: Vec3,
     pub kind: LightKind,
+    /// Whether it casts shadows: a sun's, the first sun that does, and a
+    /// spot light's, up to [`ShadowLevel::spot_maps`] a frame. Point lights
+    /// cast none yet.
+    pub shadows: bool,
 }
 
 /// What kind of light a [`Light`] is.
@@ -147,18 +151,23 @@ pub enum LightKind {
 impl Light {
     /// A sun shining along `direction` with `color` (colour × intensity).
     pub fn sun(direction: Vec3, color: Vec3) -> Self {
-        Self { color, kind: LightKind::Sun { direction } }
+        Self { color, kind: LightKind::Sun { direction }, shadows: false }
     }
 
     /// A lamp at `position` reaching `range` metres.
     pub fn point(position: Vec3, range: f32, color: Vec3) -> Self {
-        Self { color, kind: LightKind::Point { position, range } }
+        Self { color, kind: LightKind::Point { position, range }, shadows: false }
     }
 
     /// A spotlight at `position` shining along `direction`, in a cone
     /// `angle` radians across whose outer `softness` fades.
     pub fn spot(position: Vec3, direction: Vec3, range: f32, angle: f32, softness: f32, color: Vec3) -> Self {
-        Self { color, kind: LightKind::Spot { position, direction, range, angle, softness } }
+        Self { color, kind: LightKind::Spot { position, direction, range, angle, softness }, shadows: false }
+    }
+
+    /// The same light, casting shadows or not.
+    pub fn with_shadows(self, shadows: bool) -> Self {
+        Self { shadows, ..self }
     }
 
     /// Where a point or spot light is and how far it reaches; `None` for a
@@ -210,12 +219,73 @@ impl Quality {
         }
     }
 
+    /// How its shadows are drawn.
+    pub fn shadows(self) -> ShadowLevel {
+        match self {
+            Self::Low => ShadowLevel {
+                cascades: 1,
+                map_size: 1024,
+                filter: ShadowFilter::Hard,
+                spot_maps: 1,
+                spot_map_size: 512,
+                distance: 40.0,
+            },
+            Self::Medium => ShadowLevel {
+                cascades: 2,
+                map_size: 2048,
+                filter: ShadowFilter::Soft,
+                spot_maps: 2,
+                spot_map_size: 1024,
+                distance: 60.0,
+            },
+            Self::High => ShadowLevel {
+                cascades: 3,
+                map_size: 2048,
+                filter: ShadowFilter::Softer,
+                spot_maps: 4,
+                spot_map_size: 1024,
+                distance: 100.0,
+            },
+        }
+    }
+
     /// The format of the image the scene is drawn into, with a last pass
     /// after it, which later effects (bloom) need: half floats, or `None`
     /// at low, which draws straight to the screen.
     pub(crate) fn image_format(self) -> Option<wgpu::TextureFormat> {
         (self != Self::Low).then_some(wgpu::TextureFormat::Rgba16Float)
     }
+}
+
+/// How a quality level draws shadows ([`Quality::shadows`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShadowLevel {
+    /// How many maps the sun's shadows are split into, nearest the camera
+    /// first: each covers further than the one before with as many texels,
+    /// so near shadows are sharp and far ones still there. 1 to 3.
+    pub cascades: usize,
+    /// Each of the sun's maps' side, in texels.
+    pub map_size: u32,
+    pub filter: ShadowFilter,
+    /// The most spot lights casting shadows in a frame: the ones nearest
+    /// the camera.
+    pub spot_maps: usize,
+    /// Each spot light's map's side, in texels.
+    pub spot_map_size: u32,
+    /// How far from the camera the sun's shadows reach, in metres (or the
+    /// camera's far plane, if nearer). They fade out before it.
+    pub distance: f32,
+}
+
+/// How a shadow's edge is drawn.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ShadowFilter {
+    /// Sharp: one sample, smoothed across a texel.
+    Hard,
+    /// Soft: 4 samples, across about 2 texels.
+    Soft,
+    /// Softer: 9 samples, across about 3 texels.
+    Softer,
 }
 
 /// A metallic-roughness material, resolved: glTF's, factors times
@@ -269,6 +339,17 @@ pub struct Draw {
     pub mesh: MeshKey,
     pub model: Mat4,
     pub material: PbrMaterial,
+    /// Whether it casts shadows.
+    pub cast_shadows: bool,
+    /// Whether shadows fall on it.
+    pub receive_shadows: bool,
+}
+
+impl Draw {
+    /// `mesh` placed by `model`, casting and receiving shadows.
+    pub fn new(mesh: MeshKey, model: Mat4, material: PbrMaterial) -> Self {
+        Self { mesh, model, material, cast_shadows: true, receive_shadows: true }
+    }
 }
 
 /// A debug line, drawn on top of the scene.

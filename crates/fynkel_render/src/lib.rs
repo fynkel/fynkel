@@ -8,6 +8,7 @@ mod frame_ring;
 mod gpu;
 mod renderer;
 mod scene;
+mod shadows;
 mod texture;
 
 pub use assets::{Assets, Kit, SharedAssets, lock as lock_assets};
@@ -17,6 +18,6 @@ pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
     CameraView, ColorSpace, Draw, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality, RenderScene,
-    TextureKey,
+    ShadowFilter, ShadowLevel, TextureKey,
 };
 pub use wgpu;
