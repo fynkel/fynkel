@@ -148,6 +148,35 @@ fn a_resize_makes_new_surfaces_and_old_frames_are_never_shown() {
 }
 
 #[test]
+fn the_last_shown_frame_stays_up_until_a_frame_of_the_new_size_finishes() {
+    let (device, queue) = device();
+    let (mut target, presenter) = Apple::new(&device, &queue, 16, 16).unwrap();
+    let (signals, ready) = listen(&presenter);
+
+    assert!(draw(&device, &mut target, [40, 40, 40]));
+    wait(&ready);
+    assert_eq!(presenter.acquire().unwrap().size(), (16, 16));
+
+    // Flutter asks for a picture every frame of a window drag: until the
+    // new size has a frame, it keeps the last one rather than none.
+    target.resize(32, 8).unwrap();
+    let kept = presenter.acquire().expect("the last shown frame, not a blank");
+    assert_eq!(kept.size(), (16, 16));
+    assert_eq!(&kept.read_rgba()[..4], &[40, 40, 40, 255]);
+    assert!(!kept.more);
+
+    assert!(draw(&device, &mut target, [90, 90, 90]));
+    wait(&ready);
+    let shown = presenter.acquire().unwrap();
+    assert_eq!(shown.size(), (32, 8));
+    assert_eq!(&shown.read_rgba()[..4], &[90, 90, 90, 255]);
+
+    // SAFETY: clearing the callback.
+    unsafe { presenter.set_frame_ready(None, std::ptr::null_mut()) };
+    assert_eq!(signals.count.load(Ordering::SeqCst), 2);
+}
+
+#[test]
 fn every_slot_takes_its_turn_and_the_ring_never_leaks_a_frame() {
     let (device, queue) = device();
     let (mut target, presenter) = Apple::new(&device, &queue, 4, 4).unwrap();

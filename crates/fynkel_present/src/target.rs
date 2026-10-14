@@ -1,5 +1,8 @@
 //! Where the render worker's frames go.
 
+/// What a target calls when a frame frees its place ([`Target::on_free`]).
+pub type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 /// A place frames are drawn into: the headless readback, the Apple ring or
 /// the Android surface. The render worker owns it and calls it from one
 /// thread, once per frame:
@@ -13,9 +16,6 @@
 /// 3. [`Target::finish`] completes the frame however the target needs to:
 ///    a readback copy, a completion callback, a present. It submits the
 ///    encoder.
-/// What a target calls when a frame frees its place ([`Target::on_free`]).
-pub type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
-
 pub trait Target: Send {
     /// One frame in progress.
     type Frame: Send;

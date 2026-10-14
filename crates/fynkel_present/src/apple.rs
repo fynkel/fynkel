@@ -14,7 +14,9 @@
 //!
 //! A resize makes a new set of surfaces and resets the ring. The presenter
 //! looks surfaces up under the same lock the swap happens under, so a slot
-//! is never paired with the other set's surface.
+//! is never paired with the other set's surface. Until the new size has a
+//! frame, the presenter shows the last surface it showed, so a window drag
+//! never shows a blank.
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
@@ -85,9 +87,9 @@ unsafe impl Send for Metal {}
 #[derive(Debug)]
 struct Shared {
     ring: Ring,
-    /// The current set's surfaces, by slot. Replaced together with the
-    /// ring's reset, under this lock.
-    surfaces: Mutex<Vec<Surface>>,
+    /// The current set's surfaces, by slot, and the last one shown.
+    /// Replaced together with the ring's reset, under this lock.
+    surfaces: Mutex<Surfaces>,
     callback: Mutex<Option<Callback>>,
     /// The render worker's, called when a frame frees its slot.
     wake: WakeSlot,
@@ -100,6 +102,15 @@ impl std::fmt::Debug for WakeSlot {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str("WakeSlot")
     }
+}
+
+#[derive(Debug)]
+struct Surfaces {
+    set: Vec<Surface>,
+    /// What [`ApplePresenter::acquire`] last returned, kept across a
+    /// resize. The ring never draws into the slot being shown, so its
+    /// pixels stay whole.
+    last: Option<Surface>,
 }
 
 /// An IOSurface. They are thread-safe objects.
@@ -136,7 +147,7 @@ impl Apple {
         let (views, surfaces) = make_slots(device, &metal.device, width, height)?;
         let shared = Arc::new(Shared {
             ring: Ring::new(),
-            surfaces: Mutex::new(surfaces),
+            surfaces: Mutex::new(Surfaces { set: surfaces, last: None }),
             callback: Mutex::new(None),
             wake: WakeSlot::default(),
         });
@@ -160,7 +171,7 @@ impl Metal {
 }
 
 impl Shared {
-    fn surfaces(&self) -> MutexGuard<'_, Vec<Surface>> {
+    fn surfaces(&self) -> MutexGuard<'_, Surfaces> {
         self.surfaces.lock().unwrap_or_else(PoisonError::into_inner)
     }
 
@@ -255,7 +266,7 @@ impl Target for Apple {
         let (views, surfaces) = make_slots(&self.device, &self.metal.device, width, height).map_err(|e| e.0)?;
         {
             let mut current = self.shared.surfaces();
-            *current = surfaces;
+            current.set = surfaces;
             self.shared.ring.reset();
         }
         // Frames in flight on the old textures finish as stale; wgpu keeps
@@ -284,11 +295,16 @@ pub struct Presented {
 
 impl ApplePresenter {
     /// The surface to show now (Flutter's raster thread calls this once
-    /// per frame), or `None` before the first frame of the current size.
+    /// per frame): after a resize, the last one shown until a frame of the
+    /// new size finishes; `None` before the first frame.
     pub fn acquire(&self) -> Option<Presented> {
-        let surfaces = self.shared.surfaces();
-        let shown = self.shared.ring.acquire()?;
-        Some(Presented { surface: surfaces[shown.slot].clone(), more: shown.more })
+        let mut surfaces = self.shared.surfaces();
+        let Some(shown) = self.shared.ring.acquire() else {
+            return surfaces.last.clone().map(|surface| Presented { surface, more: false });
+        };
+        let surface = surfaces.set[shown.slot].clone();
+        surfaces.last = Some(surface.clone());
+        Some(Presented { surface, more: shown.more })
     }
 
     /// Sets the function called on a Metal thread whenever a frame
