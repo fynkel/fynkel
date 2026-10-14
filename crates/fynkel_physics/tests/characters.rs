@@ -218,6 +218,23 @@ fn it_enters_a_static_trigger_as_a_kinematic_body_would() {
 }
 
 #[test]
+fn one_marked_a_character_enters_a_trigger_it_starts_in_before_it_moves() {
+    let mut physics = floor();
+    let mut zone = spec(ColliderShape::Sphere { radius: 3.0 });
+    zone.is_trigger = true;
+    zone.listens = LISTEN_TRIGGERS;
+    physics.add_static_collider(2, zone, at(0.0, 1.0, 0.0)).unwrap();
+    let character = Character::new(&mut physics, 0.0, 0.0);
+    physics.set_character(character.id, true).unwrap();
+    let mut entered = 0;
+    for _ in 0..5 {
+        physics.step(DT).unwrap();
+        entered += physics.contact_events().iter().filter(|e| e.kind == ContactKind::Enter && e.trigger).count();
+    }
+    assert_eq!(entered, 1);
+}
+
+#[test]
 fn bad_moves_are_refused() {
     let mut physics = floor();
     let mut character = Character::new(&mut physics, 0.0, 0.0);

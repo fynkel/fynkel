@@ -299,6 +299,15 @@ impl Physics {
         Ok(())
     }
 
+    /// Marks followed collider `id` as a character controller's, or not:
+    /// it meets triggers as a kinematic body would, before its first
+    /// [`Physics::move_character`] too. Adding the collider again clears it.
+    pub fn set_character(&mut self, id: u64, character: bool) -> Result<(), PhysicsError> {
+        let handle = self.followed_handle(id)?;
+        self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed").character = character;
+        Ok(())
+    }
+
     /// The followed colliders `ids[i]`'s objects are now at `objects[i]`:
     /// those that moved, turned or were scaled are put where their objects
     /// are. Checks every id and pose before changing anything.
