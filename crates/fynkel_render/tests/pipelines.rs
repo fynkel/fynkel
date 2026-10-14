@@ -46,18 +46,43 @@ fn shadows_lines_and_cutouts_compile_theirs_when_first_drawn() {
 
     scene.lights[0].shadows = true;
     render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(kit.pipelines_made(), plain + 1, "the cascades' opaque caster pipeline");
+    assert_eq!(kit.pipelines_made(), plain + 2, "the cascades' opaque caster pipeline, and the shadowed variant");
 
     scene.lines.push(Line { a: Vec3::ZERO, b: Vec3::ONE, color: [1.0; 4] });
     render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(kit.pipelines_made(), plain + 2, "the lines'");
+    assert_eq!(kit.pipelines_made(), plain + 3, "the lines'");
 
     scene.draws[0].material.double_sided = true;
     render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(kit.pipelines_made(), plain + 3, "the double-sided variant");
+    assert_eq!(kit.pipelines_made(), plain + 4, "the double-sided variant");
 
     render(&gpu, &mut r, &scene, 32, 32);
-    assert_eq!(kit.pipelines_made(), plain + 3, "each once");
+    assert_eq!(kit.pipelines_made(), plain + 4, "each once");
+}
+
+/// A frame no light casts shadows in, and a material with no textures,
+/// draw with variants that leave that work out (hardening R11): the
+/// shader no longer pays for what it doesn't use.
+#[test]
+fn shadows_and_textures_are_compiled_in_only_where_used() {
+    let gpu = gpu();
+    let (kit, mut r) = fresh(&gpu);
+    // Uploaded first: its mipmaps are made with a pipeline too.
+    let texture = TextureKey(1);
+    r.upload_texture(texture, ColorSpace::Srgb, 2, 2, &[255; 16]);
+    let mut scene = stage1_scene();
+    scene.quality = Some(Quality::Low);
+    let before = kit.pipelines_made();
+    render(&gpu, &mut r, &scene, 32, 32);
+    assert_eq!(kit.pipelines_made(), before + 1, "untextured and unshadowed");
+
+    scene.draws[0].material.textures.base_color = Some(texture);
+    render(&gpu, &mut r, &scene, 32, 32);
+    assert_eq!(kit.pipelines_made(), before + 2, "a textured material's variant");
+
+    scene.lights[0].shadows = true;
+    render(&gpu, &mut r, &scene, 32, 32);
+    assert_eq!(kit.pipelines_made(), before + 4, "the caster's, and the textured, shadowed variant");
 }
 
 /// Where the GPU keeps a pipeline cache (Vulkan), what a frame compiled is

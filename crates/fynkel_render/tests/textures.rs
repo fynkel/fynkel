@@ -547,7 +547,13 @@ fn a_cutout_covers_as_much_far_away_as_near() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     // Stripes, 3 texels opaque in each 8: 37.5 % covered.
-    r.upload_texture(A, ColorSpace::Srgb, 64, 64, &pixels(64, 64, |x, _| [255, 255, 255, if x % 8 < 3 { 255 } else { 0 }]));
+    r.upload_texture(
+        A,
+        ColorSpace::Srgb,
+        64,
+        64,
+        &pixels(64, 64, |x, _| [255, 255, 255, if x % 8 < 3 { 255 } else { 0 }]),
+    );
     let material = |alpha_cutoff, tiles: f32| PbrMaterial {
         base_color: [0.0, 0.0, 0.0, 1.0],
         emissive: [1.0; 3],

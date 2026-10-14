@@ -210,9 +210,26 @@ impl Faces {
     }
 }
 
-/// A pipeline's index in `Pipelines::forward`.
-fn pipeline_index(cutout: bool, faces: Faces) -> usize {
-    usize::from(cutout) * Faces::ALL.len() + faces as usize
+/// What a forward pipeline is made for: the shader's work left out where a
+/// frame or a material doesn't use it (hardening R11).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Variant {
+    cutout: bool,
+    faces: Faces,
+    /// Some light casts shadows this frame.
+    shadowed: bool,
+    /// The material has a texture.
+    textured: bool,
+}
+
+impl Variant {
+    const COUNT: usize = 2 * Faces::ALL.len() * 2 * 2;
+
+    /// Its index in `Pipelines::forward`.
+    fn index(self) -> usize {
+        ((usize::from(self.cutout) * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+            + usize::from(self.textured)
+    }
 }
 
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
@@ -261,9 +278,8 @@ pub(crate) struct Pipelines {
     maps_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
     forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
-    /// Opaque then cut-out, each for every [`Faces`] (see
-    /// [`pipeline_index`]).
-    forward: [OnceLock<wgpu::RenderPipeline>; 6],
+    /// One for each [`Variant`], at its index.
+    forward: [OnceLock<wgpu::RenderPipeline>; Variant::COUNT],
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
     finish: OnceLock<wgpu::RenderPipeline>,
@@ -869,6 +885,7 @@ impl Renderer {
             if !self.batches.is_empty() {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
+            let shadowed = self.shadow_maps_drawn != (0, 0);
             let mut last: Option<&Batch> = None;
             for batch in &self.batches {
                 // Freed since prepare, by another view's render worker.
@@ -876,8 +893,16 @@ impl Renderer {
                 else {
                     continue;
                 };
-                if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
-                    pass.set_pipeline(scene_pipelines.forward(batch.cutout, batch.faces));
+                let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
+                if last.is_none_or(|l| (l.cutout, l.faces, textured(l)) != (batch.cutout, batch.faces, textured(batch)))
+                {
+                    let (cutout, faces) = (batch.cutout, batch.faces);
+                    pass.set_pipeline(scene_pipelines.forward(Variant {
+                        cutout,
+                        faces,
+                        shadowed,
+                        textured: textured(batch),
+                    }));
                 }
                 if last.is_none_or(|l| l.textures != batch.textures) {
                     pass.set_bind_group(1, bind_group, &[]);
@@ -999,12 +1024,13 @@ impl Pipelines {
         }
     }
 
-    /// The pipeline for opaque or cut-out draws facing `faces`.
-    fn forward(&self, cutout: bool, faces: Faces) -> &wgpu::RenderPipeline {
-        self.forward[pipeline_index(cutout, faces)].get_or_init(|| self.make_forward(cutout, faces))
+    /// The forward pipeline for `variant`.
+    fn forward(&self, variant: Variant) -> &wgpu::RenderPipeline {
+        self.forward[variant.index()].get_or_init(|| self.make_forward(variant))
     }
 
-    fn make_forward(&self, cutout: bool, faces: Faces) -> wgpu::RenderPipeline {
+    fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
+        let Variant { cutout, faces, shadowed, textured } = variant;
         let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
             let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
@@ -1044,7 +1070,9 @@ impl Pipelines {
             Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
             Faces::Both => (wgpu::FrontFace::Ccw, None),
         };
-        let constants = [("double_sided", if faces == Faces::Both { 1.0 } else { 0.0 })];
+        let on = |yes: bool| if yes { 1.0 } else { 0.0 };
+        let constants =
+            [("double_sided", on(faces == Faces::Both)), ("shadowed", on(shadowed)), ("textured", on(textured))];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
         self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some(if cutout { "forward cut-out" } else { "forward" }),

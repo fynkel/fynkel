@@ -72,6 +72,10 @@ struct Frame {
 // drawn from both sides: seen from behind, the normal is turned round so
 // the back is lit as the front.
 override double_sided: bool = false;
+// Off for a frame no light casts shadows in, and for a material with no
+// textures: the work is left out, rather than done and thrown away.
+override shadowed: bool = true;
+override textured: bool = true;
 
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
@@ -344,11 +348,19 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
 fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
-    let base_sample = textureSample(base_color_texture, material_sampler, in.uv);
-    let normal_sample = textureSample(normal_texture, material_sampler, in.uv).xyz;
-    let mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
-    let occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
-    let emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+    // Untextured, each is what its stand-in holds.
+    var base_sample = vec4<f32>(1.0);
+    var normal_sample = vec3<f32>(0.5, 0.5, 1.0);
+    var mr_sample = vec4<f32>(1.0);
+    var occlusion = 1.0;
+    var emissive_sample = vec3<f32>(1.0);
+    if textured {
+        base_sample = textureSample(base_color_texture, material_sampler, in.uv);
+        normal_sample = textureSample(normal_texture, material_sampler, in.uv).xyz;
+        mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
+        occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
+        emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+    }
 
     let base = in.base_color * base_sample;
     let albedo = base.rgb;
@@ -357,7 +369,10 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     let roughness = clamp(in.params.y * mr_sample.g, 0.045, 1.0);
     let alpha = roughness * roughness;
 
-    var n = surface_normal(in, normal_sample);
+    var n = normalize(in.normal);
+    if textured {
+        n = surface_normal(in, normal_sample);
+    }
     // The surface's own normal, without the map: shadow lookups move out
     // along it.
     var ng = normalize(in.normal);
@@ -383,7 +398,7 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
         var lit = 1.0;
-        if i == frame.counts.y && receives {
+        if shadowed && i == frame.counts.y && receives {
             lit = sun_shadow(in.world_position, ng, sun.to_sun.xyz);
         }
         color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
@@ -409,7 +424,7 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         let reach = 1.0 - near * near;
         let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
         var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-        if lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
+        if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
             falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
         }
         color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
@@ -442,7 +457,10 @@ fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locat
     let shaded = shade(in, front_facing);
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
-    let far = saturate(mip_level(in.uv, vec2<f32>(textureDimensions(base_color_texture))) - 1.0);
+    var far = 0.0;
+    if textured {
+        far = saturate(mip_level(in.uv, vec2<f32>(textureDimensions(base_color_texture))) - 1.0);
+    }
     return vec4<f32>(tonemap_neutral(shaded.rgb), mix(clamp(sharp, 0.0, 1.0), shaded.a, far));
 }
 
