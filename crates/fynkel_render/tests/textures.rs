@@ -537,3 +537,41 @@ fn textures_and_meshes_are_made_without_holding_the_assets() {
     assets.insert_mesh(MeshKey(9), mesh);
     assert!(assets.texture_bytes() > before.0 && assets.mesh_bytes() > before.1);
 }
+
+/// Hardening R12: mips average alpha, so where a cut-out's texture is far
+/// (or tiled small) its alpha is below the cutoff everywhere and it
+/// vanished. Covered as much far as near: about the share of the texture
+/// that's opaque.
+#[test]
+fn a_cutout_covers_as_much_far_away_as_near() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    // Stripes, 3 texels opaque in each 8: 37.5 % covered.
+    r.upload_texture(A, ColorSpace::Srgb, 64, 64, &pixels(64, 64, |x, _| [255, 255, 255, if x % 8 < 3 { 255 } else { 0 }]));
+    let material = |alpha_cutoff, tiles: f32| PbrMaterial {
+        base_color: [0.0, 0.0, 0.0, 1.0],
+        emissive: [1.0; 3],
+        alpha_cutoff,
+        uv_scale: [tiles; 2],
+        textures: MaterialTextures { base_color: Some(A), ..MaterialTextures::NONE },
+        ..PbrMaterial::DEFAULT
+    };
+    // The mean light of the middle of the plane (linear: a pixel half
+    // covered is half as bright), against the plane drawn whole.
+    let mut covered = |alpha_cutoff, tiles| {
+        let (image, _) = render(&gpu, &mut r, &facing_plane(material(alpha_cutoff, tiles)), 256, 256);
+        let mut sum = 0.0;
+        for y in 96..160 {
+            for x in 96..160 {
+                sum += f64::from(linear(f32::from(image.pixel(x, y)[1]) / 255.0));
+            }
+        }
+        sum
+    };
+    let whole = covered(0.0, 1.0);
+    let near = covered(0.5, 1.0) / whole;
+    // 16 tiles: about 7 texels a pixel, the texture's third mip.
+    let far = covered(0.5, 16.0) / whole;
+    assert!((0.25..0.5).contains(&near), "near: {near}");
+    assert!((0.2..0.6).contains(&far), "far: {far}, near {near}");
+}

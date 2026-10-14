@@ -432,10 +432,23 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locatio
 // edge stays crisp at any distance instead of turning into a dither
 // (Castaño, "Anti-aliased alpha test"). The pipeline writes colour only,
 // so the target stays opaque.
+//
+// Mips average alpha, so where the texture is small on screen its alpha is
+// the share of each texel's area the surface covers, and may sit below
+// the cutoff everywhere: sharpened, the surface would vanish with
+// distance. From the second mip on, that share is the coverage instead.
 @fragment
 fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let shaded = shade(in, front_facing);
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
-    return vec4<f32>(tonemap_neutral(shaded.rgb), clamp(sharp, 0.0, 1.0));
+    let far = saturate(mip_level(in.uv, vec2<f32>(textureDimensions(base_color_texture))) - 1.0);
+    return vec4<f32>(tonemap_neutral(shaded.rgb), mix(clamp(sharp, 0.0, 1.0), shaded.a, far));
+}
+
+// The mip level a texture of `size` texels is read at, at `uv`.
+fn mip_level(uv: vec2<f32>, size: vec2<f32>) -> f32 {
+    let dx = dpdx(uv * size);
+    let dy = dpdy(uv * size);
+    return max(0.0, 0.5 * log2(max(dot(dx, dx), dot(dy, dy))));
 }

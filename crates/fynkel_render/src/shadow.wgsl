@@ -59,10 +59,21 @@ fn vs_cascade(in: In) -> Out {
     return out;
 }
 
+// Mips average alpha, so where the texture is small in the map its alpha
+// is the share of each texel's area the caster covers, and may sit below
+// the cutoff everywhere. From the second mip on, that share of the map's
+// texels is kept instead, by a dither, and the filter softens it into
+// about that much shadow (forward.wgsl's `fs_cutout` does as much).
 @fragment
 fn fs_cutout(in: Out) {
     let alpha = in.alpha.x * textureSample(base_color_texture, material_sampler, in.uv).a;
-    if alpha < in.alpha.y {
+    let size = vec2<f32>(textureDimensions(base_color_texture));
+    let dx = dpdx(in.uv * size);
+    let dy = dpdy(in.uv * size);
+    let mip = max(0.0, 0.5 * log2(max(dot(dx, dx), dot(dy, dy))));
+    // Interleaved gradient noise (Jimenez): an even spread from 0 to 1.
+    let dither = fract(52.9829189 * fract(dot(in.clip.xy, vec2<f32>(0.06711056, 0.00583715))));
+    if alpha < mix(in.alpha.y, dither, saturate(mip - 1.0)) {
         discard;
     }
 }

@@ -392,3 +392,53 @@ fn views_of_one_kit_share_their_maps() {
     drop(views);
     assert_eq!(kit.shadow_bytes(), 0, "gone with the views");
 }
+
+/// Hardening R12: a cut-out caster whose texture is small in the shadow map
+/// (far, or tiled fine) still casts about its share of shadow; mips
+/// averaged its alpha below the cutoff, and it cast none.
+#[test]
+fn a_fine_cutout_still_casts_its_share() {
+    const STRIPES: TextureKey = TextureKey(2);
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    // 3 texels opaque in each 8: 37.5 % covered.
+    let stripes: Vec<u8> =
+        (0..64u32 * 64).flat_map(|i| [255, 255, 255, if i % 64 % 8 < 3 { 255 } else { 0 }]).collect();
+    r.upload_texture(STRIPES, ColorSpace::Srgb, 64, 64, &stripes);
+    // A standing screen at x = -3, facing +x, tiled 32 times: the sun,
+    // from the left, throws it onto the floor at -2.5 < x < -0.5.
+    let mut scene = stage(vec![Light::sun(Vec3::new(1.0, -1.0, 0.0), Vec3::ONE).with_shadows(true)], Quality::Medium);
+    scene.draws[1] = Draw::new(
+        PLANE,
+        Mat4::from_scale_rotation_translation(
+            Vec3::splat(2.0),
+            Quat::from_rotation_z(-90f32.to_radians()),
+            Vec3::new(-3.0, 1.5, 0.0),
+        ),
+        PbrMaterial {
+            alpha_cutoff: 0.5,
+            double_sided: true,
+            uv_scale: [32.0; 2],
+            textures: MaterialTextures { base_color: Some(STRIPES), ..MaterialTextures::NONE },
+            ..material(0.5)
+        },
+    );
+    let light = |scene: &RenderScene, r: &mut Renderer| {
+        let (image, _) = render(&gpu, r, scene, SIZE, SIZE);
+        let mut sum = 0.0;
+        for i in 0..8 {
+            for j in 0..8 {
+                let p = Vec3::new(-2.2 + 1.4 * i as f32 / 7.0, 0.0, -0.7 + 1.4 * j as f32 / 7.0);
+                let (x, y) = pixel_of(scene, p);
+                sum += linear(f32::from(image.pixel(x, y)[1]) / 255.0);
+            }
+        }
+        sum
+    };
+    let shadowed = light(&scene, &mut r);
+    scene.draws[1].cast_shadows = false;
+    let open = light(&scene, &mut r);
+    let share = shadowed / open;
+    assert!(share < 0.85, "the screen casts some shadow: {share} of the light reaches the floor");
+    assert!(share > 0.3, "not a whole one: {share}");
+}
