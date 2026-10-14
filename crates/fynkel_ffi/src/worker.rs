@@ -21,13 +21,13 @@
 //! thread and leaves nothing behind.
 
 use std::panic::{self, AssertUnwindSafe};
-use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, Weak, mpsc};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, Weak, mpsc};
 use std::thread;
 
 use fynkel_present::Target;
 #[cfg(test)]
 use fynkel_render::Gpu;
-use fynkel_render::{RenderScene, Renderer, wgpu};
+use fynkel_render::{MadeMesh, MadeTexture, MeshKey, RenderScene, Renderer, TextureKey, wgpu};
 
 #[cfg(test)]
 use crate::device::Device;
@@ -362,10 +362,46 @@ impl Shared {
     }
 }
 
+/// How many bytes of meshes and textures a frame makes on the GPU, at
+/// most: a 2048² texture is 16 MiB. One bigger still goes, alone.
+const UPLOAD_BUDGET: u64 = 32 << 20;
+
+/// Moves the oldest of `waiting` into `frame`, up to `budget` bytes of
+/// uploads and at least one change; removing costs nothing.
+fn take_within(waiting: &mut Vec<ResourceOp>, frame: &mut Vec<ResourceOp>, budget: u64) {
+    let mut spent = 0;
+    let mut count = 0;
+    for op in waiting.iter() {
+        let cost = match op {
+            ResourceOp::UploadMesh(_, mesh) => {
+                (std::mem::size_of_val(mesh.vertices()) + std::mem::size_of_val(mesh.indices())) as u64
+            }
+            ResourceOp::UploadTexture(_, _, image) => image.pixels().len() as u64,
+            ResourceOp::RemoveMesh(_) | ResourceOp::RemoveTexture(_) => 0,
+        };
+        if count > 0 && spent + cost > budget {
+            break;
+        }
+        spent += cost;
+        count += 1;
+    }
+    frame.extend(waiting.drain(..count));
+}
+
+/// A change to the world's assets, made on the GPU and waiting to be put
+/// in.
+enum Made {
+    Mesh(MeshKey, MadeMesh),
+    RemoveMesh(MeshKey),
+    Texture(TextureKey, MadeTexture),
+    RemoveTexture(TextureKey),
+}
+
 /// Draws until stopped. Fails when the target can't take a new size.
 fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer, mut target: T) -> Result<(), String> {
     let gpu = &world.device.gpu;
-    let mut ops = Vec::new();
+    let (mut ops, mut made) = (Vec::new(), Vec::new());
+    let mut first = true;
     // A scene the target has no room for waits for a frame to free some.
     let waits = target.on_free(Arc::new({
         let shared = Arc::downgrade(shared);
@@ -418,22 +454,43 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                         .resize(width, height)
                         .map_err(|e| format!("couldn't resize the view to {width} × {height}: {e}"))?;
                 }
-                // The world's changes, by whichever of its workers comes first.
-                // Taken with the assets locked, so no other worker draws before
-                // they're made.
-                {
+                // The world's changes, by whichever of its workers comes first,
+                // a frame's budget of them (all of them, for the view's first
+                // frame, so it starts on the whole scene); the rest wait, in
+                // order, for the next frame. They're made on the GPU without the assets held,
+                // so the world's other views draw meanwhile (without them, for
+                // a frame), then put in together under the assets' lock. One
+                // worker at a time makes them, so they go in in order; another
+                // doesn't wait for it, but in its view's first frame.
+                let uploading = match world.uploading.try_lock() {
+                    Ok(guard) => Some(guard),
+                    Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+                    Err(TryLockError::WouldBlock) if first => {
+                        Some(world.uploading.lock().unwrap_or_else(PoisonError::into_inner))
+                    }
+                    Err(TryLockError::WouldBlock) => None,
+                };
+                if let Some(_uploading) = uploading {
+                    let budget = if first { u64::MAX } else { UPLOAD_BUDGET };
+                    take_within(&mut world.ledger().ops, &mut ops, budget);
+                    let kit = &world.device.kit;
+                    made.extend(ops.drain(..).map(|op| match op {
+                        ResourceOp::UploadMesh(key, mesh) => Made::Mesh(key, kit.make_mesh(&mesh)),
+                        ResourceOp::RemoveMesh(key) => Made::RemoveMesh(key),
+                        ResourceOp::UploadTexture(key, space, image) => {
+                            Made::Texture(key, kit.make_texture(space, image.width(), image.height(), image.pixels()))
+                        }
+                        ResourceOp::RemoveTexture(key) => Made::RemoveTexture(key),
+                    }));
                     let mut assets = fynkel_render::lock_assets(&world.assets);
-                    std::mem::swap(&mut world.ledger().ops, &mut ops);
-                    for op in ops.drain(..) {
-                        match op {
-                            ResourceOp::UploadMesh(key, mesh) => assets.upload_mesh(key, &mesh),
-                            ResourceOp::RemoveMesh(key) => {
+                    for made in made.drain(..) {
+                        match made {
+                            Made::Mesh(key, mesh) => assets.insert_mesh(key, mesh),
+                            Made::RemoveMesh(key) => {
                                 assets.remove_mesh(key);
                             }
-                            ResourceOp::UploadTexture(key, space, image) => {
-                                assets.upload_texture(key, space, image.width(), image.height(), image.pixels());
-                            }
-                            ResourceOp::RemoveTexture(key) => {
+                            Made::Texture(key, texture) => assets.insert_texture(key, texture),
+                            Made::RemoveTexture(key) => {
                                 assets.remove_texture(key);
                             }
                         }
@@ -465,6 +522,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
 
         let mut mailbox = shared.lock();
         if drawn {
+            first = false;
             mailbox.spare.push(scene);
             mailbox.stats.rendered += 1;
         } else if waits && mailbox.pending.is_none() {

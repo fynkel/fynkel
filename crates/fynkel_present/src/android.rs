@@ -288,18 +288,19 @@ impl Target for Android {
         // same, and that wait falls on Flutter as before.
         //
         // The platform thread waits for the lease to give the surface up
-        // (a resize, the app going to the background): then the frame is
-        // presented at once and the rest of the wait falls on Flutter, so
-        // that thread waits for no GPU work.
-        let start = std::time::Instant::now();
-        while start.elapsed() < std::time::Duration::from_secs(1) && !frame.lease.wanted() {
-            let waited = self.shared.device.poll(wgpu::PollType::Wait {
-                submission_index: Some(submitted.clone()),
-                timeout: Some(std::time::Duration::from_millis(2)),
+        // (a resize, the app going to the background): if it already does,
+        // the frame is presented at once and the wait falls on Flutter;
+        // otherwise it waits behind at most this frame's GPU work.
+        //
+        // One blocking wait: a short timeout lost the Note10+'s device
+        // (Mali's driver answers a timed-out wait with an error wgpu takes
+        // as a lost device), and polling every 0.5 ms instead cost the
+        // shadows scene 9 fps (56.9 → 47.9 at medium).
+        if !frame.lease.wanted() {
+            let _ = self.shared.device.poll(wgpu::PollType::Wait {
+                submission_index: Some(submitted),
+                timeout: Some(std::time::Duration::from_secs(1)),
             });
-            if !matches!(waited, Err(wgpu::PollError::Timeout)) {
-                break;
-            }
         }
         let Frame { texture, view, lease } = frame;
         drop(view);

@@ -5,7 +5,7 @@
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::*;
 
-pub use fynkel_golden::{Image, assert_golden};
+pub use fynkel_golden::{Image, assert_golden, assert_golden_within};
 
 pub const CUBE: MeshKey = MeshKey(1);
 pub const SPHERE: MeshKey = MeshKey(2);

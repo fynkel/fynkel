@@ -24,12 +24,12 @@
 //! 2. The last pass, when there is a scene image: the image onto the view
 //!    (`finish.wgsl`). Effects that need the whole picture (bloom) go here.
 
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
-use crate::assets::{self, Assets, Kit, SharedAssets};
+use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
 use crate::frame_ring::FrameRing;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, TextureKey};
@@ -61,6 +61,9 @@ pub struct FrameStats {
     pub shadow_maps: u32,
     /// Draws into shadow maps: one per caster per map it falls in.
     pub shadow_casters: u32,
+    /// GPU memory of the shadow maps the view holds, shared with the kit's
+    /// other views or not.
+    pub shadow_bytes: u64,
 }
 
 /// `Frame` in forward.wgsl.
@@ -138,10 +141,11 @@ const NO_LIGHT: u8 = 0xFF;
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
-    model: [[f32; 4]; 4],
-    normal: [[f32; 3]; 3],
+    /// The model matrix's rows, but its last (0, 0, 0, 1). The shader works
+    /// out the normals' matrix and whether it mirrors.
+    model: [[f32; 4]; 3],
     base_color: [f32; 4],
-    /// Metallic, roughness, alpha cutoff, and -1 when the model mirrors.
+    /// Metallic, roughness, alpha cutoff, and 0.
     params: [f32; 4],
     /// Emission; w: 1 if shadows fall on it, 0 if not.
     emissive: [f32; 4],
@@ -206,9 +210,26 @@ impl Faces {
     }
 }
 
-/// A pipeline's index in `Pipelines::forward`.
-fn pipeline_index(cutout: bool, faces: Faces) -> usize {
-    usize::from(cutout) * Faces::ALL.len() + faces as usize
+/// What a forward pipeline is made for: the shader's work left out where a
+/// frame or a material doesn't use it (hardening R11).
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct Variant {
+    cutout: bool,
+    faces: Faces,
+    /// Some light casts shadows this frame.
+    shadowed: bool,
+    /// The material has a texture.
+    textured: bool,
+}
+
+impl Variant {
+    const COUNT: usize = 2 * Faces::ALL.len() * 2 * 2;
+
+    /// Its index in `Pipelines::forward`.
+    fn index(self) -> usize {
+        ((usize::from(self.cutout) * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+            + usize::from(self.textured)
+    }
 }
 
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
@@ -243,15 +264,25 @@ type CasterKey = (u8, bool, MaterialTextures, u64);
 
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
+///
+/// Each is made the first time a frame draws with it: a game uses one or
+/// two of the forward pipelines, and the view's format draws the scene only
+/// at low quality.
 pub(crate) struct Pipelines {
     /// The format they draw into.
     format: wgpu::TextureFormat,
-    /// Opaque then cut-out, each for every [`Faces`] (see
-    /// [`pipeline_index`]).
-    forward: Vec<wgpu::RenderPipeline>,
-    lines: wgpu::RenderPipeline,
+    maker: PipelineMaker,
+    device: wgpu::Device,
+    frame_layout: wgpu::BindGroupLayout,
+    textures_layout: wgpu::BindGroupLayout,
+    maps_layout: wgpu::BindGroupLayout,
+    image_layout: wgpu::BindGroupLayout,
+    forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
+    /// One for each [`Variant`], at its index.
+    forward: [OnceLock<wgpu::RenderPipeline>; Variant::COUNT],
+    lines: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
-    finish: Option<wgpu::RenderPipeline>,
+    finish: OnceLock<wgpu::RenderPipeline>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -275,9 +306,9 @@ pub struct Renderer {
     line_vertices: Vec<LineVertex>,
     /// The scene's draws that are seen, each with its sort key, sorted.
     order: Vec<(SortKey, u32)>,
-    /// Each seen draw's normal matrix, whether it mirrors, and its lights
-    /// (as [`Instance::lights`]), by its index in the scene.
-    seen: Vec<(Mat3, bool, [u32; 2])>,
+    /// Each seen draw's lights (as [`Instance::lights`]), by its index in
+    /// the scene.
+    seen: Vec<[u32; 2]>,
     /// Point and spot lights in view: how far each is from the camera
     /// (squared) and its index in the scene.
     in_view_lights: Vec<(f32, u32)>,
@@ -298,6 +329,10 @@ pub struct Renderer {
     /// the spot maps; `None` where it needs none.
     shadow_shape: [Option<(u32, u32)>; 2],
     shadow_maps: Option<ShadowMaps>,
+    /// The maps' shape the next `encode` draws with, and for how many
+    /// frames each kind has been using fewer than it holds.
+    shadow_next: [(u32, u32); 2],
+    shadow_idle: [u32; 2],
     clear: wgpu::Color,
     size: (u32, u32),
     /// This frame's level: the scene's, or the device's.
@@ -311,6 +346,9 @@ impl std::fmt::Debug for Renderer {
 }
 
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+/// How many frames shadow maps a view stops using are kept: about a
+/// second.
+const KEEP_UNUSED_MAPS: u32 = 60;
 const INSTANCE_SIZE: u64 = std::mem::size_of::<Instance>() as u64;
 
 impl Renderer {
@@ -373,6 +411,8 @@ impl Renderer {
             shadow_maps_drawn: (0, 0),
             shadow_shape: [None; 2],
             shadow_maps: None,
+            shadow_next: [(1, 0); 2],
+            shadow_idle: [0; 2],
             clear: wgpu::Color::BLACK,
             size: (0, 0),
             kit,
@@ -383,6 +423,11 @@ impl Renderer {
     /// ([`Renderer::sharing`]).
     pub fn assets(&self) -> &SharedAssets {
         &self.assets
+    }
+
+    /// The device's pipelines and shared GPU state it draws with.
+    pub fn kit(&self) -> &Arc<Kit> {
+        &self.kit
     }
 
     /// The target format this renderer draws into.
@@ -398,7 +443,8 @@ impl Renderer {
 
     /// Uploads `data` under `key` to its assets ([`Assets::upload_mesh`]).
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
-        assets::lock(&self.assets).upload_mesh(key, data);
+        let made = self.kit.make_mesh(data);
+        assets::lock(&self.assets).insert_mesh(key, made);
     }
 
     /// Frees the mesh under `key` ([`Assets::remove_mesh`]).
@@ -408,7 +454,8 @@ impl Renderer {
 
     /// Uploads an image under `key` to its assets ([`Assets::upload_texture`]).
     pub fn upload_texture(&mut self, key: TextureKey, space: ColorSpace, width: u32, height: u32, rgba: &[u8]) {
-        assets::lock(&self.assets).upload_texture(key, space, width, height, rgba);
+        let made = self.kit.make_texture(space, width, height, rgba);
+        assets::lock(&self.assets).insert_texture(key, made);
     }
 
     /// Frees the textures under `key` ([`Assets::remove_texture`]).
@@ -529,7 +576,7 @@ impl Renderer {
         // The sort is in place and the buffers reused, so a steady frame
         // allocates nothing.
         self.order.clear();
-        self.seen.resize(scene.draws.len(), (Mat3::ZERO, false, [0; 2]));
+        self.seen.resize(scene.draws.len(), [0; 2]);
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
@@ -545,8 +592,8 @@ impl Renderer {
                 stats.culled += 1;
                 continue;
             }
-            let (normal, mirrored) = normal_matrix(draw.model);
-            self.seen[i] = (normal, mirrored, brightest_lights(&self.frame_lights, at, radius, per_object));
+            let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
+            self.seen[i] = brightest_lights(&self.frame_lights, at, radius, per_object);
             let m = &draw.material;
             let key = (m.alpha_cutoff > 0.0, Faces::of(m, mirrored), m.textures, draw.mesh.0);
             self.order.push((key, i as u32));
@@ -557,7 +604,7 @@ impl Renderer {
         for &((cutout, faces, textures, mesh), i) in &self.order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
-            let (normal, mirrored, lights) = self.seen[i as usize];
+            let lights = self.seen[i as usize];
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
                 Some(b) if (b.cutout, b.faces, b.textures, b.mesh.0) == (cutout, faces, textures, mesh) => b.count += 1,
@@ -566,10 +613,12 @@ impl Renderer {
             let [er, eg, eb] = m.emissive;
             let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
             self.instances.push(Instance {
-                model: draw.model.to_cols_array_2d(),
-                normal: normal.to_cols_array_2d(),
+                model: {
+                    let rows = draw.model.transpose();
+                    [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
+                },
                 base_color: m.base_color,
-                params: [m.metallic, m.roughness, m.alpha_cutoff, if mirrored { -1.0 } else { 1.0 }],
+                params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
                 emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
                 uv: [su, sv, ou, ov],
                 lights,
@@ -581,6 +630,17 @@ impl Renderer {
             }
         }
         self.prepare_shadows(scene, &camera, aspect, shadow_sun.map(|(_, direction)| direction), &mut stats);
+        // The shadow maps `encode` draws with: as many as the frame uses.
+        // A kind it uses fewer of keeps what it has a while, so shadows that
+        // come and go don't remake them, then lets them go.
+        let had = self.shadow_maps.as_ref().map_or([(1, 0); 2], |m| m.shape);
+        for (k, had) in had.into_iter().enumerate() {
+            let want = self.shadow_shape[k].unwrap_or((had.0, 0));
+            let fewer = want.0 == had.0 && want.1 < had.1;
+            self.shadow_idle[k] = if fewer { self.shadow_idle[k] + 1 } else { 0 };
+            self.shadow_next[k] = if fewer && self.shadow_idle[k] <= KEEP_UNUSED_MAPS { had } else { want };
+        }
+        stats.shadow_bytes = ShadowMaps::bytes(self.shadow_next);
         stats.lines = scene.lines.len() as u32;
         stats.draws = self.instances.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
@@ -681,7 +741,7 @@ impl Renderer {
         }
         if spots > 0 {
             self.shadow_maps_drawn.1 = spots as u8;
-            self.shadow_shape[1] = Some((level.spot_map_size, level.spot_maps.min(MAX_SPOT_MAPS) as u32));
+            self.shadow_shape[1] = Some((level.spot_map_size, spots as u32));
         }
 
         self.caster_order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
@@ -724,13 +784,8 @@ impl Renderer {
         {
             self.image_pipelines = Some(self.kit.pipelines(format));
         }
-        // The shadow maps, remade when a level needs others. A kind of map
-        // the frame doesn't use keeps what it had, so a spot light coming
-        // into view doesn't make new ones.
-        let had = self.shadow_maps.as_ref().map_or([(1, 0); 2], |m| m.shape);
-        let shape = [0, 1].map(|k| self.shadow_shape[k].unwrap_or(had[k]));
-        if self.shadow_maps.is_none() || shape != had {
-            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, shape));
+        if self.shadow_maps.as_ref().is_none_or(|m| m.shape != self.shadow_next) {
+            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, self.shadow_next));
         }
         let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, .. } = self;
         let targets = targets.as_ref().expect("made above");
@@ -830,6 +885,7 @@ impl Renderer {
             if !self.batches.is_empty() {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
+            let shadowed = self.shadow_maps_drawn != (0, 0);
             let mut last: Option<&Batch> = None;
             for batch in &self.batches {
                 // Freed since prepare, by another view's render worker.
@@ -837,8 +893,16 @@ impl Renderer {
                 else {
                     continue;
                 };
-                if last.is_none_or(|l| (l.cutout, l.faces) != (batch.cutout, batch.faces)) {
-                    pass.set_pipeline(&scene_pipelines.forward[pipeline_index(batch.cutout, batch.faces)]);
+                let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
+                if last.is_none_or(|l| (l.cutout, l.faces, textured(l)) != (batch.cutout, batch.faces, textured(batch)))
+                {
+                    let (cutout, faces) = (batch.cutout, batch.faces);
+                    pass.set_pipeline(scene_pipelines.forward(Variant {
+                        cutout,
+                        faces,
+                        shadowed,
+                        textured: textured(batch),
+                    }));
                 }
                 if last.is_none_or(|l| l.textures != batch.textures) {
                     pass.set_bind_group(1, bind_group, &[]);
@@ -849,7 +913,7 @@ impl Renderer {
                 pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
             }
             if !self.line_vertices.is_empty() {
-                pass.set_pipeline(&scene_pipelines.lines);
+                pass.set_pipeline(scene_pipelines.lines());
                 pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
                 pass.draw(0..self.line_vertices.len() as u32, 0..1);
             }
@@ -874,7 +938,7 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(pipelines.finish.as_ref().expect("a view's format is sRGB"));
+            pass.set_pipeline(pipelines.finish());
             pass.set_bind_group(0, &image.bind_group, &[]);
             pass.draw(0..3, 0..1);
         }
@@ -945,23 +1009,45 @@ impl Renderer {
 
 impl Pipelines {
     pub(crate) fn new(kit: &Kit, format: wgpu::TextureFormat) -> Self {
-        let device = &kit.gpu.device;
-        let frame_layout = &kit.frame_layout;
-        let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
+        Self {
+            format,
+            maker: kit.maker.clone(),
+            device: kit.gpu.device.clone(),
+            frame_layout: kit.frame_layout.clone(),
+            textures_layout: kit.textures.layout.clone(),
+            maps_layout: kit.shadows.maps_layout.clone(),
+            image_layout: kit.image_layout.clone(),
+            forward_shader: OnceLock::new(),
+            forward: Default::default(),
+            lines: OnceLock::new(),
+            finish: OnceLock::new(),
+        }
+    }
 
-        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-            label: Some("forward"),
-            bind_group_layouts: &[Some(frame_layout), Some(&kit.textures.layout), Some(&kit.shadows.maps_layout)],
-            immediate_size: 0,
+    /// The forward pipeline for `variant`.
+    fn forward(&self, variant: Variant) -> &wgpu::RenderPipeline {
+        self.forward[variant.index()].get_or_init(|| self.make_forward(variant))
+    }
+
+    fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
+        let Variant { cutout, faces, shadowed, textured } = variant;
+        let device = &self.device;
+        let (shader, layout) = self.forward_shader.get_or_init(|| {
+            let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
+            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("forward"),
+                bind_group_layouts: &[Some(&self.frame_layout), Some(&self.textures_layout), Some(&self.maps_layout)],
+                immediate_size: 0,
+            });
+            (shader, layout)
         });
         // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
         let vertex_attributes =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
         let instance_attributes = wgpu::vertex_attr_array![
-            4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4,
-            8 => Float32x3, 9 => Float32x3, 10 => Float32x3,
-            11 => Float32x4, 12 => Float32x4, 13 => Float32x4, 14 => Float32x4,
-            15 => Uint32x2,
+            4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
+            7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
+            11 => Uint32x2,
         ];
         let buffers = [
             Some(wgpu::VertexBufferLayout {
@@ -979,69 +1065,76 @@ impl Pipelines {
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
         // don't use it. Its alpha becomes MSAA coverage, and it writes
         // colour only, so the target stays opaque.
-        let pipeline = |cutout: bool, faces: Faces| {
-            let (front_face, cull_mode) = match faces {
-                Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
-                Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
-                Faces::Both => (wgpu::FrontFace::Ccw, None),
-            };
-            let constants = [("double_sided", if faces == Faces::Both { 1.0 } else { 0.0 })];
-            let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some(if cutout { "forward cut-out" } else { "forward" }),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &buffers,
-                },
-                primitive: wgpu::PrimitiveState {
-                    topology: wgpu::PrimitiveTopology::TriangleList,
-                    front_face,
-                    cull_mode,
-                    ..Default::default()
-                },
-                // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
-                // depth has most precision near 0, which is where reversed-Z puts
-                // the distance, where perspective has least.
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Greater),
-                    stencil: Default::default(),
-                    bias: Default::default(),
-                }),
-                multisample: wgpu::MultisampleState {
-                    count: Renderer::SAMPLES,
-                    alpha_to_coverage_enabled: cutout,
-                    ..Default::default()
-                },
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
-                    compilation_options,
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
+        let (front_face, cull_mode) = match faces {
+            Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
+            Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
+            Faces::Both => (wgpu::FrontFace::Ccw, None),
         };
+        let on = |yes: bool| if yes { 1.0 } else { 0.0 };
+        let constants =
+            [("double_sided", on(faces == Faces::Both)), ("shadowed", on(shadowed)), ("textured", on(textured))];
+        let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(if cutout { "forward cut-out" } else { "forward" }),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &buffers,
+            },
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face,
+                cull_mode,
+                ..Default::default()
+            },
+            // Reversed-Z: near is 1, far is 0, so nearer means greater. Float
+            // depth has most precision near 0, which is where reversed-Z puts
+            // the distance, where perspective has least.
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: Renderer::SAMPLES,
+                alpha_to_coverage_enabled: cutout,
+                ..Default::default()
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
+                compilation_options,
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
 
+    /// Debug lines' pipeline.
+    fn lines(&self) -> &wgpu::RenderPipeline {
+        self.lines.get_or_init(|| self.make_lines())
+    }
+
+    fn make_lines(&self) -> wgpu::RenderPipeline {
         // Lines: over everything (depth always passes, and isn't written),
         // blended by their alpha.
-        let line_shader = device.create_shader_module(wgpu::include_wgsl!("lines.wgsl"));
-        let line_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+        let line_shader = self.device.create_shader_module(wgpu::include_wgsl!("lines.wgsl"));
+        let line_layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("lines"),
-            bind_group_layouts: &[Some(frame_layout)],
+            bind_group_layouts: &[Some(&self.frame_layout)],
             immediate_size: 0,
         });
         let line_attributes = wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x4];
-        let lines = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+        self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some("lines"),
             layout: Some(&line_layout),
             vertex: wgpu::VertexState {
@@ -1068,7 +1161,7 @@ impl Pipelines {
                 entry_point: Some("fs_main"),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
-                    format,
+                    format: self.format,
                     blend: Some(wgpu::BlendState::ALPHA_BLENDING),
                     // Colour only: the target stays opaque.
                     write_mask: wgpu::ColorWrites::COLOR,
@@ -1076,65 +1169,49 @@ impl Pipelines {
             }),
             multiview_mask: None,
             cache: None,
-        });
-
-        // The last pass, onto a view.
-        let finish = format.is_srgb().then(|| {
-            let shader = device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("finish"),
-                bind_group_layouts: &[Some(&kit.image_layout)],
-                immediate_size: 0,
-            });
-            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-                label: Some("finish"),
-                layout: Some(&layout),
-                vertex: wgpu::VertexState {
-                    module: &shader,
-                    entry_point: Some("vs_main"),
-                    compilation_options: Default::default(),
-                    buffers: &[],
-                },
-                primitive: Default::default(),
-                depth_stencil: None,
-                multisample: Default::default(),
-                fragment: Some(wgpu::FragmentState {
-                    module: &shader,
-                    entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
-                    targets: &[Some(wgpu::ColorTargetState {
-                        format,
-                        blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
-                    })],
-                }),
-                multiview_mask: None,
-                cache: None,
-            })
-        });
-
-        Self {
-            format,
-            finish,
-            forward: [false, true]
-                .into_iter()
-                .flat_map(|cutout| Faces::ALL.map(|faces| (cutout, faces)))
-                .map(|(cutout, faces)| pipeline(cutout, faces))
-                .collect(),
-            lines,
-        }
+        })
     }
-}
 
-/// The inverse-transpose of the upper 3×3: keeps normals perpendicular to
-/// their surface under non-uniform scale. Rotation-only matrices give
-/// themselves back. A degenerate (zero-scale) matrix gives zero, so the
-/// object draws unlit instead of NaN. Also whether the matrix mirrors (a
-/// negative determinant), which flips the bitangent.
-fn normal_matrix(model: Mat4) -> (Mat3, bool) {
-    let m = Mat3::from_mat4(model);
-    let det = m.determinant();
-    (if det.abs() < 1e-12 { Mat3::ZERO } else { m.inverse().transpose() }, det < 0.0)
+    /// The last pass's pipeline, onto a view (of an sRGB format).
+    fn finish(&self) -> &wgpu::RenderPipeline {
+        assert!(self.format.is_srgb(), "a view's format is sRGB");
+        self.finish.get_or_init(|| self.make_finish())
+    }
+
+    fn make_finish(&self) -> wgpu::RenderPipeline {
+        // The last pass, onto a view.
+        let shader = self.device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("finish"),
+            bind_group_layouts: &[Some(&self.image_layout)],
+            immediate_size: 0,
+        });
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some("finish"),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_main"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_main"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
 }
 
 /// Where a draw goes among `map`'s casters: opaque ones need no textures,

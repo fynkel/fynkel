@@ -12,13 +12,14 @@ use std::fmt;
 use std::sync::Arc;
 
 use fynkel_mesh::{MeshData, MeshError, MeshParts};
+use gltf::accessor::{self, DataType, Item};
 use gltf::mesh::Mode;
 use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 
 use crate::{ImageData, ImageError};
 
 /// Extensions this reader understands, so a file may require them.
-const SUPPORTED: &[&str] = &["KHR_texture_transform", "KHR_materials_emissive_strength"];
+const SUPPORTED: &[&str] = &["KHR_texture_transform", "KHR_materials_emissive_strength", "KHR_mesh_quantization"];
 
 /// The largest UV scale or offset: the world's limit for a material.
 const MAX_UV: f32 = 1e4;
@@ -239,8 +240,11 @@ impl<'a> Reader<'a> {
         if let Some(missing) = document.extensions_required().find(|e| !SUPPORTED.contains(e)) {
             return Err(ModelError::Requires(missing.to_owned()));
         }
-        let document =
-            gltf::Document::from_json(document.into_json()).map_err(|e| ModelError::Invalid(e.to_string()))?;
+        // gltf has no feature for quantization and calls any required
+        // extension it doesn't know unsupported; `floats` reads it.
+        let mut json = document.into_json();
+        json.extensions_required.retain(|e| e != "KHR_mesh_quantization");
+        let document = gltf::Document::from_json(json).map_err(|e| ModelError::Invalid(e.to_string()))?;
         let blob = match glb.bin {
             Some(std::borrow::Cow::Borrowed(blob)) => blob,
             // `from_slice` borrows; an owned chunk can't happen.
@@ -270,7 +274,7 @@ impl<'a> Reader<'a> {
         let document = self.document.clone();
         for extension in document.extensions_used() {
             match extension {
-                "KHR_texture_transform" | "KHR_materials_emissive_strength" => {}
+                "KHR_texture_transform" | "KHR_materials_emissive_strength" | "KHR_mesh_quantization" => {}
                 // Said per material, where it applies.
                 "KHR_materials_unlit" => {}
                 "KHR_lights_punctual" => self.warn("the model's lights are skipped; light the scene from code"),
@@ -435,18 +439,18 @@ impl<'a> Reader<'a> {
             gltf::buffer::Source::Bin => Some(blob),
             gltf::buffer::Source::Uri(_) => None,
         });
-        let Some(positions) = reader.read_positions() else {
+        let attribute = |semantic| primitive.get(&semantic);
+        let Some(positions) = attribute(gltf::Semantic::Positions).and_then(|a| floats::<3>(a, blob)) else {
             return Err(fail("it has no positions".into()));
         };
-        let positions: Vec<[f32; 3]> = positions.collect();
-        let normals: Option<Vec<[f32; 3]>> = reader.read_normals().map(Iterator::collect);
+        let normals = attribute(gltf::Semantic::Normals).and_then(|a| floats::<3>(a, blob));
         // Without normals, glTF says flat shading; the mesh computes
         // smooth ones from shared vertices, which for an exporter's
         // per-face vertices is the same thing. Tangents are only used with
         // the normals they were made for.
-        let tangents: Option<Vec<[f32; 4]>> =
-            reader.read_tangents().filter(|_| normals.is_some()).map(Iterator::collect);
-        let uvs: Option<Vec<[f32; 2]>> = reader.read_tex_coords(0).map(|t| t.into_f32().collect());
+        let tangents =
+            attribute(gltf::Semantic::Tangents).filter(|_| normals.is_some()).and_then(|a| floats::<4>(a, blob));
+        let uvs = attribute(gltf::Semantic::TexCoords(0)).and_then(|a| floats::<2>(a, blob));
         let listed: Vec<u32> = match reader.read_indices() {
             Some(indices) => indices.into_u32().collect(),
             None => (0..positions.len() as u32).collect(),
@@ -655,4 +659,48 @@ fn fan(indices: &[u32]) -> Vec<u32> {
 
 fn shorten(uri: &str) -> String {
     if uri.starts_with("data:") { "a data: URI".to_owned() } else { uri.to_owned() }
+}
+
+/// `accessor`'s values as floats. KHR_mesh_quantization lets positions,
+/// normals, tangents and UVs be small integers, normalised (to -1..1 or
+/// 0..1, as glTF says) or not; without it they're floats, or UVs
+/// normalised u8 or u16. `None` for a type no attribute may have.
+fn floats<const N: usize>(accessor: gltf::Accessor<'_>, blob: &[u8]) -> Option<Vec<[f32; N]>>
+where
+    [f32; N]: Item,
+    [i8; N]: Item,
+    [u8; N]: Item,
+    [i16; N]: Item,
+    [u16; N]: Item,
+{
+    fn each<T: Copy, const N: usize>(values: accessor::Iter<'_, [T; N]>, f: impl Fn(T) -> f32) -> Vec<[f32; N]>
+    where
+        [T; N]: Item,
+    {
+        values.map(|v| v.map(&f)).collect()
+    }
+    let get = |buffer: gltf::Buffer<'_>| match buffer.source() {
+        gltf::buffer::Source::Bin => Some(blob),
+        gltf::buffer::Source::Uri(_) => None,
+    };
+    let unit = accessor.normalized();
+    Some(match accessor.data_type() {
+        DataType::F32 => accessor::Iter::<[f32; N]>::new(accessor, get)?.collect(),
+        DataType::I8 => each(accessor::Iter::<[i8; N]>::new(accessor, get)?, |c| {
+            if unit { (f32::from(c) / 127.0).max(-1.0) } else { f32::from(c) }
+        }),
+        DataType::U8 => {
+            each(
+                accessor::Iter::<[u8; N]>::new(accessor, get)?,
+                |c| if unit { f32::from(c) / 255.0 } else { f32::from(c) },
+            )
+        }
+        DataType::I16 => each(accessor::Iter::<[i16; N]>::new(accessor, get)?, |c| {
+            if unit { (f32::from(c) / 32767.0).max(-1.0) } else { f32::from(c) }
+        }),
+        DataType::U16 => each(accessor::Iter::<[u16; N]>::new(accessor, get)?, |c| {
+            if unit { f32::from(c) / 65535.0 } else { f32::from(c) }
+        }),
+        DataType::U32 => return None,
+    })
 }

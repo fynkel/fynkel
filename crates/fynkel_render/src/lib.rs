@@ -11,7 +11,7 @@ mod scene;
 mod shadows;
 mod texture;
 
-pub use assets::{Assets, Kit, SharedAssets, lock as lock_assets};
+pub use assets::{Assets, Kit, MadeMesh, MadeTexture, SharedAssets, lock as lock_assets, set_pipeline_cache_dir};
 pub use fynkel_mesh::{MeshData, Vertex};
 pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};

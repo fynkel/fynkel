@@ -62,6 +62,15 @@ pub fn read_png(path: &Path) -> Option<Image> {
 /// and look at the image before committing it. On a mismatch the actual
 /// image and a diff are written to `target/golden-failures/`.
 pub fn assert_golden(name: &str, image: &Image) {
+    let pixels = (image.width * image.height) as usize;
+    assert_golden_within(name, image, pixels / 1000);
+}
+
+/// [`assert_golden`], with at most `pixels` outside 2/255 instead of
+/// 0.1 %: for a test whose subject is a few pixels wide, as a shadow's
+/// edge is, which 0.1 % of the image would let move.
+pub fn assert_golden_within(name: &str, image: &Image, pixels: usize) {
+    let allowed = pixels;
     let path = golden_dir().join(format!("{name}.png"));
     if std::env::var("FYNKEL_BLESS").as_deref() == Ok("1") {
         std::fs::create_dir_all(golden_dir()).unwrap();
@@ -84,12 +93,12 @@ pub fn assert_golden(name: &str, image: &Image) {
         diff.rgba[i * 4..i * 4 + 4].copy_from_slice(&[d.saturating_mul(16), 0, 0, 255]);
     }
     let pixels = (image.width * image.height) as usize;
-    if off * 1000 > pixels {
+    if off > allowed {
         std::fs::create_dir_all(failure_dir()).unwrap();
         write_png(&failure_dir().join(format!("{name}.actual.png")), image);
         write_png(&failure_dir().join(format!("{name}.diff.png")), &diff);
         panic!(
-            "{name}: {off} of {pixels} pixels differ by more than 2/255 (worst {worst}); see {}",
+            "{name}: {off} of {pixels} pixels differ by more than 2/255 ({allowed} may; worst {worst}); see {}",
             failure_dir().display()
         );
     }

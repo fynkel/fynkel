@@ -59,10 +59,30 @@ fn each_gpu_gets_its_quality_level() {
         (gpu(0x1234, Other, Vulkan), Quality::Low),
     ];
     for (info, want) in cases {
-        assert_eq!(Quality::for_adapter(&info), want, "{info:?}");
+        assert_eq!(Quality::for_adapter_on(&info, false), want, "{info:?}");
     }
     #[cfg(target_os = "macos")]
     assert_eq!(Quality::for_adapter(&this), Quality::High, "this Mac");
+    #[cfg(target_os = "android")]
+    assert_eq!(Quality::for_adapter(&this), Quality::Medium, "this phone");
+
+    // On Android (hardening R4), a phone's GPU is medium whoever makes it,
+    // not high because its maker isn't known: PowerVR, Samsung's Xclipse
+    // (AMD's id), NVIDIA's Tegra. One that isn't a real GPU is low.
+    let android = [
+        (gpu(0x13B5, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x5143, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x1010, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x1002, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x10DE, IntegratedGpu, Vulkan), Quality::Medium),
+        (gpu(0x10DE, DiscreteGpu, Gl), Quality::Medium),
+        (gpu(0x1234, Other, Vulkan), Quality::Low),
+        (gpu(0x1AE0, VirtualGpu, Vulkan), Quality::Low),
+        (gpu(0x10005, Cpu, Vulkan), Quality::Low),
+    ];
+    for (info, want) in android {
+        assert_eq!(Quality::for_adapter_on(&info, true), want, "Android: {info:?}");
+    }
 }
 
 #[test]

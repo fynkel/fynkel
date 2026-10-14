@@ -121,17 +121,24 @@ pub(crate) struct WorldGpu {
     /// What the GPU has or is about to have: each view's extract adds to
     /// it, and the first render worker to draw after makes the changes.
     pub(crate) ledger: Mutex<Ledger>,
+    /// Held by the render worker making the ledger's changes.
+    pub(crate) uploading: Mutex<()>,
 }
 
 impl WorldGpu {
     pub(crate) fn new(device: &Arc<Device>) -> Arc<Self> {
-        Arc::new(Self { device: device.clone(), assets: Assets::shared(&device.kit), ledger: Mutex::default() })
+        Arc::new(Self {
+            device: device.clone(),
+            assets: Assets::shared(&device.kit),
+            ledger: Mutex::default(),
+            uploading: Mutex::default(),
+        })
     }
 
     /// Shares `assets` (made on `device`'s kit) rather than new ones.
     #[cfg(test)]
     pub(crate) fn with_assets(device: &Arc<Device>, assets: SharedAssets) -> Arc<Self> {
-        Arc::new(Self { device: device.clone(), assets, ledger: Mutex::default() })
+        Arc::new(Self { device: device.clone(), assets, ledger: Mutex::default(), uploading: Mutex::default() })
     }
 
     pub(crate) fn ledger(&self) -> MutexGuard<'_, Ledger> {

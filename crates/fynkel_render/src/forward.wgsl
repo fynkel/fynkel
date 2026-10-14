@@ -72,6 +72,10 @@ struct Frame {
 // drawn from both sides: seen from behind, the normal is turned round so
 // the back is lit as the front.
 override double_sided: bool = false;
+// Off for a frame no light casts shadows in, and for a material with no
+// textures: the work is left out, rather than done and thrown away.
+override shadowed: bool = true;
+override textured: bool = true;
 
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
@@ -101,26 +105,21 @@ struct VertexIn {
     // (0, 0) is the image's top-left.
     @location(3) uv: vec2<f32>,
     // Per draw (instance step):
+    // The model matrix's three rows (its last is always 0, 0, 0, 1).
     @location(4) model_0: vec4<f32>,
     @location(5) model_1: vec4<f32>,
     @location(6) model_2: vec4<f32>,
-    @location(7) model_3: vec4<f32>,
-    // The inverse-transpose of the model matrix's upper 3×3, so normals
-    // stay perpendicular under non-uniform scale.
-    @location(8) normal_0: vec3<f32>,
-    @location(9) normal_1: vec3<f32>,
-    @location(10) normal_2: vec3<f32>,
-    @location(11) base_color: vec4<f32>,
-    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: 1, or
-    // -1 when the model matrix mirrors (which flips the bitangent).
-    @location(12) params: vec4<f32>,
+    @location(7) base_color: vec4<f32>,
+    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: unused
+    // (the vertex shader puts the mirroring sign there).
+    @location(8) params: vec4<f32>,
     // rgb: linear emission. w: 1 if shadows fall on it.
-    @location(13) emissive: vec4<f32>,
+    @location(9) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
-    @location(14) uv_transform: vec4<f32>,
+    @location(10) uv_transform: vec4<f32>,
     // The lamps that light it: indices into `frame.lamps`, a byte each,
     // nearest first, 0xFF after the last.
-    @location(15) lamps: vec2<u32>,
+    @location(11) lamps: vec2<u32>,
 };
 
 struct VertexOut {
@@ -128,6 +127,8 @@ struct VertexOut {
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) @interpolate(flat) base_color: vec4<f32>,
+    // As the instance's, with w 1, or -1 when the model matrix mirrors
+    // (which flips the bitangent and the front face).
     @location(3) @interpolate(flat) params: vec4<f32>,
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
@@ -137,20 +138,28 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    let model = mat4x4<f32>(in.model_0, in.model_1, in.model_2, in.model_3);
-    let normal_matrix = mat3x3<f32>(in.normal_0, in.normal_1, in.normal_2);
-    let world = model * vec4<f32>(in.position, 1.0);
+    let p = vec4<f32>(in.position, 1.0);
+    let world = vec4<f32>(dot(in.model_0, p), dot(in.model_1, p), dot(in.model_2, p), 1.0);
+    // The upper 3×3's columns.
+    let c0 = vec3<f32>(in.model_0.x, in.model_1.x, in.model_2.x);
+    let c1 = vec3<f32>(in.model_0.y, in.model_1.y, in.model_2.y);
+    let c2 = vec3<f32>(in.model_0.z, in.model_1.z, in.model_2.z);
+    // Normals turn by the inverse-transpose, so they stay perpendicular
+    // under non-uniform scale. The cofactor matrix is that times the
+    // determinant: its sign keeps a mirrored object's normals pointing
+    // out, and the fragment shader normalises away its size.
+    let cofactor = mat3x3<f32>(cross(c1, c2), cross(c2, c0), cross(c0, c1));
+    let mirror = select(1.0, -1.0, dot(c0, cross(c1, c2)) < 0.0);
     var out: VertexOut;
     out.clip = frame.view_proj * world;
     out.world_position = world.xyz;
-    out.normal = normal_matrix * in.normal;
+    out.normal = cofactor * in.normal * mirror;
     // A tangent lies along the surface, so it turns with the model matrix
     // itself (unlike the normal).
-    out.tangent = vec4<f32>(mat3x3<f32>(in.model_0.xyz, in.model_1.xyz, in.model_2.xyz) * in.tangent.xyz,
-        in.tangent.w * in.params.w);
+    out.tangent = vec4<f32>(mat3x3<f32>(c0, c1, c2) * in.tangent.xyz, in.tangent.w * mirror);
     out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.base_color = in.base_color;
-    out.params = in.params;
+    out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
     out.lamps = in.lamps;
     return out;
@@ -271,8 +280,10 @@ fn offset_position(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>, texel: f32) -> vec
     return p + ng * texel * (0.75 + 1.5 * (1.0 - saturate(dot(ng, l))));
 }
 
-// How much of the sun reaches `p`, 0 to 1, from its cascades. Past the
-// shadow distance all of it does; the last tenth fades there.
+// How much of the sun reaches `p`, 0 to 1, from its cascades. The last
+// tenth of each but the last blends into the next, which holds it too
+// (`shadows::blend_start`), so there's no seam. Past the shadow distance
+// all of it does; the last tenth fades there.
 // Reads `frame.shadows` in place: copying it into a local first (`let s =
 // frame.shadows`) loses the Android emulator's device.
 fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
@@ -285,11 +296,24 @@ fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
     while c + 1u < count && along > frame.shadows.splits[c] {
         c++;
     }
-    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
-    let lit = filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
+    var lit = cascade_lit(c, p, ng, l);
+    if c + 1u < count {
+        let begin = select(0.0, frame.shadows.splits[max(c, 1u) - 1u], c > 0u);
+        let end = frame.shadows.splits[c];
+        let blend = saturate((along - (end - 0.1 * (end - begin))) / max(0.1 * (end - begin), 1e-4));
+        if blend > 0.0 {
+            lit = mix(lit, cascade_lit(c + 1u, p, ng, l), blend);
+        }
+    }
     let fading = frame.shadows.splits.w;
     let fade = saturate((along - fading) / max(frame.shadows.camera_forward.w - fading, 1e-4));
     return mix(lit, 1.0, fade);
+}
+
+// How much of the sun reaches `p` by cascade `c` alone.
+fn cascade_lit(c: u32, p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
+    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
+    return filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
 }
 
 // How much of a spot light reaches `p`, 0 to 1, from its map. `distance`
@@ -324,11 +348,19 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
 fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
-    let base_sample = textureSample(base_color_texture, material_sampler, in.uv);
-    let normal_sample = textureSample(normal_texture, material_sampler, in.uv).xyz;
-    let mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
-    let occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
-    let emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+    // Untextured, each is what its stand-in holds.
+    var base_sample = vec4<f32>(1.0);
+    var normal_sample = vec3<f32>(0.5, 0.5, 1.0);
+    var mr_sample = vec4<f32>(1.0);
+    var occlusion = 1.0;
+    var emissive_sample = vec3<f32>(1.0);
+    if textured {
+        base_sample = textureSample(base_color_texture, material_sampler, in.uv);
+        normal_sample = textureSample(normal_texture, material_sampler, in.uv).xyz;
+        mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
+        occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
+        emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+    }
 
     let base = in.base_color * base_sample;
     let albedo = base.rgb;
@@ -337,7 +369,10 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     let roughness = clamp(in.params.y * mr_sample.g, 0.045, 1.0);
     let alpha = roughness * roughness;
 
-    var n = surface_normal(in, normal_sample);
+    var n = normalize(in.normal);
+    if textured {
+        n = surface_normal(in, normal_sample);
+    }
     // The surface's own normal, without the map: shadow lookups move out
     // along it.
     var ng = normalize(in.normal);
@@ -363,7 +398,7 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
         var lit = 1.0;
-        if i == frame.counts.y && receives {
+        if shadowed && i == frame.counts.y && receives {
             lit = sun_shadow(in.world_position, ng, sun.to_sun.xyz);
         }
         color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
@@ -389,7 +424,7 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         let reach = 1.0 - near * near;
         let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
         var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-        if lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
+        if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
             falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
         }
         color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
@@ -412,6 +447,10 @@ fn fs_main(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locatio
 // edge stays crisp at any distance instead of turning into a dither
 // (Castaño, "Anti-aliased alpha test"). The pipeline writes colour only,
 // so the target stays opaque.
+//
+// Far away, mips average alpha; the mips keep the share of texels that
+// reach the cutoff (texture.rs, `alpha_scales`), so the surface doesn't
+// thin out with distance.
 @fragment
 fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
     let shaded = shade(in, front_facing);

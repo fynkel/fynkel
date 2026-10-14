@@ -191,6 +191,25 @@ void main() {
     expect(said[0], allOf(contains('turned'), contains('5 suns')));
   });
 
+  test('a spot light wider than 150° is refused shadows, saying why', () {
+    // Hardening R7: its map can't be wider than 160°, and outside it a
+    // surface would be lit as if nothing stood in the way.
+    final world = World();
+    addTearDown(world.dispose);
+    final says = throwsA(
+      isA<ArgumentError>().having((e) => '${e.message}', 'message', allOf(contains('150°'), contains('160°'))),
+    );
+    expect(() => world.add(GameObject(components: [Light.spot(angle: 160.deg, shadows: true)])), says);
+    final wide = world.add(GameObject(components: [Light.spot(angle: 160.deg)])).get<Light>()!;
+    expect(() => wide.shadows = true, says);
+    expect(wide.shadows, isFalse);
+    final narrow = world.add(GameObject(components: [Light.spot(angle: 150.deg, shadows: true)])).get<Light>()!;
+    expect(() => narrow.angle = 160.deg, says);
+    expect(narrow.angle.inDegrees, closeTo(150, 1e-9));
+    // Without shadows it may be as wide as it likes.
+    wide.angle = 179.deg;
+  });
+
   test('changing a light costs the same however many objects there are', () {
     Duration time(int others) {
       final world = World();

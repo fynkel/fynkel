@@ -193,11 +193,21 @@ impl Quality {
     /// The level for a GPU: high on Apple's and on desktops', medium on
     /// phones' (Mali, Adreno), low on a software one or one not known.
     pub fn for_adapter(info: &wgpu::AdapterInfo) -> Self {
+        Self::for_adapter_on(info, cfg!(target_os = "android"))
+    }
+
+    /// [`Quality::for_adapter`], on Android or not. On Android every real
+    /// GPU is a phone's, medium whoever makes it: one isn't high because
+    /// its maker isn't known.
+    pub fn for_adapter_on(info: &wgpu::AdapterInfo, android: bool) -> Self {
         const APPLE: u32 = 0x106B;
         const ARM: u32 = 0x13B5;
         const QUALCOMM: u32 = 0x5143;
+        use wgpu::DeviceType::{Cpu, Other, VirtualGpu};
         match (info.device_type, info.vendor) {
-            (wgpu::DeviceType::Cpu, _) => Self::Low,
+            (Cpu, _) => Self::Low,
+            (Other | VirtualGpu, _) if android => Self::Low,
+            _ if android => Self::Medium,
             (_, ARM | QUALCOMM) => Self::Medium,
             (_, APPLE) => Self::High,
             (_, _) if info.backend == wgpu::Backend::Metal => Self::High,

@@ -554,7 +554,9 @@ MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..cas
   camera moves. Only the first sun with `shadows` casts them.
 - **A spotlight's shadows** reach as far as its `range`. Each frame
   gives a few spotlights shadows, the ones nearest the camera: 1 at low,
-  2 at medium, 4 at high. The others still light, without shadows.
+  2 at medium, 4 at high. The others still light, without shadows. A
+  spotlight with shadows is at most 150° across: a wider one is refused
+  with an `ArgumentError`, since its shadow map can't cover the rim.
 - **Point lights don't cast shadows** yet.
 - **`castShadows: false`** is for what shouldn't darken the ground (a
   glow, water, a ghost) and for what can't shadow anything (a flat

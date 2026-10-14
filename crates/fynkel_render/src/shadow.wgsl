@@ -34,13 +34,28 @@ struct Out {
     @location(1) @interpolate(flat) alpha: vec2<f32>,
 };
 
-@vertex
-fn vs_main(in: In) -> Out {
+// A caster's vertex in the map.
+fn caster_vertex(in: In) -> Out {
     let model = mat4x4<f32>(in.model_0, in.model_1, in.model_2, in.model_3);
     var out: Out;
     out.clip = view.matrix * model * vec4<f32>(in.position, 1.0);
     out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.alpha = in.alpha.xy;
+    return out;
+}
+
+@vertex
+fn vs_main(in: In) -> Out {
+    return caster_vertex(in);
+}
+
+// A cascade's: as `vs_main`, but a caster nearer the sun than the map's
+// depth range reaches is flattened onto its near end, so it still casts
+// (pancaking; the map is orthographic, so w is 1).
+@vertex
+fn vs_cascade(in: In) -> Out {
+    var out = caster_vertex(in);
+    out.clip.z = max(out.clip.z, 0.0);
     return out;
 }
 
