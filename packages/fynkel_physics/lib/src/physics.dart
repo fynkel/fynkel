@@ -176,6 +176,8 @@ final class Physics extends WorldSystem implements Finalizable {
   final _toFollow = FrameList<Collider>();
   final _toPut = FrameList<Rigidbody>();
   final _tree = FrameList<GameObject>();
+  // The colliders in the follow batch, told they're seen once it's taken.
+  final _batch = FrameList<Collider>();
 
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
@@ -492,6 +494,18 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._released();
   }
 
+  /// Takes [collider], out of the native world already, out of the lists:
+  /// [_reattach] couldn't put it back.
+  void _drop(Collider collider) {
+    _leaving.add(collider._key);
+    final last = _colliders.removeLast();
+    if (!identical(last, collider)) {
+      _colliders[collider._index] = last;
+      last._index = collider._index;
+    }
+    collider._released();
+  }
+
   /// Puts [collider] on [body] (or none) in the native world: out, and in
   /// again, where its object is now.
   void _reattach(Collider collider, Rigidbody? body) {
@@ -499,7 +513,12 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._id = 0;
     collider._body?._colliders.remove(collider);
     collider._body = null;
-    _addNative(collider, collider._key, body);
+    try {
+      _addNative(collider, collider._key, body);
+    } catch (_) {
+      _drop(collider);
+      rethrow;
+    }
   }
 
   void _respec(Collider collider) {
@@ -619,6 +638,7 @@ final class Physics extends WorldSystem implements Finalizable {
   /// Makes room to follow [count] colliders.
   void _startFollowing(int count) {
     _following = 0;
+    _batch.clear();
     if (count <= _capacity) return;
     for (final p in [_objectIds, _colliderIds, _transforms]) {
       if (p != nullptr) _memory.free(p);
@@ -645,7 +665,7 @@ final class Physics extends WorldSystem implements Finalizable {
       _reattach(c, place.body);
       return;
     }
-    place.seen();
+    _batch.add(c);
     _objectIds[_following] = c.gameObject.id;
     _colliderIds[_following] = c._id;
     _following++;
@@ -655,8 +675,17 @@ final class Physics extends WorldSystem implements Finalizable {
   void _endFollowing() {
     final count = _following;
     if (count == 0) return;
-    world.readWorldTransforms(_objectIds, count, _transforms);
-    checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
+    final batch = _batch;
+    try {
+      world.readWorldTransforms(_objectIds, count, _transforms);
+      checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
+      // Seen only once taken: a refused batch is tried again next time.
+      for (var i = 0; i < batch.length; i++) {
+        batch[i]._place.seen();
+      }
+    } finally {
+      batch.clear();
+    }
   }
 
   // --- Rigidbodies -----------------------------------------------------------
