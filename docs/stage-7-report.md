@@ -79,20 +79,26 @@ Nothing from stage 6 is left open in stage 7's scope.
 
 | | Mac | iPhone | Note10+ |
 |---|---|---|---|
-| Phase 3: 100 enemies with health bars | 120 fps | 120 fps | owed |
-| Phase 5: a minimap over a game | 120 fps | 120 fps | owed |
-| Phase 5: split screen | 120 fps | 120, with short dips to 107–118 | owed |
-| Phase 7: Sheepdog, level 3, HUD and minimap | 120 fps (min 90.2 in one second, no slow frame) | 120 fps (min 119) | owed |
+| Phase 3: 100 enemies with health bars | 120 fps | 120 fps | 60 fps (min 57.9; the same without bars) |
+| Phase 5: a minimap over a game | 120 fps | 120 fps | 60 fps in both views (the minimap's min 58.9) |
+| Phase 5: split screen | 120 fps | 120, with short dips to 107–118 | 60 fps in both views (min 59.9) |
+| Phase 7: Sheepdog, level 3, HUD and minimap | 120 fps (min 90.2 in one second, no slow frame) | 120 fps (min 119) | 60 fps (min 57.9) |
 
 Each was measured for 60 s, alone, under `caffeinate`. The arena's Dart
 garbage is 40–44 KB a frame without bars and 81–102 KB with 100 of them.
 Sheepdog's is 17 KB (Mac) and 43 KB (iPhone).
 
-**The Note10+ wasn't connected during stage 7**, so its three rows are
-owed. It is the one device where the UI thread is the limit, and both
-world widgets and a second view add work there. So it is the measure
-most likely to show something. I'd take it before stage 8 starts, when
-the phone is plugged in, and add it here.
+**The Note10+** was measured on 2026-10-14, after #98. Its screen
+shows 60 frames a second, so 60 is its full rate, and every row holds
+it. It does drop a frame now and then: 1.6–3.4% of frames take longer than
+16.7 ms to draw, in Sheepdog and in the arena alike, with bars or
+without. So that comes from the phone, not from the world widgets or a
+second view. In the arena the 100 bars change the frame rate by nothing;
+they add Dart garbage (41 KB a frame without them, 118 KB with them).
+Sheepdog makes 46 KB a frame and uses 106–117 MB. Its first frame is on
+screen 1.5 s after the app starts, as is the arena's (1.3 s); the
+iPhone's is about 0.1 s. The lab's views were read from its own rates
+(`LAB_RATES`), 30 one-second windows each.
 
 ## What the real game found
 
@@ -119,7 +125,6 @@ Writing one game with everything is what found these:
 Stage 8 is the look, as planned: shadows, point and spot lights,
 transparency, animated characters (R12, R14). From stage 7, only:
 
-- the Note10+ numbers above, if they are still owed then;
 - the `uses-material-design` line and, if you want it, the "is it fair"
   test pattern in the guide.
 
@@ -127,8 +132,7 @@ transparency, animated characters (R12, R14). From stage 7, only:
 
 Phase 7 is done when you have read this.
 
-- [ ] Read
-- [ ] The Note10+ numbers in (phases 3, 5, 7), now or at the start of
-  stage 8
+- [x] Read
+- [x] The Note10+ numbers in (phases 3, 5, 7)
 
 Then **stage 7 is done**.
