@@ -697,8 +697,9 @@ class GameObject with _Moving {
         world._safely(this, b.onDestroy);
       case Camera():
         check(fy_camera_remove(world.pointer, id));
-      case Light():
+      case Light l:
         check(fy_light_remove(world.pointer, id));
+        world._countLight(this, l, _LightCount.none);
       case MeshRenderer():
         check(fy_mesh_renderer_remove(world.pointer, id));
     }
@@ -918,7 +919,7 @@ class GameObject with _Moving {
     l.softness = value.softness;
     l.shadows = value.shadows;
     check(fy_light_set(_engine('its Light can\'t be changed'), id, scratch.light));
-    if (value.kind != LightKind.ambient) world._noteLights(this);
+    world._countLight(this, value, _LightCount.of(value.kind));
   }
 
   void _writeMeshRenderer(MeshRenderer value) {

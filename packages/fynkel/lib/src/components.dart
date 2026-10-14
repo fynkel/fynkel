@@ -360,6 +360,20 @@ enum LightKind {
   spot,
 }
 
+/// What a light counts as against a frame's caps.
+enum _LightCount {
+  none,
+  sun,
+  lamp;
+
+  /// What a light of [kind] counts as.
+  static _LightCount of(LightKind kind) => switch (kind) {
+    LightKind.sun => sun,
+    LightKind.point || LightKind.spot => lamp,
+    LightKind.ambient => none,
+  };
+}
+
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
   /// Shines along the object's [GameObject.forward]: give the object
@@ -405,6 +419,9 @@ final class Light extends Component {
   ]) : super._();
 
   LightKind _kind;
+  // What the world counts it as ([World._countLight]): a sun, a lamp or
+  // neither.
+  _LightCount _counted = _LightCount.none;
   Color _color;
   double _intensity, _range, _angle, _softness;
   bool _shadows;

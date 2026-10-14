@@ -268,8 +268,9 @@ final class World implements Finalizable {
   // readWorldTransforms' last buffer, as the engine's type.
   Pointer<FyTransform> _manyOut = nullptr;
 
-  // Whether the world has said that it has more suns, or more lamps, than a
-  // frame takes ([_noteLights]).
+  // How many suns and lamps the world has, and whether it has said that
+  // it has more than a frame takes ([_countLight]).
+  var _suns = 0, _lamps = 0;
   var _warnedSuns = false, _warnedLamps = false;
 
   // Whether a destroyed object is in [_unsent], to be dropped at the next

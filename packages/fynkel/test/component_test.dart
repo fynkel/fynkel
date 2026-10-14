@@ -171,6 +171,47 @@ void main() {
     expect(said[1], allOf(contains('spare'), contains('65 point and spot lights'), contains('nearest the camera')));
   });
 
+  test('the suns and lamps are counted as they come, go and change kind', () {
+    final said = <String>[];
+    runZoned(() {
+      final world = World();
+      addTearDown(world.dispose);
+      final suns = [
+        for (var i = 0; i < 4; i++) world.add(GameObject(components: [Light.sun()])),
+      ];
+      suns[0].destroy();
+      suns[1].removeComponent(suns[1].get<Light>()!);
+      world.add(GameObject(components: [Light.sun()]));
+      world.add(GameObject(components: [Light.sun()]));
+      expect(said, isEmpty, reason: 'two went, so four light the scene');
+      final lamp = world.add(GameObject(name: 'turned', components: [Light.point()]));
+      lamp.get<Light>()!.kind = LightKind.sun;
+    }, zoneSpecification: ZoneSpecification(print: (_, _, _, line) => said.add(line)));
+    expect(said, hasLength(1));
+    expect(said[0], allOf(contains('turned'), contains('5 suns')));
+  });
+
+  test('changing a light costs the same however many objects there are', () {
+    Duration time(int others) {
+      final world = World();
+      addTearDown(world.dispose);
+      for (var i = 0; i < others; i++) {
+        world.add(GameObject());
+      }
+      final light = world.add(GameObject(components: [Light.point()])).get<Light>()!;
+      final watch = Stopwatch()..start();
+      for (var i = 0; i < 2000; i++) {
+        light.intensity = 1 + i % 2;
+      }
+      return watch.elapsed;
+    }
+
+    time(0);
+    final alone = time(0);
+    final crowded = time(5000);
+    expect(crowded.inMicroseconds, lessThan(alone.inMicroseconds * 3 + 2000), reason: 'alone $alone, crowded $crowded');
+  });
+
   test('get finds a component by its type, a subtype or an interface, before and after adding', () {
     final armour = Armour(5);
     final renderer = cube();
