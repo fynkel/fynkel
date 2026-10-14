@@ -755,8 +755,10 @@ class GameObject with _Moving {
   /// depth first in [children] order, or null.
   T? getInChildren<T extends Object>() {
     if (get<T>() case final found?) return found;
-    for (final child in children) {
-      if (child.getInChildren<T>() case final found?) return found;
+    // By index, as [children] makes a list.
+    final children = _children;
+    for (var i = 0; children != null && i < children.length; i++) {
+      if (children[i].getInChildren<T>() case final found?) return found;
     }
     return null;
   }
