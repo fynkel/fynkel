@@ -143,6 +143,9 @@ class GameObject with _Moving {
   @override
   bool get _holdsStill => !_enabled;
 
+  @override
+  bool get _loading => !_appeared;
+
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
   World get world => _world ?? (throw _notAdded('world'));
@@ -239,7 +242,7 @@ class GameObject with _Moving {
   /// ```
   ///
   /// It stops when this object is destroyed, and is paused while it's
-  /// hidden. Throws a [StateError] before the object is added.
+  /// hidden, though not during its own load. Throws a [StateError] before the object is added.
   Routine<T> startRoutine<T>(Future<T> Function() body) => world._start(this, this, body);
 
   /// Stops every routine this object started ([startRoutine]), not those

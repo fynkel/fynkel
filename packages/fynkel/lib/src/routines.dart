@@ -128,7 +128,7 @@ final class Routine<T> implements Future<T> {
     _result.completeError(RoutineStopped._(), StackTrace.current);
   }
 
-  bool get _paused => _owner._holdsStill;
+  bool get _paused => _owner._paused;
 
   void _finish(T value) {
     if (!_running) return;

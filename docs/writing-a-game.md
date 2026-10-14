@@ -772,7 +772,8 @@ class Spawner extends GameObject {
   started. It
   **stops by itself** when its object is destroyed (or its behaviour
   removed), and **pauses** while its object is hidden or the behaviour
-  isn't enabled.
+  isn't enabled, except during their own load: an `onLoad` may await a
+  routine (or a tween) of its own.
 - **Waits**: `await nextFrame`, `await fixedStep` (right after the next
   fixed step's `onFixedUpdate` calls), `await wait(seconds)`
   (`unscaled: true` to go on while paused), `await waitUntil(() => test)`,
@@ -2267,6 +2268,8 @@ For code written before: each change that breaks it, newest first.
     it, listened to with `on` while shown; what it listened to in its
     load stays. A pooled object listening in `onEnable` no longer hears
     once more per reuse.
+  - An object's or behaviour's routines and tweens run during its own
+    load, so an `onLoad` that awaits one finishes; they hung there.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

@@ -612,6 +612,9 @@ abstract class Behaviour extends Component with _Moving {
   @override
   bool get _holdsStill => !_enabledNow;
 
+  @override
+  bool get _loading => !_loaded && !_removed;
+
   /// Whether it gets its object's frames and pointers. A disabled behaviour
   /// waits to start until it's enabled. Setting it calls [onDisable] or
   /// [onEnable] when that changes whether it's enabled: only while it's
@@ -655,7 +658,7 @@ abstract class Behaviour extends Component with _Moving {
 
   /// Starts a routine, as [GameObject.startRoutine] does; it stops when this
   /// behaviour is removed or its object destroyed, and is paused while
-  /// the behaviour isn't enabled.
+  /// the behaviour isn't enabled, though not during its own load.
   Routine<T> startRoutine<T>(Future<T> Function() body) {
     if (_going) throw StateError('$this was removed, so it can\'t start a routine');
     return gameObject.world._start(this, gameObject, body);

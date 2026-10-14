@@ -50,7 +50,7 @@ extension _Loop on World {
         ended = true;
         continue;
       }
-      if (m._made >= frame || m._owner._holdsStill) continue;
+      if (m._made >= frame || m._owner._paused) continue;
       try {
         m._step(m.unscaled ? time._unscaledDelta : time._delta);
       } catch (error, stack) {

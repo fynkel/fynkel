@@ -437,6 +437,14 @@ mixin _Moving {
   /// behaviour disabled.
   bool get _holdsStill;
 
+  /// Whether it's still in its own load: an object that hasn't appeared,
+  /// or a behaviour whose onLoad hasn't finished.
+  bool get _loading;
+
+  /// Whether its routines and motions pause: it holds still, and isn't
+  /// loading (a load may wait for its own routines and motions).
+  bool get _paused => _holdsStill && !_loading;
+
   M _own<M extends Motion>(M motion) {
     (_motions ??= []).add(motion);
     motion._world._motions.add(motion);
