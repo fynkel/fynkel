@@ -54,7 +54,10 @@ impl Gpu {
             label: Some("fynkel"),
             // Buffers the CPU writes and the GPU reads in place, with no
             // staging copy (frame_ring.rs). Every native backend has it.
-            required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS,
+            // And a pipeline cache where there is one (Vulkan), kept
+            // between runs (assets.rs).
+            required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
+                | (adapter.features() & wgpu::Features::PIPELINE_CACHE),
             // WebGPU's defaults, lowered wherever this adapter offers less
             // (the iOS simulator sits below a few of them). The renderer
             // stays within the lower set.

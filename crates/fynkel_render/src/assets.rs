@@ -4,6 +4,7 @@
 //! once however many views show the world.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
@@ -33,21 +34,95 @@ pub struct Kit {
     pub(crate) maker: PipelineMaker,
 }
 
+/// Where compiled pipelines are kept between runs, when the app has said
+/// ([`set_pipeline_cache_dir`]).
+static PIPELINE_CACHE_DIR: Mutex<Option<PathBuf>> = Mutex::new(None);
+
+/// Keeps the GPU's compiled pipelines in `dir`, so the next run's first
+/// frame doesn't compile them again. Only Vulkan (Android) has such a
+/// cache; Apple's driver keeps its own. Takes effect for devices made
+/// after it. package:fynkel_flutter's Android plugin passes the app's
+/// cache directory.
+pub fn set_pipeline_cache_dir(dir: impl Into<PathBuf>) {
+    *PIPELINE_CACHE_DIR.lock().unwrap_or_else(PoisonError::into_inner) = Some(dir.into());
+}
+
 /// Makes a device's render pipelines, and counts them.
 #[derive(Clone, Debug)]
 pub(crate) struct PipelineMaker {
     device: wgpu::Device,
     made: Arc<AtomicU32>,
+    disk: Option<DiskCache>,
+}
+
+/// A pipeline cache, and the file it's kept in.
+#[derive(Clone, Debug)]
+struct DiskCache {
+    cache: wgpu::PipelineCache,
+    file: PathBuf,
+    /// Held while a copy is written, so two don't write one file.
+    writing: Arc<Mutex<()>>,
+}
+
+impl DiskCache {
+    /// The cache for `gpu`'s device, from its file if one was kept, if the
+    /// device has caches and the app gave a directory.
+    #[allow(unsafe_code)] // wgpu can't prove the data is its own.
+    fn open(gpu: &Gpu) -> Option<Self> {
+        if !gpu.device.features().contains(wgpu::Features::PIPELINE_CACHE) {
+            return None;
+        }
+        let dir = PIPELINE_CACHE_DIR.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
+        // Named for the GPU and its driver's device: another's is no use.
+        let file = dir.join(wgpu::util::pipeline_cache_key(&gpu.adapter.get_info())?);
+        let data = std::fs::read(&file).ok();
+        // SAFETY: the data is what `get_data` gave for a device with this
+        // key, or a damaged copy of it, which wgpu checks (its header and
+        // a hash) and, with `fallback`, ignores.
+        let cache = unsafe {
+            gpu.device.create_pipeline_cache(&wgpu::PipelineCacheDescriptor {
+                label: Some("fynkel"),
+                data: data.as_deref(),
+                fallback: true,
+            })
+        };
+        Some(Self { cache, file, writing: Arc::default() })
+    }
+
+    /// Writes the cache to its file, off this thread: a new pipeline was
+    /// just made. Whole or not at all, through a file beside it.
+    fn save(&self) {
+        let this = self.clone();
+        std::thread::spawn(move || {
+            let _writing = this.writing.lock().unwrap_or_else(PoisonError::into_inner);
+            let Some(data) = this.cache.get_data() else { return };
+            let temporary = this.file.with_extension("partial");
+            // Nothing to report: without the file, the next run compiles.
+            if std::fs::write(&temporary, data).is_ok() {
+                let _ = std::fs::rename(&temporary, &this.file);
+            }
+        });
+    }
 }
 
 impl PipelineMaker {
-    fn new(device: &wgpu::Device) -> Self {
-        Self { device: device.clone(), made: Arc::default() }
+    fn new(gpu: &Gpu) -> Self {
+        Self { device: gpu.device.clone(), made: Arc::default(), disk: DiskCache::open(gpu) }
     }
 
-    pub(crate) fn make(&self, descriptor: wgpu::RenderPipelineDescriptor<'_>) -> wgpu::RenderPipeline {
+    pub(crate) fn make<'a>(&'a self, mut descriptor: wgpu::RenderPipelineDescriptor<'a>) -> wgpu::RenderPipeline {
         self.made.fetch_add(1, Ordering::Relaxed);
-        self.device.create_render_pipeline(&descriptor)
+        descriptor.cache = self.disk.as_ref().map(|disk| &disk.cache);
+        let pipeline = self.device.create_render_pipeline(&descriptor);
+        if let Some(disk) = &self.disk {
+            disk.save();
+        }
+        pipeline
+    }
+
+    /// Whether pipelines go through a cache kept between runs.
+    pub(crate) fn caches(&self) -> bool {
+        self.disk.is_some()
     }
 }
 
@@ -86,7 +161,7 @@ impl Kit {
                 count: None,
             }],
         });
-        let maker = PipelineMaker::new(&gpu.device);
+        let maker = PipelineMaker::new(gpu);
         let textures = TextureKit::new(gpu, &maker);
         Arc::new(Self {
             shadows: ShadowKit::new(&gpu.device, &textures.layout, &maker),
@@ -115,6 +190,12 @@ impl Kit {
     /// for the GPU, the bulk of the time to a first frame.
     pub fn pipelines_made(&self) -> u32 {
         self.maker.made.load(Ordering::Relaxed)
+    }
+
+    /// Whether its pipelines are kept between runs
+    /// ([`set_pipeline_cache_dir`]).
+    pub fn caches_pipelines(&self) -> bool {
+        self.maker.caches()
     }
 
     /// The pipelines that draw into `format`, made on first use.

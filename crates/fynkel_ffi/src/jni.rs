@@ -106,6 +106,38 @@ pub unsafe extern "system" fn Java_dev_fynkel_fynkel_1flutter_FynkelNative_free(
     });
 }
 
+/// `FynkelNative.cacheDir(dir)`: keep compiled pipelines in `dir` (the
+/// app's cache directory), for devices made after it. Called when the
+/// plugin attaches, before any view.
+///
+/// # Safety
+///
+/// Called by the JVM: `env` is this thread's and `dir` a `java.lang.String`.
+#[unsafe(no_mangle)]
+pub unsafe extern "system" fn Java_dev_fynkel_fynkel_1flutter_FynkelNative_cacheDir(
+    env: *mut JNIEnv,
+    _class: jclass,
+    dir: jstring,
+) {
+    let _ = catch(|| {
+        // SAFETY: per this function's contract; every JVM has these two.
+        let dir = unsafe {
+            let (Some(get), Some(release)) = ((**env).GetStringUTFChars, (**env).ReleaseStringUTFChars) else {
+                return Err("no JNI string functions".to_owned());
+            };
+            let chars = get(env, dir, ptr::null_mut());
+            if chars.is_null() {
+                return Err("no directory".to_owned());
+            }
+            let owned = std::ffi::CStr::from_ptr(chars).to_string_lossy().into_owned();
+            release(env, dir, chars);
+            owned
+        };
+        fynkel_render::set_pipeline_cache_dir(dir);
+        Ok(())
+    });
+}
+
 /// `message` as a Java string, or null if even that fails.
 ///
 /// # Safety

@@ -30,6 +30,8 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
     private val live = HashMap<Long, Entry>()
 
     override fun onAttachedToEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        // Compiled pipelines are kept here, so a later run's first frame doesn't compile them.
+        FynkelNative.cacheDir(binding.applicationContext.cacheDir.absolutePath)
         textures = binding.textureRegistry
         channel = MethodChannel(binding.binaryMessenger, "fynkel_flutter")
         channel.setMethodCallHandler(this)
@@ -175,4 +177,7 @@ internal object FynkelNative {
 
     /** `fy_view_free`. */
     @JvmStatic external fun free(view: Long)
+
+    /** Keep the GPU's compiled pipelines in [dir], for devices made after this. */
+    @JvmStatic external fun cacheDir(dir: String)
 }
