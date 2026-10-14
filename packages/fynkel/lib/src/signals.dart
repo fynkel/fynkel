@@ -138,6 +138,10 @@ final class SignalSubscription<T> {
   // The GameObject or Behaviour that listens with `on`, or null.
   final _Moving? _owner;
 
+  // Made with `on` while its owner was shown (enabled): a pool's release
+  // cancels these, and keeps the ones made during the load.
+  bool _whileShown = false;
+
   bool _cancelled = false;
 
   /// Whether it was cancelled, by [cancel] or with its object or
@@ -185,6 +189,14 @@ final class _Listening {
     _subscriptions.add(WeakReference(subscription));
   }
 
+  /// Cancels the ones made while their owner was shown.
+  void cancelShown() {
+    for (final w in _subscriptions) {
+      if (w.target case final s? when s._whileShown) s.cancel();
+    }
+    _subscriptions.removeWhere((w) => w.target?._cancelled ?? true);
+  }
+
   void cancelAll() {
     for (final w in _subscriptions) {
       w.target?.cancel();
@@ -194,7 +206,7 @@ final class _Listening {
 }
 
 SignalSubscription<T> _on<T>(_Moving owner, Signal<T> signal, void Function(T value) handler) {
-  final subscription = signal._add(SignalSubscription<T>._(signal, handler, owner));
+  final subscription = signal._add(SignalSubscription<T>._(signal, handler, owner)).._whileShown = !owner._holdsStill;
   (owner._listening ??= _Listening()).add(subscription);
   return subscription;
 }

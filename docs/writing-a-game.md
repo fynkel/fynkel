@@ -244,10 +244,11 @@ class Turret extends GameObject {
   below the pool's parent.
 - **A released object starts clean**: it's hidden, the routines and
   motions it and everything below it ran are stopped (a hidden object's
-  would only pause, and resume stale), and it's back below the pool's
-  parent. Its fields, and the signals it listens to, are the game's: a
-  hidden object still hears signals, so listen in `onEnable` and cancel
-  in `onDisable` if it shouldn't.
+  would only pause, and resume stale), what they listened to with `on`
+  while shown (from `onEnable` on) is cancelled, and it's back below the
+  pool's parent. So listen in `onEnable`, and each `get` listens once
+  again; what it listened to in `onLoad` stays, through every reuse. Its
+  fields are the game's.
 - **`release()` on the object** gives it back to its pool, or destroys
   it if it didn't come from one: write it where you'd write `destroy()`.
 - **Hold pooled objects with an `ObjectHandle`.** A field pointing at a
@@ -2262,6 +2263,10 @@ For code written before: each change that breaks it, newest first.
   - A frame runs at most `time.maxFixedSteps` (5) fixed steps, and drops
     the rest of its time: a frame of 1/3 s runs 5 where it ran 16. Set it
     higher to keep the old behaviour.
+  - A pool's `release` cancels what the object, and everything below
+    it, listened to with `on` while shown; what it listened to in its
+    load stays. A pooled object listening in `onEnable` no longer hears
+    once more per reuse.
 
 - **Stage 8** (2026-10-14):
   - Every `Light.sun` lights the scene, up to four, where only the first

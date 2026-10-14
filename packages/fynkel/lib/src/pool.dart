@@ -92,7 +92,8 @@ final class Pool<T extends GameObject> {
   }
 
   /// Hides [object] for the next [get]: it and everything below it stop
-  /// their routines and motions, it goes back under [parent], and each
+  /// their routines and motions and cancel what they listened to with `on`
+  /// while shown (what they listened to in their load stays), it goes back under [parent], and each
   /// [ObjectHandle] to it goes null. Beyond [maxSize] it's destroyed
   /// instead. One destroyed already is left alone. Throws if it isn't this
   /// pool's or was released already.
@@ -143,17 +144,20 @@ final class Pool<T extends GameObject> {
     _freeCount++;
   }
 
-  // Stops what [object] and everything below it run, with no list.
+  // Stops what [object] and everything below it run, and what they
+  // listened to while shown, with no list.
   static void _stop(World world, GameObject object) {
     final components = object._components;
     for (var i = 0; components != null && i < components.length; i++) {
       if (components[i] case final Behaviour b) {
         world._stopRoutines(b._routines);
         world._haltMotions(b._motions);
+        b._listening?.cancelShown();
       }
     }
     world._stopRoutines(object._routines);
     world._haltMotions(object._motions);
+    object._listening?.cancelShown();
     final children = object._children;
     for (var i = 0; children != null && i < children.length; i++) {
       _stop(world, children[i]);
