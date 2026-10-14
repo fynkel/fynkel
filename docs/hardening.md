@@ -582,7 +582,12 @@ planned; neither needs anything here changed again.
   120 fresh fps with 0 coalesced, skipped or dropped, as main does; the
   skip path V5 fixes no longer runs on the Mac, so the gain is for slower
   GPUs. V9's window drag and the iPhone are left to the user's eyes.
-- [ ] Phase 2: physics' transform sync
+- [x] Phase 2: physics' transform sync (P1–P4, P6–P10; P5 was wrong,
+  see Raised and left). P1, P2, P3, P4, P6 and P10 each had a test that
+  failed first; P2 also with a forearm under an upper arm that must bend
+  at the elbow (the guide has no nested ragdoll). P7: 1000 spawns and
+  removes with 10,000 colliders in the world, 358 → 13 ms (JIT). P9 is
+  unreachable today, so hardened without a test. Physics ABI 13.
 - [ ] Phase 3: the Dart frame
 - [ ] Phase 4: the renderer
 - [ ] Phase 5: what a game writes
