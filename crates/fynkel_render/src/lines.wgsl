@@ -1,12 +1,9 @@
 // Debug lines: drawn after the scene, on top of it (no depth test), unlit,
 // in their own linear colour, whose alpha blends over what's there.
 
+// The start of forward.wgsl's `Frame`: lines need only the camera.
 struct Frame {
     view_proj: mat4x4<f32>,
-    camera_position: vec4<f32>,
-    to_sun: vec4<f32>,
-    sun_color: vec4<f32>,
-    ambient: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;

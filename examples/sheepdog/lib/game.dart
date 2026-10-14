@@ -155,6 +155,10 @@ class SheepdogGame extends GameObject {
   final map = Camera(orthographic: true, orthographicSize: size + 0.5, cullingMask: LayerMask.except([effects]));
 
   late final Light _sun, _ambient;
+
+  /// The lamp posts' lights and their bulbs' glass: lit at night.
+  final _lamps = <Light>[];
+  final _bulb = Material(name: 'bulb', color: Color.black, emissive: const Color(0xFFFFC880));
   late final DogCamera camera;
   late Round round;
 
@@ -168,6 +172,27 @@ class SheepdogGame extends GameObject {
       ),
     ).get<Light>()!;
     _ambient = add(GameObject(components: [Light.ambient()])).get<Light>()!;
+    // Lamp posts at the pen's gate and halfway down the sides.
+    for (final at in [Vec3(-penHalf, 0, penFront), Vec3(penHalf, 0, penFront), Vec3(-size, 0, 4), Vec3(size, 0, 4)]) {
+      add(
+        GameObject(
+          name: 'lamp post',
+          transform: Transform(position: at + Vec3(0, 1.1, 0), scale: Vec3(0.12, 2.2, 0.12)),
+          components: [MeshRenderer(Mesh.cube(), fence)],
+        ),
+      );
+      final lamp = add(
+        GameObject(
+          name: 'lamp',
+          transform: Transform(position: at + Vec3(0, 2.35, 0), scale: Vec3.one * 0.3),
+          components: [
+            MeshRenderer(Mesh.sphere(), _bulb),
+            Light.point(color: const Color(0xFFFFC880), intensity: 0, range: 10),
+          ],
+        ),
+      );
+      _lamps.add(lamp.get<Light>()!);
+    }
     round = add(Round(this, math.Random(seed)));
     // The main camera is the first added; the minimap's comes after.
     camera = add(DogCamera(round.dog));
@@ -205,6 +230,11 @@ class SheepdogGame extends GameObject {
     _ambient
       ..intensity = dark ? 0.35 : 0.6
       ..color = light;
+    // The lamps come on at night.
+    for (final lamp in _lamps) {
+      lamp.intensity = dark ? 12 : 0;
+    }
+    _bulb.emissiveIntensity = dark ? 4 : 0;
   }
 
   /// A new round, at [level] (this one's if not given): the flock back in

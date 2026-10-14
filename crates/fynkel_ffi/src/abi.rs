@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 21;
+pub const FY_ABI_VERSION: u32 = 22;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -116,6 +116,10 @@ pub struct FyCamera {
 pub const FY_LIGHT_DIRECTIONAL: u32 = 0;
 /// `FyLight::kind`.
 pub const FY_LIGHT_AMBIENT: u32 = 1;
+/// `FyLight::kind`.
+pub const FY_LIGHT_POINT: u32 = 2;
+/// `FyLight::kind`.
+pub const FY_LIGHT_SPOT: u32 = 3;
 
 /// A quality level: the device's own (`fy_quality_auto`).
 pub const FY_QUALITY_AUTO: u32 = 0;
@@ -144,13 +148,22 @@ fn level_of(quality: Quality) -> u32 {
     }
 }
 
+/// `Default` is the engine's default light: a white sun of intensity 1,
+/// with point and spot settings ready for a change of kind.
 #[repr(C)]
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyLight {
-    /// `FY_LIGHT_DIRECTIONAL` or `FY_LIGHT_AMBIENT`.
+    /// `FY_LIGHT_DIRECTIONAL`, `FY_LIGHT_AMBIENT`, `FY_LIGHT_POINT` or
+    /// `FY_LIGHT_SPOT`.
     pub kind: u32,
     pub color: FyColor,
     pub intensity: f32,
+    /// Point and spot lights: how far the light reaches, in metres.
+    pub range: f32,
+    /// Spot lights: the cone's full angle, in degrees.
+    pub spot_angle: f32,
+    /// Spot lights: how much of the cone fades, from its edge in, 0 to 1.
+    pub softness: f32,
 }
 
 /// A metallic-roughness material (glTF's). Each texture multiplies its
@@ -339,21 +352,45 @@ impl CComponent for FyLight {
         let kind = match self.kind {
             FY_LIGHT_DIRECTIONAL => LightKind::Directional,
             FY_LIGHT_AMBIENT => LightKind::Ambient,
+            FY_LIGHT_POINT => LightKind::Point,
+            FY_LIGHT_SPOT => LightKind::Spot,
             other => {
                 return Err(Error::new(
                     FyStatus::InvalidValue,
-                    format!("Light.kind {other} doesn't exist (0 = directional, 1 = ambient)"),
+                    format!("Light.kind {other} doesn't exist (0 = directional, 1 = ambient, 2 = point, 3 = spot)"),
                 ));
             }
         };
-        Ok(Light { kind, color: self.color.into(), intensity: self.intensity })
+        Ok(Light {
+            kind,
+            color: self.color.into(),
+            intensity: self.intensity,
+            range: self.range,
+            spot_angle: self.spot_angle,
+            softness: self.softness,
+        })
     }
     fn from_component(l: Light) -> Self {
         let kind = match l.kind {
             LightKind::Directional => FY_LIGHT_DIRECTIONAL,
             LightKind::Ambient => FY_LIGHT_AMBIENT,
+            LightKind::Point => FY_LIGHT_POINT,
+            LightKind::Spot => FY_LIGHT_SPOT,
         };
-        Self { kind, color: l.color.into(), intensity: l.intensity }
+        Self {
+            kind,
+            color: l.color.into(),
+            intensity: l.intensity,
+            range: l.range,
+            spot_angle: l.spot_angle,
+            softness: l.softness,
+        }
+    }
+}
+
+impl Default for FyLight {
+    fn default() -> Self {
+        Self::from_component(Light::DEFAULT)
     }
 }
 

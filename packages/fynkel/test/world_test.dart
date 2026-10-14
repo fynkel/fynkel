@@ -71,6 +71,29 @@ void main() {
     expect(o.get<MeshRenderer>()!.material, same(material));
   });
 
+  test("a lamp's and a spotlight's settings go in, and a wrong one is refused and leaves the old", () {
+    final lamp = Light.point(color: Color.rgb(1, 0.5, 0), intensity: 12, range: 6);
+    final spot = Light.spot(intensity: 20, range: 15, angle: 50.deg, softness: 0.5);
+    expect((lamp.kind, lamp.intensity, lamp.range), (LightKind.point, 12, 6));
+    expect((spot.kind, spot.range, spot.angle, spot.softness), (LightKind.spot, 15, 50.deg, 0.5));
+    expect(spot.toString(), contains('angle: 50.0°'));
+    world.add(GameObject(components: [lamp]));
+    world.add(GameObject(components: [spot]));
+
+    lamp.range = 8;
+    expect(lamp.range, 8);
+    expect(() => lamp.range = -1, throwsArgumentError);
+    expect(lamp.range, 8, reason: 'the old value stays');
+    expect(
+      () => spot.angle = 200.deg,
+      throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('spot_angle'))),
+    );
+    expect(spot.angle, 50.deg);
+    expect(() => spot.softness = 2, throwsArgumentError);
+    spot.kind = LightKind.point;
+    expect(spot.kind, LightKind.point);
+  });
+
   test('a missing component is null, and removeComponent takes one away', () {
     final o = world.add(GameObject(transform: Transform(), components: [Light.sun()]));
     expect(o.get<Camera>(), isNull);

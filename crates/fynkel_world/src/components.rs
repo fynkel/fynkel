@@ -247,31 +247,61 @@ pub enum LightKind {
     Directional,
     /// Light from every direction equally. It needs no transform.
     Ambient,
+    /// A lamp: light from the transform's position in every direction,
+    /// fading with distance and gone at [`Light::range`].
+    Point,
+    /// A spotlight: a point light that shines only in a cone around the
+    /// transform's forward (-Z), [`Light::spot_angle`] across.
+    Spot,
 }
 
 impl LightKind {
-    const NAMES: &'static [&'static str] = &["Directional", "Ambient"];
+    const NAMES: &'static [&'static str] = &["Directional", "Ambient", "Point", "Spot"];
 }
 
 /// A light. Units are unitless (plan §3.6): a directional light with
 /// intensity 1.0 lights a white, rough surface facing it to exactly its
-/// albedo.
+/// albedo. A point or spot light of intensity 1.0 does the same to a
+/// surface 1 m away; light falls off with the square of the distance.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Light {
     pub kind: LightKind,
     pub color: Color,
     pub intensity: f32,
+    /// Point and spot lights: how far the light reaches, in metres. It
+    /// fades smoothly to nothing there.
+    pub range: f32,
+    /// Spot lights: the cone's full angle, in degrees.
+    pub spot_angle: f32,
+    /// Spot lights: how much of the cone, from its edge in, fades: 0 for
+    /// a hard edge, 1 to fade all the way to the centre.
+    pub softness: f32,
 }
 
 impl Light {
-    pub const DEFAULT: Self = Self { kind: LightKind::Directional, color: Color::WHITE, intensity: 1.0 };
+    pub const DEFAULT: Self = Self {
+        kind: LightKind::Directional,
+        color: Color::WHITE,
+        intensity: 1.0,
+        range: 10.0,
+        spot_angle: 30.0,
+        softness: 0.2,
+    };
 
     pub const fn directional(color: Color, intensity: f32) -> Self {
-        Self { kind: LightKind::Directional, color, intensity }
+        Self { kind: LightKind::Directional, color, intensity, ..Self::DEFAULT }
     }
 
     pub const fn ambient(color: Color, intensity: f32) -> Self {
-        Self { kind: LightKind::Ambient, color, intensity }
+        Self { kind: LightKind::Ambient, color, intensity, ..Self::DEFAULT }
+    }
+
+    pub const fn point(color: Color, intensity: f32, range: f32) -> Self {
+        Self { kind: LightKind::Point, color, intensity, range, ..Self::DEFAULT }
+    }
+
+    pub const fn spot(color: Color, intensity: f32, range: f32, spot_angle: f32, softness: f32) -> Self {
+        Self { kind: LightKind::Spot, color, intensity, range, spot_angle, softness }
     }
 }
 
@@ -290,6 +320,9 @@ impl Describe for Light {
             Field::new("kind", FieldKind::Enum(LightKind::NAMES), Value::Enum(D.kind as u32)),
             Field::new("color", FieldKind::Color, Value::Color(D.color)),
             Field::new("intensity", FieldKind::F32, Value::F32(D.intensity)).range(0.0, 1e6),
+            Field::new("range", FieldKind::F32, Value::F32(D.range)).range(0.0, 1e6),
+            Field::new("spot_angle", FieldKind::F32, Value::F32(D.spot_angle)).range(0.0, 179.0),
+            Field::new("softness", FieldKind::F32, Value::F32(D.softness)).range(0.0, 1.0),
         ];
         FIELDS
     }
@@ -299,6 +332,9 @@ impl Describe for Light {
             0 => Value::Enum(self.kind as u32),
             1 => Value::Color(self.color),
             2 => Value::F32(self.intensity),
+            3 => Value::F32(self.range),
+            4 => Value::F32(self.spot_angle),
+            5 => Value::F32(self.softness),
             _ => return None,
         })
     }
@@ -307,8 +343,13 @@ impl Describe for Light {
         match (index, value) {
             (0, Value::Enum(0)) => self.kind = LightKind::Directional,
             (0, Value::Enum(1)) => self.kind = LightKind::Ambient,
+            (0, Value::Enum(2)) => self.kind = LightKind::Point,
+            (0, Value::Enum(3)) => self.kind = LightKind::Spot,
             (1, Value::Color(c)) => self.color = c,
             (2, Value::F32(v)) => self.intensity = v,
+            (3, Value::F32(v)) => self.range = v,
+            (4, Value::F32(v)) => self.spot_angle = v,
+            (5, Value::F32(v)) => self.softness = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

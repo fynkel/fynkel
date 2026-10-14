@@ -50,10 +50,18 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
 
         let sun = world.spawn();
         let white = srgb(1.0, 1.0, 1.0);
-        ok(fy_light_set(w, sun, &FyLight { kind: FY_LIGHT_DIRECTIONAL, color: white, intensity: 1.0 }));
+        ok(fy_light_set(
+            w,
+            sun,
+            &FyLight { kind: FY_LIGHT_DIRECTIONAL, color: white, intensity: 1.0, ..Default::default() },
+        ));
         ok(fy_transform_set(w, sun, &transform(Transform::default().looking_at(Vec3::new(1.0, 0.0, -0.5)))));
         let ambient = world.spawn();
-        ok(fy_light_set(w, ambient, &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.05 }));
+        ok(fy_light_set(
+            w,
+            ambient,
+            &FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.05, ..Default::default() },
+        ));
 
         let (mesh, mut material) = (add_shape(&world, FY_MESH_SPHERE), 0);
         // Linear 0.8, as the golden scene has it, written in sRGB.
@@ -154,9 +162,9 @@ fn values_are_validated_with_a_message_that_names_the_field() {
         assert_eq!(fy_transform_set(world.0, id, &squashed), FyStatus::InvalidValue);
         assert!(last_error().contains("Transform.rotation"), "{}", last_error());
 
-        let light = FyLight { kind: 7, color: srgb(1.0, 1.0, 1.0), intensity: 1.0 };
+        let light = FyLight { kind: 7, color: srgb(1.0, 1.0, 1.0), intensity: 1.0, ..Default::default() };
         assert_eq!(fy_light_set(world.0, id, &light), FyStatus::InvalidValue);
-        assert_eq!(last_error(), "Light.kind 7 doesn't exist (0 = directional, 1 = ambient)");
+        assert_eq!(last_error(), "Light.kind 7 doesn't exist (0 = directional, 1 = ambient, 2 = point, 3 = spot)");
 
         let mut shape = ptr::null_mut();
         assert_eq!(fy_mesh_new_shape(6, &mut shape), FyStatus::InvalidValue);
@@ -224,7 +232,7 @@ fn every_component_reads_back_what_was_written() {
         size: 3.0,
         culling_mask: u32::MAX,
     };
-    let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.5, 0.5, 0.5), intensity: 2.0 };
+    let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.5, 0.5, 0.5), intensity: 2.0, ..Default::default() };
     // SAFETY: a live world and pointers to locals.
     unsafe {
         ok(fy_transform_set(world.0, id, &transform));
@@ -412,10 +420,12 @@ fn hidden_rig(world: &World) -> u64 {
         };
         ok(fy_camera_set(w, camera, &wide));
         ok(fy_transform_set(w, camera, &transform(Transform::from_position(Vec3::new(0.0, 0.0, 6.0)))));
-        let bright = FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(0.0, 1.0, 0.0), intensity: 5.0 };
+        let bright =
+            FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(0.0, 1.0, 0.0), intensity: 5.0, ..Default::default() };
         ok(fy_light_set(w, sun, &bright));
         ok(fy_transform_set(w, sun, &transform(Transform::default())));
-        let flood = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.0, 0.0, 1.0), intensity: 5.0 };
+        let flood =
+            FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.0, 0.0, 1.0), intensity: 5.0, ..Default::default() };
         ok(fy_light_set(w, ambient, &flood));
         let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);
         ok(fy_material_add(w, &FyMaterial::default(), &mut material));

@@ -10,13 +10,19 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 21
+#define FY_ABI_VERSION 22
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
 
 // `FyLight::kind`.
 #define FY_LIGHT_AMBIENT 1
+
+// `FyLight::kind`.
+#define FY_LIGHT_POINT 2
+
+// `FyLight::kind`.
+#define FY_LIGHT_SPOT 3
 
 // A quality level: the device's own (`fy_quality_auto`).
 #define FY_QUALITY_AUTO 0
@@ -212,11 +218,20 @@ typedef struct FyCamera {
   uint32_t culling_mask;
 } FyCamera;
 
+// `Default` is the engine's default light: a white sun of intensity 1,
+// with point and spot settings ready for a change of kind.
 typedef struct FyLight {
-  // `FY_LIGHT_DIRECTIONAL` or `FY_LIGHT_AMBIENT`.
+  // `FY_LIGHT_DIRECTIONAL`, `FY_LIGHT_AMBIENT`, `FY_LIGHT_POINT` or
+  // `FY_LIGHT_SPOT`.
   uint32_t kind;
   struct FyColor color;
   float intensity;
+  // Point and spot lights: how far the light reaches, in metres.
+  float range;
+  // Spot lights: the cone's full angle, in degrees.
+  float spot_angle;
+  // Spot lights: how much of the cone fades, from its edge in, 0 to 1.
+  float softness;
 } FyLight;
 
 // A mesh made from code, for `fy_mesh_new`. Each array holds

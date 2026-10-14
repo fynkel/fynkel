@@ -88,13 +88,15 @@ pub fn stage1(world: &World) -> u64 {
         ok(fy_transform_set(w, camera, &transform(looking)));
 
         let sun = world.spawn();
-        let light = FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(1.0, 1.0, 1.0), intensity: 1.0 };
+        let light =
+            FyLight { kind: FY_LIGHT_DIRECTIONAL, color: srgb(1.0, 1.0, 1.0), intensity: 1.0, ..Default::default() };
         ok(fy_light_set(w, sun, &light));
         let facing = Transform::default().looking_at(Vec3::new(-0.4, -1.0, -0.3));
         ok(fy_transform_set(w, sun, &transform(facing)));
 
         let ambient = world.spawn();
-        let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(1.0, 1.0, 1.0), intensity: 0.15 };
+        let light =
+            FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(1.0, 1.0, 1.0), intensity: 0.15, ..Default::default() };
         ok(fy_light_set(w, ambient, &light));
 
         let (mesh, mut material) = (add_shape(world, FY_MESH_CUBE), 0);

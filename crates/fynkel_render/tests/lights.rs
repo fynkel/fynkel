@@ -1,0 +1,207 @@
+//! Point and spot lights, more than one sun, and the caps on how many light
+//! a frame and an object (stage 8 phase 2), checked on the real GPU.
+
+mod common;
+
+use common::*;
+use fynkel_render::glam::{Mat4, Vec3};
+use fynkel_render::*;
+
+const SRGB: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+
+/// A rough grey square `size` metres across at the origin, facing the
+/// camera 3 m away along +Z, lit by `lights` alone.
+fn wall(size: f32, lights: Vec<Light>, quality: Quality) -> RenderScene {
+    let albedo = linear(0.5);
+    RenderScene {
+        camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
+        lights,
+        quality: Some(quality),
+        ambient: Vec3::ZERO,
+        lines: Vec::new(),
+        draws: vec![Draw {
+            mesh: PLANE,
+            model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(size)),
+            material: PbrMaterial {
+                base_color: [albedo, albedo, albedo, 1.0],
+                metallic: 0.0,
+                roughness: 1.0,
+                ..PbrMaterial::DEFAULT
+            },
+        }],
+    }
+}
+
+/// The wall's centre pixel as forward.wgsl's maths says it should be, lit
+/// head-on with `irradiance` (a sun's colour).
+fn head_on(irradiance: f32) -> [u8; 3] {
+    let surface = Surface { albedo: Vec3::splat(linear(0.5)), metallic: 0.0, roughness: 1.0 };
+    to_srgb8(tonemap(shade(&surface, Vec3::Z, Vec3::Z, Vec3::Z, Vec3::splat(irradiance), Vec3::ZERO)))
+}
+
+fn assert_close(got: [u8; 4], want: [u8; 3], what: &str) {
+    for c in 0..3 {
+        assert!(got[c].abs_diff(want[c]) <= 1, "{what}: GPU {got:?} vs maths {want:?}");
+    }
+}
+
+/// The units: a lamp of 1 lights a surface 1 m away as a sun of 1 does, a
+/// quarter as much at 2 m, and fades smoothly to nothing at its range
+/// (Karis's window, (1 - (d / range)⁴)²).
+#[test]
+fn a_lamp_one_metre_away_lights_as_a_sun_does_and_fades_with_distance() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let render_centre =
+        |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, Quality::High), 64, 64).0.pixel(32, 32);
+
+    let sun = render_centre(&mut r, vec![Light::sun(Vec3::NEG_Z, Vec3::splat(2.0))]);
+    assert_close(sun, head_on(2.0), "a sun of 2");
+    let window = |d: f32, range: f32| (1.0 - (d / range).powi(4)).max(0.0).powi(2);
+    for (distance, range) in [(1.0, 100.0), (2.0, 100.0), (1.0, 2.0), (1.5, 1.6)] {
+        let lamp = Light::point(Vec3::new(0.0, 0.0, distance), range, Vec3::splat(2.0));
+        let got = render_centre(&mut r, vec![lamp]);
+        let want = head_on(2.0 / (distance * distance) * window(distance, range));
+        assert_close(got, want, &format!("a lamp of 2, {distance} m away, reaching {range} m"));
+    }
+    assert_close(render_centre(&mut r, vec![Light::sun(Vec3::NEG_Z, Vec3::splat(2.0))]), head_on(2.0), "again");
+    let out_of_reach = render_centre(&mut r, vec![Light::point(Vec3::new(0.0, 0.0, 1.0), 0.9, Vec3::splat(50.0))]);
+    assert_eq!(out_of_reach, [0, 0, 0, 255], "a lamp lights nothing past its range");
+}
+
+/// A spotlight lights inside its cone only. Its axis gets the full light,
+/// the same as a lamp's; a soft edge fades towards it.
+#[test]
+fn a_spot_lights_only_inside_its_cone() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    // 2 m from the wall, 60° across: a circle 1.15 m in radius. The camera
+    // sees 1.73 m either side of the centre.
+    let spot = |softness| {
+        Light::spot(Vec3::new(0.0, 0.0, 2.0), Vec3::NEG_Z, 100.0, 60f32.to_radians(), softness, Vec3::splat(8.0))
+    };
+    let (hard, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(0.0)], Quality::High), 64, 64);
+    let (soft, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(1.0)], Quality::High), 64, 64);
+    let (lamp, _) = render(
+        &gpu,
+        &mut r,
+        &wall(4.0, vec![Light::point(Vec3::new(0.0, 0.0, 2.0), 100.0, Vec3::splat(8.0))], Quality::High),
+        64,
+        64,
+    );
+
+    assert_eq!(hard.pixel(32, 32), lamp.pixel(32, 32), "on the axis, a spot is a lamp");
+    assert_eq!(soft.pixel(32, 32), lamp.pixel(32, 32), "even a soft one");
+    assert_eq!(hard.pixel(2, 2), [0, 0, 0, 255], "the corners are outside the cone");
+    // Halfway out (0.58 m, 15° off the axis): the hard cone's full light,
+    // the soft one's fading.
+    let halfway = 32 + 11;
+    assert_eq!(hard.pixel(halfway, 32), lamp.pixel(halfway, 32), "inside a hard cone, a lamp's light");
+    assert!(soft.pixel(halfway, 32)[0] < hard.pixel(halfway, 32)[0], "a soft edge fades in from the rim");
+    assert!(soft.pixel(halfway, 32)[0] > 0, "but reaches halfway");
+}
+
+/// Every sun lights the scene, up to `MAX_SUNS`; the rest are left out and
+/// counted.
+#[test]
+fn every_sun_lights_the_scene_up_to_the_cap() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let suns = |n: usize, each: f32| (0..n).map(|_| Light::sun(Vec3::NEG_Z, Vec3::splat(each))).collect();
+    let (one, _) = render(&gpu, &mut r, &wall(4.0, suns(1, 1.0), Quality::High), 64, 64);
+    let (two, _) = render(&gpu, &mut r, &wall(4.0, suns(2, 0.5), Quality::High), 64, 64);
+    assert_eq!(one.pixel(32, 32), two.pixel(32, 32), "two suns of 0.5 make one of 1");
+
+    let (four, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS, 0.25), Quality::Low), 64, 64);
+    assert_eq!((four.pixel(32, 32), stats.lights_left_out), (one.pixel(32, 32), 0));
+    let (five, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS + 1, 0.25), Quality::Low), 64, 64);
+    assert_eq!((five.pixel(32, 32), stats.lights_left_out), (one.pixel(32, 32), 1), "the fifth is left out");
+}
+
+/// Red lamps around the wall's middle, `distance` metres out, each `red`
+/// bright.
+fn reds(n: usize, distance: f32, red: f32) -> Vec<Light> {
+    (0..n)
+        .map(|i| {
+            let angle = i as f32 * std::f32::consts::TAU / n as f32;
+            let at = Vec3::new(0.2 * angle.cos(), 0.2 * angle.sin(), distance);
+            Light::point(at, 10.0, Vec3::new(red, 0.0, 0.0))
+        })
+        .collect()
+}
+
+/// An object reached by more lamps than its level allows is lit by the
+/// nearest ones, among lamps alike: with as many red lamps close by as the
+/// cap, a green one as bright but further off is left out, at every level.
+/// With one red lamp fewer, the green one lights it.
+#[test]
+fn an_object_lit_by_more_than_its_cap_is_lit_by_the_nearest() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let cap = quality.lights_per_object();
+        let green = Light::point(Vec3::new(0.0, 0.0, 1.5), 10.0, Vec3::new(0.0, 0.5, 0.0));
+        let centre = |r: &mut Renderer, lights| render(&gpu, r, &wall(1.0, lights, quality), 64, 64).0.pixel(32, 32);
+
+        let full = centre(&mut r, reds(cap, 1.0, 0.5));
+        let with_green = centre(&mut r, [vec![green], reds(cap, 1.0, 0.5)].concat());
+        assert_eq!(full, with_green, "{quality:?}: {cap} red lamps nearer than the green one: no green");
+        assert!(full[0] > 0, "{quality:?}: the red lamps light it");
+
+        let short = centre(&mut r, [reds(cap - 1, 1.0, 0.5), vec![green]].concat());
+        assert!(short[1] > 0, "{quality:?}: {} red lamps leave room for the green one: {short:?}", cap - 1);
+    }
+}
+
+/// What counts is how brightly a light lights the object: a strong light
+/// far off (a torch from the camera) beats dim lamps close by. A spotlight
+/// shining elsewhere takes no place at all.
+#[test]
+fn an_object_keeps_the_lights_brightest_at_it() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let quality = Quality::Low;
+    let cap = quality.lights_per_object();
+    let centre = |r: &mut Renderer, lights| render(&gpu, r, &wall(1.0, lights, quality), 64, 64).0.pixel(32, 32);
+    let dim = reds(cap, 1.0, 0.1);
+
+    let torch = Light::spot(Vec3::new(0.0, 0.0, 2.9), Vec3::NEG_Z, 10.0, 0.5, 0.0, Vec3::new(0.0, 20.0, 0.0));
+    let lit = centre(&mut r, [dim.clone(), vec![torch]].concat());
+    assert!(lit[1] > 100, "the torch 2.9 m off outshines lamps of 0.1 at 1 m: {lit:?}");
+
+    // Turned away, it would push a red lamp out if it took a place: it
+    // doesn't, so the wall is as the red lamps alone light it.
+    let away = Light::spot(Vec3::new(0.0, 0.0, 2.9), Vec3::Z, 10.0, 0.5, 0.0, Vec3::new(0.0, 20.0, 0.0));
+    let without = centre(&mut r, dim.clone());
+    assert_eq!(centre(&mut r, [vec![away], dim.clone()].concat()), without, "a torch turned away takes no place");
+    assert_ne!(centre(&mut r, dim[1..].to_vec()), without, "one red lamp fewer shows");
+}
+
+/// A frame takes `MAX_LIGHTS` point and spot lights: past that, the ones
+/// furthest from the camera are left out, and counted. Lamps out of view,
+/// or off, don't count.
+#[test]
+fn a_frame_keeps_the_lamps_nearest_the_camera() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    // Lamps in view next to the camera, too short to reach the wall.
+    let near: Vec<Light> = (0..Renderer::MAX_LIGHTS)
+        .map(|i| Light::point(Vec3::new(0.01 * i as f32 - 0.3, 0.0, 2.0), 0.5, Vec3::ONE))
+        .collect();
+    // One by the wall, the furthest from the camera.
+    let by_the_wall = Light::point(Vec3::new(0.0, 0.0, 0.5), 10.0, Vec3::ONE);
+    // Off (a lamp by day): no light, no place.
+    let off = Light::point(Vec3::new(0.0, 0.0, 1.0), 10.0, Vec3::ZERO);
+    // Behind the camera, out of view, with a short reach.
+    let behind = Light::point(Vec3::new(0.0, 0.0, 10.0), 1.0, Vec3::ONE);
+
+    let lights = [vec![by_the_wall, behind, off], near.clone()].concat();
+    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
+    assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 1));
+    assert_eq!(image.pixel(32, 32), [0, 0, 0, 255], "the lamp by the wall is the one left out");
+
+    let lights = [vec![by_the_wall, behind, off], near[1..].to_vec()].concat();
+    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
+    assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 0));
+    assert_ne!(image.pixel(32, 32), [0, 0, 0, 255], "with room for it, it lights the wall");
+}

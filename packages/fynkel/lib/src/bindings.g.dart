@@ -385,7 +385,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 21;
+const int FY_ABI_VERSION = 22;
 
 const int FY_APPLE_MORE = 2;
 
@@ -394,6 +394,10 @@ const int FY_APPLE_SHOWN = 1;
 const int FY_LIGHT_AMBIENT = 1;
 
 const int FY_LIGHT_DIRECTIONAL = 0;
+
+const int FY_LIGHT_POINT = 2;
+
+const int FY_LIGHT_SPOT = 3;
 
 const int FY_MESH_CAPSULE = 3;
 
@@ -479,6 +483,15 @@ final class FyLight extends ffi.Struct {
 
   @ffi.Float()
   external double intensity;
+
+  @ffi.Float()
+  external double range;
+
+  @ffi.Float()
+  external double spot_angle;
+
+  @ffi.Float()
+  external double softness;
 }
 
 final class FyMaterial extends ffi.Struct {

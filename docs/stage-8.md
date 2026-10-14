@@ -174,6 +174,76 @@ image and the extra pass is measured on all three devices.
 *Done when* 32 lights hold the budget at every level, and an object lit
 by more than its cap is lit by the nearest ones, with a test.
 
+**Done** (2026-10-14), except the Note10+ at medium (below):
+
+- **Lamps and spotlights.** `Light.point(range:)` and `Light.spot(range:,
+  angle:, softness:)` in Dart, `LightKind.point` and `.spot`; `range`,
+  `angle` and `softness` can be read and set, and bad values are refused
+  (a negative range, an angle of 180° or more, a softness outside 0–1).
+  ABI 22: `FyLight` has `range`, `spot_angle` (degrees, as the
+  Inspector-style fields elsewhere) and `softness`.
+- **The sun's units.** A lamp of intensity 1, 1 m from a surface facing
+  it, lights it as a sun of 1 does; it falls off with the square of the
+  distance and fades smoothly to nothing at its range. A spot's cone
+  fades over its outer `softness`. Tests check each against the sun.
+- **Every sun lights**, up to 4 in a frame, in id order. The Dart warning
+  about a second sun is gone; a fifth is warned about, once.
+- **Many lights in a frame.** The frame takes the lights in view (each
+  lamp's reach tested against the view), nearest the camera first, up to
+  64; Dart warns once past 64 lamps in the world, and `FrameStats` counts
+  the lights drawn and the ones left out. Lights that are off (colour or
+  intensity 0) take no place.
+- **A few per object**: 4 at low and medium, 8 at high. *Changed from
+  the plan:* an object gets the lights **brightest at it**, not simply
+  the nearest. Among lights alike that is the nearest ones (the test the
+  plan asks for: of equal lamps, the nearer win), but a bright torch
+  from across the room now beats a dim lamp close by, and a spotlight
+  turned away takes no place. Ranking by distance alone hid the lab's
+  torch behind the coloured lamps. Medium was planned at 8; it takes 4,
+  as the Note10+ measures below show it can't afford more.
+- **The lab** ("Look: lamps"): a dark room of 1 m tiles, 31 coloured
+  lamps drifting about with glowing bulbs, metal and plastic blocks and
+  balls, and a torch that follows the pointer. Buttons for 8, 32 and 64
+  lights, each level, and stopping the lamps. Tiles because each object
+  gets its own few lights: one big floor would be lit only by the lamps
+  brightest at it as a whole. The guide (§5 "Lamps and spotlights") says
+  so.
+- **Sheepdog** has four lamp posts, lit at night and dark by day.
+- **Measured**, the lamps scene with 32 lights, 60 s each, alone, under
+  `caffeinate`:
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | Mac (840×1088) | 120 fps (min 117) | 120 (min 119) | 120 (min 119) |
+  | iPhone (1320×1309) | 120 (min 119) | 120 (min 119) | 120 (min 118) |
+  | Note10+ (1080×1068) | 59.3 (min 56.9) | **56.4 (min 42)** | 51.8 (min 35) |
+
+  Low, high, the Mac and the iPhone were measured before the lamp
+  shading was made cheaper; it can only have helped them.
+
+  On the renderer's bench (Mac, 32 lamps), choosing the lights adds about
+  0.06 ms a frame at 1,000 objects and 0.5 ms at 10,000.
+- **Not done: the Note10+ at medium**, its own level. It averages about
+  56 fps with lamps, against 60 without; its ticks stay at 60, so it's the
+  GPU. What was tried, each a 60 s run:
+
+  | medium on the Note10+ | fps (min) |
+  |---|---|
+  | 32 lights, 8 per object (first try) | 52.2 (39) |
+  | 4 per object | 51.4 |
+  | 4 per object, cheaper lamp shading | 56.4 (42) |
+  | as above, an 8-bit image instead of half floats | 56.2 (47) |
+  | as above, 2 per object | 56.7 (49) |
+  | 16 lights, 4 per object | 56.2 (46) |
+  | no lamps | 59.9 (58.9) |
+
+  So it isn't the number of lamps, nor how many light a pixel, nor the
+  image's memory: lamps cost the Mali something fixed on the medium
+  path that they don't on low's single pass, not yet found. Phase 6
+  reworks the last pass for bloom and has to fit the same phone, so it
+  picks this up; until then a game for the Note10+ class with lamps can
+  set `world.quality = Quality.low`.
+
 ### Phase 3: shadows
 
 - **The sun's shadows.** `Light.sun(shadows: true)`.
@@ -291,7 +361,7 @@ say otherwise.
 ## 5. Checklist
 
 - [x] Phase 1: groundwork
-- [ ] Phase 2: lights
+- [x] Phase 2: lights (the Note10+ at medium left to phase 6)
 - [ ] Phase 3: shadows
 - [ ] Phase 4: the sky and what reflects it
 - [ ] Phase 5: see-through
