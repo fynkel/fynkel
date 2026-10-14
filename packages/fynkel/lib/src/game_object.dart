@@ -737,7 +737,10 @@ class GameObject with _Moving {
   /// they can't be changed. One taken off with [removeComponent] is gone.
   T? get<T extends Object>() {
     _probe();
-    for (final c in _components ?? const <Component>[]) {
+    // By index: an iterator would be made each call.
+    final components = _components;
+    for (var i = 0; components != null && i < components.length; i++) {
+      final c = components[i];
       if (c is T && !c._takenOff) return c as T;
     }
     return null;
@@ -780,7 +783,12 @@ class GameObject with _Moving {
   /// Reads the engine components of an object the engine made, the first
   /// time they're asked for, so the same instances come back after.
   void _probe() {
-    if (_probed) return;
+    if (!_probed) _probeNow();
+  }
+
+  // Apart from [_probe], whose every call would otherwise make this one's
+  // closure context.
+  void _probeNow() {
     _probed = true;
     final world = _world;
     if (world == null || _destroyed || world.isDisposed) return;

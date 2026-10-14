@@ -26,6 +26,8 @@ final class Debug implements Finalizable {
   // The lines, ten floats each as the engine's FyDebugLine (a, b, colour),
   // and when each goes, in unscaled time: -infinity after this frame.
   Pointer<Float> _lines = nullptr;
+  // The same memory as the engine's lines, cast once.
+  Pointer<FyDebugLine> _engineLines = nullptr;
   Float64List _until = Float64List(0);
   int _count = 0;
   int _capacity = 0;
@@ -35,28 +37,30 @@ final class Debug implements Finalizable {
   static final _free = NativeFinalizer(malloc.nativeFree);
 
   /// A line from [a] to [b] (Unity's `Debug.DrawLine`).
-  void line(Vec3 a, Vec3 b, {Color color = Color.white, double seconds = 0}) {
+  void line(Vec3 a, Vec3 b, {Color color = Color.white, double? seconds}) {
     if (!enabled) return;
-    _add(a, b, color, _untilAfter(seconds));
+    _addSeconds = seconds;
+    _add(a, b, color);
   }
 
   /// A line from [origin] along [direction], as long as it is (Unity's
   /// `Debug.DrawRay`).
-  void ray(Vec3 origin, Vec3 direction, {Color color = Color.white, double seconds = 0}) {
+  void ray(Vec3 origin, Vec3 direction, {Color color = Color.white, double? seconds}) {
     if (!enabled) return;
-    _add(origin, origin + direction, color, _untilAfter(seconds));
+    _addSeconds = seconds;
+    _add(origin, origin + direction, color);
   }
 
   /// The edges of a box [size] across, its middle at [center], turned by
   /// [rotation] (Unity's `Gizmos.DrawWireCube`).
-  void box(Vec3 center, Vec3 size, {Quat rotation = Quat.identity, Color color = Color.white, double seconds = 0}) {
+  void box(Vec3 center, Vec3 size, {Quat rotation = Quat.identity, Color color = Color.white, double? seconds}) {
     if (!enabled) return;
-    final until = _untilAfter(seconds);
+    _addSeconds = seconds;
     final h = size * 0.5;
     // Each corner to the ones that differ from it in one axis, once.
     for (var i = 0; i < 8; i++) {
-      for (final bit in const [1, 2, 4]) {
-        if (i & bit == 0) _add(_corner(center, h, rotation, i), _corner(center, h, rotation, i | bit), color, until);
+      for (var bit = 1; bit < 8; bit <<= 1) {
+        if (i & bit == 0) _add(_corner(center, h, rotation, i), _corner(center, h, rotation, i | bit), color);
       }
     }
   }
@@ -68,19 +72,25 @@ final class Debug implements Finalizable {
 
   /// A sphere of [radius] around [center], as three circles: one around
   /// each axis (Unity's `Gizmos.DrawWireSphere`).
-  void sphere(Vec3 center, double radius, {Color color = Color.white, double seconds = 0}) {
+  void sphere(Vec3 center, double radius, {Color color = Color.white, double? seconds}) {
     if (!enabled) return;
-    final until = _untilAfter(seconds);
+    _addSeconds = seconds;
+    _radius = radius;
     const segments = 32;
     for (var axis = 0; axis < 3; axis++) {
       for (var i = 0; i < segments; i++) {
-        _add(_around(center, radius, axis, i, segments), _around(center, radius, axis, i + 1, segments), color, until);
+        _add(_around(center, axis, i, segments), _around(center, axis, i + 1, segments), color);
       }
     }
   }
 
-  // Point [i] of [segments] on the circle of [radius] around [axis].
-  static Vec3 _around(Vec3 center, double radius, int axis, int i, int segments) {
+  // The sphere's radius for [_around]: a field, as the JIT boxes a double
+  // passed to a call.
+  double _radius = 0;
+
+  // Point [i] of [segments] on the circle of [_radius] around [axis].
+  Vec3 _around(Vec3 center, int axis, int i, int segments) {
+    final radius = _radius;
     final angle = 2 * math.pi * i / segments;
     final (c, s) = (math.cos(angle) * radius, math.sin(angle) * radius);
     return center +
@@ -92,13 +102,13 @@ final class Debug implements Finalizable {
   }
 
   /// Lines through [points] in order, and back to the first if [closed].
-  void path(List<Vec3> points, {bool closed = false, Color color = Color.white, double seconds = 0}) {
+  void path(List<Vec3> points, {bool closed = false, Color color = Color.white, double? seconds}) {
     if (!enabled) return;
-    final until = _untilAfter(seconds);
+    _addSeconds = seconds;
     for (var i = 1; i < points.length; i++) {
-      _add(points[i - 1], points[i], color, until);
+      _add(points[i - 1], points[i], color);
     }
-    if (closed && points.length > 2) _add(points.last, points.first, color, until);
+    if (closed && points.length > 2) _add(points.last, points.first, color);
   }
 
   /// Takes every line away now, those with seconds left too.
@@ -108,10 +118,12 @@ final class Debug implements Finalizable {
   /// seconds left.
   int get count => _count;
 
-  double _untilAfter(double seconds) =>
-      seconds > 0 ? _world.time._unscaledSinceStart + seconds : double.negativeInfinity;
+  // How long the lines being added stay. The public calls take a nullable
+  // double and keep it so: the JIT boxes a double with a default, or one
+  // stored in a double field, at every call too big to inline.
+  double? _addSeconds;
 
-  void _add(Vec3 a, Vec3 b, Color color, double until) {
+  void _add(Vec3 a, Vec3 b, Color color) {
     if (_world.isDisposed) throw StateError('this Debug belongs to a disposed World, so it can\'t draw');
     if (_count == _capacity) _grow();
     final f = _lines;
@@ -127,7 +139,10 @@ final class Debug implements Finalizable {
       ..[at + 7] = color.g
       ..[at + 8] = color.b
       ..[at + 9] = color.a;
-    _until[_count] = until;
+    final seconds = _addSeconds;
+    _until[_count] = seconds != null && seconds > 0
+        ? _world.time._unscaledSinceStart + seconds
+        : double.negativeInfinity;
     _count++;
   }
 
@@ -139,6 +154,7 @@ final class Debug implements Finalizable {
     }
     _release();
     _lines = lines;
+    _engineLines = lines.cast();
     _free.attach(this, lines.cast(), detach: this);
     _until = Float64List(capacity)..setRange(0, _count, _until);
     _capacity = capacity;
@@ -149,6 +165,7 @@ final class Debug implements Finalizable {
     _free.detach(this);
     malloc.free(_lines);
     _lines = nullptr;
+    _engineLines = nullptr;
   }
 
   /// Frees the lines for good, as the world is disposed.
@@ -166,7 +183,7 @@ final class Debug implements Finalizable {
     _now = _world.time._unscaledSinceStart;
     _keep(oneFrame: true);
     if (_count == 0 && _sent == 0) return;
-    check(fy_debug_lines_set(_world.pointer, _lines.cast(), _count));
+    check(fy_debug_lines_set(_world.pointer, _engineLines, _count));
     _sent = _count;
     _keep(oneFrame: false);
   }
