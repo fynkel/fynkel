@@ -187,6 +187,21 @@ void main() {
       expect(await next, 7);
       expect(signal.hasListeners, isFalse);
     });
+
+    test('next asked again and again outside a routine shares one listener until the emit', () async {
+      final signal = Signal<int>();
+      final first = signal.next;
+      for (var i = 0; i < 1000; i++) {
+        expect(signal.next, same(first));
+      }
+      signal.emit(3);
+      expect(signal.hasListeners, isFalse);
+      expect(await first, 3);
+      final again = signal.next;
+      expect(again, isNot(same(first)), reason: 'a new wait after the emit');
+      signal.emit(4);
+      expect(await again, 4);
+    });
   });
 
   group('on', () {
