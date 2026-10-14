@@ -22,6 +22,7 @@ const _blocking = {
   'fy_texture_decode', // decoding a big image takes tens of milliseconds
   'fy_texture_new_rgba', // copies the pixels
   'fy_model_load', // decodes the model's images and generates tangents
+  'fy_quality_auto', // may create the GPU device
 };
 
 Future<void> main() async {

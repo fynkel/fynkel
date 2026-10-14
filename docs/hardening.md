@@ -578,7 +578,12 @@ planned; neither needs anything here changed again.
 
 ## Checklist
 
-- [ ] Phase 1: the view and the bridge
+- [x] Phase 1: the view and the bridge (V1–V12; every bug row's test
+  failed first). Measured on the Mac, 30 s each, the scale example: 2000
+  objects in the window and 5000 at full screen (3456x2168) both hold
+  120 fresh fps with 0 coalesced, skipped or dropped, as main does; the
+  skip path V5 fixes no longer runs on the Mac, so the gain is for slower
+  GPUs. V9's window drag and the iPhone are left to the user's eyes.
 - [ ] Phase 2: physics' transform sync
 - [ ] Phase 3: the Dart frame
 - [ ] Phase 4: the renderer

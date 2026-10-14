@@ -50,10 +50,49 @@ bool get _android => debugAndroid ?? Platform.isAndroid;
 /// it, even while the first is still waiting for the answer.
 bool _resetSent = false;
 
+/// Tells the plugin to free the views an earlier isolate left, once per
+/// isolate: [FynkelGame] does it as it starts, so a hot restart into a game
+/// that shows no view yet leaks none, and the first view does it too. With
+/// no plugin (a widget test) there's nothing to free.
+Future<void> resetPlugin() async {
+  if (_resetSent) return;
+  _resetSent = true;
+  try {
+    await channel.invokeMethod<void>('reset');
+  } on MissingPluginException {
+    // Nothing to free.
+  }
+}
+
 /// Forgets that this isolate reset the plugin, so a test can check that it
 /// does.
 @visibleForTesting
 void forgetReset() => _resetSent = false;
+
+/// The views showing each texture, for the plugin's calls about one.
+final _byTexture = <int, FynkelViewState>{};
+bool _listening = false;
+
+/// Listens for the plugin's calls: `failed` when the Android plugin
+/// couldn't hand a view its new surface.
+void _listenToPlugin() {
+  if (_listening) return;
+  _listening = true;
+  channel.setMethodCallHandler((call) async {
+    if (call.method != 'failed') throw MissingPluginException();
+    final args = call.arguments as Map;
+    _byTexture[args['texture'] as int]?._replace(
+      PlatformException(code: 'attach', message: args['message'] as String?),
+      StackTrace.current,
+    );
+  });
+}
+
+/// How many engine views the [FynkelView]s made and haven't freed yet, so
+/// a test can check none is left behind.
+@visibleForTesting
+int get debugViewsOpen => _viewsOpen;
+int _viewsOpen = 0;
 
 /// What a [FynkelView] did in one stats window (about a second).
 @immutable
@@ -289,9 +328,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   FocusNode? _ownFocus;
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
-  /// The size the next frame is drawn at, from the last layout; 0 while it
-  /// is empty.
+  /// The size the last layout gave, in pixels; 0 while it is empty.
+  int _layoutWidth = 0, _layoutHeight = 0;
+
+  /// The size the next frame is drawn at: the layout's once it has held
+  /// for [_settleFrames] frames (at once for the first), so a window drag
+  /// or a split-view animation makes one new set of surfaces, not one a
+  /// frame. Meanwhile the last picture is stretched to fit.
   int _width = 0, _height = 0;
+  int _steadyFrames = 0;
+  static const _settleFrames = 3;
 
   WorldView? _view;
   Future<int?>? _registration;
@@ -555,6 +601,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final world = this.world;
     if (!world.isDisposed) _WorldClock.of(world).update(world);
     _ticks.tick();
+    _settle();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
     if (_noPicture || _width == 0 || _height == 0) return;
@@ -569,7 +616,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (_android) _sendSize(view, texture);
       view.frame();
     } on FynkelException catch (error, stack) {
-      if (error.status != FynkelStatus.deviceLost) rethrow;
+      if (error.status != FynkelStatus.deviceLost && error.status != FynkelStatus.workerFailed) rethrow;
       _lost(error, stack, micros);
       return;
     }
@@ -595,6 +642,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
+  void _settle() {
+    if (_layoutWidth == _width && _layoutHeight == _height) {
+      _steadyFrames = 0;
+      return;
+    }
+    if (_width == 0 || _height == 0 || ++_steadyFrames >= _settleFrames) {
+      _width = _layoutWidth;
+      _height = _layoutHeight;
+      _steadyFrames = 0;
+    }
+  }
+
   /// Makes the engine view and starts registering its texture.
   WorldView? _open() {
     final WorldView view;
@@ -612,6 +671,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _fail(error, stack);
       return null;
     }
+    _viewsOpen++;
     _view = view;
     _registration = _register(view);
     return view;
@@ -636,8 +696,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           'free': AppleView.freeAddress,
         };
       }
+      if (_android) _listenToPlugin();
       final texture = await channel.invokeMethod<int>('register', arguments);
-      if (mounted && _view == view) setState(() => _texture = texture);
+      if (mounted && _view == view) {
+        if (texture != null) _byTexture[texture] = this;
+        setState(() => _texture = texture);
+      }
       return texture;
     } on MissingPluginException {
       // No plugin: a widget test, most likely. The game runs on unseen.
@@ -660,9 +724,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         Object error,
         StackTrace stack,
       ) {
-        if (mounted && _view == view) _fail(error, stack);
+        if (mounted && _view == view) _replace(error, stack);
       }),
     );
+  }
+
+  /// The view can't go on (the plugin couldn't give it a new surface): a
+  /// new one takes its place, as for a lost device.
+  void _replace(Object error, StackTrace stack) {
+    if (!mounted || _view == null) return;
+    _lost(error, stack, _lastMicros ?? 0);
   }
 
   /// The view can't show the game: the error shows in its place, and the
@@ -680,10 +751,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     setState(() => _error = error);
   }
 
-  /// The GPU device was lost: a new view, with a new device, takes the old
-  /// one's place from the next frame and uploads everything again. More than
-  /// [_maxLosses] in a minute, and the view fails.
-  void _lost(FynkelException error, StackTrace stack, int micros) {
+  /// The GPU device was lost, the render worker stopped, or the plugin
+  /// couldn't give the view a new surface: a new view (with a new device,
+  /// when it was lost) takes the old one's place from the next frame and
+  /// uploads everything again. More than [_maxLosses] in
+  /// a minute, and the view fails.
+  void _lost(Object error, StackTrace stack, int micros) {
     _losses
       ..removeWhere((at) => micros - at > 60000000)
       ..add(micros);
@@ -714,15 +787,31 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// is freed. Safe while the registration is still on its way.
   void _release() {
     final view = _view, registration = _registration;
+    _byTexture.remove(_texture);
     _view = null;
     _registration = null;
     _texture = null;
     _windowStartMicros = 0;
     if (view == null || registration == null) return;
     unawaited(() async {
-      final texture = await registration;
-      if (texture != null) await channel.invokeMethod<void>('unregister', {'texture': texture});
-      view.dispose();
+      try {
+        final texture = await registration;
+        if (texture != null) await channel.invokeMethod<void>('unregister', {'texture': texture});
+      } catch (error, stack) {
+        // The plugin already let go of it (after a reset, or with the
+        // engine detached): it's freed all the same.
+        FlutterError.reportError(
+          FlutterErrorDetails(
+            exception: error,
+            stack: stack,
+            library: 'fynkel_flutter',
+            context: ErrorDescription('while FynkelView let go of its view'),
+          ),
+        );
+      } finally {
+        view.dispose();
+        _viewsOpen--;
+      }
     }());
   }
 
@@ -745,8 +834,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           _input.resize(size);
           world.input.camera = widget.camera;
         }
-        _width = (size.width * ratio).round().clamp(0, 16384);
-        _height = (size.height * ratio).round().clamp(0, 16384);
+        final width = (size.width * ratio).round().clamp(0, 16384);
+        final height = (size.height * ratio).round().clamp(0, 16384);
+        if (width != _layoutWidth || height != _layoutHeight) _steadyFrames = 0;
+        _layoutWidth = width;
+        _layoutHeight = height;
         final texture = _texture;
         return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
       },

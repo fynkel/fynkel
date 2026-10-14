@@ -1,11 +1,16 @@
 //! Where the render worker's frames go.
 
+/// What a target calls when a frame frees its place ([`Target::on_free`]).
+pub type Wake = std::sync::Arc<dyn Fn() + Send + Sync>;
+
 /// A place frames are drawn into: the headless readback, the Apple ring or
 /// the Android surface. The render worker owns it and calls it from one
 /// thread, once per frame:
 ///
 /// 1. [`Target::begin`] hands out somewhere to draw, or `None` when there's
-///    nowhere right now (the worker keeps its scene and tries again).
+///    nowhere right now. A target that calls back when a slot frees
+///    ([`Target::on_free`]) gets the same scene again then, unless a newer
+///    one came; others lose the scene and get the next one posted.
 /// 2. The worker records the frame into a command encoder, drawing into
 ///    [`Target::view`].
 /// 3. [`Target::finish`] completes the frame however the target needs to:
@@ -31,6 +36,15 @@ pub trait Target: Send {
     /// `number` is the frame's number from the caller, for targets that
     /// report which frame they show.
     fn finish(&mut self, frame: Self::Frame, encoder: wgpu::CommandEncoder, number: u64);
+
+    /// Calls `wake` (from any thread) each time a frame finishes and frees
+    /// the place it was drawn in, so a scene [`Target::begin`] had no room
+    /// for is drawn as soon as there is some. Returns whether it will:
+    /// targets whose `begin` fails for other reasons don't.
+    fn on_free(&mut self, wake: Wake) -> bool {
+        let _ = wake;
+        false
+    }
 
     /// Draws later frames at `width` × `height` (each at least 1). Frames
     /// already begun finish at the old size. Fails only when the platform

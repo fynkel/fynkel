@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, ObjectError, World;
 
-import 'fynkel_view.dart' show bundleSource;
+import 'fynkel_view.dart' show bundleSource, resetPlugin;
 import 'world_listenables.dart' show WorldTheme;
 
 /// Makes a game's root with [make] and builds what shows it, so the game
@@ -113,6 +113,7 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
     // The first time, after initState: the theme can be read from here on.
     if (!_started) {
       _started = true;
+      unawaited(resetPlugin());
       _start();
     } else {
       _world.theme = Theme.of(context);

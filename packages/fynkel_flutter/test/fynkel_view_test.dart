@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, forgetReset;
+import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, debugViewsOpen, forgetReset;
 import 'package:fynkel_flutter/src/error_panel.dart' show ErrorPanel;
 import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer, worldWidgetsOf;
 
@@ -125,6 +125,9 @@ void main() {
   late int nextTexture;
   // When set, `register` answers only once it completes.
   Completer<void>? hold;
+  // Whether the plugin's unregister fails, as it does for a texture it
+  // already let go of.
+  late bool unregisterFails;
 
   setUp(() {
     world = World();
@@ -138,6 +141,7 @@ void main() {
     resets = [];
     nextTexture = 7;
     hold = null;
+    unregisterFails = false;
     // The Swift or Kotlin plugin, as far as Dart can see it.
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
       final args = call.arguments as Map? ?? const {};
@@ -166,6 +170,7 @@ void main() {
           final texture = args['texture'] as int;
           expect(alive(views[texture]!), isTrue, reason: 'the view is freed only after this');
           calls.add('unregister $texture');
+          if (unregisterFails) throw PlatformException(code: 'gone', message: 'no such texture');
           return null;
         case 'resize':
           final texture = args['texture'] as int;
@@ -280,6 +285,18 @@ void main() {
     expect(calls, ['register', 'unregister 7']);
   });
 
+  testWidgets('a view is freed even when the plugin fails to let go of it', (tester) async {
+    unregisterFails = true;
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    final open = debugViewsOpen;
+    await tester.pumpWidget(sized(const SizedBox()));
+    await tester.pump();
+    expect(calls, ['register', 'unregister 7']);
+    expect(debugViewsOpen, open - 1, reason: 'freed all the same');
+    expect(tester.takeException().toString(), contains('no such texture'), reason: 'and reported');
+  });
+
   testWidgets('removed while its texture is being registered, the view is let go once that finishes', (tester) async {
     final held = hold = Completer<void>();
     await tester.pumpWidget(sized(FynkelView.world(world)));
@@ -340,6 +357,18 @@ void main() {
     await tester.pumpWidget(sized(const SizedBox()));
   });
 
+  testWidgets('a game resets the plugin as it starts, before it shows any view', (tester) async {
+    forgetReset();
+    await tester.pumpWidget(FynkelGame(make: Tiny.new, builder: (context, game) => const SizedBox()));
+    await tester.pump();
+    expect(resets, [0], reason: "an earlier isolate's views are freed though this game shows none yet");
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    await tester.pump(const Duration(milliseconds: 8));
+    expect(calls, ['register']);
+    expect(resets, [0], reason: 'once per isolate');
+    await tester.pumpWidget(sized(const SizedBox()));
+  });
+
   // On Android a view laid out before its window has a size would get a
   // surface of its own (Flutter makes it 1 × 1), only to swap it at once.
   testWidgets('an empty layout makes no view until there is a size', (tester) async {
@@ -375,23 +404,96 @@ void main() {
       }
       await tester.pumpWidget(sized(FynkelView.world(world), width: 50, height: 100));
       await tester.pump(const Duration(milliseconds: 8));
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(calls, ['register 300x150', 'resize 7 180x120'], reason: 'a new size waits until it holds still');
+      await tester.pump(const Duration(milliseconds: 8));
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump();
       expect(calls, ['register 300x150', 'resize 7 180x120', 'resize 7 150x300', 'unregister 7']);
     });
 
-    testWidgets('a failed resize is reported', (tester) async {
+    testWidgets('a drag that changes the size every frame sends only the size it ends at', (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await tester.pump(const Duration(milliseconds: 8));
+      await tester.pump(const Duration(milliseconds: 8));
+      expect(calls, ['register 300x150']);
+      for (var width = 101; width <= 120; width++) {
+        await tester.pumpWidget(sized(FynkelView.world(world), width: width.toDouble(), height: 50));
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150'], reason: 'one new surface per drag, not one a frame');
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150', 'resize 7 360x150']);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
+    testWidgets('a failed resize brings a new view at the new size, and the frames go on', (tester) async {
+      var failures = 1;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-        if (call.method == 'resize') throw PlatformException(code: 'attach', message: 'no RGBA8 format');
-        return call.method == 'register' ? 7 : null;
+        final args = call.arguments as Map? ?? const {};
+        switch (call.method) {
+          case 'register':
+            calls.add('register ${args['width']}x${args['height']}');
+            return nextTexture++;
+          case 'resize':
+            calls.add('resize ${args['texture']}');
+            if (failures-- > 0) throw PlatformException(code: 'attach', message: 'no RGBA8 format');
+          case 'unregister':
+            calls.add('unregister ${args['texture']}');
+        }
+        return null;
       });
       await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
       await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(tester.takeException().toString(), contains('no RGBA8 format'), reason: 'reported');
+      expect(calls, ['register 300x150', 'resize 7', 'unregister 7', 'register 180x120']);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
+    });
+
+    testWidgets('a resize that keeps failing ends in the error, after three new views', (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'resize') throw PlatformException(code: 'attach', message: 'no RGBA8 format');
+        return call.method == 'register' ? nextTexture++ : null;
+      });
+      await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
-      await tester.pump();
-      expect(tester.takeException().toString(), contains('no RGBA8 format'));
+      for (var i = 0; i < 4; i++) {
+        await tester.pumpWidget(sized(FynkelView.world(world), width: 60.0 + i, height: 40));
+        for (var j = 0; j < 3; j++) {
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+        tester.takeException();
+      }
       expect(find.byType(ErrorWidget), findsOneWidget);
+    });
+
+    testWidgets("the plugin's failure to give a view its new surface brings a new view", (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150']);
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(
+          const MethodCall('failed', {'texture': 7, 'message': "couldn't draw to the new surface"}),
+        ),
+        (_) {},
+      );
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(tester.takeException().toString(), contains("couldn't draw to the new surface"));
+      expect(calls, ['register 300x150', 'unregister 7', 'register 300x150']);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
     });
   });
 
@@ -1283,6 +1385,26 @@ void main() {
       await tester.pump(const Duration(milliseconds: 8));
     }
     expect(dts.length, greaterThan(before + 10), reason: 'the world runs on');
+  });
+
+  testWidgets('a failed render worker brings a new view, as a lost device does', (tester) async {
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(calls, ['register']);
+    expect(fy_view_fail_worker(Pointer.fromAddress(views[7]!)), FyStatus.FY_STATUS_OK);
+    // The render thread panics in real time.
+    for (var i = 0; i < 200 && tester.takeException() == null; i++) {
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(calls, ['register', 'unregister 7', 'register']);
+    expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
+    expect(alive(views[8]!), isTrue);
   });
 
   testWidgets('with no plugin, as in a widget test of the game, the game runs on unseen', (tester) async {

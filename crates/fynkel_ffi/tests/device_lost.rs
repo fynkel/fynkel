@@ -37,7 +37,9 @@ fn losing_the_device_stops_every_view_and_a_new_view_starts_over() {
     for view in [&a, &b, &c] {
         view.read(view.frame(), 256, 256);
     }
-    // SAFETY: a live view.
+    // SAFETY: the only test in this process, so nothing reads the
+    // environment meanwhile; then a live view.
+    unsafe { std::env::set_var("FYNKEL_TEST_HOOKS", "1") };
     ok(unsafe { fy_view_lose_device(a.0) });
     for view in [&a, &b, &c] {
         until_lost(view);

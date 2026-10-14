@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 23
+#define FY_ABI_VERSION 24
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1046,14 +1046,25 @@ FyStatus fy_view_camera_set(const struct FyView *view, uint64_t camera);
 // `view` is null or live.
 FyStatus fy_view_resize(const struct FyView *view, uint32_t width, uint32_t height);
 
-// For tests: destroys the GPU device, as a driver reset would. Every view
-// shares it, so soon after, `fy_view_frame` returns
-// `FY_STATUS_DEVICE_LOST` for each; a view made after has a new one.
+// For tests only (see `fy_view_fail_worker`): destroys the GPU device, as
+// a driver reset would. Every view shares it, so soon after,
+// `fy_view_frame` returns `FY_STATUS_DEVICE_LOST` for each; a view made
+// after has a new one.
 //
 // # Safety
 //
 // `view` is null or live.
 FyStatus fy_view_lose_device(const struct FyView *view);
+
+// For tests only: makes the view's render worker panic before its next
+// frame, as a bug in it would, so soon after `fy_view_frame` returns
+// `FY_STATUS_WORKER_FAILED`. Runs only in a test process (`FLUTTER_TEST`
+// or `FYNKEL_TEST_HOOKS` set); `FY_STATUS_UNSUPPORTED` otherwise.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_fail_worker(const struct FyView *view);
 
 // # Safety
 //
