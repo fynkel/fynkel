@@ -56,9 +56,15 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 // later one do so, the view lets go of it first and takes the new one.
                 producer.setCallback(object : TextureRegistry.SurfaceProducer.Callback {
                     // A new surface, after one was taken away.
+                    // Dart is told when the view can't draw to it, so a new view takes its place.
                     override fun onSurfaceAvailable() {
                         Log.i(TAG, "texture ${producer.id()}: a new surface")
-                        attach(entry)?.let { Log.e(TAG, "couldn't draw to the new surface: $it") }
+                        val error = attach(entry) ?: return
+                        Log.e(TAG, "couldn't draw to the new surface: $error")
+                        channel.invokeMethod(
+                            "failed",
+                            mapOf("texture" to producer.id(), "message" to "couldn't draw to the new surface: $error"),
+                        )
                     }
 
                     // The surface is about to be released.
@@ -118,9 +124,16 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
         }
     }
 
-    /** Hands the producer's current surface to the view. Null, or why it failed. */
-    private fun attach(entry: Entry): String? =
-        FynkelNative.attach(entry.view, entry.producer.surface, entry.producer.width, entry.producer.height)
+    /**
+     * Hands the producer's current surface to the view, trying twice: a surface can fail once while
+     * it's being made. Null, or why it failed.
+     */
+    private fun attach(entry: Entry): String? {
+        val once = FynkelNative.attach(entry.view, entry.producer.surface, entry.producer.width, entry.producer.height)
+            ?: return null
+        Log.w(TAG, "couldn't draw to the surface, trying again: $once")
+        return FynkelNative.attach(entry.view, entry.producer.surface, entry.producer.width, entry.producer.height)
+    }
 
     /**
      * The order matters: no more lifecycle calls, the view lets go of the surface (after the frame

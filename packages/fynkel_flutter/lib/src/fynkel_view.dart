@@ -55,6 +55,25 @@ bool _resetSent = false;
 @visibleForTesting
 void forgetReset() => _resetSent = false;
 
+/// The views showing each texture, for the plugin's calls about one.
+final _byTexture = <int, FynkelViewState>{};
+bool _listening = false;
+
+/// Listens for the plugin's calls: `failed` when the Android plugin
+/// couldn't hand a view its new surface.
+void _listenToPlugin() {
+  if (_listening) return;
+  _listening = true;
+  channel.setMethodCallHandler((call) async {
+    if (call.method != 'failed') throw MissingPluginException();
+    final args = call.arguments as Map;
+    _byTexture[args['texture'] as int]?._replace(
+      PlatformException(code: 'attach', message: args['message'] as String?),
+      StackTrace.current,
+    );
+  });
+}
+
 /// How many engine views the [FynkelView]s made and haven't freed yet, so
 /// a test can check none is left behind.
 @visibleForTesting
@@ -643,8 +662,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           'free': AppleView.freeAddress,
         };
       }
+      if (_android) _listenToPlugin();
       final texture = await channel.invokeMethod<int>('register', arguments);
-      if (mounted && _view == view) setState(() => _texture = texture);
+      if (mounted && _view == view) {
+        if (texture != null) _byTexture[texture] = this;
+        setState(() => _texture = texture);
+      }
       return texture;
     } on MissingPluginException {
       // No plugin: a widget test, most likely. The game runs on unseen.
@@ -667,9 +690,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         Object error,
         StackTrace stack,
       ) {
-        if (mounted && _view == view) _fail(error, stack);
+        if (mounted && _view == view) _replace(error, stack);
       }),
     );
+  }
+
+  /// The view can't go on (the plugin couldn't give it a new surface): a
+  /// new one takes its place, as for a lost device.
+  void _replace(Object error, StackTrace stack) {
+    if (!mounted || _view == null) return;
+    _lost(error, stack, _lastMicros ?? 0);
   }
 
   /// The view can't show the game: the error shows in its place, and the
@@ -687,11 +717,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     setState(() => _error = error);
   }
 
-  /// The GPU device was lost, or the render worker stopped: a new view
-  /// (with a new device, when it was lost) takes the old one's place from
-  /// the next frame and uploads everything again. More than [_maxLosses] in
+  /// The GPU device was lost, the render worker stopped, or the plugin
+  /// couldn't give the view a new surface: a new view (with a new device,
+  /// when it was lost) takes the old one's place from the next frame and
+  /// uploads everything again. More than [_maxLosses] in
   /// a minute, and the view fails.
-  void _lost(FynkelException error, StackTrace stack, int micros) {
+  void _lost(Object error, StackTrace stack, int micros) {
     _losses
       ..removeWhere((at) => micros - at > 60000000)
       ..add(micros);
@@ -722,6 +753,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// is freed. Safe while the registration is still on its way.
   void _release() {
     final view = _view, registration = _registration;
+    _byTexture.remove(_texture);
     _view = null;
     _registration = null;
     _texture = null;

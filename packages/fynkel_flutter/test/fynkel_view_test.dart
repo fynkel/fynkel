@@ -397,18 +397,70 @@ void main() {
       expect(calls, ['register 300x150', 'resize 7 180x120', 'resize 7 150x300', 'unregister 7']);
     });
 
-    testWidgets('a failed resize is reported', (tester) async {
+    testWidgets('a failed resize brings a new view at the new size, and the frames go on', (tester) async {
+      var failures = 1;
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
-        if (call.method == 'resize') throw PlatformException(code: 'attach', message: 'no RGBA8 format');
-        return call.method == 'register' ? 7 : null;
+        final args = call.arguments as Map? ?? const {};
+        switch (call.method) {
+          case 'register':
+            calls.add('register ${args['width']}x${args['height']}');
+            return nextTexture++;
+          case 'resize':
+            calls.add('resize ${args['texture']}');
+            if (failures-- > 0) throw PlatformException(code: 'attach', message: 'no RGBA8 format');
+          case 'unregister':
+            calls.add('unregister ${args['texture']}');
+        }
+        return null;
       });
       await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
       await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
+      for (var i = 0; i < 5; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(tester.takeException().toString(), contains('no RGBA8 format'), reason: 'reported');
+      expect(calls, ['register 300x150', 'resize 7', 'unregister 7', 'register 180x120']);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
+    });
+
+    testWidgets('a resize that keeps failing ends in the error, after three new views', (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'resize') throw PlatformException(code: 'attach', message: 'no RGBA8 format');
+        return call.method == 'register' ? nextTexture++ : null;
+      });
+      await tester.pumpWidget(sized(FynkelView.world(world)));
       await tester.pump(const Duration(milliseconds: 8));
-      await tester.pump();
-      expect(tester.takeException().toString(), contains('no RGBA8 format'));
+      for (var i = 0; i < 4; i++) {
+        await tester.pumpWidget(sized(FynkelView.world(world), width: 60.0 + i, height: 40));
+        for (var j = 0; j < 3; j++) {
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+        tester.takeException();
+      }
       expect(find.byType(ErrorWidget), findsOneWidget);
+    });
+
+    testWidgets("the plugin's failure to give a view its new surface brings a new view", (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(calls, ['register 300x150']);
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(
+          const MethodCall('failed', {'texture': 7, 'message': "couldn't draw to the new surface"}),
+        ),
+        (_) {},
+      );
+      for (var i = 0; i < 3; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(tester.takeException().toString(), contains("couldn't draw to the new surface"));
+      expect(calls, ['register 300x150', 'unregister 7', 'register 300x150']);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
     });
   });
 
