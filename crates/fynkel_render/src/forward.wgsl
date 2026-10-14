@@ -276,8 +276,10 @@ fn offset_position(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>, texel: f32) -> vec
     return p + ng * texel * (0.75 + 1.5 * (1.0 - saturate(dot(ng, l))));
 }
 
-// How much of the sun reaches `p`, 0 to 1, from its cascades. Past the
-// shadow distance all of it does; the last tenth fades there.
+// How much of the sun reaches `p`, 0 to 1, from its cascades. The last
+// tenth of each but the last blends into the next, which holds it too
+// (`shadows::blend_start`), so there's no seam. Past the shadow distance
+// all of it does; the last tenth fades there.
 // Reads `frame.shadows` in place: copying it into a local first (`let s =
 // frame.shadows`) loses the Android emulator's device.
 fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
@@ -290,11 +292,24 @@ fn sun_shadow(p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
     while c + 1u < count && along > frame.shadows.splits[c] {
         c++;
     }
-    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
-    let lit = filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
+    var lit = cascade_lit(c, p, ng, l);
+    if c + 1u < count {
+        let begin = select(0.0, frame.shadows.splits[max(c, 1u) - 1u], c > 0u);
+        let end = frame.shadows.splits[c];
+        let blend = saturate((along - (end - 0.1 * (end - begin))) / max(0.1 * (end - begin), 1e-4));
+        if blend > 0.0 {
+            lit = mix(lit, cascade_lit(c + 1u, p, ng, l), blend);
+        }
+    }
     let fading = frame.shadows.splits.w;
     let fade = saturate((along - fading) / max(frame.shadows.camera_forward.w - fading, 1e-4));
     return mix(lit, 1.0, fade);
+}
+
+// How much of the sun reaches `p` by cascade `c` alone.
+fn cascade_lit(c: u32, p: vec3<f32>, ng: vec3<f32>, l: vec3<f32>) -> f32 {
+    let q = frame.shadows.cascades[c] * vec4<f32>(offset_position(p, ng, l, frame.shadows.texels[c]), 1.0);
+    return filtered(cascade_maps, c, q.xy * vec2<f32>(0.5, -0.5) + 0.5, q.z, frame.shadows.params.z);
 }
 
 // How much of a spot light reaches `p`, 0 to 1, from its map. `distance`

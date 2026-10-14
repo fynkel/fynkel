@@ -172,13 +172,20 @@ pub(crate) fn cascades(
     let splits = cascade_splits(camera.near, distance, count);
     let forward = camera_forward(camera);
     let mut out = [Cascade { centre: [0.0; 2], radius: 1.0, near: 0.0, far: 1.0 }; MAX_CASCADES];
-    let mut start = camera.near;
     for (i, cascade) in out.iter_mut().enumerate().take(count) {
+        // From where the one before starts blending into it.
+        let start = if i == 0 { camera.near } else { blend_start(i - 1, &splits).max(camera.near) };
         let (along, radius) = slice_sphere(camera, aspect, start, splits[i]);
         *cascade = Cascade::around(basis, camera.position + forward * along, radius, level.map_size);
-        start = splits[i];
     }
     (out, splits)
+}
+
+/// Where cascade `c`'s blend into the next starts, along the view: its
+/// last tenth, counted from the cascade before's end (or the camera).
+pub(crate) fn blend_start(c: usize, splits: &[f32; MAX_CASCADES]) -> f32 {
+    let from = if c == 0 { 0.0 } else { splits[c - 1] };
+    splits[c] - 0.1 * (splits[c] - from)
 }
 
 /// How far from the camera the sun's shadows reach: the level's distance,
@@ -601,6 +608,47 @@ mod tests {
                     }
                 }
                 _ => (first, radii) = (Some(fractions), Some(sizes)),
+            }
+        }
+    }
+
+    // Hardening R6: the last tenth of each cascade but the last blends into
+    // the next, so the next must hold that band too.
+    #[test]
+    fn the_next_cascade_holds_the_band_it_blends_over() {
+        let basis = light_basis(Vec3::new(-0.4, -1.0, -0.3));
+        let aspect = 16.0 / 9.0;
+        let perspective = camera(Vec3::new(0.0, 2.0, 5.0), Vec3::new(0.0, 0.0, -10.0));
+        let ortho = CameraView { orthographic: Some(6.0), ..perspective };
+        for cam in [perspective, ortho] {
+            for quality in [Quality::Medium, Quality::High] {
+                let level = quality.shadows();
+                let (cascades, splits) = cascades(&cam, aspect, &level, &basis);
+                let forward = camera_forward(&cam);
+                let right = forward.cross(Vec3::Y).normalize();
+                let up = right.cross(forward);
+                for c in 0..level.cascades - 1 {
+                    let m = cascades[c + 1].matrix(&basis);
+                    for d in [blend_start(c, &splits), splits[c]] {
+                        let (w, h) = match cam.orthographic {
+                            Some(half) => (half * aspect, half),
+                            None => {
+                                let tan = (cam.fov_y * 0.5).tan();
+                                (d * tan * aspect, d * tan)
+                            }
+                        };
+                        for (sx, sy) in [(-1.0, -1.0), (1.0, -1.0), (-1.0, 1.0), (1.0, 1.0)] {
+                            let p = cam.position + forward * d + right * (sx * w) + up * (sy * h);
+                            let q = m.project_point3(p);
+                            assert!(
+                                q.x.abs() <= 1.0 && q.y.abs() <= 1.0 && (0.0..=1.0).contains(&q.z),
+                                "{quality:?} {:?}: cascade {} misses {p} at {d} → {q}",
+                                cam.orthographic,
+                                c + 1
+                            );
+                        }
+                    }
+                }
             }
         }
     }
