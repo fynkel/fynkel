@@ -195,8 +195,11 @@ impl Physics {
         self.forget_joints_of(handle);
         let w = &mut self.world;
         for collider in w.bodies[handle].colliders() {
-            if let Some(slot) = self.followed.get_mut(collider.into_raw_parts().0 as usize) {
-                *slot = None;
+            if let Some(slot) = self.followed.get_mut(collider.into_raw_parts().0 as usize)
+                && let Some(followed) = slot.take()
+                && followed.spec.listens != 0
+            {
+                self.contacts.listening -= 1;
             }
         }
         if let Some(slot) = self.bodies.get_mut(handle.into_raw_parts().0 as usize) {
@@ -402,6 +405,24 @@ mod tests {
         physics
             .add_collider(None, Shape::Box { half_extents: Vector::new(50.0, 0.5, 50.0) }, at(0.0, -0.5, 0.0))
             .unwrap();
+    }
+
+    #[test]
+    fn removing_a_body_stops_its_colliders_listening() {
+        let mut physics = Physics::new();
+        let body = physics.add_body(BodyKind::Dynamic, 1, at(0.0, 0.0, 0.0)).unwrap();
+        let spec = ColliderSpec {
+            shape: ColliderShape::Sphere { radius: 0.5 },
+            center: Vector::ZERO,
+            is_trigger: false,
+            layer: 0,
+            material: Material::DEFAULT,
+            listens: LISTEN_COLLISIONS,
+        };
+        physics.add_object_collider(1, spec, ObjectPose::IDENTITY, Some(body)).unwrap();
+        assert_eq!(physics.contacts.listening, 1);
+        physics.remove_body(body).unwrap();
+        assert_eq!(physics.contacts.listening, 0, "nothing listens, so the steps skip the contacts");
     }
 
     #[test]
