@@ -76,4 +76,91 @@ void main() {
       expect(foundAt(world), [10.0]);
     });
   });
+
+  group('P2: a rigidbody under a rigidbody keeps its own motion', () {
+    for (final interpolation in RigidbodyInterpolation.values) {
+      test('${interpolation.name}: a child pushed sideways goes as far as a lone body', () {
+        final world = newWorld();
+        final lone = Rigidbody(interpolation: interpolation);
+        world.add(
+          GameObject(
+            name: 'lone',
+            transform: Transform(position: const Vec3(0, 0, 5)),
+            components: [lone],
+          ),
+        );
+        final parent = world.add(
+          GameObject(
+            name: 'parent',
+            components: [Rigidbody(interpolation: interpolation)],
+          ),
+        );
+        final child = Rigidbody(interpolation: interpolation);
+        final childObject = parent.add(GameObject(name: 'child', components: [child]));
+        lone.linearVelocity = const Vec3(5, 0, 0);
+        child.linearVelocity = const Vec3(5, 0, 0);
+        for (var i = 0; i < 50; i++) {
+          world.update(step);
+        }
+        expect(lone.position.x, closeTo(5, 0.2));
+        expect(child.position.x, closeTo(lone.position.x, 1e-3), reason: 'the body');
+        expect(childObject.worldTransform.position.x, closeTo(lone.gameObject.position.x, 1e-3), reason: 'its object');
+        expect(child.position.y, closeTo(lone.position.y, 1e-3), reason: 'it falls as the lone one does');
+      });
+    }
+
+    test('a forearm under an upper arm swings at the elbow, and stays on it', () {
+      final world = newWorld();
+      CharacterJoint free({Rigidbody? to}) => CharacterJoint(
+        anchor: const Vec3(0, 0.5, 0),
+        axis: const Vec3(0, 1, 0),
+        swingAxis: const Vec3(1, 0, 0),
+        connectedBody: to,
+        lowTwistLimit: SoftJointLimit(limit: -180.deg),
+        highTwistLimit: SoftJointLimit(limit: 180.deg),
+        swing1Limit: SoftJointLimit(limit: 180.deg),
+        swing2Limit: SoftJointLimit(limit: 180.deg),
+      );
+      final upperBody = Rigidbody(interpolation: RigidbodyInterpolation.interpolate);
+      final upper = world.add(
+        GameObject(
+          name: 'upper arm',
+          transform: Transform(position: const Vec3(0, 3, 0)),
+          components: [
+            BoxCollider(size: const Vec3(0.15, 1, 0.15)),
+            upperBody,
+            free(),
+          ],
+        ),
+      );
+      final forearmBody = Rigidbody(interpolation: RigidbodyInterpolation.interpolate);
+      final forearm = upper.add(
+        GameObject(
+          name: 'forearm',
+          transform: Transform(position: const Vec3(0, -1, 0)),
+          components: [
+            BoxCollider(size: const Vec3(0.15, 1, 0.15)),
+            forearmBody,
+            free(to: upperBody),
+          ],
+        ),
+      );
+      world.update(step);
+      forearmBody.addForceAtPosition(
+        const Vec3(1, 0, 0),
+        forearm.transformPoint(const Vec3(0, -0.5, 0)),
+        mode: ForceMode.impulse,
+      );
+      var most = 0.0;
+      for (var i = 0; i < 25; i++) {
+        world.update(step);
+        final bend = upper.worldTransform.rotation.angleTo(forearm.worldTransform.rotation);
+        if (bend > most) most = bend;
+        final elbow = upper.transformPoint(const Vec3(0, -0.5, 0));
+        final top = forearm.transformPoint(const Vec3(0, 0.5, 0));
+        expect((elbow - top).length, lessThan(0.05), reason: 'the forearm stays on the elbow');
+      }
+      expect(most, greaterThan(20.deg), reason: 'the elbow bends');
+    });
+  });
 }

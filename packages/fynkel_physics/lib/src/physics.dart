@@ -174,6 +174,7 @@ final class Physics extends WorldSystem implements Finalizable {
   var _stepLength = 1 / 50;
   final _below = FrameList<GameObject>();
   final _toFollow = FrameList<Collider>();
+  final _toPut = FrameList<Rigidbody>();
 
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
@@ -766,8 +767,33 @@ final class Physics extends WorldSystem implements Finalizable {
         raw.movedAngularVelocity(i),
         _steps,
       );
-      if (body._interpolation == RigidbodyInterpolation.none) body._put(body._p1, body._r1);
+      if (body._interpolation == RigidbodyInterpolation.none) {
+        body._prepare(body._p1, body._r1);
+        _toPut.add(body);
+      }
     }
+    _putAll();
+  }
+
+  /// Writes the bodies in [_toPut], each already [Rigidbody._prepare]d,
+  /// those higher in the hierarchy first: a body under another is placed
+  /// against where that one's object is now.
+  void _putAll() {
+    final put = _toPut;
+    if (put.isEmpty) return;
+    var low = 1 << 30, high = 0;
+    for (var i = 0; i < put.length; i++) {
+      final depth = put[i]._place.ancestors.length;
+      if (depth < low) low = depth;
+      if (depth > high) high = depth;
+    }
+    for (var depth = low; depth <= high; depth++) {
+      for (var i = 0; i < put.length; i++) {
+        final body = put[i];
+        if (body._place.ancestors.length == depth) body._write();
+      }
+    }
+    put.clear();
   }
 
   /// What [collider] listens for, on [body]: its object's callbacks and
@@ -1028,7 +1054,8 @@ final class Physics extends WorldSystem implements Finalizable {
         // Asleep, or not moved: where the last step left it, once.
         if (!body._resting) {
           body._resting = true;
-          body._put(body._p1, body._r1);
+          body._prepare(body._p1, body._r1);
+          _toPut.add(body);
         }
         continue;
       }
@@ -1037,11 +1064,13 @@ final class Physics extends WorldSystem implements Finalizable {
       final extrapolate = body._interpolation == RigidbodyInterpolation.extrapolate;
       if (_due || extrapolate) {
         final ahead = (alpha + (_due && extrapolate ? 1 : 0)) * delta;
-        body._put(body._p1 + body._v1 * ahead, _turned(body._r1, body._w1, ahead));
+        body._prepare(body._p1 + body._v1 * ahead, _turned(body._r1, body._w1, ahead));
       } else {
-        body._put(Vec3.lerp(body._p0, body._p1, alpha), Quat.slerp(body._r0, body._r1, alpha));
+        body._prepare(Vec3.lerp(body._p0, body._p1, alpha), Quat.slerp(body._r0, body._r1, alpha));
       }
+      _toPut.add(body);
     }
+    _putAll();
   }
 
   /// [rotation] turned at [spin] radians a second, about the world's axes,
