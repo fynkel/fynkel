@@ -385,7 +385,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 22;
+const int FY_ABI_VERSION = 23;
 
 const int FY_APPLE_MORE = 2;
 
@@ -492,6 +492,9 @@ final class FyLight extends ffi.Struct {
 
   @ffi.Float()
   external double softness;
+
+  @ffi.Bool()
+  external bool shadows;
 }
 
 final class FyMaterial extends ffi.Struct {
@@ -583,6 +586,12 @@ final class FyMeshRenderer extends ffi.Struct {
   external bool own_color;
 
   external FyColor color;
+
+  @ffi.Bool()
+  external bool cast_shadows;
+
+  @ffi.Bool()
+  external bool receive_shadows;
 }
 
 final class FyModel extends ffi.Opaque {}

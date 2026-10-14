@@ -538,6 +538,32 @@ fn the_worlds_debug_lines_are_copied_with_linear_colours() {
     assert_eq!(scene.lines[0].color[3], 0.25, "alpha as given");
 }
 
+/// Which lights cast shadows, and which renderers cast and receive them,
+/// reach the scene as the world has them.
+#[test]
+fn shadow_settings_reach_the_scene() {
+    let mut world = World::new();
+    let (cube, _) = stage1_into(&mut world);
+    let (scene, _) = extract(&world);
+    assert!(!scene.lights[0].shadows, "a light casts none unless asked");
+    assert!(scene.draws[0].cast_shadows && scene.draws[0].receive_shadows, "a renderer does both unless told");
+
+    let mut sun = None;
+    world.for_each::<Light>(|id, l| {
+        if l.kind == LightKind::Directional {
+            sun = Some(id);
+        }
+    });
+    let sun = sun.unwrap();
+    world.insert(sun, Light::DEFAULT.with_shadows(true)).unwrap();
+    let mut r = world.get::<MeshRenderer>(cube).unwrap();
+    (r.cast_shadows, r.receive_shadows) = (false, false);
+    world.insert(cube, r).unwrap();
+    let (scene, _) = extract(&world);
+    assert!(scene.lights[0].shadows);
+    assert!(!scene.draws[0].cast_shadows && !scene.draws[0].receive_shadows);
+}
+
 #[test]
 fn a_renderer_s_own_color_replaces_its_material_s_for_it_alone() {
     let mut world = World::new();
@@ -545,7 +571,7 @@ fn a_renderer_s_own_color_replaces_its_material_s_for_it_alone() {
     let material = world.get::<MeshRenderer>(cube).unwrap().material;
     let other = world.spawn();
     world.insert(other, Transform::from_position(Vec3::new(1.0, 0.0, 0.0))).unwrap();
-    let white = MeshRenderer { mesh: Some(mesh), material, own_color: true, color: Color::WHITE };
+    let white = MeshRenderer { mesh: Some(mesh), material, own_color: true, color: Color::WHITE, ..Default::default() };
     world.insert(other, white).unwrap();
 
     let (scene, _) = extract(&world);

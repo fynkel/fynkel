@@ -255,7 +255,8 @@ impl Extract {
                         color,
                     ),
                     _ => RenderLight::sun(forward, color),
-                },
+                }
+                .with_shadows(light.shadows),
             ));
         });
         lights.sort_unstable_by_key(|&(id, _)| id);
@@ -290,7 +291,13 @@ impl Extract {
             if r.own_color {
                 material.base_color = r.color.to_linear();
             }
-            scene.draws.push(Draw { mesh: mesh_key(mesh), model, material, cast_shadows: true, receive_shadows: true });
+            scene.draws.push(Draw {
+                mesh: mesh_key(mesh),
+                model,
+                material,
+                cast_shadows: r.cast_shadows,
+                receive_shadows: r.receive_shadows,
+            });
         });
 
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));

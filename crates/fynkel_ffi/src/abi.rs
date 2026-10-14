@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 22;
+pub const FY_ABI_VERSION: u32 = 23;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -87,11 +87,17 @@ pub struct FyMeshRenderer {
     /// The object's own base colour (sRGB, as a material's), with
     /// `own_color`.
     pub color: FyColor,
+    /// Whether it blocks lights that cast shadows.
+    pub cast_shadows: bool,
+    /// Whether shadows fall on it.
+    pub receive_shadows: bool,
 }
 
+/// `Default` is the engine's: no mesh or material, casting and receiving
+/// shadows.
 impl Default for FyMeshRenderer {
     fn default() -> Self {
-        Self { mesh: 0, material: 0, own_color: false, color: FyColor { r: 1.0, g: 1.0, b: 1.0, a: 1.0 } }
+        Self::from_component(MeshRenderer::default())
     }
 }
 
@@ -164,6 +170,8 @@ pub struct FyLight {
     pub spot_angle: f32,
     /// Spot lights: how much of the cone fades, from its edge in, 0 to 1.
     pub softness: f32,
+    /// Directional and spot lights: whether it casts shadows.
+    pub shadows: bool,
 }
 
 /// A metallic-roughness material (glTF's). Each texture multiplies its
@@ -308,6 +316,8 @@ impl CComponent for FyMeshRenderer {
             material: MaterialId::from_raw(self.material),
             own_color: self.own_color,
             color: self.color.into(),
+            cast_shadows: self.cast_shadows,
+            receive_shadows: self.receive_shadows,
         })
     }
     fn from_component(r: MeshRenderer) -> Self {
@@ -316,6 +326,8 @@ impl CComponent for FyMeshRenderer {
             material: r.material.map_or(0, MaterialId::raw),
             own_color: r.own_color,
             color: r.color.into(),
+            cast_shadows: r.cast_shadows,
+            receive_shadows: r.receive_shadows,
         }
     }
 }
@@ -368,6 +380,7 @@ impl CComponent for FyLight {
             range: self.range,
             spot_angle: self.spot_angle,
             softness: self.softness,
+            shadows: self.shadows,
         })
     }
     fn from_component(l: Light) -> Self {
@@ -384,6 +397,7 @@ impl CComponent for FyLight {
             range: l.range,
             spot_angle: l.spot_angle,
             softness: l.softness,
+            shadows: l.shadows,
         }
     }
 }

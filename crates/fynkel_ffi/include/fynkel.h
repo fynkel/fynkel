@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 22
+#define FY_ABI_VERSION 23
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -201,6 +201,10 @@ typedef struct FyMeshRenderer {
   // The object's own base colour (sRGB, as a material's), with
   // `own_color`.
   struct FyColor color;
+  // Whether it blocks lights that cast shadows.
+  bool cast_shadows;
+  // Whether shadows fall on it.
+  bool receive_shadows;
 } FyMeshRenderer;
 
 typedef struct FyCamera {
@@ -232,6 +236,8 @@ typedef struct FyLight {
   float spot_angle;
   // Spot lights: how much of the cone fades, from its edge in, 0 to 1.
   float softness;
+  // Directional and spot lights: whether it casts shadows.
+  bool shadows;
 } FyLight;
 
 // A mesh made from code, for `fy_mesh_new`. Each array holds
