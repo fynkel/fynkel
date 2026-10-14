@@ -2,9 +2,11 @@
 //! and shared by every collider made of it: triangles for a static or
 //! kinematic one (Unity's non-convex `MeshCollider`), or their convex hull
 //! (a convex one, or one on a dynamic body). The hull is worked out the
-//! first time it's needed; the unscaled shapes are made once and shared.
+//! first time it's needed; the unscaled shapes are made once and shared,
+//! and the last few scaled ones too, so a level's copies of a mesh at one
+//! scale share one shape.
 
-use std::cell::OnceCell;
+use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::HashMap;
 
 use rapier3d::parry::transformation::try_convex_hull;
@@ -25,12 +27,26 @@ struct Mesh {
     // The unscaled shapes.
     whole: OnceCell<Option<SharedShape>>,
     whole_hull: OnceCell<Option<SharedShape>>,
+    // The last scaled shapes made or used, the latest first.
+    scaled: RefCell<Vec<Scaled>>,
+}
+
+/// How many scaled shapes a mesh keeps.
+const SCALED: usize = 8;
+
+#[derive(Debug)]
+struct Scaled {
+    scale: Vector,
+    convex: bool,
+    shape: Option<SharedShape>,
 }
 
 #[derive(Debug, Default)]
 pub(crate) struct Meshes {
     meshes: HashMap<u64, Mesh>,
     last: u64,
+    // How many shapes were made of them.
+    made: Cell<usize>,
 }
 
 impl Mesh {
@@ -39,22 +55,52 @@ impl Mesh {
     }
 
     /// Its triangles scaled by `scale`, or None if they can't be made.
-    fn triangles(&self, scale: Vector) -> Option<SharedShape> {
+    fn triangles(&self, scale: Vector, made: &Cell<usize>) -> Option<SharedShape> {
         let make = |scale: Vector| {
+            made.set(made.get() + 1);
             let points = self.points.iter().map(|p| *p * scale).collect();
             SharedShape::trimesh_with_flags(points, self.triangles.clone(), TriMeshFlags::FIX_INTERNAL_EDGES).ok()
         };
-        if scale == Vector::ONE { self.whole.get_or_init(|| make(scale)).clone() } else { make(scale) }
+        if scale == Vector::ONE {
+            self.whole.get_or_init(|| make(scale)).clone()
+        } else {
+            self.scaled(scale, false, make)
+        }
     }
 
     /// Its hull scaled by `scale`, or None if it can't be made.
-    fn convex(&self, scale: Vector) -> Option<SharedShape> {
+    fn convex(&self, scale: Vector, made: &Cell<usize>) -> Option<SharedShape> {
         let (points, triangles) = self.hull()?;
         let make = |scale: Vector| {
+            made.set(made.get() + 1);
             let points = points.iter().map(|p| *p * scale).collect();
             SharedShape::convex_mesh(points, triangles)
         };
-        if scale == Vector::ONE { self.whole_hull.get_or_init(|| make(scale)).clone() } else { make(scale) }
+        if scale == Vector::ONE {
+            self.whole_hull.get_or_init(|| make(scale)).clone()
+        } else {
+            self.scaled(scale, true, make)
+        }
+    }
+
+    /// The shape at `scale` from the last few, or made by `make` and kept.
+    fn scaled(
+        &self,
+        scale: Vector,
+        convex: bool,
+        make: impl FnOnce(Vector) -> Option<SharedShape>,
+    ) -> Option<SharedShape> {
+        let mut scaled = self.scaled.borrow_mut();
+        if let Some(i) = scaled.iter().position(|s| s.scale == scale && s.convex == convex) {
+            scaled[..=i].rotate_right(1);
+            return scaled[0].shape.clone();
+        }
+        let shape = make(scale);
+        if scaled.len() == SCALED {
+            scaled.pop();
+        }
+        scaled.insert(0, Scaled { scale, convex, shape: shape.clone() });
+        shape
     }
 }
 
@@ -65,7 +111,12 @@ impl Meshes {
     pub(crate) fn shape(&self, id: u64, convex: bool, scale: Vector, smallest: f32) -> SharedShape {
         let Some(mesh) = self.meshes.get(&id) else { return SharedShape::ball(smallest) };
         let scale = scale.max(Vector::splat(smallest));
-        let shape = if convex { mesh.convex(scale).or_else(|| mesh.triangles(scale)) } else { mesh.triangles(scale) };
+        let made = &self.made;
+        let shape = if convex {
+            mesh.convex(scale, made).or_else(|| mesh.triangles(scale, made))
+        } else {
+            mesh.triangles(scale, made)
+        };
         shape.unwrap_or_else(|| SharedShape::ball(smallest))
     }
 
@@ -73,10 +124,10 @@ impl Meshes {
     /// whose points are all on a line, say.
     pub(crate) fn check(&self, id: u64, convex: bool) -> Result<(), PhysicsError> {
         let mesh = self.meshes.get(&id).ok_or_else(|| PhysicsError::Value(format!("no mesh {id}")))?;
-        if convex && mesh.convex(Vector::ONE).is_none() {
+        if convex && mesh.convex(Vector::ONE, &self.made).is_none() {
             return Err(PhysicsError::Value(format!("mesh {id} has no convex hull: are its points all on a line?")));
         }
-        if !convex && mesh.triangles(Vector::ONE).is_none() {
+        if !convex && mesh.triangles(Vector::ONE, &self.made).is_none() {
             return Err(PhysicsError::Value(format!("mesh {id}'s triangles make no shape")));
         }
         Ok(())
@@ -110,6 +161,7 @@ impl Physics {
                 hull: OnceCell::new(),
                 whole: OnceCell::new(),
                 whole_hull: OnceCell::new(),
+                scaled: RefCell::new(Vec::with_capacity(SCALED)),
             },
         );
         Ok(meshes.last)
@@ -134,5 +186,11 @@ impl Physics {
 
     pub fn mesh_count(&self) -> usize {
         self.meshes.meshes.len()
+    }
+
+    /// How many shapes were made of meshes so far: each mesh's own, and one
+    /// for each scale it's used at, shared by the colliders at that scale.
+    pub fn mesh_shapes_made(&self) -> usize {
+        self.meshes.made.get()
     }
 }

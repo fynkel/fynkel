@@ -215,10 +215,8 @@ spurious exit.
 *Test*: a controller spawned inside a trigger sphere; `entered == 1`
 without a `move`.
 
-**P5. `maxAngularVelocity` defaults to 50; Unity's is 7.** (S)
-`bodies.rs:63`, `rigidbody.dart:117`. The docs say defaults are Unity's.
-Set 7, and keep bowling's explicit 100. (Sleep time is fine: Rapier's
-0.5 s, not the 2 s the reader claimed.)
+**P5. `maxAngularVelocity` defaults to 50; Unity's is 7.** Wrong: see
+"Raised and left".
 
 **P6. A mesh collider at non-unit scale rebuilds its shape per instance
 and per scale change.** (M)
@@ -584,7 +582,12 @@ planned; neither needs anything here changed again.
   120 fresh fps with 0 coalesced, skipped or dropped, as main does; the
   skip path V5 fixes no longer runs on the Mac, so the gain is for slower
   GPUs. V9's window drag and the iPhone are left to the user's eyes.
-- [ ] Phase 2: physics' transform sync
+- [x] Phase 2: physics' transform sync (P1–P4, P6–P10; P5 was wrong,
+  see Raised and left). P1, P2, P3, P4, P6 and P10 each had a test that
+  failed first; P2 also with a forearm under an upper arm that must bend
+  at the elbow (the guide has no nested ragdoll). P7: 1000 spawns and
+  removes with 10,000 colliders in the world, 358 → 13 ms (JIT). P9 is
+  unreachable today, so hardened without a test. Physics ABI 13.
 - [ ] Phase 3: the Dart frame
 - [ ] Phase 4: the renderer
 - [ ] Phase 5: what a game writes
@@ -600,6 +603,9 @@ So they aren't raised again.
   at 10,000 objects); only the lease across it is wrong (V10). Whether
   CPU work hiding behind it explains the Note10+'s medium gap is for
   R11's measurement to say.
+- **`maxAngularVelocity` should default to 7** (P5): 7 was Unity 5.6's
+  and older. Current Unity (6 included, and 2020.1 already) defaults to 50
+  (`Physics.defaultMaxAngularSpeed`), as Fynkel does.
 - **A NaN pose dropping a whole follow batch**: unreachable, `Transform`
   refuses NaN. Hardened anyway in P9 because it is cheap.
 - **Bodies sleeping 5× later than Unity's**: wrong. Rapier's default is

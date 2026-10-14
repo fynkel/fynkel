@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 12
+#define FP_ABI_VERSION 13
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -307,6 +307,9 @@ typedef struct FpColliderSpec {
   // For `FP_COLLIDER_KIND_MESH`.
   uint64_t mesh;
   uint32_t convex;
+  // 1 for a character controller's: it meets triggers as a kinematic
+  // body would, before its first `fp_character_move` too. 0 otherwise.
+  uint32_t character;
 } FpColliderSpec;
 
 // An object's world transform, as the engine's `FyTransform` has it (the

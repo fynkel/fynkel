@@ -174,6 +174,10 @@ final class Physics extends WorldSystem implements Finalizable {
   var _stepLength = 1 / 50;
   final _below = FrameList<GameObject>();
   final _toFollow = FrameList<Collider>();
+  final _toPut = FrameList<Rigidbody>();
+  final _tree = FrameList<GameObject>();
+  // The colliders in the follow batch, told they're seen once it's taken.
+  final _batch = FrameList<Collider>();
 
   // The step: running between frames, due (a fixed step asked for it and
   // it hasn't run), and how many have been collected.
@@ -386,6 +390,7 @@ final class Physics extends WorldSystem implements Finalizable {
     for (final b in _bodies) {
       b._physics = null;
       b._id = 0;
+      b._interpolatedAt = -1;
     }
     for (final j in _joints) {
       j._physics = null;
@@ -409,16 +414,26 @@ final class Physics extends WorldSystem implements Finalizable {
     super.componentAdded(object, component);
     if (component is! Triggers && component is! Collisions) return;
     // The colliders it now listens for: on its object, or on a rigidbody
-    // there.
-    for (final c in _colliders) {
-      if (!identical(c.gameObject, object) && !identical(c._body?.gameObject, object)) continue;
-      if (_listensFor(c, c._body) != c._listens) _respec(c);
+    // there, so on it or below it.
+    final tree = _treeOf(object);
+    for (var i = 0; i < tree.length; i++) {
+      final o = tree[i];
+      for (var k = 0; k < o.componentCount; k++) {
+        final c = o.componentAt(k);
+        if (c is! Collider || c._id == 0) continue;
+        if (!identical(c.gameObject, object) && !identical(c._body?.gameObject, object)) continue;
+        if (_listensFor(c, c._body) != c._listens) _respec(c);
+      }
     }
+    tree.clear();
   }
 
   // --- Colliders -------------------------------------------------------------
 
   void _add(Collider collider) {
+    // Its rigidbody's native pose must be where its object is now: the
+    // collider is placed against it.
+    _follow();
     final object = collider.gameObject;
     final key = _freeKeys.isNotEmpty ? _freeKeys.removeLast() : (_byKey..add(null)).length - 1;
     collider._layer = object.layer;
@@ -479,6 +494,18 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._released();
   }
 
+  /// Takes [collider], out of the native world already, out of the lists:
+  /// [_reattach] couldn't put it back.
+  void _drop(Collider collider) {
+    _leaving.add(collider._key);
+    final last = _colliders.removeLast();
+    if (!identical(last, collider)) {
+      _colliders[collider._index] = last;
+      last._index = collider._index;
+    }
+    collider._released();
+  }
+
   /// Puts [collider] on [body] (or none) in the native world: out, and in
   /// again, where its object is now.
   void _reattach(Collider collider, Rigidbody? body) {
@@ -486,7 +513,12 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._id = 0;
     collider._body?._colliders.remove(collider);
     collider._body = null;
-    _addNative(collider, collider._key, body);
+    try {
+      _addNative(collider, collider._key, body);
+    } catch (_) {
+      _drop(collider);
+      rethrow;
+    }
   }
 
   void _respec(Collider collider) {
@@ -606,6 +638,7 @@ final class Physics extends WorldSystem implements Finalizable {
   /// Makes room to follow [count] colliders.
   void _startFollowing(int count) {
     _following = 0;
+    _batch.clear();
     if (count <= _capacity) return;
     for (final p in [_objectIds, _colliderIds, _transforms]) {
       if (p != nullptr) _memory.free(p);
@@ -632,7 +665,7 @@ final class Physics extends WorldSystem implements Finalizable {
       _reattach(c, place.body);
       return;
     }
-    place.seen();
+    _batch.add(c);
     _objectIds[_following] = c.gameObject.id;
     _colliderIds[_following] = c._id;
     _following++;
@@ -642,8 +675,17 @@ final class Physics extends WorldSystem implements Finalizable {
   void _endFollowing() {
     final count = _following;
     if (count == 0) return;
-    world.readWorldTransforms(_objectIds, count, _transforms);
-    checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
+    final batch = _batch;
+    try {
+      world.readWorldTransforms(_objectIds, count, _transforms);
+      checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
+      // Seen only once taken: a refused batch is tried again next time.
+      for (var i = 0; i < batch.length; i++) {
+        batch[i]._place.seen();
+      }
+    } finally {
+      batch.clear();
+    }
   }
 
   // --- Rigidbodies -----------------------------------------------------------
@@ -669,7 +711,7 @@ final class Physics extends WorldSystem implements Finalizable {
       .._index = _bodies.length
       .._reset(position, rotation);
     _bodies.add(body);
-    if (body._interpolation != RigidbodyInterpolation.none) _interpolated.add(body);
+    if (body._interpolation != RigidbodyInterpolation.none) _setInterpolated(body, true);
     if (body._startLinear != Vec3.zero || body._startAngular != Vec3.zero) {
       body._setVelocities(body._startLinear, body._startAngular);
       body
@@ -678,11 +720,17 @@ final class Physics extends WorldSystem implements Finalizable {
     }
     // The colliders on its object and below it, down to the next
     // rigidbody, move onto it.
-    for (final c in [..._colliders]) {
-      if (!identical(c.gameObject, object) && !c._place.isBelow(object)) continue;
-      c._place._walk(c.gameObject);
-      if (c._place.body != c._body) _reattach(c, c._place.body);
+    final tree = _treeOf(object);
+    for (var i = 0; i < tree.length; i++) {
+      final o = tree[i];
+      for (var k = 0; k < o.componentCount; k++) {
+        final c = o.componentAt(k);
+        if (c is! Collider || c._id == 0) continue;
+        c._place._walk(c.gameObject);
+        if (c._place.body != c._body) _reattach(c, c._place.body);
+      }
     }
+    tree.clear();
     // The joints waiting for it join.
     if (_waiting.isNotEmpty) _joinWaiting();
   }
@@ -690,7 +738,9 @@ final class Physics extends WorldSystem implements Finalizable {
   void _removeBody(Rigidbody body) {
     if (_disposed || body._id == 0) return;
     // Its colliders go to the next rigidbody up, or none, first: removing
-    // a body removes the colliders on it.
+    // a body removes the colliders on it. That one's native pose must be
+    // where its object is now.
+    _follow();
     final id = body._id;
     for (final c in [...body._colliders]) {
       c._place._walk(c.gameObject, without: body);
@@ -704,7 +754,7 @@ final class Physics extends WorldSystem implements Finalizable {
       _bodies[body._index] = last;
       last._index = body._index;
     }
-    _interpolated.remove(body);
+    _setInterpolated(body, false);
     // Its joints go with it, and wait for it to come back.
     for (final j in _joints) {
       if (j._id != 0 && (identical(j._body, body) || identical(j._connectedBody, body))) {
@@ -720,9 +770,36 @@ final class Physics extends WorldSystem implements Finalizable {
     body._writeSpec(_bodySpec.ref);
     checkPhysics(fp_rigidbody_spec_set(_world, body._id, _bodySpec));
     final interpolated = body._interpolation != RigidbodyInterpolation.none;
-    if (interpolated != _interpolated.contains(body)) {
-      interpolated ? _interpolated.add(body) : _interpolated.remove(body);
+    _setInterpolated(body, interpolated);
+  }
+
+  /// Puts [body] in the interpolated list, or takes it out.
+  void _setInterpolated(Rigidbody body, bool interpolated) {
+    if (interpolated == (body._interpolatedAt >= 0)) return;
+    final list = _interpolated;
+    if (interpolated) {
+      body._interpolatedAt = list.length;
+      list.add(body);
+      return;
     }
+    final last = list.removeLast();
+    if (!identical(last, body)) {
+      list[body._interpolatedAt] = last;
+      last._interpolatedAt = body._interpolatedAt;
+    }
+    body._interpolatedAt = -1;
+  }
+
+  /// [object] and every object below it, in [_tree]: clear it after.
+  FrameList<GameObject> _treeOf(GameObject object) {
+    final tree = _tree..add(object);
+    for (var i = 0; i < tree.length; i++) {
+      final o = tree[i];
+      for (var k = 0; k < o.childCount; k++) {
+        tree.add(o.childAt(k));
+      }
+    }
+    return tree;
   }
 
   /// Puts [body] where the game put its object, at once.
@@ -761,8 +838,33 @@ final class Physics extends WorldSystem implements Finalizable {
         raw.movedAngularVelocity(i),
         _steps,
       );
-      if (body._interpolation == RigidbodyInterpolation.none) body._put(body._p1, body._r1);
+      if (body._interpolation == RigidbodyInterpolation.none) {
+        body._prepare(body._p1, body._r1);
+        _toPut.add(body);
+      }
     }
+    _putAll();
+  }
+
+  /// Writes the bodies in [_toPut], each already [Rigidbody._prepare]d,
+  /// those higher in the hierarchy first: a body under another is placed
+  /// against where that one's object is now.
+  void _putAll() {
+    final put = _toPut;
+    if (put.isEmpty) return;
+    var low = 1 << 30, high = 0;
+    for (var i = 0; i < put.length; i++) {
+      final depth = put[i]._place.ancestors.length;
+      if (depth < low) low = depth;
+      if (depth > high) high = depth;
+    }
+    for (var depth = low; depth <= high; depth++) {
+      for (var i = 0; i < put.length; i++) {
+        final body = put[i];
+        if (body._place.ancestors.length == depth) body._write();
+      }
+    }
+    put.clear();
   }
 
   /// What [collider] listens for, on [body]: its object's callbacks and
@@ -908,6 +1010,7 @@ final class Physics extends WorldSystem implements Finalizable {
     final key = _freeJointKeys.isNotEmpty ? _freeJointKeys.removeLast() : (_jointsByKey..add(null)).length - 1;
     _jointsByKey[key] = joint;
     joint._key = key;
+    joint._index = _joints.length;
     _joints.add(joint);
     _waiting.add(joint);
     _follow();
@@ -915,8 +1018,12 @@ final class Physics extends WorldSystem implements Finalizable {
 
   void _removeJoint(Joint joint) {
     if (_disposed) return;
-    _waiting.remove(joint);
-    _joints.remove(joint);
+    if (joint._id == 0) _waiting.remove(joint);
+    final last = _joints.removeLast();
+    if (!identical(last, joint)) {
+      _joints[joint._index] = last;
+      last._index = joint._index;
+    }
     _jointsByKey[joint._key] = null;
     _freeJointKeys.add(joint._key);
     if (joint._id == 0) return;
@@ -1023,7 +1130,8 @@ final class Physics extends WorldSystem implements Finalizable {
         // Asleep, or not moved: where the last step left it, once.
         if (!body._resting) {
           body._resting = true;
-          body._put(body._p1, body._r1);
+          body._prepare(body._p1, body._r1);
+          _toPut.add(body);
         }
         continue;
       }
@@ -1032,11 +1140,13 @@ final class Physics extends WorldSystem implements Finalizable {
       final extrapolate = body._interpolation == RigidbodyInterpolation.extrapolate;
       if (_due || extrapolate) {
         final ahead = (alpha + (_due && extrapolate ? 1 : 0)) * delta;
-        body._put(body._p1 + body._v1 * ahead, _turned(body._r1, body._w1, ahead));
+        body._prepare(body._p1 + body._v1 * ahead, _turned(body._r1, body._w1, ahead));
       } else {
-        body._put(Vec3.lerp(body._p0, body._p1, alpha), Quat.slerp(body._r0, body._r1, alpha));
+        body._prepare(Vec3.lerp(body._p0, body._p1, alpha), Quat.slerp(body._r0, body._r1, alpha));
       }
+      _toPut.add(body);
     }
+    _putAll();
   }
 
   /// [rotation] turned at [spin] radians a second, about the world's axes,

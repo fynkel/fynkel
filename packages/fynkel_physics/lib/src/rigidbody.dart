@@ -238,7 +238,7 @@ final class Rigidbody extends Behaviour {
   @override
   Vec3 get position => _readState('position').pose.position.get();
   @override
-  set position(Vec3 value) => _teleport(value, rotation);
+  set position(Vec3 value) => _teleport(value, _moved ? gameObject.worldTransform.rotation : rotation);
 
   /// How the body is turned, in the world: where the last step left it, as
   /// [position]. Setting it turns the body and its object at once. Throws
@@ -246,7 +246,11 @@ final class Rigidbody extends Behaviour {
   @override
   Quat get rotation => _readState('rotation').pose.rotation.get();
   @override
-  set rotation(Quat value) => _teleport(position, value);
+  set rotation(Quat value) => _teleport(_moved ? gameObject.worldTransform.position : position, value);
+
+  /// Whether the game moved its object since physics last looked: then the
+  /// object, not the body, says where the rest of it is.
+  bool get _moved => _id != 0 && _place.chain() != _place.stamp;
 
   /// Whether it's asleep: still for a while, so the step skips it until
   /// something touches it or the game pushes it. False while it isn't in
@@ -335,6 +339,8 @@ final class Rigidbody extends Behaviour {
   int _id = 0;
   int _key = 0;
   int _index = 0;
+  // Where it is in the physics' interpolated list, or -1.
+  int _interpolatedAt = -1;
   final _colliders = <Collider>[];
   final _place = _Place();
 
@@ -348,6 +354,12 @@ final class Rigidbody extends Behaviour {
   var _w1 = Vec3.zero;
   var _movedAt = -1;
   var _resting = true;
+
+  // Where [_write] puts its object, and whether the game left the object
+  // alone since physics last looked.
+  var _toPosition = Vec3.zero;
+  var _toRotation = Quat.identity;
+  var _clean = false;
 
   // Where movePosition and moveRotation send it, and the step count then.
   var _movePosition = Vec3.zero;
@@ -463,13 +475,36 @@ final class Rigidbody extends Behaviour {
   /// game moved it since physics last looked: then the next step puts the
   /// body where the game did.
   void _put(Vec3 position, Quat rotation) {
+    _prepare(position, rotation);
+    _write();
+  }
+
+  /// Notes where [_write] puts its object, and whether the game moved it.
+  /// For several bodies, [Physics._putAll] prepares them all before it
+  /// writes any: a body above this one moving its object is not the game
+  /// moving it.
+  void _prepare(Vec3 position, Quat rotation) {
+    _toPosition = position;
+    _toRotation = rotation;
     final place = _place;
-    if (place.chain() != place.stamp) return;
+    _clean = place.chain() == place.stamp;
+    if (!_clean) return;
     final colliders = _colliders;
     for (var i = 0; i < colliders.length; i++) {
       final c = colliders[i];
       c._clean = c._place.chain() == c._place.stamp;
     }
+  }
+
+  /// Puts its object where [_prepare] noted, against where its parent is
+  /// now, if the game left it alone.
+  void _write() {
+    if (!_clean) return;
+    _clean = false;
+    final position = _toPosition;
+    final rotation = _toRotation;
+    final place = _place;
+    final colliders = _colliders;
     final object = gameObject;
     final ancestors = place.ancestors;
     if (ancestors.isEmpty) {
