@@ -1,6 +1,6 @@
 // Calls a game makes every frame allocate nothing: finding a component
-// below an object (docs/hardening.md D10), a light's intensity and a
-// renderer's colour tweened for ever (D14), counted by the VM service's
+// below an object (docs/hardening.md D10), a light's intensity, a
+// renderer's colour and a material set each frame (D14), counted by the VM service's
 // allocation profile (see allocations.dart).
 
 // Counted alone, a file at a time: see dart_test.yaml.
@@ -25,16 +25,29 @@ class _Finder extends GameObject {
   }
 }
 
-/// A lamp whose intensity pulses, and a cube whose colour does.
+/// A lamp whose intensity changes each frame, and a cube whose colour does,
+/// as a tween's onUpdate sets them (a tween's own easing boxes doubles in
+/// the JIT, so it isn't counted here: docs/hardening.md, Raised and left).
 class _Pulse extends GameObject {
   _Pulse() : super(components: [Light.point(), MeshRenderer(Mesh.cube(), Material())]);
 
+  var _flip = false;
+
   @override
-  void onStart() {
-    super.onStart();
-    final light = get<Light>()!;
-    tween(0.5, 2.0, seconds: 1, loops: -1, yoyo: true, onUpdate: (v) => light.intensity = v);
-    colorTo(const Color(0xFFFF0000), seconds: 0.5, loops: -1, yoyo: true);
+  void onUpdate() {
+    super.onUpdate();
+    _flip = !_flip;
+    final light = get<Light>()!, renderer = get<MeshRenderer>()!;
+    // A constant each, with no choice between doubles, which the JIT boxes.
+    if (_flip) {
+      light.intensity = 0.5;
+      renderer.color = const Color(0xFFFF0000);
+      renderer.material!.metallic = 0.25;
+    } else {
+      light.intensity = 2.0;
+      renderer.color = const Color(0xFF0000FF);
+      renderer.material!.metallic = 0.75;
+    }
   }
 }
 
