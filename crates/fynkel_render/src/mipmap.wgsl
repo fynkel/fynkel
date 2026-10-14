@@ -5,9 +5,14 @@
 // meet, so one bilinear sample averages them. In an sRGB texture the
 // hardware decodes to linear before filtering and encodes after, so the
 // average is taken in linear light.
+//
+// Alpha is then scaled by the level's `alpha_scale` (texture.rs,
+// `alpha_scales`), so a cut-out keeps its coverage as it shrinks.
 
 @group(0) @binding(0) var source: texture_2d<f32>;
 @group(0) @binding(1) var source_sampler: sampler;
+// x: what this level's alpha is multiplied by.
+@group(0) @binding(2) var<uniform> alpha_scale: vec4<f32>;
 
 struct VertexOut {
     @builtin(position) clip: vec4<f32>,
@@ -27,5 +32,6 @@ fn vs_main(@builtin(vertex_index) index: u32) -> VertexOut {
 
 @fragment
 fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
-    return textureSampleLevel(source, source_sampler, in.uv, 0.0);
+    let c = textureSampleLevel(source, source_sampler, in.uv, 0.0);
+    return vec4<f32>(c.rgb, min(c.a * alpha_scale.x, 1.0));
 }

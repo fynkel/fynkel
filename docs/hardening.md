@@ -606,6 +606,10 @@ planned; neither needs anything here changed again.
 - [x] Phase 4: the renderer (R1–R13; R9 done by V9, R13's samplers
   left, see Raised and left). Every golden unchanged after R1 and R2;
   R6's two cascade goldens re-blessed after looking (the band now blends).
+  R12 keeps coverage in the mips (scaled for a 0.5 cutoff, counted where
+  they're sampled): its first try, in the shader, made gradient alpha
+  see-through far off (CI's glTF alpha test). That golden re-blessed after
+  looking: other cutoffs' cut lines move by about a pixel.
   R3's two-view test passes, R5's goldens exist. Each bug row had a test
   that failed first; R10's also fails without its depth clamp. On the
   Note10+: the pipeline cache takes a warm start's first-frame gap from

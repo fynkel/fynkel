@@ -10,6 +10,8 @@
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
+use wgpu::util::DeviceExt;
+
 use crate::assets::PipelineMaker;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, MaterialTextures, TextureKey};
@@ -37,7 +39,20 @@ impl Mipmapper {
         let shader = device.create_shader_module(wgpu::include_wgsl!("mipmap.wgsl"));
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mipmap"),
-            entries: &[texture_entry(0), sampler_entry(1)],
+            entries: &[
+                texture_entry(0),
+                sampler_entry(1),
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: false,
+                        min_binding_size: None,
+                    },
+                    count: None,
+                },
+            ],
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mipmap"),
@@ -85,8 +100,16 @@ impl Mipmapper {
         })
     }
 
-    /// Records drawing levels 1 and up of `texture` from level 0.
-    fn record(&self, device: &wgpu::Device, encoder: &mut wgpu::CommandEncoder, texture: &wgpu::Texture) {
+    /// Records drawing levels 1 and up of `texture` from level 0, each
+    /// level's alpha multiplied by its entry in `alpha_scales` (1 where
+    /// there's none).
+    fn record(
+        &self,
+        device: &wgpu::Device,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        alpha_scales: &[f32],
+    ) {
         let pipeline = if texture.format().is_srgb() {
             self.srgb.get_or_init(|| self.make(wgpu::TextureFormat::Rgba8UnormSrgb))
         } else {
@@ -100,12 +123,19 @@ impl Mipmapper {
             })
         };
         for mip in 1..texture.mip_level_count() {
+            let scale = alpha_scales.get(mip as usize).copied().unwrap_or(1.0);
+            let scale = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                label: Some("mipmap alpha scale"),
+                contents: bytemuck::bytes_of(&[scale, 0.0, 0.0, 0.0]),
+                usage: wgpu::BufferUsages::UNIFORM,
+            });
             let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("mipmap"),
                 layout: &self.layout,
                 entries: &[
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&level(mip - 1)) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::Sampler(&self.sampler) },
+                    wgpu::BindGroupEntry { binding: 2, resource: scale.as_entire_binding() },
                 ],
             });
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -261,7 +291,10 @@ impl GpuTexture {
             size,
         );
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor { label: Some("mipmaps") });
-        kit.mipmapper.record(device, &mut encoder, &texture);
+        // Colour's alpha may be a cut-out's; the other slots have none.
+        let alpha_scales =
+            if space == ColorSpace::Srgb { alpha_scales(width, height, rgba, mip_level_count) } else { Vec::new() };
+        kit.mipmapper.record(device, &mut encoder, &texture, &alpha_scales);
         gpu.queue.submit([encoder.finish()]);
 
         let bytes = (0..mip_level_count)
@@ -412,5 +445,86 @@ mod shrink_tests {
         let (width, height, pixels) = shrink_to(1, 3, 1, &rgba);
         assert_eq!((width, height), (1, 1));
         assert_eq!(pixels[0], 50);
+    }
+}
+
+/// The alpha a cut-out's texel needs to be there, as the scales are made
+/// for: glTF's default cutoff, and most textures'.
+const COVERAGE_CUTOFF: f32 = 0.5;
+
+/// What each mip level's alpha is multiplied by, so as many of its texels
+/// reach [`COVERAGE_CUTOFF`] as of the image's own (Castaño's
+/// coverage-preserving mips; Unity's "Mip Maps Preserve Coverage").
+/// Averaged, a fine cut-out's alpha sinks below the cutoff with distance,
+/// and the surface and its shadow vanish.
+///
+/// The levels are followed as the GPU makes them: each the 2×2 average of
+/// the one above as stored. A level is read filtered, so the share is
+/// counted where it's sampled: at its texels and halfway between them. A
+/// level too small to hold the share (all its texels alike) is covered
+/// whole rather than not at all. Empty where no
+/// texel is see-through, or none reaches the cutoff: nothing to keep.
+fn alpha_scales(width: u32, height: u32, rgba: &[u8], levels: u32) -> Vec<f32> {
+    let alpha = |i: usize| rgba[i * 4 + 3];
+    let n = (width * height) as usize;
+    if (0..n).all(|i| alpha(i) == 255) {
+        return Vec::new();
+    }
+    let reaching = (0..n).filter(|&i| f32::from(alpha(i)) / 255.0 >= COVERAGE_CUTOFF).count();
+    if reaching == 0 {
+        return Vec::new();
+    }
+    let share = reaching as f64 / n as f64;
+    let mut level: Vec<f32> = (0..n).map(|i| f32::from(alpha(i)) / 255.0).collect();
+    let (mut w, mut h) = (width as usize, height as usize);
+    let mut scales = vec![1.0];
+    let mut sorted = Vec::new();
+    for _ in 1..levels {
+        let (nw, nh) = ((w / 2).max(1), (h / 2).max(1));
+        let at = |x: usize, y: usize| level[y.min(h - 1) * w + x.min(w - 1)];
+        let raw: Vec<f32> = (0..nw * nh)
+            .map(|i| {
+                let (x, y) = (i % nw * 2, i / nw * 2);
+                (at(x, y) + at(x + 1, y) + at(x, y + 1) + at(x + 1, y + 1)) * 0.25
+            })
+            .collect();
+        // Each texel, and the filtered alpha halfway to the next across,
+        // down and diagonally.
+        let near = |x: usize, y: usize| raw[y.min(nh - 1) * nw + x.min(nw - 1)];
+        sorted.clear();
+        for y in 0..nh {
+            for x in 0..nw {
+                let (a, right, down, both) = (near(x, y), near(x + 1, y), near(x, y + 1), near(x + 1, y + 1));
+                sorted.extend([a, (a + right) * 0.5, (a + down) * 0.5, (a + right + down + both) * 0.25]);
+            }
+        }
+        // The alpha the share's last sample has: scaled to just reach the
+        // cutoff once stored as 8 bits.
+        let k = ((share * sorted.len() as f64).ceil() as usize).clamp(1, sorted.len());
+        let (_, &mut threshold, _) = sorted.select_nth_unstable_by(k - 1, |a, b| b.total_cmp(a));
+        let scale = if threshold > 0.0 { (COVERAGE_CUTOFF * 255.0).ceil() / 255.0 / threshold } else { 1.0 };
+        scales.push(scale);
+        level = raw.iter().map(|a| ((a * scale).min(1.0) * 255.0).round() / 255.0).collect();
+        (w, h) = (nw, nh);
+    }
+    scales
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Stripes, 3 texels opaque in each 8, and an opaque texture, which is
+    /// left alone.
+    #[test]
+    fn mips_keep_a_cutouts_share() {
+        let stripes: Vec<u8> = (0..64u32 * 64).flat_map(|i| [255, 255, 255, if i % 8 < 3 { 255 } else { 0 }]).collect();
+        let scales = alpha_scales(64, 64, &stripes, 7);
+        assert_eq!(scales.len(), 7);
+        // None thins out; the level where the stripes alternate, 0.5 and 0,
+        // is filtered to 0.25 between its texels, so it's raised.
+        assert!(scales[1..].iter().all(|&s| s >= 1.0), "{scales:?}");
+        assert!(scales[2] > 1.2, "{scales:?}");
+        assert!(alpha_scales(4, 4, &[255; 64], 3).is_empty());
     }
 }
