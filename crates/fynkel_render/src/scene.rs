@@ -96,6 +96,33 @@ pub struct CameraView {
     /// one: off, its clear colour (a minimap's, say). The sky lights the
     /// scene either way.
     pub sky: bool,
+    /// Whether light brighter than white glows into what's around it, and
+    /// how: `None`, it doesn't (a minimap's, say). Only where the quality
+    /// level draws it ([`Quality::bloom`]).
+    pub bloom: Option<Bloom>,
+}
+
+/// Light brighter than white glowing into what's around it: a lamp's
+/// bulb, a glowing sword, the sun on metal ([`CameraView::bloom`]).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bloom {
+    /// How much of the light glows: 0, none; 1, about as much as it gives
+    /// off itself, spread wide.
+    pub strength: f32,
+    /// How bright light must be to glow, in linear light: at 1, only what's
+    /// brighter than white (a lit white surface stays as it is), fading in
+    /// over half as much again.
+    pub threshold: f32,
+}
+
+impl Bloom {
+    pub const DEFAULT: Self = Self { strength: 1.0, threshold: 1.0 };
+}
+
+impl Default for Bloom {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 impl CameraView {
@@ -110,6 +137,7 @@ impl CameraView {
             far: 1000.0,
             clear_color: [0.0; 3],
             sky: true,
+            bloom: None,
         }
     }
 }
@@ -262,6 +290,12 @@ impl Quality {
                 distance: 100.0,
             },
         }
+    }
+
+    /// Whether cameras' [`CameraView::bloom`] is drawn: above low. At low
+    /// there's no scene image to work it out from (`image_format`).
+    pub fn bloom(self) -> bool {
+        self != Self::Low
     }
 
     /// The format of the image the scene is drawn into, with a last pass

@@ -21,8 +21,9 @@
 //! 1. The scene: every draw, then the debug lines on top. Above
 //!    [`Quality::Low`] it is drawn into a half-float image (the scene
 //!    image); at low, straight into the view.
-//! 2. The last pass, when there is a scene image: the image onto the view
-//!    (`finish.wgsl`). Effects that need the whole picture (bloom) go here.
+//! 2. Bloom, when the camera has it and there is a scene image (`bloom`).
+//! 3. The last pass, when there is a scene image: the image onto the view
+//!    (`finish.wgsl`), with bloom's glow added.
 
 use std::sync::{Arc, OnceLock};
 
@@ -30,11 +31,13 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
 use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
+use crate::bloom::BloomChain;
 use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{
-    Blend, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind, TextureKey,
+    Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind,
+    TextureKey,
 };
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
 use crate::sky::{self, Environment, SPECULAR_MIPS};
@@ -214,6 +217,8 @@ struct SceneImage {
     format: wgpu::TextureFormat,
     view: wgpu::TextureView,
     bind_group: wgpu::BindGroup,
+    /// Bloom's images, made the first frame a camera has bloom.
+    bloom: Option<BloomChain>,
 }
 
 /// Which faces a pipeline draws, and which way round.
@@ -342,6 +347,7 @@ pub(crate) struct Pipelines {
     image_layout: wgpu::BindGroupLayout,
     sky_light_layout: wgpu::BindGroupLayout,
     sky_image_layout: wgpu::BindGroupLayout,
+    bloom_layout: wgpu::BindGroupLayout,
     forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
     /// One for each [`Variant`], at its index.
     forward: [OnceLock<wgpu::RenderPipeline>; Variant::COUNT],
@@ -350,6 +356,8 @@ pub(crate) struct Pipelines {
     sky: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
     finish: OnceLock<wgpu::RenderPipeline>,
+    /// The same, adding bloom's glow.
+    finish_bloom: OnceLock<wgpu::RenderPipeline>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -410,6 +418,9 @@ pub struct Renderer {
     /// it's drawn behind everything.
     sky_next: Option<SkyKind>,
     sky_drawn: bool,
+    /// This frame's bloom: the camera's, where the level draws it and it
+    /// glows at all.
+    bloom: Option<Bloom>,
     /// The cubes (and image) of the last such sky, kept until another.
     environment: Option<Environment>,
     size: (u32, u32),
@@ -496,6 +507,7 @@ impl Renderer {
             clear: wgpu::Color::BLACK,
             sky_next: None,
             sky_drawn: false,
+            bloom: None,
             environment: None,
             size: (0, 0),
             kit,
@@ -574,12 +586,14 @@ impl Renderer {
         self.shadow_shape = [None; 2];
         self.sky_next = None;
         self.sky_drawn = false;
+        self.bloom = None;
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
             self.clear = wgpu::Color::BLACK;
             return stats;
         };
+        self.bloom = camera.bloom.filter(|b| self.quality.bloom() && b.strength > 0.0);
         let [r, g, b] = camera.clear_color.map(f64::from);
         // Linear: the sRGB target encodes it like everything else.
         self.clear = wgpu::Color { r, g, b, a: 1.0 };
@@ -943,13 +957,18 @@ impl Renderer {
         {
             self.environment = Some(Environment::new(&self.kit.sky, encoder, kind));
         }
+        if let (Some(_), Some(image)) = (self.bloom, self.targets.as_mut().and_then(|t| t.image.as_mut()))
+            && image.bloom.is_none()
+        {
+            image.bloom = Some(BloomChain::new(&self.kit.bloom, &image.view, width, height));
+        }
         let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, environment, .. } = self;
         let sky_light = match (&self.sky_next, &*environment) {
             (Some(_), Some(environment)) => &environment.light,
             _ => &kit.sky.no_light,
         };
         let sky_image = environment.as_ref().and_then(|e| e.image.as_ref()).unwrap_or(&kit.sky.no_image);
-        let targets = targets.as_ref().expect("made above");
+        let targets = targets.as_mut().expect("made above");
         let shadow_maps = shadow_maps.as_ref().expect("made above");
 
         // Bind groups for texture sets not seen before. A steady frame only
@@ -1100,7 +1119,12 @@ impl Renderer {
             }
         }
 
-        // 2. The last pass: the scene image onto the view.
+        // 2. Bloom's glow, from the scene image.
+        if let (Some(bloom), Some(SceneImage { bloom: Some(chain), .. })) = (self.bloom, &mut targets.image) {
+            chain.encode(&kit.bloom, &kit.gpu.queue, encoder, bloom);
+        }
+
+        // 3. The last pass: the scene image onto the view.
         if let Some(image) = &targets.image {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("finish"),
@@ -1119,8 +1143,14 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(pipelines.finish());
             pass.set_bind_group(0, &image.bind_group, &[]);
+            match image.bloom.as_ref().filter(|_| self.bloom.is_some()) {
+                Some(chain) => {
+                    pass.set_pipeline(pipelines.finish(true));
+                    pass.set_bind_group(1, chain.glow(), &[]);
+                }
+                None => pass.set_pipeline(pipelines.finish(false)),
+            }
             pass.draw(0..3, 0..1);
         }
     }
@@ -1165,7 +1195,7 @@ impl Renderer {
                 layout: &self.kit.image_layout,
                 entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&view) }],
             });
-            SceneImage { format, view, bind_group }
+            SceneImage { format, view, bind_group, bloom: None }
         });
         let color_format = image.as_ref().map_or(self.format, |i| i.format);
         Targets {
@@ -1200,11 +1230,13 @@ impl Pipelines {
             image_layout: kit.image_layout.clone(),
             sky_light_layout: kit.sky.light_layout.clone(),
             sky_image_layout: kit.sky.image_layout.clone(),
+            bloom_layout: kit.bloom.layout.clone(),
             forward_shader: OnceLock::new(),
             forward: std::array::from_fn(|_| OnceLock::new()),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
             finish: OnceLock::new(),
+            finish_bloom: OnceLock::new(),
         }
     }
 
@@ -1432,18 +1464,26 @@ impl Pipelines {
         })
     }
 
-    /// The last pass's pipeline, onto a view (of an sRGB format).
-    fn finish(&self) -> &wgpu::RenderPipeline {
+    /// The last pass's pipeline, onto a view (of an sRGB format), adding
+    /// bloom's glow or not.
+    fn finish(&self, bloom: bool) -> &wgpu::RenderPipeline {
         assert!(self.format.is_srgb(), "a view's format is sRGB");
-        self.finish.get_or_init(|| self.make_finish())
+        match bloom {
+            false => self.finish.get_or_init(|| self.make_finish(false)),
+            true => self.finish_bloom.get_or_init(|| self.make_finish(true)),
+        }
     }
 
-    fn make_finish(&self) -> wgpu::RenderPipeline {
+    fn make_finish(&self, bloom: bool) -> wgpu::RenderPipeline {
         // The last pass, onto a view.
-        let shader = self.device.create_shader_module(wgpu::include_wgsl!("finish.wgsl"));
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("finish"),
+            source: wgpu::ShaderSource::Wgsl(concat!(include_str!("neutral.wgsl"), include_str!("finish.wgsl")).into()),
+        });
+        let groups = [Some(&self.image_layout), Some(&self.bloom_layout)];
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("finish"),
-            bind_group_layouts: &[Some(&self.image_layout)],
+            bind_group_layouts: if bloom { &groups } else { &groups[..1] },
             immediate_size: 0,
         });
         self.maker.make(wgpu::RenderPipelineDescriptor {
@@ -1460,7 +1500,7 @@ impl Pipelines {
             multisample: Default::default(),
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_main"),
+                entry_point: Some(if bloom { "fs_bloom" } else { "fs_main" }),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.format,
