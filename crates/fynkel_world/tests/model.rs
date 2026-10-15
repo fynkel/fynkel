@@ -54,7 +54,9 @@ fn a_models_materials_become_the_worlds() {
     assert_eq!(bed.emissive_texture, None);
     let cutoff = model.materials().iter().position(|m| m.name == "MatCutoff25").unwrap();
     let cutoff = world.material(ids.materials[cutoff]).unwrap();
-    assert_eq!((cutoff.alpha_cutoff, cutoff.double_sided), (0.25, true));
+    assert_eq!((cutoff.alpha_cutoff, cutoff.double_sided, cutoff.blend), (0.25, true, Blend::Opaque));
+    let glass = model.materials().iter().position(|m| m.name == "MatBlend").unwrap();
+    assert_eq!(world.material(ids.materials[glass]).unwrap().blend, Blend::Transparent);
 }
 
 #[test]

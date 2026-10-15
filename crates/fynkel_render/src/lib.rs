@@ -19,7 +19,7 @@ pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
-    CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
+    Blend, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
     RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
 };
 pub use wgpu;

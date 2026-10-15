@@ -19,8 +19,9 @@ use fynkel_render::{Fog, Gpu, Quality, Renderer, Sky, SkyImage, SkyKind};
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
-    MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId, Transform, Vec2, Vec3, World,
+    Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData,
+    MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId, Transform, Vec2, Vec3,
+    World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -28,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 25;
+pub const FY_ABI_VERSION: u32 = 26;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -177,13 +178,21 @@ pub struct FyLight {
     pub shadows: bool,
 }
 
+/// `FyMaterial::blend`: covers what's behind.
+pub const FY_BLEND_OPAQUE: u32 = 0;
+/// Laid over what's behind by its alpha (glTF's BLEND).
+pub const FY_BLEND_TRANSPARENT: u32 = 1;
+/// Adds its light, times its alpha, to what's behind.
+pub const FY_BLEND_ADDITIVE: u32 = 2;
+
 /// A metallic-roughness material (glTF's). Each texture multiplies its
 /// factor; 0 is no texture. `Default` is the engine's default material,
 /// not zeros (a UV scale of 0 would show one texel).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyMaterial {
-    /// sRGB. Its alpha matters only for cut-outs.
+    /// sRGB. Its alpha is how opaque it is: it matters for cut-outs and
+    /// for surfaces that blend.
     pub base_color: FyColor,
     /// 0–1.
     pub metallic: f32,
@@ -202,6 +211,8 @@ pub struct FyMaterial {
     pub alpha_cutoff: f32,
     /// Both sides of each triangle are drawn.
     pub double_sided: bool,
+    /// `FY_BLEND_*`: how the surface covers what's behind it.
+    pub blend: u32,
     /// Read as sRGB.
     pub base_color_texture: u64,
     /// Tangent space, glTF's convention. Linear.
@@ -419,24 +430,32 @@ impl Default for FyMaterial {
     }
 }
 
-impl From<FyMaterial> for Material {
-    fn from(m: FyMaterial) -> Self {
-        Material {
-            base_color: m.base_color.into(),
-            metallic: m.metallic,
-            roughness: m.roughness,
-            emissive: m.emissive.into(),
-            emissive_intensity: m.emissive_intensity,
-            uv_scale: m.uv_scale.into(),
-            uv_offset: m.uv_offset.into(),
-            alpha_cutoff: m.alpha_cutoff,
-            double_sided: m.double_sided,
-            base_color_texture: TextureId::from_raw(m.base_color_texture),
-            normal_texture: TextureId::from_raw(m.normal_texture),
-            metallic_roughness_texture: TextureId::from_raw(m.metallic_roughness_texture),
-            occlusion_texture: TextureId::from_raw(m.occlusion_texture),
-            emissive_texture: TextureId::from_raw(m.emissive_texture),
-        }
+impl FyMaterial {
+    /// The world's material, or what's wrong with this one.
+    fn to_material(self) -> Result<Material, Error> {
+        let blend = match self.blend {
+            FY_BLEND_OPAQUE => Blend::Opaque,
+            FY_BLEND_TRANSPARENT => Blend::Transparent,
+            FY_BLEND_ADDITIVE => Blend::Additive,
+            other => return Err(Error::new(FyStatus::InvalidValue, format!("{other} isn't a kind of blend"))),
+        };
+        Ok(Material {
+            base_color: self.base_color.into(),
+            metallic: self.metallic,
+            roughness: self.roughness,
+            emissive: self.emissive.into(),
+            emissive_intensity: self.emissive_intensity,
+            uv_scale: self.uv_scale.into(),
+            uv_offset: self.uv_offset.into(),
+            alpha_cutoff: self.alpha_cutoff,
+            double_sided: self.double_sided,
+            blend,
+            base_color_texture: TextureId::from_raw(self.base_color_texture),
+            normal_texture: TextureId::from_raw(self.normal_texture),
+            metallic_roughness_texture: TextureId::from_raw(self.metallic_roughness_texture),
+            occlusion_texture: TextureId::from_raw(self.occlusion_texture),
+            emissive_texture: TextureId::from_raw(self.emissive_texture),
+        })
     }
 }
 
@@ -453,6 +472,11 @@ impl From<Material> for FyMaterial {
             uv_offset: m.uv_offset.into(),
             alpha_cutoff: m.alpha_cutoff,
             double_sided: m.double_sided,
+            blend: match m.blend {
+                Blend::Opaque => FY_BLEND_OPAQUE,
+                Blend::Transparent => FY_BLEND_TRANSPARENT,
+                Blend::Additive => FY_BLEND_ADDITIVE,
+            },
             base_color_texture: raw(m.base_color_texture),
             normal_texture: raw(m.normal_texture),
             metallic_roughness_texture: raw(m.metallic_roughness_texture),
@@ -1898,7 +1922,7 @@ pub unsafe extern "C" fn fy_material_add(world: *const FyWorld, value: *const Fy
     guard(|| {
         // SAFETY: per this function's contract.
         let (world, value) = unsafe { (handle(world, "world")?, read(value, "value")?) };
-        let id = world.lock()?.add_material(value.into())?;
+        let id = world.lock()?.add_material(value.to_material()?)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, id.raw(), "out") }
     })
@@ -1914,7 +1938,7 @@ pub unsafe extern "C" fn fy_material_set(world: *const FyWorld, id: u64, value: 
     guard(|| {
         // SAFETY: per this function's contract.
         let (world, value) = unsafe { (handle(world, "world")?, read(value, "value")?) };
-        Ok(world.lock()?.set_material(material(id)?, value.into())?)
+        Ok(world.lock()?.set_material(material(id)?, value.to_material()?)?)
     })
 }
 

@@ -8,7 +8,7 @@
 use glam::{Quat, Vec2, Vec3};
 
 use crate::components::{MeshRenderer, Transform};
-use crate::resources::Material;
+use crate::resources::{Blend, Material};
 use crate::world::{Result, World, WorldError};
 use crate::{Color, MaterialData, MaterialId, MeshId, ModelData, ObjectId, TextureId};
 
@@ -39,6 +39,7 @@ impl Material {
             uv_offset: Vec2::from_array(data.uv_offset),
             alpha_cutoff: data.alpha_cutoff,
             double_sided: data.double_sided,
+            blend: if data.transparent { Blend::Transparent } else { Blend::Opaque },
             base_color_texture: texture(data.base_color_texture),
             normal_texture: texture(data.normal_texture),
             metallic_roughness_texture: texture(data.metallic_roughness_texture),

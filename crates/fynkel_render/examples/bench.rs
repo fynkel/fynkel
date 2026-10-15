@@ -3,11 +3,12 @@
 //! `cargo run --release -p fynkel_render --example bench`
 //!
 //! For each quality level, screen size and scene size, with the sun alone,
-//! the sun casting shadows, 32 lamps over the cubes as well, and a sky
-//! that lights with fog: the CPU time of `prepare`, and the wall time of a
-//! whole frame (prepare, encode, submit, wait for the GPU), best of 50
-//! frames after 10 warm-up frames. Then what a new sky costs, once: the
-//! whole frame that works out its light.
+//! the sun casting shadows, 32 lamps over the cubes as well, a sky that
+//! lights with fog, and every cube see-through (sorted back to front each
+//! frame): the CPU time of `prepare`, and the wall time of a whole frame
+//! (prepare, encode, submit, wait for the GPU), best of 50 frames after 10
+//! warm-up frames. Then what a new sky costs, once: the whole frame that
+//! works out its light.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -15,12 +16,18 @@ use std::time::{Duration, Instant};
 use fynkel_render::glam::{Mat4, Quat, Vec3};
 use fynkel_render::*;
 
-fn scene(n: u32, lamps: u32, shadows: bool, t: f32) -> RenderScene {
+fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> RenderScene {
     let side = (n as f32).sqrt().ceil() as u32;
     let spacing = 1.5;
     let extent = side as f32 * spacing;
-    let material =
-        PbrMaterial { base_color: [0.8, 0.3, 0.1, 1.0], metallic: 0.0, roughness: 0.5, ..PbrMaterial::DEFAULT };
+    let (alpha, blend) = if see_through { (0.4, Blend::Transparent) } else { (1.0, Blend::Opaque) };
+    let material = PbrMaterial {
+        base_color: [0.8, 0.3, 0.1, alpha],
+        metallic: 0.0,
+        roughness: 0.5,
+        blend,
+        ..PbrMaterial::DEFAULT
+    };
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, extent * 0.6, extent * 0.9), Vec3::ZERO)),
         lights: std::iter::once(Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(shadows))
@@ -96,24 +103,26 @@ fn main() {
         for quality in [Quality::Low, Quality::Medium, Quality::High] {
             let mut renderer = Renderer::new(&gpu, format);
             renderer.upload_mesh(MeshKey(1), &MeshData::cube());
-            for (n, lamps, shadows, sky) in [
-                (1, 0, false, false),
-                (1_000, 0, false, false),
-                (10_000, 0, false, false),
-                (1_000, 0, true, false),
-                (10_000, 0, true, false),
-                (1, 32, false, false),
-                (1_000, 32, false, false),
-                (10_000, 32, false, false),
-                (1_000, 0, false, true),
-                (10_000, 0, false, true),
+            for (n, lamps, shadows, sky, see_through) in [
+                (1, 0, false, false, false),
+                (1_000, 0, false, false, false),
+                (10_000, 0, false, false, false),
+                (1_000, 0, true, false, false),
+                (10_000, 0, true, false, false),
+                (1, 32, false, false, false),
+                (1_000, 32, false, false, false),
+                (10_000, 32, false, false, false),
+                (1_000, 0, false, true, false),
+                (10_000, 0, false, true, false),
+                (1_000, 0, true, false, true),
+                (10_000, 0, true, false, true),
             ] {
                 let scenes: Vec<RenderScene> = (0..60)
                     .map(|f| RenderScene {
                         quality: Some(quality),
                         sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
                         fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
-                        ..scene(n, lamps, shadows, f as f32 / 60.0)
+                        ..scene(n, lamps, shadows, see_through, f as f32 / 60.0)
                     })
                     .collect();
                 let (mut prepare, mut frame) = (Duration::MAX, Duration::MAX);
@@ -134,8 +143,9 @@ fn main() {
                 }
                 let shadows = if shadows { ", shadows" } else { "" };
                 let sky = if sky { ", sky and fog" } else { "" };
+                let see_through = if see_through { ", see-through" } else { "" };
                 println!(
-                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}{sky}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
+                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}{sky}{see_through}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
                     prepare.as_secs_f64() * 1e3,
                     frame.as_secs_f64() * 1e3
                 );
@@ -152,7 +162,7 @@ fn main() {
                     let s = RenderScene {
                         quality: Some(quality),
                         sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
-                        ..scene(1_000, 0, false, 0.0)
+                        ..scene(1_000, 0, false, false, 0.0)
                     };
                     let start = Instant::now();
                     renderer.prepare(&s, width, height);

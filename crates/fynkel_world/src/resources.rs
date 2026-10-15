@@ -11,7 +11,8 @@ use crate::{Color, TextureId};
 /// materials are these. Each texture multiplies its factor.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Material {
-    /// The surface colour (sRGB). Its alpha matters only for cut-outs.
+    /// The surface colour (sRGB). Its alpha is how opaque it is: it
+    /// matters for cut-outs and for surfaces that blend.
     pub base_color: Color,
     /// 0 = dielectric (plastic, wood), 1 = metal.
     pub metallic: f32,
@@ -36,6 +37,9 @@ pub struct Material {
     /// (glTF's `doubleSided`): for leaves, paper, flags. Otherwise a
     /// triangle seen from behind isn't drawn.
     pub double_sided: bool,
+    /// Whether what's behind shows through, and how (glTF's BLEND is
+    /// [`Blend::Transparent`]).
+    pub blend: Blend,
     /// Read as sRGB, like `base_color`.
     pub base_color_texture: Option<TextureId>,
     /// A tangent-space normal map (glTF's convention: +X along the image's
@@ -60,6 +64,7 @@ impl Material {
         uv_offset: Vec2::ZERO,
         alpha_cutoff: 0.0,
         double_sided: false,
+        blend: Blend::Opaque,
         base_color_texture: None,
         normal_texture: None,
         metallic_roughness_texture: None,
@@ -81,6 +86,24 @@ impl Material {
             self.emissive_texture,
         ]
     }
+}
+
+/// How a [`Material`]'s surface covers what's behind it. See-through
+/// surfaces are drawn after the solid ones, the furthest object first;
+/// they cast no shadow.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum Blend {
+    /// Covers it (or, with an alpha cutoff, where the alpha reaches it).
+    #[default]
+    Opaque,
+    /// Laid over it by the alpha, as glass or water is.
+    Transparent,
+    /// Adds its light, times the alpha, as a glow does.
+    Additive,
+}
+
+impl Blend {
+    const NAMES: &'static [&'static str] = &["Opaque", "Transparent", "Additive"];
 }
 
 impl Default for Material {
@@ -110,6 +133,7 @@ impl Describe for Material {
             Field::new("metallic_roughness_texture", FieldKind::Texture, Value::Texture(None)),
             Field::new("occlusion_texture", FieldKind::Texture, Value::Texture(None)),
             Field::new("emissive_texture", FieldKind::Texture, Value::Texture(None)),
+            Field::new("blend", FieldKind::Enum(Blend::NAMES), Value::Enum(D.blend as u32)),
         ];
         FIELDS
     }
@@ -126,6 +150,7 @@ impl Describe for Material {
             7 => Value::F32(self.alpha_cutoff),
             8 => Value::Bool(self.double_sided),
             9..=13 => Value::Texture(self.textures()[index - 9]),
+            14 => Value::Enum(self.blend as u32),
             _ => return None,
         })
     }
@@ -146,6 +171,9 @@ impl Describe for Material {
             (11, Value::Texture(t)) => self.metallic_roughness_texture = t,
             (12, Value::Texture(t)) => self.occlusion_texture = t,
             (13, Value::Texture(t)) => self.emissive_texture = t,
+            (14, Value::Enum(0)) => self.blend = Blend::Opaque,
+            (14, Value::Enum(1)) => self.blend = Blend::Transparent,
+            (14, Value::Enum(2)) => self.blend = Blend::Additive,
             _ => unreachable!("validated by Describe::set"),
         }
     }

@@ -504,17 +504,22 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     return vec4<f32>(color, base.a);
 }
 
-// What's at `p`, `seen` (tone mapped), behind the fog between it and the
-// camera: more the further it is, less the higher, as seen too.
-fn fogged(seen: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
+// How much of what's at `p` the fog between it and the camera hides:
+// more the further it is, less the higher, as seen too.
+fn fog_amount(p: vec3<f32>) -> f32 {
     if frame.fog_color.w == 0.0 {
-        return seen;
+        return 0.0;
     }
     var amount = saturate((distance(p, frame.cells_eye.xyz) - frame.fog.x) * frame.fog.y);
     if frame.fog.z > 0.0 {
         amount *= exp2(-max(p.y, 0.0) * frame.fog.z);
     }
-    return mix(seen, frame.fog_color.rgb, amount);
+    return amount;
+}
+
+// What's at `p`, `seen` (tone mapped), behind the fog.
+fn fogged(seen: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
+    return mix(seen, frame.fog_color.rgb, fog_amount(p));
 }
 
 // Opaque surfaces: alpha is ignored. The target is always an sRGB view,
@@ -541,4 +546,32 @@ fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locat
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
     return vec4<f32>(fogged(tonemap_neutral(shaded.rgb), in.world_position), clamp(sharp, 0.0, 1.0));
+}
+
+// See-through surfaces (glTF's BLEND), laid over what's behind: the
+// pipeline adds what's returned to what's there times one minus its alpha,
+// so the colour comes premultiplied. The fog is part of what the surface
+// shows: whatever is behind it is fogged as much or more. Below a cutoff
+// the surface isn't there.
+@fragment
+fn fs_transparent(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    let shaded = shade(in, front_facing);
+    let alpha = saturate(shaded.a);
+    if alpha < in.params.z {
+        discard;
+    }
+    return vec4<f32>(fogged(tonemap_neutral(shaded.rgb), in.world_position) * alpha, alpha);
+}
+
+// Glows: their light, times their alpha, added to what's behind, fading
+// to nothing in the fog. Each is tone mapped on its own, so overlapping
+// glows can grow brighter than one can.
+@fragment
+fn fs_additive(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
+    let shaded = shade(in, front_facing);
+    let alpha = saturate(shaded.a);
+    if alpha < in.params.z {
+        discard;
+    }
+    return vec4<f32>(tonemap_neutral(shaded.rgb * alpha) * (1.0 - fog_amount(in.world_position)), alpha);
 }

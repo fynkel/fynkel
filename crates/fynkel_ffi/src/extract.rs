@@ -323,6 +323,11 @@ fn pbr(m: &Material) -> PbrMaterial {
         uv_offset: m.uv_offset.into(),
         alpha_cutoff: m.alpha_cutoff,
         double_sided: m.double_sided,
+        blend: match m.blend {
+            fynkel_world::Blend::Opaque => fynkel_render::Blend::Opaque,
+            fynkel_world::Blend::Transparent => fynkel_render::Blend::Transparent,
+            fynkel_world::Blend::Additive => fynkel_render::Blend::Additive,
+        },
         textures: texture_keys(m),
     }
 }

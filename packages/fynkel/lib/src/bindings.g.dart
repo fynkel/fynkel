@@ -407,11 +407,17 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 25;
+const int FY_ABI_VERSION = 26;
 
 const int FY_APPLE_MORE = 2;
 
 const int FY_APPLE_SHOWN = 1;
+
+const int FY_BLEND_ADDITIVE = 2;
+
+const int FY_BLEND_OPAQUE = 0;
+
+const int FY_BLEND_TRANSPARENT = 1;
 
 const int FY_LIGHT_AMBIENT = 1;
 
@@ -569,6 +575,9 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Bool()
   external bool double_sided;
+
+  @ffi.Uint32()
+  external int blend;
 
   @ffi.Uint64()
   external int base_color_texture;

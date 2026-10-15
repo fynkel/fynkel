@@ -344,6 +344,30 @@ final class Texture2D implements Finalizable {
   String toString() => _name;
 }
 
+/// How a [Material]'s surface covers what's behind it.
+///
+/// See-through surfaces are drawn after the solid ones, the furthest
+/// object first, by its middle. Within one object the order is its
+/// triangles', so an object that overlaps itself (a glass jar's back and
+/// front) can draw its far side over its near one: split it into two
+/// objects if that shows. They receive light and fog, and cast no shadow.
+enum Blending {
+  /// Hides what's behind it; with an [Material.alphaCutoff], where its
+  /// alpha reaches the cutoff.
+  opaque,
+
+  /// Laid over what's behind it by its alpha ([Material.opacity]), as
+  /// glass, water or a fading object is: at 0.3, a third of it and two
+  /// thirds of what's behind. Its highlights and glow fade with it.
+  /// glTF's BLEND.
+  transparent,
+
+  /// Adds its light, times its alpha, to what's behind it: for glows,
+  /// flames, sparks and beams. Black adds nothing, so its [Material.emissive]
+  /// is what shows.
+  additive,
+}
+
 /// How a surface looks under light: glTF's metallic-roughness model, so a
 /// loaded model's materials are these. A material can be used in any
 /// number of worlds, and changing it changes every object that uses it, in
@@ -353,14 +377,18 @@ final class Texture2D implements Finalizable {
 /// [metallicRoughnessTexture] the [metallic] (blue) and [roughness]
 /// (green), [emissiveTexture] the [emissive] light.
 final class Material {
-  /// A material, white, not metallic, half rough unless given. [metallic],
-  /// [roughness] and [alphaCutoff] are 0 to 1, [emissiveIntensity] 0 to
-  /// 1,000,000, [uvScale] and [uvOffset] -10,000 to 10,000 each way: out
-  /// of range or NaN throws a [RangeError]. A disposed texture throws a
-  /// [StateError].
+  /// A material, white, not metallic, half rough unless given. [opacity]
+  /// replaces [color]'s alpha; below 1 it makes the material
+  /// [Blending.transparent] unless [blending] says otherwise. [opacity],
+  /// [metallic], [roughness] and [alphaCutoff] are 0 to 1,
+  /// [emissiveIntensity] 0 to 1,000,000, [uvScale] and [uvOffset] -10,000
+  /// to 10,000 each way: out of range or NaN throws a [RangeError]. A
+  /// disposed texture throws a [StateError].
   Material({
     this.name,
-    this._color = Color.white,
+    Color color = Color.white,
+    double? opacity,
+    Blending? blending,
     double metallic = 0,
     double roughness = 0.5,
     this._emissive = Color.black,
@@ -380,6 +408,8 @@ final class Material {
        _uvScale = _uv(uvScale, 'uvScale'),
        _uvOffset = _uv(uvOffset, 'uvOffset'),
        _alphaCutoff = _unit(alphaCutoff, 'alphaCutoff'),
+       _color = opacity == null ? color : _withAlpha(color, _unit(opacity, 'opacity')),
+       _blending = blending ?? (opacity != null && opacity < 1 ? Blending.transparent : Blending.opaque),
        _textures = [
          _usable(baseColorTexture),
          _usable(normalTexture),
@@ -402,6 +432,7 @@ final class Material {
   Vec2 _uvOffset;
   double _alphaCutoff;
   bool _doubleSided;
+  Blending _blending;
 
   /// Base colour, normal, metallic-roughness, occlusion, emissive: the
   /// engine's order.
@@ -442,6 +473,7 @@ final class Material {
     uvOffset: _uvOffset,
     alphaCutoff: _alphaCutoff,
     doubleSided: _doubleSided,
+    blending: _blending,
     baseColorTexture: _textures[0],
     normalTexture: _textures[1],
     metallicRoughnessTexture: _textures[2],
@@ -449,10 +481,30 @@ final class Material {
     emissiveTexture: _textures[4],
   );
 
-  /// The base colour (albedo). Its alpha matters only with [alphaCutoff].
+  /// The base colour (albedo). Its alpha is the [opacity].
   Color get color => _color;
   set color(Color value) {
     _color = value;
+    _changed();
+  }
+
+  /// How much of the surface there is, 0 to 1: [color]'s alpha, times
+  /// [baseColorTexture]'s. It shows when the material is
+  /// [Blending.transparent] or [Blending.additive], or cut out at
+  /// [alphaCutoff]; an opaque one ignores it. Setting it changes the alpha
+  /// alone, not [blending].
+  double get opacity => _color.a;
+  set opacity(double value) {
+    _color = _withAlpha(_color, _unit(value, 'opacity'));
+    _changed();
+  }
+
+  /// Whether what's behind the surface shows through, and how:
+  /// [Blending.opaque] unless given, or unless the material was made with
+  /// an [opacity] below 1.
+  Blending get blending => _blending;
+  set blending(Blending value) {
+    _blending = value;
     _changed();
   }
 
@@ -507,7 +559,7 @@ final class Material {
   /// 0 for a solid surface. Otherwise a cut-out, for leaves and fences:
   /// the surface is there only where the alpha of [color] times
   /// [baseColorTexture] reaches this, and gone elsewhere. 0.5 is usual.
-  /// (Partly see-through surfaces aren't drawn yet.)
+  /// With [blending], what's left is see-through too.
   double get alphaCutoff => _alphaCutoff;
   set alphaCutoff(double value) {
     _alphaCutoff = _unit(value, 'alphaCutoff');
@@ -564,6 +616,8 @@ final class Material {
     return value;
   }
 
+  static Color _withAlpha(Color c, double a) => Color.rgb(c.r, c.g, c.b, a);
+
   static double _atLeast0(double value, String name) {
     if (!(value >= 0 && value <= 1e6)) throw RangeError.value(value, name, 'must be between 0 and 1e6');
     return value;
@@ -594,6 +648,7 @@ final class Material {
       if (uvOffset != Vec2.zero) 'uvOffset: $uvOffset',
       if (alphaCutoff != 0) 'alphaCutoff: $alphaCutoff',
       if (doubleSided) 'doubleSided',
+      if (blending != Blending.opaque) 'blending: $blending',
       ...textures,
     ];
     return 'Material(${fields.join(', ')})';
