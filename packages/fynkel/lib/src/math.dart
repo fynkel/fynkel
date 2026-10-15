@@ -67,6 +67,9 @@ final class Vec3 {
   /// The point ([x], [y], [z]).
   const Vec3(this.x, this.y, this.z);
 
+  /// ([s], [s], [s]): a uniform scale, as `scale: Vec3.all(2)`.
+  const Vec3.all(double s) : x = s, y = s, z = s;
+
   /// The x component: +X is right.
   final double x;
 
@@ -128,6 +131,19 @@ final class Vec3 {
 
   /// How long it is (Unity's `magnitude`).
   double get length => math.sqrt(dot(this));
+
+  /// It with [x] in place of its own.
+  Vec3 withX(double x) => Vec3(x, y, z);
+
+  /// It with [y] in place of its own: `position.withY(0.5)` keeps x and z.
+  Vec3 withY(double y) => Vec3(x, y, z);
+
+  /// It with [z] in place of its own.
+  Vec3 withZ(double z) => Vec3(x, y, z);
+
+  /// It on the ground, y = 0: `(target - position).flat` is the way to
+  /// walk to a target above or below.
+  Vec3 get flat => Vec3(x, 0, z);
 
   /// This direction with length 1. Throws for a zero vector, which has no
   /// direction, so a vector that should never be zero says so where it is;
@@ -432,6 +448,9 @@ final class ViewPoint {
 
   @override
   int get hashCode => Object.hash(x, y, width, height);
+
+  /// Its [x] and [y], as for a trail drawn on the screen.
+  Vec2 toVec2() => Vec2(x, y);
 
   @override
   String toString() => 'ViewPoint($x, $y in ${width}x$height)';

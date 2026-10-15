@@ -12,18 +12,8 @@ class Hello extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
-        components: [Camera()],
-      ),
-    );
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun()],
-      ),
-    );
+    add(GameObject(transform: Transform.lookAt(Vec3(0, 1.5, 4), Vec3.zero), components: [Camera()]));
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))]));
     add(Cube());
   }
 }

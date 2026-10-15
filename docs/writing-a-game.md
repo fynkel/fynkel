@@ -73,18 +73,8 @@ class Hello extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
-        components: [Camera()],
-      ),
-    );
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun()],
-      ),
-    );
+    add(GameObject(transform: Transform.lookAt(Vec3(0, 1.5, 4), Vec3.zero), components: [Camera()]));
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))]));
     add(Cube());
   }
 }
@@ -456,7 +446,8 @@ class Beacon extends GameObject {
   own (Unity's `MaterialPropertyBlock`): it replaces the material's color
   for that object, and `null` gives it back. `material.copy()` makes a
   material of its own to change every value.
-- **Lights**: `Light.sun` (from the object's forward), `Light.ambient`,
+- **Lights**: `Light.sun` (along the object's forward, which
+  `Light.sun(direction: …)` turns the object to), `Light.ambient`,
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
@@ -547,10 +538,8 @@ them and has them fall on it, unless its renderer says not, as in Unity:
 
 ```dart
 /// A low evening sun, casting long shadows.
-GameObject eveningSun() => GameObject(
-  transform: Transform(rotation: Quat.lookRotation(Vec3(-0.6, -0.5, -0.4))),
-  components: [Light.sun(intensity: 2, shadows: true)],
-);
+GameObject eveningSun() =>
+    GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.5, -0.4), intensity: 2, shadows: true)]);
 
 /// A puddle: it shadows nothing, but shadows fall on it.
 MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
@@ -683,7 +672,10 @@ class Pilot extends GameObject {}
 - **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
-  `Transform(position: eye, rotation: Quat.lookRotation(target - eye))`.
+  `Transform.lookAt(eye, target)`.
+- `v.withY(0.5)` (and `withX`, `withZ`) changes one part, `v.flat` puts
+  it on the ground (y = 0) for walking, and `Vec3.all(2)` is a uniform
+  scale.
 - **A zero vector has no direction**: `normalized` throws for one, so a
   vector that should never be zero says so where it is. Where one can be,
   as the way to a target the object may have reached, write
@@ -842,8 +834,9 @@ class Scoreboard extends GameObject {
 ```
 
 - A signal with nothing to tell is a `Signal<void>`, emitted with
-  `emit(null)`.
-- `emit(value)` calls every listener at once, in order. A handler that
+  `emit()`.
+- `emit(value)` calls every listener at once, in order; a
+  `Signal<void>` is emitted with `emit()`. A handler that
   throws goes to `world.errors`, and the others still hear.
 - `signal.listen(handler)` listens without an owner: cancel it yourself.
 - `await signal.next` waits for the next value.
@@ -908,7 +901,8 @@ class Button3D extends GameObject {
 - **A `Finger`** is one touch, or the mouse: `position`, `startPosition`,
   `delta`, `totalDelta`, `velocity`, `age`, `tapCount`, `isPressed`,
   `isDragging`, and `over` (what's under it in the world: `gameObject`,
-  `point`, `normal`). `input.fingers` lists them.
+  `point`, `normal`). `input.fingers` lists them. `position` is a
+  `ViewPoint`, for `screenPointToRay`; `position.toVec2()` for a `Vec2`.
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
@@ -2293,6 +2287,10 @@ For code written before: each change that breaks it, newest first.
     `Vec3.normalizedOrZero` is new (§7).
   - An object's own `release()` on one released already does nothing; it
     threw. `destroy(after:)` and `release(after:)` are new (§3).
+  - New helpers: `Vec3.withX`/`withY`/`withZ`, `flat` and `Vec3.all`,
+    `Transform.lookAt(eye, target)`, `Light.sun(direction:)`,
+    `ViewPoint.toVec2()`, and `emit()` for a `Signal<void>`
+    (`emit(null)` still works).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

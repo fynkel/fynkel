@@ -702,6 +702,10 @@ class GameObject with _Moving {
     }
     component._owner = this;
     (_components ??= []).add(component);
+    if (component case Light(:final _facing?)) {
+      component._facing = null;
+      rotation = _facing;
+    }
     if (_world case final world?) {
       try {
         _write(component);

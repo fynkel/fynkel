@@ -110,6 +110,13 @@ final class Transform {
 
   const Transform._(this.position, this.rotation, this.scale);
 
+  /// At [eye], looking at [target] with its up as close to [up] as it can
+  /// be: a camera's place, `Transform.lookAt(Vec3(0, 6, 8), Vec3.zero)`.
+  /// Throws an [ArgumentError] if they're the same point.
+  Transform.lookAt(Vec3 eye, Vec3 target, {Vec3 up = Vec3.up, this.scale = Vec3.one})
+    : position = eye,
+      rotation = Quat.lookRotation(target - eye, up: up);
+
   /// Where it is, in metres, from its parent's origin and along its
   /// parent's axes (the world's for a root): Unity's `localPosition`.
   /// NaN or infinity is refused with an ArgumentError when it's set on an
@@ -437,11 +444,18 @@ enum _LightCount {
 
 /// Lights the scene. Change it in place: `get<Light>()!.intensity = 2`.
 final class Light extends Component {
-  /// Shines along the object's [GameObject.forward]: give the object
-  /// `Transform(rotation: Quat.lookRotation(direction))`. With [shadows],
-  /// what it shines on casts shadows (see [Light.shadows]).
-  Light.sun({Color color = Color.white, double intensity = 1, bool shadows = false})
-    : this._(LightKind.sun, color, intensity, 10, 30 * math.pi / 180, 0.2, shadows);
+  /// Shines along the object's [GameObject.forward]. Given a [direction],
+  /// it turns the object it's put on to shine that way:
+  /// `GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))])`.
+  /// With [shadows], what it shines on casts shadows (see [Light.shadows]).
+  factory Light.sun({Vec3? direction, Color color = Color.white, double intensity = 1, bool shadows = false}) {
+    final facing = direction == null ? null : Quat.lookRotation(direction);
+    return Light._(LightKind.sun, color, intensity, 10, 30 * math.pi / 180, 0.2, shadows).._facing = facing;
+  }
+
+  // The way a sun given a direction turns the object it's put on, until
+  // it's put on one.
+  Quat? _facing;
 
   /// Light from every direction: see [LightKind.ambient]. A dim one, say
   /// `Light.ambient(intensity: 0.25)`, keeps the sides the sun misses from
