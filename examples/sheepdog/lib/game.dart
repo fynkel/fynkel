@@ -7,7 +7,7 @@
 
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueListenable, ValueNotifier;
 import 'package:flutter/material.dart' show Brightness, ThemeData;
 import 'package:flutter/widgets.dart' show Alignment;
 import 'package:fynkel/fynkel.dart';
@@ -80,14 +80,16 @@ Controls sheepdogControls() =>
 /// being played. Its colours are the app's theme's.
 class SheepdogGame extends GameObject {
   /// [seed] makes every round the same, for tests; the first round is at
-  /// [level].
-  SheepdogGame({this.seed, Controls? controls, int level = 1})
+  /// [level]. [quality] is the settings page's: the world's quality level,
+  /// null for the device's own pick.
+  SheepdogGame({this.seed, Controls? controls, this.quality, int level = 1})
     : controls = controls ?? sheepdogControls(),
       level = ValueNotifier(level),
       clock = ValueNotifier(levelOf(level).seconds.ceil());
 
   final int? seed;
   final Controls controls;
+  final ValueListenable<Quality?>? quality;
 
   /// Sheep in the pen, and taken by wolves.
   final home = ValueNotifier(0), lost = ValueNotifier(0);
@@ -130,8 +132,15 @@ class SheepdogGame extends GameObject {
     // grass, the fences across it.
     _sun = addWith(Light.sun(direction: Vec3(-0.4, -1, -0.6), shadows: true));
     _ambient = addWith(Light.ambient());
-    // Lamp posts at the pen's gate and halfway down the sides.
-    for (final at in [Vec3(-penHalf, 0, penFront), Vec3(penHalf, 0, penFront), Vec3(-size, 0, 4), Vec3(size, 0, 4)]) {
+    // Lamp posts along the fences: at the pen's gate, two down each side,
+    // and two along the front.
+    for (final at in [
+      Vec3(-penHalf, 0, penFront),
+      Vec3(penHalf, 0, penFront),
+      for (final x in [-size, size]) ...[Vec3(x, 0, -3), Vec3(x, 0, 6)],
+      Vec3(-6, 0, size),
+      Vec3(6, 0, size),
+    ]) {
       add(
         GameObject(
           name: 'lamp post',
@@ -166,6 +175,10 @@ class SheepdogGame extends GameObject {
     );
     controls.bindTo(input);
     on(controls.changed, (_) => controls.bindTo(input));
+    if (quality case final quality?) {
+      world.quality = quality.value;
+      on(quality.changed, (_) => world.quality = quality.value);
+    }
     wear(world.theme);
     on(world.onThemeChanged, wear);
   }

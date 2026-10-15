@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' show KeyCode, Vec3;
+import 'package:fynkel/fynkel.dart' show KeyCode, Quality, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:sheepdog/app.dart';
 import 'package:sheepdog/game.dart';
@@ -87,12 +87,34 @@ void main() {
     expect(find.byType(FynkelView), findsOneWidget, reason: 'no minimap');
   });
 
+  testWidgets("the quality setting: the device's pick, then the one chosen, in the game at once", (tester) async {
+    final settings = Settings();
+    await play(tester, settings);
+    final world = game(tester).world;
+    expect(world.quality, isNull);
+    await tester.tap(find.byTooltip('Pause'));
+    await wait(tester);
+    await tester.tap(find.text('Settings'));
+    await wait(tester);
+    await tester.tap(find.text('Low'));
+    await wait(tester);
+    expect((settings.quality.value, world.quality), (Quality.low, Quality.low));
+    await tester.tap(find.text('High'));
+    await wait(tester);
+    expect(world.quality, Quality.high);
+    await tester.tap(find.text('Auto'));
+    await wait(tester);
+    expect(world.quality, isNull);
+  });
+
   testWidgets('controls: Bark rebound to B in the settings barks on B, not space', (tester) async {
     final settings = Settings();
     await play(tester, settings);
     await tester.tap(find.byTooltip('Pause'));
     await wait(tester);
     await tester.tap(find.text('Settings'));
+    await wait(tester);
+    await tester.drag(find.byType(ListView), const Offset(0, -300));
     await wait(tester);
     await tester.tap(find.widgetWithText(OutlinedButton, 'Space'));
     await wait(tester);
