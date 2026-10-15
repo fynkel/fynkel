@@ -30,6 +30,7 @@ part 'pool.dart';
 part 'resources.dart';
 part 'routines.dart';
 part 'signals.dart';
+part 'sky.dart';
 part 'systems.dart';
 part 'time.dart';
 part 'world_loop.dart';
@@ -371,6 +372,52 @@ final class World implements Finalizable {
   }
 
   Quality? _quality;
+
+  /// What's behind everything, and the light it gives ([Sky]): null, as a
+  /// new world has, for none, so the camera's [Camera.clearColor] shows.
+  /// From the views' next frame; a new gradient or image costs each view
+  /// a few milliseconds of GPU work, once.
+  Sky? get sky => _sky;
+  set sky(Sky? value) {
+    using((arena) {
+      final s = arena<FySky>();
+      if (value != null) {
+        s.ref.lighting = value.lighting;
+        value._write(s.ref);
+      }
+      check(fy_world_sky_set(_engineWorld, value == null ? nullptr : s));
+    });
+    _sky = value;
+  }
+
+  Sky? _sky;
+
+  /// The world's [Fog], or null, as a new world has, for none. Throws an
+  /// [ArgumentError] unless `0 ≤ start < end` and `height` is above 0,
+  /// leaving it as it was.
+  Fog? get fog => _fog;
+  set fog(Fog? value) {
+    using((arena) {
+      Pointer<FyFog> f = nullptr;
+      if (value != null) {
+        f = arena<FyFog>();
+        final color = value.color;
+        if (color != null) f.ref.color.write(color);
+        if (value.height case final height? when !(height > 0)) {
+          throw ArgumentError.value(value, 'fog', 'height must be above 0');
+        }
+        f.ref
+          ..use_color = color != null
+          ..start = value.start
+          ..end = value.end
+          ..height = value.height ?? 0;
+      }
+      check(fy_world_fog_set(_engineWorld, f));
+    });
+    _fog = value;
+  }
+
+  Fog? _fog;
 
   /// The virtual cameras, their blends, and shaking the view's camera
   /// (docs/stage-4.md §3.8).

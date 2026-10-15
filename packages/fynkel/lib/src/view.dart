@@ -20,6 +20,7 @@ final class ViewStats {
     this.dropped = 0,
     this.textureBytes = 0,
     this.meshBytes = 0,
+    this.skyBytes = 0,
   });
 
   /// Scenes handed to the render worker by [WorldView.frame].
@@ -50,6 +51,10 @@ final class ViewStats {
   /// world's views, like [textureBytes]. As of the last frame drawn.
   final int meshBytes;
 
+  /// GPU memory the sky's light holds for this view, in bytes: 0 without
+  /// a sky or with a [ColorSky]. As of the last frame drawn.
+  final int skyBytes;
+
   /// The counts since [earlier]. The memory is the newer one's.
   ViewStats operator -(ViewStats earlier) => ViewStats(
     posted: posted - earlier.posted,
@@ -60,12 +65,13 @@ final class ViewStats {
     dropped: dropped - earlier.dropped,
     textureBytes: textureBytes,
     meshBytes: meshBytes,
+    skyBytes: skyBytes,
   );
 
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes';
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes';
 }
 
 /// A view of a [World]: a render worker on its own thread that draws the
@@ -165,6 +171,7 @@ abstract base class WorldView implements Finalizable {
       dropped: r.dropped,
       textureBytes: r.texture_bytes,
       meshBytes: r.mesh_bytes,
+      skyBytes: r.sky_bytes,
     );
   }
 

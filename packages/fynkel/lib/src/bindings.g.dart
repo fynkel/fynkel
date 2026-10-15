@@ -255,6 +255,19 @@ external int fy_raycast(
   ffi.Pointer<FyRayHit> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FySkyImage>>)>(isLeaf: true)
+external int fy_sky_image_decode(ffi.Pointer<ffi.Uint8> bytes, int len, ffi.Pointer<ffi.Pointer<FySkyImage>> out);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<FySkyImage>)>(isLeaf: true)
+external void fy_sky_image_free(ffi.Pointer<FySkyImage> image);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FySkyImage>, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fy_sky_image_size(
+  ffi.Pointer<FySkyImage> image,
+  ffi.Pointer<ffi.Uint32> out_width,
+  ffi.Pointer<ffi.Uint32> out_height,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
@@ -366,6 +379,9 @@ external int fy_view_resize(ffi.Pointer<FyView> view, int width, int height);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<FyViewStats>)>(isLeaf: true)
 external int fy_view_stats(ffi.Pointer<FyView> view, ffi.Pointer<FyViewStats> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyFog>)>(isLeaf: true)
+external int fy_world_fog_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyFog> fog);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<FyWorld>)>(isLeaf: true)
 external void fy_world_free(ffi.Pointer<FyWorld> world);
 
@@ -374,6 +390,9 @@ external ffi.Pointer<FyWorld> fy_world_new();
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32)>(isLeaf: true)
 external int fy_world_quality_set(ffi.Pointer<FyWorld> world, int level);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FySky>)>(isLeaf: true)
+external int fy_world_sky_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FySky> sky);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
@@ -388,7 +407,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 24;
+const int FY_ABI_VERSION = 25;
 
 const int FY_APPLE_MORE = 2;
 
@@ -422,6 +441,14 @@ const int FY_QUALITY_LOW = 1;
 
 const int FY_QUALITY_MEDIUM = 2;
 
+const int FY_SKY_COLOR = 1;
+
+const int FY_SKY_GRADIENT = 2;
+
+const int FY_SKY_IMAGE = 3;
+
+const int FY_SKY_NONE = 0;
+
 final class FyCamera extends ffi.Struct {
   @ffi.Float()
   external double fov_y;
@@ -442,6 +469,9 @@ final class FyCamera extends ffi.Struct {
 
   @ffi.Uint32()
   external int culling_mask;
+
+  @ffi.Bool()
+  external bool show_sky;
 }
 
 final class FyColor extends ffi.Struct {
@@ -476,6 +506,22 @@ final class FyDebugLine extends ffi.Struct {
   external FyVec3 b;
 
   external FyColor color;
+}
+
+final class FyFog extends ffi.Struct {
+  external FyColor color;
+
+  @ffi.Bool()
+  external bool use_color;
+
+  @ffi.Float()
+  external double start;
+
+  @ffi.Float()
+  external double end;
+
+  @ffi.Float()
+  external double height;
 }
 
 final class FyLight extends ffi.Struct {
@@ -669,6 +715,30 @@ final class FyRayHit extends ffi.Struct {
   external double distance;
 }
 
+final class FySky extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  external FyColor zenith;
+
+  external FyColor horizon;
+
+  external FyColor ground;
+
+  external ffi.Pointer<FySkyImage> image;
+
+  @ffi.Float()
+  external double intensity;
+
+  @ffi.Float()
+  external double rotation;
+
+  @ffi.Float()
+  external double lighting;
+}
+
+final class FySkyImage extends ffi.Opaque {}
+
 sealed class FyStatus {
   static const FY_STATUS_OK = 0;
   static const FY_STATUS_NO_OBJECT = 1;
@@ -760,6 +830,9 @@ final class FyViewStats extends ffi.Struct {
   @ffi.Uint64()
   external int mesh_bytes;
 
+  @ffi.Uint64()
+  external int sky_bytes;
+
   static ffi.Pointer<FyViewStats> $allocate(
     ffi.Allocator $allocator, {
     required int posted,
@@ -770,6 +843,7 @@ final class FyViewStats extends ffi.Struct {
     required int dropped,
     required int texture_bytes,
     required int mesh_bytes,
+    required int sky_bytes,
   }) => $allocator<FyViewStats>()
     ..ref.posted = posted
     ..ref.rendered = rendered
@@ -778,7 +852,8 @@ final class FyViewStats extends ffi.Struct {
     ..ref.presented = presented
     ..ref.dropped = dropped
     ..ref.texture_bytes = texture_bytes
-    ..ref.mesh_bytes = mesh_bytes;
+    ..ref.mesh_bytes = mesh_bytes
+    ..ref.sky_bytes = sky_bytes;
 }
 
 final class FyWorld extends ffi.Opaque {}

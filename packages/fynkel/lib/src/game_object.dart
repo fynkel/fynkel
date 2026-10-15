@@ -851,6 +851,7 @@ class GameObject with _Moving {
           orthographic: scratch.camera.ref.orthographic,
           orthographicSize: scratch.camera.ref.size,
           cullingMask: LayerMask._(scratch.camera.ref.culling_mask),
+          showSky: scratch.camera.ref.show_sky,
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
@@ -993,6 +994,7 @@ class GameObject with _Moving {
     c.orthographic = value.orthographic;
     c.size = value.orthographicSize;
     c.culling_mask = value.cullingMask.value;
+    c.show_sky = value.showSky;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
 

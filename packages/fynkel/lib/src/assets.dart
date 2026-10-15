@@ -48,6 +48,16 @@ final class Assets {
     return texture;
   }
 
+  /// The sky image in [name] (a Radiance `.hdr`), for [Sky.image], shared
+  /// by everything that asks for it. A world showing it keeps its own
+  /// share, so the sky stays when the last object holding it goes.
+  Future<SkyImage> skyImage(String name) async {
+    final asset = _hold(name, _skyImage);
+    final image = await asset.ready as SkyImage;
+    _stillUsable(name);
+    return image;
+  }
+
   /// The asset in [name] as [kind] loads it: a package's kind of asset,
   /// such as a sound, held and shared as a texture is, and freed with
   /// [AssetKind.free]. A package gives it a getter of its own
@@ -61,7 +71,7 @@ final class Assets {
 
   /// Loads [names] without adding anything, so what asks for them later
   /// has them at once: models (`.glb`), textures (`.png`, `.jpg`,
-  /// `.jpeg`) and the kinds packages added ([WorldSystems.addAssetKind]),
+  /// `.jpeg`), sky images (`.hdr`) and the kinds packages added ([WorldSystems.addAssetKind]),
   /// told apart by their extension. They're held as anything else asked
   /// for here is.
   Future<void> preload(Iterable<String> names) async {
@@ -72,7 +82,7 @@ final class Assets {
 
   AssetKind<Object> _kindOf(String name) {
     final lower = name.toLowerCase();
-    final kinds = <AssetKind<Object>>[_model, _texture, ..._world._assetKinds];
+    final kinds = <AssetKind<Object>>[_model, _texture, _skyImage, ..._world._assetKinds];
     for (final kind in kinds) {
       for (final extension in kind.extensions) {
         if (lower.endsWith(extension.toLowerCase())) return kind;
@@ -169,8 +179,27 @@ final class _TextureKind extends _BuiltInKind<Texture2D> {
   Future<Texture2D> load(World world, String name, Uint8List bytes) => Texture2D.load(bytes);
 }
 
+/// Sky images: not one of a world's resources, so freed as a package's
+/// kind is.
+final class _SkyImageKind extends AssetKind<SkyImage> {
+  const _SkyImageKind();
+
+  @override
+  String get name => 'sky image';
+
+  @override
+  List<String> get extensions => const ['.hdr'];
+
+  @override
+  Future<SkyImage> load(World world, String name, Uint8List bytes) => SkyImage.load(bytes);
+
+  @override
+  void free(World world, SkyImage value) => value.dispose();
+}
+
 const _model = _ModelKind();
 const _texture = _TextureKind();
+const _skyImage = _SkyImageKind();
 
 /// One loaded (or loading) asset, and how many uses of it are held.
 final class _Asset {
