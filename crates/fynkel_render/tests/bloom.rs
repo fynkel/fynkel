@@ -138,3 +138,26 @@ fn bloom_looks_like_its_golden() {
     };
     assert_golden("bloom", &render(&gpu, &mut r, &scene, 256, 256).0);
 }
+
+/// Colours shown as they're picked, the clear colour and a gradient sky,
+/// aren't light: however bright, they don't glow.
+#[test]
+fn colours_shown_as_picked_do_not_glow() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = glowing(0.5, Some(Bloom::DEFAULT), Quality::High);
+    if let Some(camera) = &mut scene.camera {
+        camera.clear_color = [1.0, 0.0, 0.0];
+    }
+    let image = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    assert_eq!(image.pixel(2, 2), [255, 0, 0, 255], "a red clear colour");
+
+    let white = Vec3::ONE;
+    scene.sky = Some(Sky { kind: SkyKind::Gradient { zenith: white, horizon: white, ground: white }, lighting: 0.0 });
+    let image = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    if let Some(camera) = &mut scene.camera {
+        camera.bloom = None;
+    }
+    let plain = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    assert!(max_difference(&image, &plain) <= 1, "a white sky, around a dim square");
+}

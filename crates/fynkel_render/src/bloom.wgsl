@@ -32,6 +32,13 @@ fn tap(uv: vec2<f32>) -> vec3<f32> {
     return textureSampleLevel(source, linear, uv, 0.0).rgb;
 }
 
+// The scene image's light at `uv`: its alpha says how much of it is light
+// (not a colour shown as picked).
+fn light(uv: vec2<f32>) -> vec3<f32> {
+    let c = textureSampleLevel(source, linear, uv, 0.0);
+    return untonemap(c.rgb) * clamp(c.a, 0.0, 1.0);
+}
+
 // The part of `c` that glows: what's above the threshold, eased in over
 // `knee` above it, so light just over it glows only a little.
 fn bright(c: vec3<f32>) -> vec3<f32> {
@@ -54,7 +61,7 @@ fn fs_prefilter(in: Out) -> @location(0) vec4<f32> {
     var weights = 0.0;
     for (var k = 0u; k < 4u; k++) {
         let offset = vec2<f32>(f32(k & 1u), f32(k >> 1u)) * 2.0 - 1.0;
-        let c = bright(untonemap(tap(in.uv + offset * texel)));
+        let c = bright(light(in.uv + offset * texel));
         let w = 1.0 / (1.0 + max(c.r, max(c.g, c.b)));
         sum += c * w;
         weights += w;

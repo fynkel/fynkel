@@ -147,3 +147,30 @@ fn ambient_occlusion_looks_like_its_golden() {
     ));
     assert_golden("ambient_occlusion", &render(&gpu, &mut r, &scene, 256, 256).0);
 }
+
+/// With nothing drawn, or only see-through things, there's no depth to
+/// work from: the view is drawn all the same.
+#[test]
+fn ambient_occlusion_with_nothing_solid_to_draw() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), Quality::High, 1.0, vec![]);
+    scene.draws.clear();
+    render(&gpu, &mut r, &scene, SIZE, SIZE);
+    scene.draws = vec![Draw::new(PLANE, Mat4::IDENTITY, PbrMaterial { blend: Blend::Transparent, ..grey() })];
+    render(&gpu, &mut r, &scene, SIZE, SIZE);
+}
+
+/// A box alone has no corners its faces close in: its convex edges stay as
+/// they were, so the stage 1 cube is its golden with ambient occlusion on.
+#[test]
+fn a_box_alone_does_not_darken_its_own_edges() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = stage1_scene();
+    scene.quality = Some(Quality::High);
+    if let Some(camera) = &mut scene.camera {
+        camera.ambient_occlusion = Some(AmbientOcclusion::DEFAULT);
+    }
+    assert_golden("cube", &render(&gpu, &mut r, &scene, 256, 256).0);
+}
