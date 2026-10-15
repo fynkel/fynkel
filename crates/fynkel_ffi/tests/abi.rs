@@ -177,6 +177,9 @@ fn values_are_validated_with_a_message_that_names_the_field() {
             FyMaterial { base_color: srgb(1.0, 1.0, 1.0), metallic: 0.0, roughness: 2.0, ..FyMaterial::default() };
         assert_eq!(fy_material_add(world.0, &rough, &mut mesh), FyStatus::InvalidValue);
         assert!(last_error().contains("Material.roughness"), "{}", last_error());
+        let unknown = FyMaterial { blend: 3, ..FyMaterial::default() };
+        assert_eq!(fy_material_add(world.0, &unknown, &mut mesh), FyStatus::InvalidValue);
+        assert!(last_error().contains("3 isn't a kind of blend"), "{}", last_error());
 
         let mut out = FyCamera::default();
         assert_eq!(fy_camera_get(world.0, id, &mut out), FyStatus::NoComponent, "a refused write changes nothing");

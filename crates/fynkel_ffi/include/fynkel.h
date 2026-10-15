@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 25
+#define FY_ABI_VERSION 26
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -35,6 +35,15 @@
 
 // A quality level: Apple's GPUs and desktops'.
 #define FY_QUALITY_HIGH 3
+
+// `FyMaterial::blend`: covers what's behind.
+#define FY_BLEND_OPAQUE 0
+
+// Laid over what's behind by its alpha (glTF's BLEND).
+#define FY_BLEND_TRANSPARENT 1
+
+// Adds its light, times its alpha, to what's behind.
+#define FY_BLEND_ADDITIVE 2
 
 // `fy_mesh_new_shape`'s shape: a 1×1×1 cube.
 #define FY_MESH_CUBE 0
@@ -321,7 +330,8 @@ typedef struct FyVec2 {
 // factor; 0 is no texture. `Default` is the engine's default material,
 // not zeros (a UV scale of 0 would show one texel).
 typedef struct FyMaterial {
-  // sRGB. Its alpha matters only for cut-outs.
+  // sRGB. Its alpha is how opaque it is: it matters for cut-outs and
+  // for surfaces that blend.
   struct FyColor base_color;
   // 0–1.
   float metallic;
@@ -340,6 +350,8 @@ typedef struct FyMaterial {
   float alpha_cutoff;
   // Both sides of each triangle are drawn.
   bool double_sided;
+  // `FY_BLEND_*`: how the surface covers what's behind it.
+  uint32_t blend;
   // Read as sRGB.
   uint64_t base_color_texture;
   // Tangent space, glTF's convention. Linear.
