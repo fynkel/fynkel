@@ -324,7 +324,32 @@ pub struct PbrMaterial {
     /// Draw the back of each triangle too, lit as its front, as for
     /// leaves or a sheet of paper. Otherwise backs aren't drawn.
     pub double_sided: bool,
+    /// Whether what's behind shows through, and how.
+    pub blend: Blend,
     pub textures: MaterialTextures,
+}
+
+/// How a surface covers what's behind it.
+///
+/// See-through surfaces are drawn after everything solid, the furthest
+/// object first. Within one object the order is its triangles', so an
+/// object that overlaps itself may draw its far side over its near one;
+/// split it in two if that shows. They hide nothing behind them from
+/// what's drawn later, and cast no shadow.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Hash)]
+pub enum Blend {
+    /// Covers it, or with an alpha cutoff, covers it where its alpha
+    /// reaches the cutoff.
+    #[default]
+    Opaque,
+    /// Laid over it as glass, water or a fading object is: everything it
+    /// shows (its light, highlights and glow) times its alpha, and what's
+    /// behind times one minus its alpha (glTF's BLEND). With an alpha
+    /// cutoff, it isn't there where its alpha is below it.
+    Transparent,
+    /// Adds its light, times its alpha, to what's behind: for glows,
+    /// flames, sparks and beams.
+    Additive,
 }
 
 impl PbrMaterial {
@@ -338,6 +363,7 @@ impl PbrMaterial {
         uv_offset: [0.0; 2],
         alpha_cutoff: 0.0,
         double_sided: false,
+        blend: Blend::Opaque,
         textures: MaterialTextures::NONE,
     };
 }

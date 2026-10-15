@@ -54,7 +54,7 @@ fn count<T>(f: impl FnOnce() -> T) -> (T, u64) {
     (out, COUNT.with(Cell::get))
 }
 
-/// 1,000 cubes moving every frame.
+/// 1,000 cubes moving every frame, some of them see-through.
 fn busy_scene(t: f32) -> RenderScene {
     let mut scene = stage1_scene();
     // High above the 40 × 25 grid, so every cube is seen.
@@ -74,7 +74,17 @@ fn busy_scene(t: f32) -> RenderScene {
         .map(|i| Draw {
             mesh: CUBE,
             model: Mat4::from_translation(Vec3::new((i % 40) as f32, (t + i as f32).sin(), (i / 40) as f32)),
-            material,
+            // Every fourth see-through, every tenth glowing: sorted back
+            // to front each frame.
+            material: PbrMaterial {
+                blend: match i {
+                    _ if i % 10 == 0 => Blend::Additive,
+                    _ if i % 4 == 0 => Blend::Transparent,
+                    _ => Blend::Opaque,
+                },
+                base_color: [0.8, 0.3, 0.1, if i % 4 == 0 { 0.5 } else { 1.0 }],
+                ..material
+            },
             cast_shadows: true,
             receive_shadows: true,
         })

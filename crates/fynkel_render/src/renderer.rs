@@ -34,7 +34,7 @@ use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{
-    ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind, TextureKey,
+    Blend, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind, TextureKey,
 };
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
 use crate::sky::{self, Environment, SPECULAR_MIPS};
@@ -240,11 +240,40 @@ impl Faces {
     }
 }
 
+/// How a draw covers what's behind it, in the order they're drawn: solid
+/// first, then blended.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+enum Cover {
+    Opaque,
+    /// Opaque with an alpha cutoff.
+    Cutout,
+    Transparent,
+    Additive,
+}
+
+impl Cover {
+    const COUNT: usize = 4;
+
+    fn of(material: &crate::PbrMaterial) -> Self {
+        match material.blend {
+            Blend::Opaque if material.alpha_cutoff > 0.0 => Self::Cutout,
+            Blend::Opaque => Self::Opaque,
+            Blend::Transparent => Self::Transparent,
+            Blend::Additive => Self::Additive,
+        }
+    }
+
+    /// Drawn over what's behind, back to front, after the sky.
+    fn blended(self) -> bool {
+        self >= Self::Transparent
+    }
+}
+
 /// What a forward pipeline is made for: the shader's work left out where a
 /// frame or a material doesn't use it (hardening R11).
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct Variant {
-    cutout: bool,
+    cover: Cover,
     faces: Faces,
     /// Some light casts shadows this frame.
     shadowed: bool,
@@ -255,11 +284,11 @@ struct Variant {
 }
 
 impl Variant {
-    const COUNT: usize = 2 * Faces::ALL.len() * 2 * 2 * 2;
+    const COUNT: usize = Cover::COUNT * Faces::ALL.len() * 2 * 2 * 2;
 
     /// Its index in `Pipelines::forward`.
     fn index(self) -> usize {
-        (((usize::from(self.cutout) * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+        (((self.cover as usize * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
             + usize::from(self.textured))
             * 2
             + usize::from(self.sky_lit)
@@ -268,10 +297,10 @@ impl Variant {
 
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
 /// instances of `mesh` starting at instance `first`, with one set of
-/// textures, opaque or cut out, facing one way.
+/// textures, covering what's behind one way, facing one way.
 #[derive(Clone, Copy)]
 struct Batch {
-    cutout: bool,
+    cover: Cover,
     faces: Faces,
     textures: MaterialTextures,
     mesh: MeshKey,
@@ -340,10 +369,16 @@ pub struct Renderer {
     // Built by `prepare`, consumed by `encode`. Reused every frame.
     uniforms: FrameUniforms,
     instances: Vec<Instance>,
+    /// The solid draws' batches, then the blended ones' from `blended_from`.
     batches: Vec<Batch>,
+    blended_from: usize,
     line_vertices: Vec<LineVertex>,
-    /// The scene's draws that are seen, each with its sort key, sorted.
+    /// The scene's solid draws that are seen, each with its sort key,
+    /// sorted.
     order: Vec<(SortKey, u32)>,
+    /// Its blended ones, each with how far it is ahead of the camera,
+    /// sorted furthest first.
+    blended: Vec<(f32, SortKey, u32)>,
     /// Point and spot lights in view: how far each is from the camera
     /// (squared) and its index in the scene.
     in_view_lights: Vec<(f32, u32)>,
@@ -441,8 +476,10 @@ impl Renderer {
             uniforms: FrameUniforms::zeroed(),
             instances: Vec::new(),
             batches: Vec::new(),
+            blended_from: 0,
             line_vertices: Vec::new(),
             order: Vec::new(),
+            blended: Vec::new(),
             in_view_lights: Vec::new(),
             frame_lights: Vec::new(),
             clusters: Clusters::new(),
@@ -527,6 +564,7 @@ impl Renderer {
         self.quality = scene.quality.unwrap_or(self.kit.quality());
         self.instances.clear();
         self.batches.clear();
+        self.blended_from = 0;
         self.line_vertices.clear();
         self.shadow_candidates.clear();
         self.caster_order.clear();
@@ -688,13 +726,16 @@ impl Renderer {
         u.cells_eye = camera.position.extend(if grid.orthographic { 0.0 } else { 1.0 }).into();
         u.cells_forward = forward.extend(0.0).into();
 
-        // Leave out what the camera can't see, then group the rest by
+        // Leave out what the camera can't see, then group the solid rest by
         // pipeline, textures and mesh, so each run of the same three is one
         // instanced draw call and the state changes least between calls.
+        // Blended draws go furthest first, by their centres, each over what
+        // it's in front of; a run of the same three is one call there too.
         // Each draw's key, normal matrix and lights are worked out once.
-        // The sort is in place and the buffers reused, so a steady frame
+        // The sorts are in place and the buffers reused, so a steady frame
         // allocates nothing.
         self.order.clear();
+        self.blended.clear();
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
@@ -702,8 +743,10 @@ impl Renderer {
                 continue;
             };
             let (at, radius) = bounds(draw.model, mesh.centre, mesh.radius);
-            // Out of view, it can still shadow what's in it.
-            if draw.cast_shadows {
+            // Out of view, it can still shadow what's in it. Blended
+            // surfaces cast none.
+            let cover = Cover::of(&draw.material);
+            if draw.cast_shadows && !cover.blended() {
                 self.shadow_candidates.push((at, radius, i as u32));
             }
             if !in_view(&planes, at, radius) {
@@ -712,32 +755,24 @@ impl Renderer {
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
             let m = &draw.material;
-            let key = (m.alpha_cutoff > 0.0, Faces::of(m, mirrored), m.textures, draw.mesh.0);
-            self.order.push((key, i as u32));
+            let key = (cover, Faces::of(m, mirrored), m.textures, draw.mesh.0);
+            if cover.blended() {
+                self.blended.push(((at - camera.position).dot(forward), key, i as u32));
+            } else {
+                self.order.push((key, i as u32));
+            }
         }
         drop(assets);
         self.order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+        // The same distance keeps the scene's order, so they don't flicker.
+        self.blended.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
 
-        for &((cutout, faces, textures, mesh), i) in &self.order {
-            let draw = &scene.draws[i as usize];
-            let m = &draw.material;
-            let instance = self.instances.len() as u32;
-            match self.batches.last_mut() {
-                Some(b) if (b.cutout, b.faces, b.textures, b.mesh.0) == (cutout, faces, textures, mesh) => b.count += 1,
-                _ => self.batches.push(Batch { cutout, faces, textures, mesh: draw.mesh, first: instance, count: 1 }),
-            }
-            let [er, eg, eb] = m.emissive;
-            let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
-            self.instances.push(Instance {
-                model: {
-                    let rows = draw.model.transpose();
-                    [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
-                },
-                base_color: m.base_color,
-                params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
-                emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
-                uv: [su, sv, ou, ov],
-            });
+        for &(key, i) in &self.order {
+            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize]);
+        }
+        self.blended_from = self.batches.len();
+        for &(_, key, i) in &self.blended {
+            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize]);
         }
         for line in &scene.lines {
             for end in [line.a, line.b] {
@@ -1017,39 +1052,47 @@ impl Renderer {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
             let shadowed = self.shadow_maps_drawn != (0, 0);
-            let mut last: Option<&Batch> = None;
-            for batch in &self.batches {
-                // Freed since prepare, by another view's render worker.
-                let (Some(mesh), Some(bind_group)) = (meshes.get(&batch.mesh), textures.bind_group(&batch.textures))
-                else {
-                    continue;
-                };
-                let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
-                if last.is_none_or(|l| (l.cutout, l.faces, textured(l)) != (batch.cutout, batch.faces, textured(batch)))
-                {
-                    let (cutout, faces) = (batch.cutout, batch.faces);
-                    pass.set_pipeline(scene_pipelines.forward(Variant {
-                        cutout,
-                        faces,
-                        shadowed,
-                        textured: textured(batch),
-                        sky_lit,
-                    }));
+            let (solid, blended) = self.batches.split_at(self.blended_from);
+            let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
+                let mut last: Option<&Batch> = None;
+                for batch in batches {
+                    // Freed since prepare, by another view's render worker.
+                    let (Some(mesh), Some(bind_group)) =
+                        (meshes.get(&batch.mesh), textures.bind_group(&batch.textures))
+                    else {
+                        continue;
+                    };
+                    let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
+                    if last
+                        .is_none_or(|l| (l.cover, l.faces, textured(l)) != (batch.cover, batch.faces, textured(batch)))
+                    {
+                        let (cover, faces) = (batch.cover, batch.faces);
+                        pass.set_pipeline(scene_pipelines.forward(Variant {
+                            cover,
+                            faces,
+                            shadowed,
+                            textured: textured(batch),
+                            sky_lit,
+                        }));
+                    }
+                    if last.is_none_or(|l| l.textures != batch.textures) {
+                        pass.set_bind_group(1, bind_group, &[]);
+                    }
+                    last = Some(batch);
+                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
                 }
-                if last.is_none_or(|l| l.textures != batch.textures) {
-                    pass.set_bind_group(1, bind_group, &[]);
-                }
-                last = Some(batch);
-                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
-            }
-            // After the scene, so it's drawn only where nothing else is.
+            };
+            draw(&mut pass, solid);
+            // After the solid scene, so it's drawn only where nothing else
+            // is; before the blended, which show it through them.
             if self.sky_drawn {
                 pass.set_pipeline(scene_pipelines.sky());
                 pass.set_bind_group(1, sky_image, &[]);
                 pass.draw(0..3, 0..1);
             }
+            draw(&mut pass, blended);
             if !self.line_vertices.is_empty() {
                 pass.set_pipeline(scene_pipelines.lines());
                 pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
@@ -1171,7 +1214,7 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let Variant { cutout, faces, shadowed, textured, sky_lit } = variant;
+        let Variant { cover, faces, shadowed, textured, sky_lit } = variant;
         let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
             let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
@@ -1209,7 +1252,10 @@ impl Pipelines {
         // Cut-outs get their own pipelines: a shader that can drop pixels
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
         // don't use it. Its alpha becomes MSAA coverage, and it writes
-        // colour only, so the target stays opaque.
+        // colour only, so the target stays opaque. Blended surfaces are
+        // tested against the depth but don't write it, so whatever is
+        // drawn after them shows through; their colour comes premultiplied
+        // by their alpha, and their alpha leaves the target's as it is.
         let (front_face, cull_mode) = match faces {
             Faces::Front => (wgpu::FrontFace::Ccw, Some(wgpu::Face::Back)),
             Faces::Mirrored => (wgpu::FrontFace::Cw, Some(wgpu::Face::Back)),
@@ -1223,8 +1269,33 @@ impl Pipelines {
             ("sky_lit", on(sky_lit)),
         ];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
+        let (label, entry_point, blend, write_mask) = match cover {
+            Cover::Opaque => ("forward", "fs_main", None, wgpu::ColorWrites::ALL),
+            Cover::Cutout => ("forward cut-out", "fs_cutout", None, wgpu::ColorWrites::COLOR),
+            Cover::Transparent => (
+                "forward transparent",
+                "fs_transparent",
+                Some(wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
+                    operation: wgpu::BlendOperation::Add,
+                }),
+                wgpu::ColorWrites::COLOR,
+            ),
+            Cover::Additive => (
+                "forward additive",
+                "fs_additive",
+                Some(wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                }),
+                wgpu::ColorWrites::COLOR,
+            ),
+        };
+        let blend = blend.map(|color| wgpu::BlendState { color, alpha: wgpu::BlendComponent::REPLACE });
         self.maker.make(wgpu::RenderPipelineDescriptor {
-            label: Some(if cutout { "forward cut-out" } else { "forward" }),
+            label: Some(label),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
@@ -1243,25 +1314,21 @@ impl Pipelines {
             // the distance, where perspective has least.
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: DEPTH_FORMAT,
-                depth_write_enabled: Some(true),
+                depth_write_enabled: Some(!cover.blended()),
                 depth_compare: Some(wgpu::CompareFunction::Greater),
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState {
                 count: Renderer::SAMPLES,
-                alpha_to_coverage_enabled: cutout,
+                alpha_to_coverage_enabled: cover == Cover::Cutout,
                 ..Default::default()
             },
             fragment: Some(wgpu::FragmentState {
                 module: shader,
-                entry_point: Some(if cutout { "fs_cutout" } else { "fs_main" }),
+                entry_point: Some(entry_point),
                 compilation_options,
-                targets: &[Some(wgpu::ColorTargetState {
-                    format: self.format,
-                    blend: None,
-                    write_mask: if cutout { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
-                })],
+                targets: &[Some(wgpu::ColorTargetState { format: self.format, blend, write_mask })],
             }),
             multiview_mask: None,
             cache: None,
@@ -1415,9 +1482,32 @@ fn caster_key(map: u8, draw: &crate::Draw) -> CasterKey {
     (map, cutout, if cutout { m.textures } else { MaterialTextures::default() }, draw.mesh.0)
 }
 
-/// A draw's sort key: cut out or not, which faces, its textures and its
-/// mesh, in the order draws are grouped.
-type SortKey = (bool, Faces, MaterialTextures, u64);
+/// A draw's sort key: how it covers what's behind, which faces, its
+/// textures and its mesh, in the order draws are grouped.
+type SortKey = (Cover, Faces, MaterialTextures, u64);
+
+/// Adds `draw` to the last of `batches` if it has `key`, or starts another.
+fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw) {
+    let (cover, faces, textures, mesh) = key;
+    let instance = instances.len() as u32;
+    match batches.last_mut() {
+        Some(b) if (b.cover, b.faces, b.textures, b.mesh.0) == (cover, faces, textures, mesh) => b.count += 1,
+        _ => batches.push(Batch { cover, faces, textures, mesh: draw.mesh, first: instance, count: 1 }),
+    }
+    let m = &draw.material;
+    let [er, eg, eb] = m.emissive;
+    let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
+    instances.push(Instance {
+        model: {
+            let rows = draw.model.transpose();
+            [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
+        },
+        base_color: m.base_color,
+        params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
+        emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
+        uv: [su, sv, ou, ov],
+    });
+}
 
 /// The six planes around what `view_proj` shows (left, right, bottom, top,
 /// far and near, for reversed-Z with depth from 0 to 1), each as a normal
