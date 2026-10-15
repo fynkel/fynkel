@@ -136,7 +136,7 @@ image and the extra pass is measured on all three devices.
   lines, the textured materials (a cut-out, a normal map, a glow) and the
   glTF cut-outs are each checked at all three levels, and a renderer
   switching level between frames.
-- **The lab's look scene** ("Look: quality levels"): metal and plastic
+- **The lab's look scene** ("Look: quality levels", grown into "Look: everything" in phase 7): metal and plastic
   spheres from smooth to rough, a ring of pillars, a glowing cube, a
   turning camera, and buttons for each level and the device's pick.
   `--dart-define=LAB_QUALITY=low` starts it at a level. The guide's §5
