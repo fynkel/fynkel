@@ -2,24 +2,33 @@
 //! ([`CameraView::bloom`](crate::CameraView)).
 //!
 //! It works on the scene image, so only above low. A chain of images, each
-//! half the size of the one before, the first half the view's: the scene
+//! half the size of the one before, the first a quarter of the view's: the scene
 //! image's bright light goes into the first (the prefilter), then each
 //! into the next, smaller (down), then each back into the larger, blurred
 //! and added (up). The last pass adds the first image's glow to the scene
-//! (`finish.wgsl`'s `fs_bloom`). Each pass reads a few texels of a small
-//! image, so the whole chain costs about one more full-size pass. A camera
-//! without bloom, or at strength 0, runs none of it.
+//! (`finish.wgsl`'s `fs_bloom`). Each pass but the first reads a few texels
+//! of a small image. The images are 32 bits a pixel where the GPU can draw
+//! into that format, half-float otherwise. Measured on a Note10+, a chain
+//! starting at half the view's size in half floats cost more than its
+//! frame had left. A camera without bloom, or at strength 0, runs none of
+//! it.
 
 use std::sync::OnceLock;
 
 use crate::assets::PipelineMaker;
 use crate::scene::Bloom;
 
-/// The images' format: light, not yet tone mapped.
-const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 /// The most images in a chain: the smallest, of a 1080-pixel view, is 17
 /// pixels across, so the glow reaches about a tenth of the view.
-const MAX_LEVELS: u32 = 6;
+const MAX_LEVELS: u32 = 5;
+
+/// The first image's width and height for a `width` × `height` view, and
+/// how many images the chain has: down to about 4 pixels across, at most
+/// [`MAX_LEVELS`].
+fn shape(width: u32, height: u32) -> (u32, u32, u32) {
+    let (w, h) = ((width / 4).max(1), (height / 4).max(1));
+    (w, h, (w.min(h).ilog2().saturating_sub(2) + 1).min(MAX_LEVELS))
+}
 
 /// `Params` in bloom.wgsl and finish.wgsl.
 #[repr(C)]
@@ -36,6 +45,8 @@ struct Params {
 pub(crate) struct BloomKit {
     device: wgpu::Device,
     maker: PipelineMaker,
+    /// The images' format: light, not yet tone mapped, so floats.
+    format: wgpu::TextureFormat,
     /// An image, its sampler and the [`Params`].
     pub(crate) layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
@@ -89,7 +100,14 @@ impl BloomKit {
             min_filter: wgpu::FilterMode::Linear,
             ..Default::default()
         });
-        Self { device: device.clone(), maker: maker.clone(), layout, sampler, pipelines: OnceLock::new() }
+        // Half the memory, and half the reading and writing, of half floats.
+        // It has no alpha, which the chain doesn't need.
+        let format = if device.features().contains(wgpu::Features::RG11B10UFLOAT_RENDERABLE) {
+            wgpu::TextureFormat::Rg11b10Ufloat
+        } else {
+            wgpu::TextureFormat::Rgba16Float
+        };
+        Self { device: device.clone(), maker: maker.clone(), format, layout, sampler, pipelines: OnceLock::new() }
     }
 
     fn pipelines(&self) -> &Pipelines {
@@ -123,7 +141,7 @@ impl BloomKit {
                         entry_point: Some(entry_point),
                         compilation_options: Default::default(),
                         targets: &[Some(wgpu::ColorTargetState {
-                            format: FORMAT,
+                            format: self.format,
                             blend,
                             write_mask: wgpu::ColorWrites::ALL,
                         })],
@@ -162,16 +180,14 @@ impl BloomChain {
     /// A chain for a `width` × `height` view whose scene image is `image`.
     pub(crate) fn new(kit: &BloomKit, image: &wgpu::TextureView, width: u32, height: u32) -> Self {
         let device = &kit.device;
-        let (w, h) = ((width / 2).max(1), (height / 2).max(1));
-        // Down to about 8 pixels across, at most.
-        let levels = (w.min(h).max(1).ilog2().saturating_sub(2) + 1).min(MAX_LEVELS);
+        let (w, h, levels) = shape(width, height);
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("bloom"),
             size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
             mip_level_count: levels,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: FORMAT,
+            format: kit.format,
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -259,5 +275,22 @@ impl BloomChain {
             let load = wgpu::LoadOp::Load;
             pass(encoder, "bloom up", &self.levels[level].0, load, &pipelines.up, &self.levels[level + 1].1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The chain starts at a quarter of the view's size, where phones can
+    /// afford it, and its smallest image is about 17 pixels across for a
+    /// 1080-pixel view, as before, so the glow reaches as far.
+    #[test]
+    fn the_chain_starts_at_a_quarter_of_the_view() {
+        assert_eq!(shape(1080, 1068), (270, 267, 5));
+        assert_eq!(shape(2796, 1290), (699, 322, 5));
+        // Small views: fewer images, down to one of a pixel.
+        assert_eq!(shape(64, 64), (16, 16, 3));
+        assert_eq!(shape(3, 1), (1, 1, 1));
     }
 }
