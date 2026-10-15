@@ -712,13 +712,8 @@ class GameObject with _Moving {
         b._listening?.cancelAll();
         b._ending = true;
         world._safely(this, b.onDestroy);
-      case Camera():
-        check(fy_camera_remove(world.pointer, id));
-      case Light l:
-        check(fy_light_remove(world.pointer, id));
-        world._countLight(this, l, _LightCount.none);
-      case MeshRenderer():
-        check(fy_mesh_renderer_remove(world.pointer, id));
+      case Camera() || Light() || MeshRenderer():
+        if (component._enabledFlag) _unwrite(component);
     }
     component
       .._removed = true
@@ -832,7 +827,25 @@ class GameObject with _Moving {
     return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness, l.shadows);
   }
 
+  /// Puts an engine component that was turned on or off into the engine,
+  /// or takes it out.
+  void _enabledChanged(Component component) => component._enabledFlag ? _write(component) : _unwrite(component);
+
+  void _unwrite(Component component) {
+    switch (component) {
+      case Camera():
+        check(fy_camera_remove(world.pointer, id));
+      case Light l:
+        check(fy_light_remove(world.pointer, id));
+        world._countLight(this, l, _LightCount.none);
+      case MeshRenderer():
+        check(fy_mesh_renderer_remove(world.pointer, id));
+      case Behaviour():
+    }
+  }
+
   void _write(Component component) => switch (component) {
+    _ when !component._enabledFlag => null,
     Camera c => _writeCamera(c),
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),

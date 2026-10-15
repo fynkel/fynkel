@@ -24,6 +24,24 @@ sealed class Component {
   // so they're told when it goes: not a model part's, read from the engine.
   bool _announced = false;
 
+  /// Whether it's on (Unity's `enabled`). Off, a [Camera] draws nothing, a
+  /// [Light] lights nothing (and isn't one of a frame's 64 lamps), a
+  /// [MeshRenderer] draws nothing, and a [Behaviour] gets none of its
+  /// object's frames or pointers; its object and its other components go
+  /// on as they were. It keeps what it was given, and changes made while
+  /// it's off show when it's on again.
+  bool get enabled => _enabledFlag;
+  set enabled(bool value) {
+    if (value == _enabledFlag) return;
+    _enabledFlag = value;
+    if (_live case final object?) _enabledChanged(object);
+  }
+
+  bool _enabledFlag = true;
+
+  /// Tells the engine or the world that [enabled] changed on live [object].
+  void _enabledChanged(GameObject object);
+
   /// The object it's on. Throws a [StateError] before it's given to one.
   GameObject get gameObject => _owner ?? (throw StateError('$runtimeType is on no object yet'));
 
@@ -361,9 +379,13 @@ final class Camera extends Component {
     return ViewPoint((across + 1) / 2 * w, (1 - up) / 2 * h, width: w, height: h);
   }
 
+  @override
+  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+
   /// Writes it to the engine; what the engine refuses comes back, for the
-  /// setter to undo its change and throw.
+  /// setter to undo its change and throw. Off, it's only kept here.
   _Failure? _write() {
+    if (!_enabledFlag) return null;
     try {
       _live?._writeCamera(this);
       return null;
@@ -571,10 +593,14 @@ final class Light extends Component {
     }
   }
 
+  @override
+  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+
   /// Writes it to the engine; what the engine refuses comes back, for the
-  /// setter to undo its change and throw.
+  /// setter to undo its change and throw. Off, it's only kept here.
   _Failure? _write() {
     if (_refused() case final error?) return _Failure(error, StackTrace.current);
+    if (!_enabledFlag) return null;
     try {
       _live?._writeLight(this);
       return null;
@@ -694,9 +720,13 @@ final class MeshRenderer extends Component {
     }
   }
 
+  @override
+  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+
   /// Writes it to the engine; what the engine refuses comes back, for the
-  /// setter to undo its change and throw.
+  /// setter to undo its change and throw. Off, it's only kept here.
   _Failure? _write() {
+    if (!_enabledFlag) return null;
     try {
       _live?._writeMeshRenderer(this);
       return null;
@@ -749,18 +779,11 @@ abstract class Behaviour extends Component with _Moving {
   @override
   bool get _loading => !_loaded && !_removed;
 
-  /// Whether it gets its object's frames and pointers. A disabled behaviour
-  /// waits to start until it's enabled. Setting it calls [onDisable] or
-  /// [onEnable] when that changes whether it's enabled: only while it's
-  /// loaded and its object is shown.
-  bool get enabled => _enabledFlag;
-  set enabled(bool value) {
-    if (value == _enabledFlag) return;
-    _enabledFlag = value;
-    if (_live case final object?) object.world._refreshBehaviour(object, this);
-  }
-
-  bool _enabledFlag = true;
+  // A disabled behaviour waits to start until it's enabled. Setting
+  // [enabled] calls [onDisable] or [onEnable] when that changes whether it's
+  // enabled: only while it's loaded and its object is shown.
+  @override
+  void _enabledChanged(GameObject object) => object.world._refreshBehaviour(object, this);
 
   // Its load is done, it has had onStart, and it had onEnable and not
   // onDisable since.
