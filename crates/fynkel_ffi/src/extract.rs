@@ -37,8 +37,8 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    CameraView, ColorSpace, Draw, Fog, Light as RenderLight, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
-    RenderScene, Sky, TextureKey,
+    AmbientOcclusion, Bloom, CameraView, ColorSpace, Draw, Fog, Light as RenderLight, Line, MaterialTextures, MeshKey,
+    PbrMaterial, Quality, RenderScene, Sky, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
@@ -234,6 +234,11 @@ impl Extract {
             far: c.far,
             clear_color: rgb(c.clear_color),
             sky: c.show_sky,
+            bloom: c.bloom.then_some(Bloom { strength: c.bloom_strength, threshold: c.bloom_threshold }),
+            ambient_occlusion: c.ambient_occlusion.then_some(AmbientOcclusion {
+                intensity: c.ambient_occlusion_intensity,
+                radius: c.ambient_occlusion_radius,
+            }),
         });
 
         scene.quality = self.quality;

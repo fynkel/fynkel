@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 26;
+pub const FY_ABI_VERSION: u32 = 27;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -120,6 +120,17 @@ pub struct FyCamera {
     /// Shows the world's sky (`fy_world_sky_set`) behind everything;
     /// without it, `clear_color`.
     pub show_sky: bool,
+    /// Light brighter than white glows into what's around it, at medium
+    /// and high quality: how much (0 none, 1 about what it gives off) and
+    /// from how bright (1: only what's brighter than white).
+    pub bloom: bool,
+    pub bloom_strength: f32,
+    pub bloom_threshold: f32,
+    /// Surfaces darken where they meet, at high quality: how dark (0 to 4)
+    /// and how far, in metres.
+    pub ambient_occlusion: bool,
+    pub ambient_occlusion_intensity: f32,
+    pub ambient_occlusion_radius: f32,
 }
 
 /// `FyLight::kind`.
@@ -358,6 +369,12 @@ impl CComponent for FyCamera {
             size: self.size,
             culling_mask: self.culling_mask,
             show_sky: self.show_sky,
+            bloom: self.bloom,
+            bloom_strength: self.bloom_strength,
+            bloom_threshold: self.bloom_threshold,
+            ambient_occlusion: self.ambient_occlusion,
+            ambient_occlusion_intensity: self.ambient_occlusion_intensity,
+            ambient_occlusion_radius: self.ambient_occlusion_radius,
         })
     }
     fn from_component(c: Camera) -> Self {
@@ -370,6 +387,12 @@ impl CComponent for FyCamera {
             size: c.size,
             culling_mask: c.culling_mask,
             show_sky: c.show_sky,
+            bloom: c.bloom,
+            bloom_strength: c.bloom_strength,
+            bloom_threshold: c.bloom_threshold,
+            ambient_occlusion: c.ambient_occlusion,
+            ambient_occlusion_intensity: c.ambient_occlusion_intensity,
+            ambient_occlusion_radius: c.ambient_occlusion_radius,
         }
     }
 }

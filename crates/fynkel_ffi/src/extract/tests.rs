@@ -72,6 +72,12 @@ fn the_stage_1_scene_is_extracted_resolved_and_linear() {
     assert_eq!((camera.near, camera.far), (0.1, 1000.0));
     assert_eq!(camera.clear_color, rgb(Camera::default().clear_color));
     assert_eq!(camera.orthographic, None, "perspective unless asked");
+    assert_eq!(camera.bloom, Some(fynkel_render::Bloom { strength: 1.0, threshold: 1.0 }), "bloom unless asked");
+    assert_eq!(
+        camera.ambient_occlusion,
+        Some(fynkel_render::AmbientOcclusion { intensity: 1.0, radius: 0.5 }),
+        "and ambient occlusion"
+    );
 
     let (direction, color) = scene.sun().unwrap();
     assert!(close(direction, Vec3::new(-0.4, -1.0, -0.3).normalize()), "{direction:?}");
@@ -581,4 +587,28 @@ fn a_renderer_s_own_color_replaces_its_material_s_for_it_alone() {
     assert_eq!(plain.material.base_color, Color::from_argb32(0xFFE0613A).to_linear(), "the shared material's");
     assert_eq!(own.material.base_color, [1.0; 4], "its own: white, for a flash");
     assert_eq!(own.material.roughness, plain.material.roughness, "the rest is the material's");
+}
+
+#[test]
+fn a_camera_without_bloom_or_ambient_occlusion_has_neither() {
+    let (mut world, _) = stage1_world();
+    let mut camera = None;
+    world.for_each::<Camera>(|id, _| camera = Some(id));
+    let camera = camera.unwrap();
+    let lens = Camera { bloom: false, ambient_occlusion: false, ..Camera::default() };
+    world.insert(camera, lens).unwrap();
+    let view = extract(&world).0.camera.unwrap();
+    assert_eq!((view.bloom, view.ambient_occlusion), (None, None));
+
+    let lens = Camera {
+        bloom_strength: 0.3,
+        bloom_threshold: 2.0,
+        ambient_occlusion_intensity: 2.0,
+        ambient_occlusion_radius: 1.5,
+        ..Camera::default()
+    };
+    world.insert(camera, lens).unwrap();
+    let view = extract(&world).0.camera.unwrap();
+    assert_eq!(view.bloom, Some(fynkel_render::Bloom { strength: 0.3, threshold: 2.0 }));
+    assert_eq!(view.ambient_occlusion, Some(fynkel_render::AmbientOcclusion { intensity: 2.0, radius: 1.5 }));
 }

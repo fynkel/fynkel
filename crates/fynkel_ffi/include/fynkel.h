@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 26
+#define FY_ABI_VERSION 27
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -286,6 +286,17 @@ typedef struct FyCamera {
   // Shows the world's sky (`fy_world_sky_set`) behind everything;
   // without it, `clear_color`.
   bool show_sky;
+  // Light brighter than white glows into what's around it, at medium
+  // and high quality: how much (0 none, 1 about what it gives off) and
+  // from how bright (1: only what's brighter than white).
+  bool bloom;
+  float bloom_strength;
+  float bloom_threshold;
+  // Surfaces darken where they meet, at high quality: how dark (0 to 4)
+  // and how far, in metres.
+  bool ambient_occlusion;
+  float ambient_occlusion_intensity;
+  float ambient_occlusion_radius;
 } FyCamera;
 
 // `Default` is the engine's default light: a white sun of intensity 1,
