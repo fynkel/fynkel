@@ -269,6 +269,24 @@ final class Input {
 
   // --- Axes and actions ---
 
+  /// A finger dragging alone, as an on-screen stick: from where it went
+  /// down to where it is, as [axis2] gives a value (x to the right, y up
+  /// the view), 1 at [radius] logical pixels and never longer. Null while
+  /// no finger is down, more than one is, or it hasn't started to drag:
+  /// `final move = input.stick() ?? input.axis2('move')`.
+  Vec2? stick({double radius = 60}) {
+    Finger? one;
+    for (final finger in _fingersView) {
+      if (!finger.isPressed) continue;
+      if (one != null) return null;
+      one = finger;
+    }
+    if (one == null || !one.isDragging) return null;
+    final x = (one._x - one._startX) / radius, y = (one._startY - one._y) / radius;
+    final length = math.sqrt(x * x + y * y);
+    return length > 1 ? Vec2(x / length, y / length) : Vec2(x, y);
+  }
+
   /// The named two-way control [name] now, as a [Vec2] of length at most
   /// 1: x to the right, y up. `'move'` reads W, A, S, D and the arrow
   /// keys; [bindAxis2] adds others, and [setAxis2] adds a Flutter stick's

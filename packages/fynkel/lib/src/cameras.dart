@@ -160,6 +160,7 @@ final class Follow extends _Rig {
     this.space = FollowSpace.world,
     this.damping = 0,
     this.lookAhead = 0,
+    this.portraitFit = 0,
   });
 
   /// The object it follows. Set it to follow another. Once the target is
@@ -186,6 +187,13 @@ final class Follow extends _Rig {
   /// it's going: a camera that shows more of where the player is heading.
   double lookAhead;
 
+  /// In a view taller than it's wide (a phone held upright), which sees
+  /// less across with the same lens: how much further back [offset] goes,
+  /// times the view's height over its width, between 1 and 2 times. 0.75
+  /// sees about as much across upright as in a wide view. 0, unless set,
+  /// leaves it as it is.
+  double portraitFit;
+
   Vec3? _at, _targetWas;
 
   @override
@@ -195,6 +203,7 @@ final class Follow extends _Rig {
   void _move(double dt) {
     if (!_present(target)) return;
     final p = target.position;
+    final offset = portraitFit > 0 ? this.offset * _stretch() : this.offset;
     var goal =
         p +
         switch (space) {
@@ -209,6 +218,12 @@ final class Follow extends _Rig {
     final next = at == null ? goal : Vec3.lerp(at, goal, _damp(damping, dt));
     _at = next;
     gameObject._setPosition(next);
+  }
+
+  double _stretch() {
+    final input = gameObject.world.input;
+    final (w, h) = (input.width, input.height);
+    return w > 0 && h > w ? (portraitFit * h / w).clamp(1.0, 2.0) : 1.0;
   }
 
   Quat _heading() {
