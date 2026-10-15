@@ -852,6 +852,15 @@ class GameObject with _Moving {
           orthographicSize: scratch.camera.ref.size,
           cullingMask: LayerMask._(scratch.camera.ref.culling_mask),
           showSky: scratch.camera.ref.show_sky,
+          bloom: scratch.camera.ref.bloom
+              ? Bloom(strength: scratch.camera.ref.bloom_strength, threshold: scratch.camera.ref.bloom_threshold)
+              : null,
+          ambientOcclusion: scratch.camera.ref.ambient_occlusion
+              ? AmbientOcclusion(
+                  intensity: scratch.camera.ref.ambient_occlusion_intensity,
+                  radius: scratch.camera.ref.ambient_occlusion_radius,
+                )
+              : null,
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
@@ -995,6 +1004,13 @@ class GameObject with _Moving {
     c.size = value.orthographicSize;
     c.culling_mask = value.cullingMask.value;
     c.show_sky = value.showSky;
+    final bloom = value.bloom, ao = value.ambientOcclusion;
+    c.bloom = bloom != null;
+    c.bloom_strength = bloom?.strength ?? 1;
+    c.bloom_threshold = bloom?.threshold ?? 1;
+    c.ambient_occlusion = ao != null;
+    c.ambient_occlusion_intensity = ao?.intensity ?? 1;
+    c.ambient_occlusion_radius = ao?.radius ?? 0.5;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
   }
 

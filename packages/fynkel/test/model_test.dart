@@ -32,7 +32,15 @@ Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) asy
     GameObject(
       transform: camera,
       components: [
-        Camera(fovY: fov.deg, near: radius * 0.05, far: radius * 8 + 10, clearColor: Color.rgb(0.16, 0.17, 0.2)),
+        // As the Rust tests' camera, whose goldens it's held to.
+        Camera(
+          fovY: fov.deg,
+          near: radius * 0.05,
+          far: radius * 8 + 10,
+          clearColor: Color.rgb(0.16, 0.17, 0.2),
+          bloom: null,
+          ambientOcclusion: null,
+        ),
       ],
     ),
   );

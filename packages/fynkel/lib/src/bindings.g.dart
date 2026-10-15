@@ -407,7 +407,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 26;
+const int FY_ABI_VERSION = 27;
 
 const int FY_APPLE_MORE = 2;
 
@@ -478,6 +478,24 @@ final class FyCamera extends ffi.Struct {
 
   @ffi.Bool()
   external bool show_sky;
+
+  @ffi.Bool()
+  external bool bloom;
+
+  @ffi.Float()
+  external double bloom_strength;
+
+  @ffi.Float()
+  external double bloom_threshold;
+
+  @ffi.Bool()
+  external bool ambient_occlusion;
+
+  @ffi.Float()
+  external double ambient_occlusion_intensity;
+
+  @ffi.Float()
+  external double ambient_occlusion_radius;
 }
 
 final class FyColor extends ffi.Struct {
