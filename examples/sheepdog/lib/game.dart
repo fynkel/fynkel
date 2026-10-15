@@ -105,8 +105,15 @@ class SheepdogGame extends GameObject {
   /// The floor and the fences, coloured by [wear].
   final grass = Material(name: 'grass', roughness: 1), fence = Material(name: 'fence', roughness: 0.8);
 
-  /// The minimap's camera, high above the field and looking straight down.
-  final map = Camera(orthographic: true, orthographicSize: size + 0.5, cullingMask: LayerMask.except([effects]));
+  /// The minimap's camera, high above the field and looking straight down:
+  /// no glow and no darkened corners, which it's too small to show.
+  final map = Camera(
+    orthographic: true,
+    orthographicSize: size + 0.5,
+    cullingMask: LayerMask.except([effects]),
+    bloom: null,
+    ambientOcclusion: null,
+  );
 
   late final Light _sun, _ambient;
 

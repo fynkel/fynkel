@@ -387,6 +387,8 @@ void main() {
     expect(world.fog?.color, isNull, reason: 'the far field fades into the horizon');
     expect(game.map.showSky, isFalse, reason: 'the minimap looks down at the field, on its own colour');
     expect(game.map.clearColor, night.$1.ground);
+    expect((game.map.bloom, game.map.ambientOcclusion), (null, null), reason: 'too small for either');
+    expect(game.camera.get<Camera>()!.bloom, isNotNull, reason: "the field's camera glows: the bulbs at night");
     await at(2);
     world.run(calm + 1);
     shot('night');
