@@ -22,6 +22,7 @@ import 'scenes/joints_bridge.dart';
 import 'scenes/joints_chain.dart';
 import 'scenes/joints_character.dart';
 import 'scenes/lamps.dart';
+import 'scenes/see_through.dart';
 import 'scenes/shadows.dart';
 import 'scenes/sky.dart';
 import 'scenes/layer_matrix.dart';
@@ -96,4 +97,5 @@ final List<LabScene Function()> scenes = [
   LampsScene.new,
   ShadowsScene.new,
   SkyScene.new,
+  SeeThroughScene.new,
 ];
