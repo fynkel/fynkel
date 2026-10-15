@@ -1,10 +1,7 @@
 // Stage 8, phase 2: lamps. A dark room lit by coloured lamps that drift
-// about, and a torch that follows the pointer. Every object is lit by the
-// lamps brightest at it, up to 4 at low and medium and 8 at high, so the
-// floor and walls are tiles: one big floor would get only the few lamps
-// nearest its middle, and big tiles show their edges where neighbours'
-// lamps differ. 32 lights (31 lamps and the torch) is the budget measured
-// here.
+// about, and a torch that follows the pointer. The floor and walls are
+// one piece each: a lamp lights whatever it reaches (hardening L1). 32
+// lights (31 lamps and the torch) is the budget measured here.
 
 import 'dart:math' as math;
 
@@ -29,8 +26,8 @@ class LampsScene extends LabScene {
   String get step => 'stage 8';
   @override
   String get about =>
-      'A dark room, lit by coloured lamps and a torch that follows the pointer. Each object is lit by the lamps '
-      'brightest at it: up to 4 at low and medium quality, 8 at high. Try 64 lights, and low.';
+      'A dark room, lit by coloured lamps and a torch that follows the pointer. Every lamp lights whatever it '
+      'reaches, up to 64 a frame; at low, lamps give no highlights. Try 64 lights, and low.';
 
   @override
   Vec3 get eye => Vec3(0, 8, 11);
@@ -55,20 +52,11 @@ class LampsScene extends LabScene {
 
     final floor = Material(color: const Color(0xFF8A8F99), roughness: 0.7);
     final wall = Material(color: const Color(0xFFB8B0A0), roughness: 0.9);
-    // Tiles 1 m across, and lamps reaching 3.5 m: neighbouring tiles then
-    // mostly share their nearest lamps, so their edges don't show.
-    const tile = 1.0;
-    for (var x = -size + tile / 2; x < size; x += tile) {
-      for (var z = -size + tile / 2; z < size; z += tile) {
-        add(_box('floor', floor, Vec3(x, -0.05, z), Vec3(tile, 0.1, tile)));
-      }
-      // The back wall and the two sides, 3 m high.
-      for (var y = tile / 2; y < 3; y += tile) {
-        add(_box('wall', wall, Vec3(x, y, -size), Vec3(tile, tile, 0.2)));
-        add(_box('wall', wall, Vec3(-size, y, x), Vec3(0.2, tile, tile)));
-        add(_box('wall', wall, Vec3(size, y, x), Vec3(0.2, tile, tile)));
-      }
-    }
+    add(_box('floor', floor, Vec3(0, -0.05, 0), Vec3(2 * size, 0.1, 2 * size)));
+    // The back wall and the two sides, 3 m high.
+    add(_box('wall', wall, Vec3(0, 1.5, -size), Vec3(2 * size, 3, 0.2)));
+    add(_box('wall', wall, Vec3(-size, 1.5, 0), Vec3(0.2, 3, 2 * size)));
+    add(_box('wall', wall, Vec3(size, 1.5, 0), Vec3(0.2, 3, 2 * size)));
     // Things to light: metal and plastic, round and square.
     final random = math.Random(8);
     for (var i = 0; i < 14; i++) {

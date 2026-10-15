@@ -8,9 +8,9 @@
 //!
 //! Lights: every sun lights every object. Point and spot lights go into a
 //! list for the frame, the ones in view, nearest the camera first, up to
-//! [`Renderer::MAX_LIGHTS`]; each object then gets the ones of those that
-//! reach it, brightest at it first, up to [`Quality::lights_per_object`],
-//! and its shader loops over just those.
+//! [`Renderer::MAX_LIGHTS`]. The view is cut into cells (`clusters`), each
+//! holding every one of those that reaches it; a pixel loops over its
+//! cell's.
 //!
 //! Shadows (`shadows`): the first sun with shadows casts them through
 //! [`ShadowLevel::cascades`](crate::ShadowLevel) maps fitted to the view,
@@ -30,7 +30,8 @@ use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
 use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
-use crate::frame_ring::FrameRing;
+use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
+use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, TextureKey};
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
@@ -74,11 +75,21 @@ struct FrameUniforms {
     camera_position: [f32; 4],
     ambient: [f32; 4],
     /// x: how many of `suns` are used. y: the one that casts shadows, or
-    /// [`NO_SHADOWS`].
+    /// [`NO_SHADOWS`]. z: 1 if lamps give highlights
+    /// ([`Quality::lamp_highlights`]).
     counts: [u32; 4],
     suns: [SunUniform; MAX_SUNS],
     lights: [LightUniform; MAX_LIGHTS],
     shadows: ShadowUniforms,
+    /// x, y: cells across and down per pixel. z, w: a point's slice is its
+    /// depth along the view (its logarithm, for a perspective camera)
+    /// times z plus w.
+    cells: [f32; 4],
+    /// xyz: where the camera is. w: 1 for a perspective camera, 0 for an
+    /// orthographic one.
+    cells_eye: [f32; 4],
+    /// xyz: the way the camera looks.
+    cells_forward: [f32; 4],
 }
 
 /// `Shadows` in forward.wgsl.
@@ -131,13 +142,9 @@ struct LightUniform {
 }
 
 const MAX_SUNS: usize = 4;
-const MAX_LIGHTS: usize = 64;
-/// The most lights an object's instance has room for.
-const LIGHT_SLOTS: usize = 8;
-/// An empty slot in an instance's light list.
-const NO_LIGHT: u8 = 0xFF;
+pub(crate) const MAX_LIGHTS: usize = 64;
 
-/// The per-draw vertex data (instance step), locations 4–14.
+/// The per-draw vertex data (instance step), locations 4–10.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
@@ -151,9 +158,6 @@ struct Instance {
     emissive: [f32; 4],
     /// UV scale (xy), then offset (zw).
     uv: [f32; 4],
-    /// The point and spot lights that light it: indices into the frame's
-    /// list, a byte each, nearest first, [`NO_LIGHT`] after the last.
-    lights: [u32; 2],
 }
 
 /// A debug line's end, as lines.wgsl reads it.
@@ -306,15 +310,14 @@ pub struct Renderer {
     line_vertices: Vec<LineVertex>,
     /// The scene's draws that are seen, each with its sort key, sorted.
     order: Vec<(SortKey, u32)>,
-    /// Each seen draw's lights (as [`Instance::lights`]), by its index in
-    /// the scene.
-    seen: Vec<[u32; 2]>,
     /// Point and spot lights in view: how far each is from the camera
     /// (squared) and its index in the scene.
     in_view_lights: Vec<(f32, u32)>,
     /// The frame's point and spot lights, in the order of
     /// [`FrameUniforms::lights`].
     frame_lights: Vec<Reach>,
+    /// Which of them light which cells of the view.
+    clusters: Clusters,
     /// Draws that cast shadows: their bounding sphere and their index.
     shadow_candidates: Vec<(Vec3, f32, u32)>,
     /// Each caster in each map, sorted as they're drawn.
@@ -400,9 +403,9 @@ impl Renderer {
             batches: Vec::new(),
             line_vertices: Vec::new(),
             order: Vec::new(),
-            seen: Vec::new(),
             in_view_lights: Vec::new(),
             frame_lights: Vec::new(),
+            clusters: Clusters::new(),
             shadow_candidates: Vec::new(),
             caster_order: Vec::new(),
             casters: Vec::new(),
@@ -543,7 +546,8 @@ impl Renderer {
             }
             suns += 1;
         }
-        u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), 0, 0];
+        let highlights = u32::from(self.quality.lamp_highlights());
+        u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), highlights, 0];
 
         // The point and spot lights that can light what's seen: their reach
         // is in view, and they give some light. Past the cap, the ones
@@ -567,7 +571,31 @@ impl Renderer {
             self.frame_lights.push(Reach::of(light));
         }
         stats.lights = self.frame_lights.len() as u32;
-        let per_object = self.quality.lights_per_object();
+        // The cells: their slices end where the furthest lamp's reach does,
+        // rounded up a quarter octave at a time so a moving camera seldom
+        // changes the grid's shape (`Clusters` keeps it while it holds).
+        let forward = camera.view.inverse().transform_vector3(Vec3::NEG_Z).normalize();
+        let reach = self
+            .frame_lights
+            .iter()
+            .map(|l| (l.position - camera.position).dot(forward) + l.range)
+            .fold(camera.near * 2.0, f32::max);
+        let quarters = ((reach / camera.near).log2() * 4.0).ceil();
+        let far = (camera.near * (quarters * 0.25).exp2()).min(camera.far.max(camera.near * 2.0));
+        let half = match camera.orthographic {
+            Some(h) => (h * aspect, h),
+            None => {
+                let t = (camera.fov_y * 0.5).tan();
+                (t * aspect, t)
+            }
+        };
+        let grid =
+            Grid { view: camera.view, half, orthographic: camera.orthographic.is_some(), near: camera.near, far };
+        self.clusters.build(&grid, &self.frame_lights);
+        let (scale, offset) = grid.slicing();
+        u.cells = [TILES_X as f32 / self.size.0 as f32, TILES_Y as f32 / self.size.1 as f32, scale, offset];
+        u.cells_eye = camera.position.extend(if grid.orthographic { 0.0 } else { 1.0 }).into();
+        u.cells_forward = forward.extend(0.0).into();
 
         // Leave out what the camera can't see, then group the rest by
         // pipeline, textures and mesh, so each run of the same three is one
@@ -576,7 +604,6 @@ impl Renderer {
         // The sort is in place and the buffers reused, so a steady frame
         // allocates nothing.
         self.order.clear();
-        self.seen.resize(scene.draws.len(), [0; 2]);
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
@@ -593,7 +620,6 @@ impl Renderer {
                 continue;
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
-            self.seen[i] = brightest_lights(&self.frame_lights, at, radius, per_object);
             let m = &draw.material;
             let key = (m.alpha_cutoff > 0.0, Faces::of(m, mirrored), m.textures, draw.mesh.0);
             self.order.push((key, i as u32));
@@ -604,7 +630,6 @@ impl Renderer {
         for &((cutout, faces, textures, mesh), i) in &self.order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
-            let lights = self.seen[i as usize];
             let instance = self.instances.len() as u32;
             match self.batches.last_mut() {
                 Some(b) if (b.cutout, b.faces, b.textures, b.mesh.0) == (cutout, faces, textures, mesh) => b.count += 1,
@@ -621,7 +646,6 @@ impl Renderer {
                 params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
                 emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
                 uv: [su, sv, ou, ov],
-                lights,
             });
         }
         for line in &scene.lines {
@@ -805,11 +829,14 @@ impl Renderer {
         }
         let frame = frame_data.write(
             &kit.gpu.device,
-            bytemuck::bytes_of(&self.uniforms),
-            &self.shadow_views,
-            bytemuck::cast_slice(&self.instances),
-            bytemuck::cast_slice(&self.line_vertices),
-            bytemuck::cast_slice(&self.casters),
+            Parts {
+                uniforms: bytemuck::bytes_of(&self.uniforms),
+                views: &self.shadow_views,
+                instances: bytemuck::cast_slice(&self.instances),
+                lines: bytemuck::cast_slice(&self.line_vertices),
+                casters: bytemuck::cast_slice(&self.casters),
+                cells: self.clusters.bytes(),
+            },
         );
 
         // 0. The shadow maps: each cleared, then its casters' depth.
@@ -1047,7 +1074,6 @@ impl Pipelines {
         let instance_attributes = wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
             7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
-            11 => Uint32x2,
         ];
         let buffers = [
             Some(wgpu::VertexBufferLayout {
@@ -1272,76 +1298,4 @@ fn light_uniform(light: &crate::Light) -> LightUniform {
         direction: direction.extend(0.0).into(),
         cone: [cone[0], cone[1], -1.0, 0.0],
     }
-}
-
-/// What a point or spot light reaches, for choosing an object's lights.
-#[derive(Clone, Copy)]
-struct Reach {
-    position: Vec3,
-    range: f32,
-    /// Its colour's brightest channel.
-    peak: f32,
-    /// A spot light's axis, and the sine and cosine of half its angle.
-    cone: Option<(Vec3, f32, f32)>,
-}
-
-impl Reach {
-    fn of(light: &crate::Light) -> Self {
-        let (position, range, cone) = match light.kind {
-            LightKind::Sun { .. } => unreachable!("suns aren't in the frame's list"),
-            LightKind::Point { position, range } => (position, range, None),
-            LightKind::Spot { position, direction, range, angle, .. } => {
-                let half = (angle * 0.5).clamp(0.0, std::f32::consts::FRAC_PI_2);
-                (position, range, Some((direction.normalize_or_zero(), half.sin(), half.cos())))
-            }
-        };
-        Self { position, range, peak: light.color.max_element(), cone }
-    }
-
-    /// How brightly it lights a sphere at `at` with radius `r`: its
-    /// irradiance at the sphere's nearest point (no closer than 10 cm), or
-    /// `None` when it doesn't reach it at all.
-    fn at(&self, at: Vec3, r: f32) -> Option<f32> {
-        let to = at - self.position;
-        let gap = to.length() - r;
-        if gap >= self.range {
-            return None;
-        }
-        if let Some((axis, sin, cos)) = self.cone {
-            // Outside the cone: the sphere's centre is further from the
-            // cone's side than its radius (Wronski, "Cull that cone!").
-            let along = to.dot(axis);
-            let across = (to.length_squared() - along * along).max(0.0).sqrt();
-            if cos * across - sin * along > r || along < -r {
-                return None;
-            }
-        }
-        Some(self.peak / gap.max(0.1).powi(2))
-    }
-}
-
-/// The lights of `lights` that reach a sphere at `at` with radius `r`, the
-/// brightest at it first, at most `cap`: their indices, a byte each, packed
-/// four to a word, [`NO_LIGHT`] after the last. Among lights alike, the
-/// brightest are the nearest.
-fn brightest_lights(lights: &[Reach], at: Vec3, r: f32, cap: usize) -> [u32; 2] {
-    let cap = cap.min(LIGHT_SLOTS);
-    let mut best = [(0.0, NO_LIGHT); LIGHT_SLOTS];
-    let mut count = 0;
-    for (index, light) in lights.iter().enumerate() {
-        let Some(bright) = light.at(at, r) else { continue };
-        if count == cap && bright <= best[cap - 1].0 {
-            continue;
-        }
-        // Into its place, the dimmest dropping off the end when full.
-        let mut k = count.min(cap - 1);
-        count = (count + 1).min(cap);
-        while k > 0 && best[k - 1].0 < bright {
-            best[k] = best[k - 1];
-            k -= 1;
-        }
-        best[k] = (bright, index as u8);
-    }
-    let byte = |k: usize| u32::from(best[k].1) << (8 * (k % 4));
-    [(0..4).map(byte).sum(), (4..8).map(byte).sum()]
 }

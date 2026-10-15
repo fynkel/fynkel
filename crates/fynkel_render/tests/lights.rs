@@ -132,51 +132,25 @@ fn reds(n: usize, distance: f32, red: f32) -> Vec<Light> {
         .collect()
 }
 
-/// An object reached by more lamps than its level allows is lit by the
-/// nearest ones, among lamps alike: with as many red lamps close by as the
-/// cap, a green one as bright but further off is left out, at every level.
-/// With one red lamp fewer, the green one lights it.
+/// Hardening L1, again: a part of the view is lit by every lamp that
+/// reaches it, however many, at every level. A cell that kept only some
+/// showed its edge where its neighbour kept others (squares of light in
+/// the lab's lamps room at low and medium). Twenty dim lamps around the
+/// wall's middle each change the pixel there.
 #[test]
-fn an_object_lit_by_more_than_its_cap_is_lit_by_the_nearest() {
+fn a_cell_is_lit_by_every_lamp_that_reaches_it() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     for quality in [Quality::Low, Quality::Medium, Quality::High] {
-        let cap = quality.lights_per_object();
-        let green = Light::point(Vec3::new(0.0, 0.0, 1.5), 10.0, Vec3::new(0.0, 0.5, 0.0));
+        let lamps = reds(20, 1.0, 0.05);
         let centre = |r: &mut Renderer, lights| render(&gpu, r, &wall(1.0, lights, quality), 64, 64).0.pixel(32, 32);
-
-        let full = centre(&mut r, reds(cap, 1.0, 0.5));
-        let with_green = centre(&mut r, [vec![green], reds(cap, 1.0, 0.5)].concat());
-        assert_eq!(full, with_green, "{quality:?}: {cap} red lamps nearer than the green one: no green");
-        assert!(full[0] > 0, "{quality:?}: the red lamps light it");
-
-        let short = centre(&mut r, [reds(cap - 1, 1.0, 0.5), vec![green]].concat());
-        assert!(short[1] > 0, "{quality:?}: {} red lamps leave room for the green one: {short:?}", cap - 1);
+        let all = centre(&mut r, lamps.clone());
+        for k in 0..lamps.len() {
+            let mut fewer = lamps.clone();
+            fewer.remove(k);
+            assert!(centre(&mut r, fewer) != all, "{quality:?}: lamp {k} lights the middle ({all:?})");
+        }
     }
-}
-
-/// What counts is how brightly a light lights the object: a strong light
-/// far off (a torch from the camera) beats dim lamps close by. A spotlight
-/// shining elsewhere takes no place at all.
-#[test]
-fn an_object_keeps_the_lights_brightest_at_it() {
-    let gpu = gpu();
-    let mut r = renderer(&gpu, SRGB);
-    let quality = Quality::Low;
-    let cap = quality.lights_per_object();
-    let centre = |r: &mut Renderer, lights| render(&gpu, r, &wall(1.0, lights, quality), 64, 64).0.pixel(32, 32);
-    let dim = reds(cap, 1.0, 0.1);
-
-    let torch = Light::spot(Vec3::new(0.0, 0.0, 2.9), Vec3::NEG_Z, 10.0, 0.5, 0.0, Vec3::new(0.0, 20.0, 0.0));
-    let lit = centre(&mut r, [dim.clone(), vec![torch]].concat());
-    assert!(lit[1] > 100, "the torch 2.9 m off outshines lamps of 0.1 at 1 m: {lit:?}");
-
-    // Turned away, it would push a red lamp out if it took a place: it
-    // doesn't, so the wall is as the red lamps alone light it.
-    let away = Light::spot(Vec3::new(0.0, 0.0, 2.9), Vec3::Z, 10.0, 0.5, 0.0, Vec3::new(0.0, 20.0, 0.0));
-    let without = centre(&mut r, dim.clone());
-    assert_eq!(centre(&mut r, [vec![away], dim.clone()].concat()), without, "a torch turned away takes no place");
-    assert_ne!(centre(&mut r, dim[1..].to_vec()), without, "one red lamp fewer shows");
 }
 
 /// A frame takes `MAX_LIGHTS` point and spot lights: past that, the ones
@@ -206,4 +180,74 @@ fn a_frame_keeps_the_lamps_nearest_the_camera() {
     let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
     assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 0));
     assert_ne!(image.pixel(32, 32), [0, 0, 0, 255], "with room for it, it lights the wall");
+}
+
+/// At low, a lamp lights a surface without a highlight, but still in the
+/// surface's own colour, metal too: a polished metal wall (no matte colour
+/// of its own) is lit at every level, not black at low (the lab's chrome
+/// balls were). A matte wall is lit about alike at every level.
+#[test]
+fn lamps_light_metal_at_every_level() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let lamp = || vec![Light::point(Vec3::new(0.0, 0.0, 1.0), 10.0, Vec3::ONE)];
+    let centre = |r: &mut Renderer, scene: &RenderScene| render(&gpu, r, scene, 64, 64).0.pixel(32, 32);
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let mut metal = wall(1.0, lamp(), quality);
+        metal.draws[0].material.metallic = 1.0;
+        metal.draws[0].material.roughness = 0.3;
+        let shine = centre(&mut r, &metal);
+        assert!(shine[0] > 20, "{quality:?}: the lamp lights the metal: {shine:?}");
+    }
+    let low = centre(&mut r, &wall(1.0, lamp(), Quality::Low));
+    let high = centre(&mut r, &wall(1.0, lamp(), Quality::High));
+    // Even a fully rough surface has a faint highlight above low; low
+    // spreads it evenly instead, a little brighter where it's seen.
+    assert!(low[0] > 20 && low[0].abs_diff(high[0]) <= 10, "matte: low {low:?}, high {high:?}");
+}
+
+/// Hardening L1: a big surface is lit by every lamp over it, not only the
+/// few brightest at its middle. Six short lamps along one wall each light
+/// the wall where they are.
+#[test]
+fn a_big_wall_is_lit_by_every_lamp_over_it() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let lamps: Vec<Light> =
+        (0..6).map(|i| Light::point(Vec3::new(-0.75 + 0.3 * i as f32, 0.0, 0.2), 0.4, Vec3::ONE)).collect();
+    let image = |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, Quality::Low), 64, 64).0;
+    let all = image(&mut r, lamps.clone());
+    for k in 0..lamps.len() {
+        let mut fewer = lamps.clone();
+        fewer.remove(k);
+        assert!(image(&mut r, fewer) != all, "lamp {k} lights the wall");
+    }
+}
+
+/// Hardening L1: a lamp's light doesn't stop at an object's edge. Two
+/// tiles side by side; brighter red lamps fill the left tile's places, and
+/// a green lamp hangs over the seam. The green either side of the seam is
+/// alike.
+#[test]
+fn a_lamp_over_a_seam_lights_both_sides_alike() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let quality = Quality::Low;
+    let mut scene = wall(1.0, Vec::new(), quality);
+    let tile = scene.draws[0];
+    scene.draws = [-0.5f32, 0.5]
+        .iter()
+        .map(|&x| Draw { model: Mat4::from_translation(Vec3::new(x, 0.0, 0.0)) * tile.model, ..tile })
+        .collect();
+    // Far left, reaching the left tile only.
+    let reds: Vec<Light> = (0..8)
+        .map(|i| Light::point(Vec3::new(-0.9, -0.3 + 0.08 * i as f32, 0.2), 0.3, Vec3::new(4.0, 0.0, 0.0)))
+        .collect();
+    let green = Light::point(Vec3::new(0.0, 0.0, 0.2), 0.6, Vec3::new(0.0, 0.3, 0.0));
+    scene.lights = [reds, vec![green]].concat();
+    let (image, _) = render(&gpu, &mut r, &scene, 64, 64);
+    // The seam is between pixels 31 and 32: 2.5 pixels either side.
+    let (left, right) = (image.pixel(29, 32), image.pixel(34, 32));
+    assert!(right[1] > 20, "the green lamp lights the right tile: {right:?}");
+    assert!(left[1].abs_diff(right[1]) <= 3, "green left of the seam {left:?}, right {right:?}");
 }

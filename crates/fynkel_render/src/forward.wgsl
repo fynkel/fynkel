@@ -59,14 +59,29 @@ struct Frame {
     camera_position: vec4<f32>,
     ambient: vec4<f32>,
     // x: how many suns there are. y: the one that casts shadows, or
-    // 0xFFFFFFFF.
+    // 0xFFFFFFFF. z: 1 if lamps give highlights (Quality::lamp_highlights).
     counts: vec4<u32>,
     suns: array<Sun, 4>,
     lamps: array<Lamp, 64>,
     shadows: Shadows,
+    // The view's cells (clusters.rs). x, y: cells across and down per
+    // pixel. z, w: a point's slice is its depth along the view (its
+    // logarithm, for a perspective camera) times z plus w.
+    cells: vec4<f32>,
+    // xyz: where the camera is. w: 1 perspective, 0 orthographic.
+    cells_eye: vec4<f32>,
+    // xyz: the way the camera looks.
+    cells_forward: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
+// Each cell's lamps, a bit for each of `frame.lamps`: two words a cell.
+@group(0) @binding(1) var<storage, read> cells: array<u32>;
+
+// clusters.rs: TILES_X, TILES_Y, SLICES.
+const CELLS_ACROSS: u32 = 16u;
+const CELLS_DOWN: u32 = 9u;
+const SLICES: u32 = 16u;
 
 // Set by the pipeline for double-sided materials, whose triangles are
 // drawn from both sides: seen from behind, the normal is turned round so
@@ -117,9 +132,6 @@ struct VertexIn {
     @location(9) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
     @location(10) uv_transform: vec4<f32>,
-    // The lamps that light it: indices into `frame.lamps`, a byte each,
-    // nearest first, 0xFF after the last.
-    @location(11) lamps: vec2<u32>,
 };
 
 struct VertexOut {
@@ -133,7 +145,6 @@ struct VertexOut {
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) emissive: vec4<f32>,
-    @location(7) @interpolate(flat) lamps: vec2<u32>,
 };
 
 @vertex
@@ -161,7 +172,6 @@ fn vs_main(in: VertexIn) -> VertexOut {
     out.base_color = in.base_color;
     out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
-    out.lamps = in.lamps;
     return out;
 }
 
@@ -345,6 +355,17 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
 
 // Linear radiance and alpha. `front_facing` is the builtin: whether the
 // triangle is counter-clockwise on screen.
+// The cell a pixel at `pixel` (framebuffer coordinates) and `p` (world) is
+// in: its index, two words of `cells` each.
+fn cell_of(pixel: vec2<f32>, p: vec3<f32>) -> u32 {
+    let depth = max(dot(p - frame.cells_eye.xyz, frame.cells_forward.xyz), 1e-6);
+    let along = select(depth, log(depth), frame.cells_eye.w > 0.5);
+    let k = u32(clamp(along * frame.cells.z + frame.cells.w, 0.0, f32(SLICES - 1u)));
+    let x = min(u32(pixel.x * frame.cells.x), CELLS_ACROSS - 1u);
+    let y = min(u32(pixel.y * frame.cells.y), CELLS_DOWN - 1u);
+    return (k * CELLS_DOWN + y) * CELLS_ACROSS + x;
+}
+
 fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
@@ -403,31 +424,42 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         }
         color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
     }
-    for (var i = 0u; i < 8u; i++) {
-        let index = (in.lamps[i / 4u] >> ((i % 4u) * 8u)) & 0xFFu;
-        if index == 0xFFu {
-            break;
+    // Every lamp that reaches the pixel's cell, lowest bit first.
+    let cell = cell_of(in.clip.xy, in.world_position) * 2u;
+    for (var word = 0u; word < 2u; word++) {
+        var bits = cells[cell + word];
+        while bits != 0u {
+            let index = word * 32u + firstTrailingBit(bits);
+            bits &= bits - 1u;
+            // Its position first: past its range (the cell is reached, not
+            // every pixel of it), the rest isn't read.
+            let position = frame.lamps[index].position;
+            let to_lamp = position.xyz - in.world_position;
+            let distance2 = dot(to_lamp, to_lamp);
+            let near = distance2 * position.w;
+            if near >= 1.0 {
+                continue;
+            }
+            let lamp = frame.lamps[index];
+            let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
+            // Closer than 10 cm counts as 10 cm, so a surface touching a lamp
+            // isn't infinitely bright.
+            let reach = 1.0 - near * near;
+            let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
+            var falloff = reach * reach * cone * cone / max(distance2, 0.01);
+            if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
+                falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
+            }
+            let irradiance = lamp.color.rgb * (PI * falloff);
+            if frame.counts.z != 0u {
+                color += reflected(surface, l, irradiance);
+            } else {
+                // No highlight, but what a highlight would reflect is spread
+                // out like the matte part: metal (all f0, no diffuse) is
+                // lit in its own colour rather than black.
+                color += (surface.diffuse + surface.f0) / PI * irradiance * max(dot(surface.n, l), 0.0);
+            }
         }
-        // Its position first: past its range (the object is reached, not
-        // every pixel of it), the rest isn't read.
-        let position = frame.lamps[index].position;
-        let to_lamp = position.xyz - in.world_position;
-        let distance2 = dot(to_lamp, to_lamp);
-        let near = distance2 * position.w;
-        if near >= 1.0 {
-            continue;
-        }
-        let lamp = frame.lamps[index];
-        let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
-        // Closer than 10 cm counts as 10 cm, so a surface touching a lamp
-        // isn't infinitely bright.
-        let reach = 1.0 - near * near;
-        let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
-        var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-        if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
-            falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
-        }
-        color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
     }
     color += in.emissive.rgb * emissive_sample;
     return vec4<f32>(color, base.a);
