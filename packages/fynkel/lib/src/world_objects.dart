@@ -123,7 +123,39 @@ extension _Objects on World {
       }
       for (final o in fresh) {
         if (o._pending > 0 && !o._destroyed) _hideWhileLoading(o);
+        // A destroy or release given `after` before it was added.
+        if (o._due case final after? when !o._dueListed && !o._destroyed) {
+          o._due = time._sinceStart + after;
+          _listDue(o);
+        }
       }
+    }
+  }
+
+  void _listDue(GameObject object) {
+    if (object._dueListed) return;
+    object._dueListed = true;
+    _dueObjects.add(object);
+  }
+
+  /// Destroys or releases the objects whose time has come.
+  void _runDue() {
+    final now = time._sinceStart;
+    var i = 0;
+    while (i < _dueObjects.length) {
+      final object = _dueObjects[i];
+      final due = object._due;
+      if (due != null && due > now && !object._destroyed) {
+        i++;
+        continue;
+      }
+      final last = _dueObjects.removeLast();
+      if (i < _dueObjects.length) _dueObjects[i] = last;
+      object._dueListed = false;
+      if (due == null || object._destroyed) continue;
+      object._due = null;
+      object._dueRelease ? object.release() : object.destroy();
+      if (_disposeAsked) return;
     }
   }
 

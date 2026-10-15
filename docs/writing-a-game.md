@@ -178,6 +178,10 @@ class Yard extends GameObject {
 - **`destroy()`** takes an object and everything below it out of the game.
   A field still pointing at it says `isDestroyed`; reading its transform
   then throws a clear error instead of giving a stale value.
+  `destroy(after: 0.5)` destroys it that many seconds of game time later
+  (Unity's `Destroy(go, t)`), for sparks and shots, without a routine
+  each; hidden or not, and slowed by `time.scale` and pauses as the game
+  is. Destroying again does nothing.
 - **`active = false`** hides an object and everything below it: not drawn,
   not touched, not updated. `activeInHierarchy` says whether it and all its
   parents are on.
@@ -251,6 +255,9 @@ class Turret extends GameObject {
   fields are the game's.
 - **`release()` on the object** gives it back to its pool, or destroys
   it if it didn't come from one: write it where you'd write `destroy()`.
+  As `destroy()`, releasing again does nothing (a shot that hits two
+  enemies in one step), and `release(after: 2)` releases it later, unless
+  it's released sooner: its next use isn't cut short.
 - **Hold pooled objects with an `ObjectHandle`.** A field pointing at a
   shot still points at it once it's released and handed out again as a
   new shot; `ObjectHandle(shot).object` is null from the release on (and
@@ -2196,7 +2203,7 @@ multibody joints).
 | `GameObject`, a prefab | `GameObject`, a subclass of it |
 | `MonoBehaviour` | `Behaviour` |
 | `AddComponent<T>()`, `GetComponent<T>()` | `addComponent(T())`, `get<T>()` |
-| `Destroy(go)` | `go.destroy()` |
+| `Destroy(go)`, `Destroy(go, t)` | `go.destroy()`, `go.destroy(after: t)` |
 | `SetActive(false)`, `enabled = false` | `active = false`, `enabled = false` |
 | `ObjectPool<T>`: `Get`, `Release` | `Pool(parent, make)`: `get`, `release` |
 | `Awake`, `Start`, `Update`, `LateUpdate`, `OnDestroy` | `onLoad`, `onStart`, `onUpdate`, `onLateUpdate`, `onDestroy` |
@@ -2284,6 +2291,8 @@ For code written before: each change that breaks it, newest first.
     did: it's on `Component` now (§5).
   - `lookAt` the point the object is at leaves it as it is; it threw.
     `Vec3.normalizedOrZero` is new (§7).
+  - An object's own `release()` on one released already does nothing; it
+    threw. `destroy(after:)` and `release(after:)` are new (§3).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

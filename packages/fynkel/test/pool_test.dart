@@ -163,6 +163,35 @@ void main() {
     expect(plain.isDestroyed, isTrue);
   });
 
+  test('the object\'s own release twice does nothing the second time, as destroy (hardening G4)', () {
+    // A shot that hits two enemies in one step.
+    final a = shots.get();
+    a.release();
+    a.release();
+    expect((shots.countActive, shots.countInactive), (0, 1));
+    expect(shots.get(), same(a), reason: 'listed once');
+    expect(shots.get(), isNot(same(a)));
+  });
+
+  test('release(after:) gives it back that much game time later, and only the use it was given in', () {
+    final a = shots.get();
+    world.update(0);
+    a.release(after: 0.5);
+    world.update(0.25);
+    expect(a.active, isTrue);
+    world.update(0.25);
+    expect(a.active, isFalse, reason: 'released');
+    expect(a.isDestroyed, isFalse);
+    expect(shots.countInactive, 1);
+
+    final b = shots.get()..release(after: 0.5);
+    expect(b, same(a));
+    b.release();
+    expect(shots.get(), same(a), reason: 'released early, then handed out again');
+    world.update(1);
+    expect(a.active, isTrue, reason: 'its new use is not cut short by the old one\'s time');
+  });
+
   test('releasing twice, or into another pool, throws; a destroyed one is left alone', () {
     final a = shots.get();
     shots.release(a);
