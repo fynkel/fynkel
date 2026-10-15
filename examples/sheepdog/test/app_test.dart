@@ -67,7 +67,7 @@ void main() {
     final settings = Settings()..themeMode.value = ThemeMode.light;
     await play(tester, settings);
     final world = game(tester).world;
-    final day = world.camera!.clearColor;
+    final day = world.sky;
     await tester.tap(find.byTooltip('Pause'));
     await wait(tester);
     await tester.tap(find.text('Settings'));
@@ -76,7 +76,7 @@ void main() {
     await tester.tap(find.text('Dark'));
     await wait(tester);
     expect(world.isDark, isTrue, reason: 'the game wears the app’s theme');
-    expect(world.camera!.clearColor, isNot(day));
+    expect(world.sky, isNot(day), reason: 'a night sky');
     await tester.tap(find.text('Minimap'));
     await wait(tester);
     await tester.tap(find.byType(BackButton));

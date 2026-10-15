@@ -168,9 +168,20 @@ class SheepdogGame extends GameObject {
   void wear(ThemeData theme) {
     final scheme = theme.colorScheme;
     final dark = theme.brightness == Brightness.dark;
-    final sky = (dark ? scheme.surfaceContainerLowest : scheme.tertiaryContainer).toFynkel();
-    camera.camera.clearColor = sky;
-    map.clearColor = sky;
+    // The sky, from the theme: it lights the field too, so the ambient
+    // light below is a little extra.
+    final sky = GradientSky(
+      zenith: (dark ? scheme.surfaceContainerLowest : scheme.tertiary).toFynkel(),
+      horizon: (dark ? scheme.surfaceContainerHigh : scheme.tertiaryContainer).toFynkel(),
+      ground: (dark ? scheme.surfaceContainerLowest : scheme.primaryContainer).toFynkel(),
+      lighting: dark ? 0.5 : 0.8,
+    );
+    world.sky = sky;
+    // Far off, the field melts into the horizon.
+    world.fog = const Fog(start: 18, end: 60);
+    map
+      ..showSky = false
+      ..clearColor = sky.ground;
     grass.color = (dark ? scheme.onPrimaryFixedVariant : scheme.primary).toFynkel();
     fence.color = (dark ? scheme.outline : scheme.secondaryContainer).toFynkel();
     // The moon is pale blue.
@@ -179,7 +190,7 @@ class SheepdogGame extends GameObject {
       ..intensity = dark ? 1.1 : 2.6
       ..color = light;
     _ambient
-      ..intensity = dark ? 0.35 : 0.6
+      ..intensity = dark ? 0.15 : 0.25
       ..color = light;
     // The lamps come on at night.
     for (final lamp in _lamps) {
