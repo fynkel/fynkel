@@ -23,6 +23,10 @@
 //!    [`Quality::Low`] it is drawn into a half-float image (the scene
 //!    image); at low, straight into the view.
 //! 2. Bloom, when the camera has it and there is a scene image (`bloom`).
+//!    The image's alpha says how much of each pixel is light, which may
+//!    glow: what's drawn and lit, and an image sky. Colours shown as
+//!    they're picked (the clear colour, a gradient sky) are 0, so a white
+//!    sky doesn't glow.
 //! 3. The last pass, when there is a scene image: the image onto the view
 //!    (`finish.wgsl`), with bloom's glow added.
 
@@ -1080,9 +1084,13 @@ impl Renderer {
         if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
             {
                 let mut pass = images.depth_pass(&kit.ao, encoder);
-                pass.set_bind_group(0, frame.bind_group, &[]);
-                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
-                for batch in self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque) {
+                let mut solid =
+                    self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque).peekable();
+                if solid.peek().is_some() {
+                    pass.set_bind_group(0, frame.bind_group, &[]);
+                    pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+                }
+                for batch in solid {
                     let Some(mesh) = meshes.get(&batch.mesh) else { continue };
                     pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1107,7 +1115,14 @@ impl Renderer {
                     // The multisampled colour is only needed until it's
                     // resolved, so it's never stored. On tile GPUs it never
                     // leaves the chip.
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(self.clear), store: wgpu::StoreOp::Discard },
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(match targets.image {
+                            // Shown as picked: not light (above).
+                            Some(_) => wgpu::Color { a: 0.0, ..self.clear },
+                            None => self.clear,
+                        }),
+                        store: wgpu::StoreOp::Discard,
+                    },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &targets.depth,
@@ -1365,9 +1380,13 @@ impl Pipelines {
             ("sky_lit", on(sky_lit)),
         ];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
+        // Into the scene image, alpha says how much is light (bloom): all
+        // of what's drawn, over what's behind as the colour is. Into a
+        // view, the target stays opaque.
+        let alpha = if self.format.is_srgb() { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL };
         let (label, entry_point, blend, write_mask) = match cover {
             Cover::Opaque => ("forward", "fs_main", None, wgpu::ColorWrites::ALL),
-            Cover::Cutout => ("forward cut-out", "fs_cutout", None, wgpu::ColorWrites::COLOR),
+            Cover::Cutout => ("forward cut-out", "fs_cutout", None, alpha),
             Cover::Transparent => (
                 "forward transparent",
                 "fs_transparent",
@@ -1376,7 +1395,7 @@ impl Pipelines {
                     dst_factor: wgpu::BlendFactor::OneMinusSrcAlpha,
                     operation: wgpu::BlendOperation::Add,
                 }),
-                wgpu::ColorWrites::COLOR,
+                alpha,
             ),
             Cover::Additive => (
                 "forward additive",
@@ -1386,10 +1405,10 @@ impl Pipelines {
                     dst_factor: wgpu::BlendFactor::One,
                     operation: wgpu::BlendOperation::Add,
                 }),
-                wgpu::ColorWrites::COLOR,
+                alpha,
             ),
         };
-        let blend = blend.map(|color| wgpu::BlendState { color, alpha: wgpu::BlendComponent::REPLACE });
+        let blend = blend.map(|color| wgpu::BlendState { color, alpha: color });
         self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some(label),
             layout: Some(layout),
@@ -1519,7 +1538,13 @@ impl Pipelines {
                     targets: &[Some(wgpu::ColorTargetState {
                         format: self.format,
                         blend: None,
-                        write_mask: wgpu::ColorWrites::ALL,
+                        // Its alpha into the scene image: an image is light,
+                        // a gradient isn't (as the forward pass's).
+                        write_mask: if self.format.is_srgb() {
+                            wgpu::ColorWrites::COLOR
+                        } else {
+                            wgpu::ColorWrites::ALL
+                        },
                     })],
                 }),
                 multiview_mask: None,

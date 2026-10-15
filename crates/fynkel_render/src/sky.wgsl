@@ -71,11 +71,13 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     let near = frame.sky.inverse_view_proj * vec4<f32>(in.ndc, 1.0, 1.0);
     let far = frame.sky.inverse_view_proj * vec4<f32>(in.ndc, 0.0, 1.0);
     let d = normalize(far.xyz / far.w - near.xyz / near.w);
+    // A gradient's colours are shown as picked, so its alpha is 0: it's
+    // not light that glows (renderer.rs, the scene image).
     if frame.sky.zenith.w < 1.5 {
         if d.y >= 0.0 {
-            return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.zenith.rgb, sqrt(d.y)), 1.0);
+            return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.zenith.rgb, sqrt(d.y)), 0.0);
         }
-        return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.ground.rgb, sqrt(-d.y)), 1.0);
+        return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.ground.rgb, sqrt(-d.y)), 0.0);
     }
     let u = 0.5 + (atan2(d.x, -d.z) - frame.sky.ground.w) / (2.0 * PI);
     let v = acos(clamp(d.y, -1.0, 1.0)) / PI;

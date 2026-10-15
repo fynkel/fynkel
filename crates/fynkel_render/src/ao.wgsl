@@ -79,7 +79,7 @@ fn fs_ao(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let r2 = radius * radius;
     // Less than this above the surface is the surface itself.
-    let bias = 0.01 * radius;
+    let bias = 0.05 * radius;
     let spin = noise(at.xy) * 6.2831853;
     var sum = 0.0;
     for (var i = 0u; i < SAMPLES; i++) {
