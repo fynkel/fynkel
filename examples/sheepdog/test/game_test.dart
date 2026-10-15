@@ -377,7 +377,6 @@ void main() {
 
   test("the game wears the app's theme: a day in the light one, a night in the dark", () async {
     world.run(0.1);
-    final camera = world.camera!;
     world.theme = sheepdogTheme(Brightness.light);
     final day = (world.sky as GradientSky, game.grass.color);
     world.theme = sheepdogTheme(Brightness.dark);
