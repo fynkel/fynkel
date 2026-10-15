@@ -8,9 +8,9 @@
 //!
 //! Lights: every sun lights every object. Point and spot lights go into a
 //! list for the frame, the ones in view, nearest the camera first, up to
-//! [`Renderer::MAX_LIGHTS`]. The view is cut into cells (`clusters`), each
-//! holding the ones of those that reach it, brightest at it first, up to
-//! [`Quality::lights_per_cell`]; a pixel loops over its cell's.
+//! the level's [`Quality::lights_in_view`]. The view is cut into cells
+//! (`clusters`), each holding every one of those that reaches it; a pixel
+//! loops over its cell's.
 //!
 //! Shadows (`shadows`): the first sun with shadows casts them through
 //! [`ShadowLevel::cascades`](crate::ShadowLevel) maps fitted to the view,
@@ -52,11 +52,11 @@ pub struct FrameStats {
     /// Debug lines drawn.
     pub lines: u32,
     /// Point and spot lights in the frame's list: in view, up to
-    /// [`Renderer::MAX_LIGHTS`].
+    /// [`Quality::lights_in_view`].
     pub lights: u32,
     /// Lights left out: suns past [`Renderer::MAX_SUNS`], and point and spot
-    /// lights in view past [`Renderer::MAX_LIGHTS`] (the furthest from the
-    /// camera).
+    /// lights in view past [`Quality::lights_in_view`] (the furthest from
+    /// the camera).
     pub lights_left_out: u32,
     /// Shadow maps drawn: the sun's cascades and the spot lights'.
     pub shadow_maps: u32,
@@ -65,9 +65,6 @@ pub struct FrameStats {
     /// GPU memory of the shadow maps the view holds, shared with the kit's
     /// other views or not.
     pub shadow_bytes: u64,
-    /// Cells of the view reached by more point and spot lights than
-    /// [`Quality::lights_per_cell`]: the dimmest at each were left out.
-    pub full_cells: u32,
 }
 
 /// `Frame` in forward.wgsl.
@@ -144,7 +141,7 @@ struct LightUniform {
 }
 
 const MAX_SUNS: usize = 4;
-const MAX_LIGHTS: usize = 64;
+pub(crate) const MAX_LIGHTS: usize = 64;
 
 /// The per-draw vertex data (instance step), locations 4–10.
 #[repr(C)]
@@ -361,8 +358,8 @@ impl Renderer {
     pub const SAMPLES: u32 = 4;
     /// The most suns that light a frame: the first ones in the scene.
     pub const MAX_SUNS: usize = MAX_SUNS;
-    /// The most point and spot lights in a frame: the ones in view nearest
-    /// the camera.
+    /// The most point and spot lights in a frame at any level: the ones in
+    /// view nearest the camera. [`Quality::lights_in_view`] sets a level's.
     pub const MAX_LIGHTS: usize = MAX_LIGHTS;
 
     /// A renderer for target views of `format`, which must be an sRGB
@@ -560,10 +557,11 @@ impl Renderer {
                 self.in_view_lights.push((position.distance_squared(camera.position), i as u32));
             }
         }
-        if self.in_view_lights.len() > MAX_LIGHTS {
-            stats.lights_left_out += (self.in_view_lights.len() - MAX_LIGHTS) as u32;
-            self.in_view_lights.select_nth_unstable_by(MAX_LIGHTS, |a, b| a.0.total_cmp(&b.0));
-            self.in_view_lights.truncate(MAX_LIGHTS);
+        let most = self.quality.lights_in_view().min(MAX_LIGHTS);
+        if self.in_view_lights.len() > most {
+            stats.lights_left_out += (self.in_view_lights.len() - most) as u32;
+            self.in_view_lights.select_nth_unstable_by(most, |a, b| a.0.total_cmp(&b.0));
+            self.in_view_lights.truncate(most);
         }
         self.frame_lights.clear();
         for (slot, &(_, i)) in self.in_view_lights.iter().enumerate() {
@@ -592,7 +590,7 @@ impl Renderer {
         };
         let grid =
             Grid { view: camera.view, half, orthographic: camera.orthographic.is_some(), near: camera.near, far };
-        stats.full_cells = self.clusters.build(&grid, &self.frame_lights, self.quality.lights_per_cell());
+        self.clusters.build(&grid, &self.frame_lights);
         let (scale, offset) = grid.slicing();
         u.cells = [TILES_X as f32 / self.size.0 as f32, TILES_Y as f32 / self.size.1 as f32, scale, offset];
         u.cells_eye = camera.position.extend(if grid.orthographic { 0.0 } else { 1.0 }).into();

@@ -26,8 +26,8 @@ class LampsScene extends LabScene {
   String get step => 'stage 8';
   @override
   String get about =>
-      'A dark room, lit by coloured lamps and a torch that follows the pointer. Each object is lit by the lamps '
-      'brightest at it: up to 4 at low and medium quality, 8 at high. Try 64 lights, and low.';
+      'A dark room, lit by coloured lamps and a torch that follows the pointer. Every lamp lights whatever it '
+      'reaches, at every level; a frame takes 64 lamps, 32 at low. Try 64 lights, and low.';
 
   @override
   Vec3 get eye => Vec3(0, 8, 11);

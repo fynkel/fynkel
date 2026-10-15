@@ -8,44 +8,32 @@
 //! (forward.wgsl's `cell_of`). A lamp's light then ends where its range
 //! does, wherever that falls, rather than at an object's edge.
 //!
-//! The cells go to the GPU as one storage buffer of `u32`s: a word per
-//! cell, the byte its list starts at (above 8 bits) and how many it holds
-//! (the low 8), then the lists, a lamp's index a byte each.
+//! A cell holds every lamp that reaches it, as Unity's Forward+ and
+//! Godot's clustered renderer do: a bit for each of the frame's
+//! [`MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS) lamps, two `u32` words a
+//! cell, sent as one storage buffer. A cell that kept only some would show
+//! its edge where its neighbour kept others; what a level can afford is
+//! set by how many lamps the frame takes instead
+//! ([`Quality::lights_in_view`](crate::Quality::lights_in_view)).
 
 use glam::{Mat4, Vec3};
 
-use crate::scene::{LightKind, Quality};
+use crate::scene::LightKind;
 
 pub(crate) const TILES_X: usize = 16;
 pub(crate) const TILES_Y: usize = 9;
 pub(crate) const SLICES: usize = 16;
 pub(crate) const CELLS: usize = TILES_X * TILES_Y * SLICES;
-/// The most lamps a cell holds at any level.
-pub(crate) const MAX_PER_CELL: usize = 16;
-/// The buffer's size: every cell's word, and room for every cell full.
-pub(crate) const BYTES: u64 = ((CELLS + CELLS * MAX_PER_CELL / 4) * 4) as u64;
-
-impl Quality {
-    /// The most point and spot lights that light one cell of the view, the
-    /// brightest at it first. Past them, the dimmest are left out, which
-    /// can show the cell's edge ([`FrameStats::full_cells`]).
-    ///
-    /// [`FrameStats::full_cells`]: crate::FrameStats::full_cells
-    pub fn lights_per_cell(self) -> usize {
-        match self {
-            Self::Low | Self::Medium => 8,
-            Self::High => MAX_PER_CELL,
-        }
-    }
-}
+/// A cell's words: a bit for each of the frame's lamps.
+const WORDS: usize = crate::renderer::MAX_LIGHTS / 32;
+/// The buffer's size.
+pub(crate) const BYTES: u64 = (CELLS * WORDS * 4) as u64;
 
 /// A point or spot light's reach, as the cells are tested against it.
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct Reach {
     pub(crate) position: Vec3,
     pub(crate) range: f32,
-    /// Its brightest channel.
-    peak: f32,
     /// A spot light's axis and the sine and cosine of half its angle.
     cone: Option<(Vec3, f32, f32)>,
 }
@@ -61,7 +49,7 @@ impl Reach {
                 (position, range, Some((direction.normalize_or_zero(), half.sin(), half.cos())))
             }
         };
-        Self { position, range, peak: light.color.max_element(), cone }
+        Self { position, range, cone }
     }
 
     /// The same reach, in the space `matrix` takes world space to (a
@@ -71,14 +59,11 @@ impl Reach {
         Self { position: matrix.transform_point3(self.position), cone, ..*self }
     }
 
-    /// How brightly it lights a sphere at `at` with radius `r`: its
-    /// irradiance at the sphere's nearest point (no closer than 10 cm), or
-    /// `None` when it doesn't reach it at all.
-    pub(crate) fn at(&self, at: Vec3, r: f32) -> Option<f32> {
+    /// Whether it reaches a sphere at `at` with radius `r`.
+    pub(crate) fn reaches(&self, at: Vec3, r: f32) -> bool {
         let to = at - self.position;
-        let gap = to.length() - r;
-        if gap >= self.range {
-            return None;
+        if to.length() - r >= self.range {
+            return false;
         }
         if let Some((axis, sin, cos)) = self.cone {
             // Outside the cone: the sphere's centre is further from the
@@ -86,10 +71,10 @@ impl Reach {
             let along = to.dot(axis);
             let across = (to.length_squared() - along * along).max(0.0).sqrt();
             if cos * across - sin * along > r || along < -r {
-                return None;
+                return false;
             }
         }
-        Some(self.peak / gap.max(0.1).powi(2))
+        true
     }
 }
 
@@ -182,41 +167,26 @@ impl Grid {
 /// The cells and their lamps, rebuilt each frame. Allocates nothing once
 /// built.
 pub(crate) struct Clusters {
-    /// How many lamps each cell holds; apart from the lists, so a frame
-    /// clears and reads a byte a cell, not a whole list.
-    counts: Vec<u8>,
-    /// Each cell's lamps: (how brightly it lights the cell, its index), the
-    /// brightest first. Only the first `counts` are meant.
-    lamps: Vec<[(f32, u8); MAX_PER_CELL]>,
+    /// Each cell's lamps, a bit each.
+    masks: Vec<[u32; WORDS]>,
     /// Each cell's view-space bounding sphere, for the grid in `cut_for`.
     spheres: Vec<(Vec3, f32)>,
     /// The grid's shape the spheres were worked out for (its half sizes,
     /// whether orthographic, near and far), or `None` before the first.
     cut_for: Option<((f32, f32), bool, f32, f32)>,
-    words: Vec<u32>,
-    /// How many of `words` this frame wrote.
-    used: usize,
 }
 
 impl Clusters {
     pub(crate) fn new() -> Self {
-        Self {
-            counts: vec![0; CELLS],
-            lamps: vec![[(0.0, 0); MAX_PER_CELL]; CELLS],
-            spheres: vec![(Vec3::ZERO, 0.0); CELLS],
-            cut_for: None,
-            words: vec![0; BYTES as usize / 4],
-            used: CELLS,
-        }
+        Self { masks: vec![[0; WORDS]; CELLS], spheres: vec![(Vec3::ZERO, 0.0); CELLS], cut_for: None }
     }
 
-    /// Enters each of `lights` (the frame's list, in its order) into every
-    /// cell of `grid` it reaches, at most `cap` a cell, the brightest at the
-    /// cell kept. Returns how many cells had more than `cap`.
-    pub(crate) fn build(&mut self, grid: &Grid, lights: &[Reach], cap: usize) -> u32 {
-        let cap = cap.clamp(1, MAX_PER_CELL);
-        self.counts.fill(0);
-        let mut full = [0u64; CELLS.div_ceil(64)];
+    /// Enters each of `lights` (the frame's list, in its order, at most
+    /// [`MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS)) into every cell of
+    /// `grid` it reaches.
+    pub(crate) fn build(&mut self, grid: &Grid, lights: &[Reach]) {
+        debug_assert!(lights.len() <= WORDS * 32);
+        self.masks.fill([0; WORDS]);
         // The spheres stay as long as the grid's shape does; the view
         // matrix doesn't move them.
         let shape = Some((grid.half, grid.orthographic, grid.near, grid.far));
@@ -237,54 +207,24 @@ impl Clusters {
             let (x0, x1) = grid.tiles(c.x, r, depth, grid.half.0, TILES_X);
             // Tiles count down from the top; y counts up.
             let (y0, y1) = grid.tiles(-c.y, r, depth, grid.half.1, TILES_Y);
+            let (word, bit) = (index / 32, 1 << (index % 32));
             for k in k0..=k1 {
                 for y in y0..=y1 {
                     for x in x0..=x1 {
                         let i = (k * TILES_Y + y) * TILES_X + x;
                         let (at, cell_r) = self.spheres[i];
-                        let Some(bright) = seen.at(at, cell_r) else { continue };
-                        let (best, count) = (&mut self.lamps[i], &mut self.counts[i]);
-                        let n = usize::from(*count);
-                        if n == cap {
-                            full[i / 64] |= 1 << (i % 64);
-                            if bright <= best[cap - 1].0 {
-                                continue;
-                            }
+                        if seen.reaches(at, cell_r) {
+                            self.masks[i][word] |= bit;
                         }
-                        // Into its place, the dimmest dropping off the end
-                        // when full.
-                        let mut j = n.min(cap - 1);
-                        *count = (n + 1).min(cap) as u8;
-                        while j > 0 && best[j - 1].0 < bright {
-                            best[j] = best[j - 1];
-                            j -= 1;
-                        }
-                        best[j] = (bright, index as u8);
                     }
                 }
             }
         }
-        // Each cell's word, then the lists, a byte each.
-        let mut at = 0usize;
-        let lists = CELLS * 4;
-        for (i, &count) in self.counts.iter().enumerate() {
-            self.words[i] = ((at as u32) << 8) | u32::from(count);
-            for &(_, lamp) in &self.lamps[i][..usize::from(count)] {
-                let byte = lists + at;
-                let word = &mut self.words[byte / 4];
-                let shift = (byte % 4) * 8;
-                *word = (*word & !(0xFF << shift)) | (u32::from(lamp) << shift);
-                at += 1;
-            }
-        }
-        self.used = CELLS + at.div_ceil(4);
-        full.iter().map(|w| w.count_ones()).sum()
     }
 
-    /// The buffer forward.wgsl reads as `cells`: only what this frame
-    /// wrote, as the rest isn't read.
+    /// The buffer forward.wgsl reads as `cells`.
     pub(crate) fn bytes(&self) -> &[u8] {
-        bytemuck::cast_slice(&self.words[..self.used])
+        bytemuck::cast_slice(&self.masks)
     }
 }
 
@@ -304,14 +244,9 @@ mod tests {
         Grid { view: camera.view, half, orthographic: camera.orthographic.is_some(), near: camera.near, far }
     }
 
-    /// The cells holding lamp 0.
-    fn holding(c: &Clusters) -> Vec<usize> {
-        (0..CELLS)
-            .filter(|&i| {
-                let (best, n) = (&c.lamps[i], &c.counts[i]);
-                best[..usize::from(*n)].iter().any(|&(_, l)| l == 0)
-            })
-            .collect()
+    /// The cells holding lamp `lamp`.
+    fn holding(c: &Clusters, lamp: usize) -> Vec<usize> {
+        (0..CELLS).filter(|&i| c.masks[i][lamp / 32] & (1 << (lamp % 32)) != 0).collect()
     }
 
     /// Whether a view-space sphere could touch cell `i`: brute force, by
@@ -353,8 +288,8 @@ mod tests {
                 [(Vec3::new(0.5, 0.2, 0.0), 1.0), (Vec3::new(-2.0, 0.0, -3.0), 2.5), (camera.position, 0.5)]
             {
                 let lamp = Light::point(at, range, Vec3::ONE);
-                assert_eq!(c.build(&g, &[Reach::of(&lamp)], 8), 0);
-                let cells = holding(&c);
+                c.build(&g, &[Reach::of(&lamp)]);
+                let cells = holding(&c, 0);
                 let seen = g.view.transform_point3(at);
                 for i in 0..CELLS {
                     if touches(&g, i, seen, range) {
@@ -370,24 +305,22 @@ mod tests {
         }
     }
 
-    /// A cell reached by more lamps than the cap keeps the brightest at
-    /// it, and is counted.
+    /// A cell reached by all of the frame's lamps holds every one, and
+    /// the buffer says so.
     #[test]
-    fn a_full_cell_keeps_its_brightest_and_is_counted() {
+    fn a_cell_holds_every_lamp_that_reaches_it() {
         let camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
         let g = grid(&camera, 1.0, 20.0);
-        let lamps: Vec<Reach> =
-            (1..=10).map(|i| Reach::of(&Light::point(Vec3::ZERO, 100.0, Vec3::splat(i as f32)))).collect();
+        let lamps: Vec<Reach> = (0..crate::renderer::MAX_LIGHTS)
+            .map(|i| Reach::of(&Light::point(Vec3::splat(0.01 * i as f32), 100.0, Vec3::ONE)))
+            .collect();
         let mut c = Clusters::new();
-        assert_eq!(c.build(&g, &lamps, 4), CELLS as u32, "every cell has all ten");
-        let (best, n) = (&c.lamps[0], &c.counts[0]);
-        assert_eq!(*n, 4);
-        let kept: Vec<u8> = best[..4].iter().map(|&(_, l)| l).collect();
-        assert_eq!(kept, [9, 8, 7, 6], "the four brightest");
-        // The packed buffer says the same.
-        let word = c.words[0];
-        assert_eq!(word & 0xFF, 4);
-        let list = &c.bytes()[CELLS * 4 + (word >> 8) as usize..][..4];
-        assert_eq!(list, [9, 8, 7, 6]);
+        c.build(&g, &lamps);
+        for lamp in 0..lamps.len() {
+            assert_eq!(holding(&c, lamp).len(), CELLS, "lamp {lamp} is in every cell");
+        }
+        assert!(c.bytes().iter().all(|&b| b == 0xFF));
+        c.build(&g, &lamps[..1]);
+        assert_eq!(&c.bytes()[..WORDS * 4], [1, 0, 0, 0, 0, 0, 0, 0], "a frame keeps nothing of the last");
     }
 }

@@ -518,14 +518,13 @@ GameObject handTorch() => GameObject(
   edge, 1 fades all the way to the middle.
 - **Every sun lights everything**, up to four of them.
 - **A lamp lights everything it reaches**, whatever it falls on: a big
-  floor, terrain or a room in one piece is lit by every lamp over it.
-  Where many lamps overlap, each part of the view takes the ones that
-  light it most: up to 8 at low and medium quality, 16 at high (among
-  lamps alike, the nearest). A spotlight counts only for what's in its
-  cone.
-- **A frame takes 64 lamps** in view, the ones nearest the camera. A
-  world with more than 64 point and spot lights, or more than four suns,
-  says so once.
+  floor, terrain or a room in one piece is lit by every lamp over it,
+  however many overlap. What costs is how many overlap: each pixel adds
+  up every lamp that reaches it.
+- **A frame takes 64 lamps** in view at medium and high quality, 32 at
+  low: the ones nearest the camera. One left out is out everywhere, as
+  if switched off. A world with more than 64 point and spot lights, or
+  more than four suns, says so once.
 
 ### Shadows
 

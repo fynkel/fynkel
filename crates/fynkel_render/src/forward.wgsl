@@ -75,9 +75,7 @@ struct Frame {
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
-// Each cell's word, the byte its list starts at (above the low 8 bits) and
-// how many lamps it holds (the low 8), then the lists: indices into
-// `frame.lamps`, a byte each.
+// Each cell's lamps, a bit for each of `frame.lamps`: two words a cell.
 @group(0) @binding(1) var<storage, read> cells: array<u32>;
 
 // clusters.rs: TILES_X, TILES_Y, SLICES.
@@ -358,7 +356,7 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
 // Linear radiance and alpha. `front_facing` is the builtin: whether the
 // triangle is counter-clockwise on screen.
 // The cell a pixel at `pixel` (framebuffer coordinates) and `p` (world) is
-// in: its word's index in `cells`.
+// in: its index, two words of `cells` each.
 fn cell_of(pixel: vec2<f32>, p: vec3<f32>) -> u32 {
     let depth = max(dot(p - frame.cells_eye.xyz, frame.cells_forward.xyz), 1e-6);
     let along = select(depth, log(depth), frame.cells_eye.w > 0.5);
@@ -426,31 +424,34 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         }
         color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
     }
-    let cell = cells[cell_of(in.clip.xy, in.world_position)];
-    let first = CELLS_ACROSS * CELLS_DOWN * SLICES * 4u + (cell >> 8u);
-    for (var i = 0u; i < (cell & 0xFFu); i++) {
-        let byte = first + i;
-        let index = (cells[byte / 4u] >> ((byte % 4u) * 8u)) & 0xFFu;
-        // Its position first: past its range (the cell is reached, not
-        // every pixel of it), the rest isn't read.
-        let position = frame.lamps[index].position;
-        let to_lamp = position.xyz - in.world_position;
-        let distance2 = dot(to_lamp, to_lamp);
-        let near = distance2 * position.w;
-        if near >= 1.0 {
-            continue;
+    // Every lamp that reaches the pixel's cell, lowest bit first.
+    let cell = cell_of(in.clip.xy, in.world_position) * 2u;
+    for (var word = 0u; word < 2u; word++) {
+        var bits = cells[cell + word];
+        while bits != 0u {
+            let index = word * 32u + firstTrailingBit(bits);
+            bits &= bits - 1u;
+            // Its position first: past its range (the cell is reached, not
+            // every pixel of it), the rest isn't read.
+            let position = frame.lamps[index].position;
+            let to_lamp = position.xyz - in.world_position;
+            let distance2 = dot(to_lamp, to_lamp);
+            let near = distance2 * position.w;
+            if near >= 1.0 {
+                continue;
+            }
+            let lamp = frame.lamps[index];
+            let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
+            // Closer than 10 cm counts as 10 cm, so a surface touching a lamp
+            // isn't infinitely bright.
+            let reach = 1.0 - near * near;
+            let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
+            var falloff = reach * reach * cone * cone / max(distance2, 0.01);
+            if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
+                falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
+            }
+            color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
         }
-        let lamp = frame.lamps[index];
-        let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
-        // Closer than 10 cm counts as 10 cm, so a surface touching a lamp
-        // isn't infinitely bright.
-        let reach = 1.0 - near * near;
-        let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
-        var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-        if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
-            falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
-        }
-        color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
     }
     color += in.emissive.rgb * emissive_sample;
     return vec4<f32>(color, base.a);
