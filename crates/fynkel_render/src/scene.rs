@@ -217,10 +217,11 @@ impl Quality {
     }
 
     /// Whether point and spot lights give shiny surfaces a highlight, as
-    /// suns always do. Without, a lamp only lights a surface's colour,
-    /// which keeps a low level's cost down where many overlap (a Note10+
-    /// with 63 lamps over its screen: 54 fps with, 59 without), much as
-    /// Unity's low tiers light extra lights per vertex.
+    /// suns always do. Without, a lamp lights a surface evenly, in its
+    /// colour (metal in its own, dimmer than its highlight would be), which
+    /// keeps a low level's cost down where many overlap (a Note10+ with 63
+    /// lamps over its screen: 54 fps with, 59 without), much as Unity's low
+    /// tiers light extra lights per vertex.
     pub fn lamp_highlights(self) -> bool {
         !matches!(self, Self::Low)
     }

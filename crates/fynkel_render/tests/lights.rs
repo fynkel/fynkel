@@ -182,11 +182,12 @@ fn a_frame_keeps_the_lamps_nearest_the_camera() {
     assert_ne!(image.pixel(32, 32), [0, 0, 0, 255], "with room for it, it lights the wall");
 }
 
-/// At low, a lamp lights a surface's colour but gives no highlight: a
-/// polished metal wall (no colour of its own to light) shows the lamp
-/// above low and stays dark at low, while a matte wall is lit about alike.
+/// At low, a lamp lights a surface without a highlight, but still in the
+/// surface's own colour, metal too: a polished metal wall (no matte colour
+/// of its own) is lit at every level, not black at low (the lab's chrome
+/// balls were). A matte wall is lit about alike at every level.
 #[test]
-fn lamps_give_highlights_above_low() {
+fn lamps_light_metal_at_every_level() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let lamp = || vec![Light::point(Vec3::new(0.0, 0.0, 1.0), 10.0, Vec3::ONE)];
@@ -196,12 +197,13 @@ fn lamps_give_highlights_above_low() {
         metal.draws[0].material.metallic = 1.0;
         metal.draws[0].material.roughness = 0.3;
         let shine = centre(&mut r, &metal);
-        assert_eq!(shine[0] > 20, quality.lamp_highlights(), "{quality:?}: {shine:?}");
+        assert!(shine[0] > 20, "{quality:?}: the lamp lights the metal: {shine:?}");
     }
     let low = centre(&mut r, &wall(1.0, lamp(), Quality::Low));
     let high = centre(&mut r, &wall(1.0, lamp(), Quality::High));
-    // Even a fully rough surface has a faint highlight above low.
-    assert!(low[0] > 20 && low[0].abs_diff(high[0]) <= 6, "matte: low {low:?}, high {high:?}");
+    // Even a fully rough surface has a faint highlight above low; low
+    // spreads it evenly instead, a little brighter where it's seen.
+    assert!(low[0] > 20 && low[0].abs_diff(high[0]) <= 10, "matte: low {low:?}, high {high:?}");
 }
 
 /// Hardening L1: a big surface is lit by every lamp over it, not only the

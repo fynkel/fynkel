@@ -454,7 +454,10 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
             if frame.counts.z != 0u {
                 color += reflected(surface, l, irradiance);
             } else {
-                color += surface.diffuse / PI * irradiance * max(dot(surface.n, l), 0.0);
+                // No highlight, but what a highlight would reflect is spread
+                // out like the matte part: metal (all f0, no diffuse) is
+                // lit in its own colour rather than black.
+                color += (surface.diffuse + surface.f0) / PI * irradiance * max(dot(surface.n, l), 0.0);
             }
         }
     }
