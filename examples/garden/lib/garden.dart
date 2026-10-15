@@ -12,12 +12,7 @@ class Garden extends GameObject {
     super.onLoad();
     final character = Character();
     add(OrbitCamera(character));
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun(intensity: 2.5)],
-      ),
-    );
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3), intensity: 2.5)]));
     add(GameObject(components: [Light.ambient(color: Color.rgb(0.75, 0.85, 1), intensity: 0.5)]));
     add(Ground());
     for (final (i, asset) in _props.indexed) {

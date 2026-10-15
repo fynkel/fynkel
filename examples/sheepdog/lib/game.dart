@@ -7,12 +7,12 @@
 
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/material.dart' show Brightness, ThemeData;
 import 'package:flutter/widgets.dart' show Alignment;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart'
-    show FlutterColorToFynkel, ListenableSignal, WorldTheme, WorldWidget;
+    show Controls, FlutterColorToFynkel, ListenableSignal, WorldTheme, WorldWidget;
 
 import 'labels.dart' show HealthBar, NameTag;
 
@@ -71,56 +71,10 @@ bool _mayStep(Vec3 from, Vec3 to, bool intoPen) {
   return outside.z >= penFront && outside.x.abs() < penHalf - 0.3;
 }
 
-/// [v] on the floor: its y left out.
-Vec3 flat(Vec3 v) => Vec3(v.x, 0, v.z);
-
-/// The keys the player chose on the settings page. The game binds them as
-/// it starts, and again each time they change; the arrow keys always move
-/// too.
-class Controls extends ChangeNotifier {
-  static const defaults = {
-    'up': KeyCode.w,
-    'down': KeyCode.s,
-    'left': KeyCode.a,
-    'right': KeyCode.d,
-    'bark': KeyCode.space,
-  };
-
-  final _keys = Map.of(defaults);
-
-  /// The key for [name]: one of [defaults]' names.
-  KeyCode operator [](String name) => _keys[name]!;
-
-  /// Gives [name] the [key]. What had that key takes [name]'s old one, so
-  /// no two share a key.
-  void set(String name, KeyCode key) {
-    final old = _keys[name]!;
-    if (old == key) return;
-    for (final other in _keys.keys) {
-      if (_keys[other] == key) _keys[other] = old;
-    }
-    _keys[name] = key;
-    notifyListeners();
-  }
-
-  /// Back to [defaults].
-  void reset() {
-    _keys.addAll(defaults);
-    notifyListeners();
-  }
-
-  /// Binds 'move' and 'bark' in [input] to these keys.
-  void bindTo(Input input) {
-    input.bindAxis2(
-      'move',
-      up: [this['up'], KeyCode.arrowUp],
-      down: [this['down'], KeyCode.arrowDown],
-      left: [this['left'], KeyCode.arrowLeft],
-      right: [this['right'], KeyCode.arrowRight],
-    );
-    input.bindAction('bark', [this['bark']]);
-  }
-}
+/// The keys the player can change on the settings page; the arrow keys
+/// always move too.
+Controls sheepdogControls() =>
+    Controls({'up': KeyCode.w, 'down': KeyCode.s, 'left': KeyCode.a, 'right': KeyCode.d, 'bark': KeyCode.space});
 
 /// The root: the lights, the cameras, what the HUD shows, and the round
 /// being played. Its colours are the app's theme's.
@@ -128,7 +82,7 @@ class SheepdogGame extends GameObject {
   /// [seed] makes every round the same, for tests; the first round is at
   /// [level].
   SheepdogGame({this.seed, Controls? controls, int level = 1})
-    : controls = controls ?? Controls(),
+    : controls = controls ?? sheepdogControls(),
       level = ValueNotifier(level),
       clock = ValueNotifier(levelOf(level).seconds.ceil());
 
@@ -181,7 +135,7 @@ class SheepdogGame extends GameObject {
       final lamp = add(
         GameObject(
           name: 'lamp',
-          transform: Transform(position: at + Vec3(0, 2.35, 0), scale: Vec3.one * 0.3),
+          transform: Transform(position: at + Vec3(0, 2.35, 0), scale: Vec3.all(0.3)),
           components: [
             MeshRenderer(Mesh.sphere(), _bulb),
             Light.point(color: const Color(0xFFFFC880), intensity: 0, range: 10),
@@ -453,8 +407,8 @@ class Dog extends GameObject {
   void onUpdate() {
     super.onUpdate();
     _sinceBark += time.delta;
-    final keys = input.axis2('move');
-    final direction = _stick() ?? Vec3(keys.x, 0, -keys.y);
+    final move = input.stick() ?? input.axis2('move');
+    final direction = Vec3(move.x, 0, -move.y);
     if (direction.length > 0) {
       facing = direction.normalized;
       rotation = Quat.lookRotation(facing);
@@ -463,28 +417,18 @@ class Dog extends GameObject {
     if (input.action('bark').wasPressed) bark();
   }
 
-  /// A finger dragging alone, as a stick: from where it went down to where
-  /// it is, full speed at 60 pixels.
-  Vec3? _stick() {
-    final down = input.fingers.where((f) => f.isPressed).toList();
-    if (down.length != 1 || !down.single.isDragging) return null;
-    final d = down.single.totalDelta;
-    final v = Vec3(d.x, 0, d.y) * (1 / 60);
-    return v.length > 1 ? v.normalized : v;
-  }
-
   /// Barks, at most twice a second: the wolves within [barkReach] run off,
   /// the sheep within [scareReach] run from it.
   void bark() {
     if (_sinceBark < 0.5 || world.paused) return;
     _sinceBark = 0;
-    barked.emit(null);
+    barked.emit();
     final round = parent! as Round;
     for (final wolf in world.all<Wolf>()) {
-      if (flat(wolf.position - position).length < barkReach) wolf.scare();
+      if ((wolf.position - position).flat.length < barkReach) wolf.scare();
     }
     for (final sheep in round.free) {
-      if (flat(sheep.position - position).length < scareReach) sheep.startle(from: position);
+      if ((sheep.position - position).flat.length < scareReach) sheep.startle(from: position);
     }
     final ring = round.add(
       GameObject(
@@ -577,7 +521,7 @@ class Sheep extends GameObject {
     var away = Vec3.zero;
     var pace = 0.0;
     void from(Vec3 at, double reach) {
-      final d = flat(position - at);
+      final d = (position - at).flat;
       final far = d.length;
       if (far >= reach || far < 1e-6) return;
       final near = 1 - far / reach;
@@ -596,7 +540,7 @@ class Sheep extends GameObject {
     _panic -= time.delta;
     for (final wolf in world.all<Wolf>()) {
       if (!wolf.isHunting) continue;
-      final d = flat(position - wolf.position);
+      final d = (position - wolf.position).flat;
       final far = d.length;
       if (far >= wolfReach || far < 1e-6) continue;
       if (_panic <= 0) _veer = _random.nextBool() ? 1 : -1;
@@ -604,14 +548,14 @@ class Sheep extends GameObject {
       away += (d + Vec3(-d.z, 0, d.x) * (0.6 * _veer)) * (2 / far);
       pace = 1;
     }
-    var want = away.length > 1e-6 ? away.normalized * (speed * pace) : Vec3.zero;
+    var want = away.normalizedOrZero * (speed * pace);
 
     // The flock: towards the neighbours, the way they go, not too close.
     // Not in a panic.
     var towards = Vec3.zero, heading = Vec3.zero, apart = Vec3.zero;
     var n = 0;
     for (final other in round.free) {
-      final d = flat(other.position - position);
+      final d = (other.position - position).flat;
       final far = d.length;
       if (other == this || far > neighbours) continue;
       n++;
@@ -666,7 +610,7 @@ class Sheep extends GameObject {
     // Further in, out of the gate, with a hop.
     final spot = Vec3((_random.nextDouble() * 2 - 1) * (penHalf - 0.8), 0.4, -size + 1.5 + _random.nextDouble() * 3);
     moveTo(spot, seconds: 1.2, ease: Ease.inOutSine);
-    punchScale(Vec3.one * 0.25, seconds: 0.4);
+    punchScale(Vec3.all(0.25), seconds: 0.4);
   }
 
   /// Taken by a wolf: gone.
@@ -750,7 +694,7 @@ class Wolf extends GameObject {
     for (final x in [-0.12, 0.12]) {
       add(
         GameObject(
-          transform: Transform(position: Vec3(x, 0.12, -0.61), scale: Vec3.one * 0.1),
+          transform: Transform(position: Vec3(x, 0.12, -0.61), scale: Vec3.all(0.1)),
           components: [MeshRenderer(Mesh.cube(), _eyes)],
         ),
       );
@@ -779,7 +723,7 @@ class Wolf extends GameObject {
     Sheep? nearest;
     var best = double.infinity;
     for (final sheep in round.free) {
-      final far = flat(sheep.position - position).length;
+      final far = (sheep.position - position).flat.length;
       if (far < best) (nearest, best) = (sheep, far);
     }
     if (nearest == null) return runOff();
@@ -787,10 +731,10 @@ class Wolf extends GameObject {
       nearest.take();
       return runOff();
     }
-    final toSheep = flat(nearest.position - position) / best;
+    final toSheep = (nearest.position - position).flat / best;
     var to = toSheep, pace = speed;
 
-    final fromDog = flat(position - round.dog.position);
+    final fromDog = (position - round.dog.position).flat;
     final dogFar = fromDog.length;
     _resting -= time.delta;
     if (dogFar < fear + 1.5 && dogFar > 1e-6) {
@@ -823,7 +767,7 @@ class Wolf extends GameObject {
   /// Scared off by a bark: its nerve gone at once.
   void scare() {
     if (_leaving) return;
-    punchScale(Vec3.one * 0.3, seconds: 0.25);
+    punchScale(Vec3.all(0.3), seconds: 0.25);
     health.damage(health.left);
   }
 
@@ -850,7 +794,10 @@ class Wolf extends GameObject {
 /// Above the dog and a little behind, looking down at it.
 class DogCamera extends GameObject {
   DogCamera(Dog dog)
-    : _follow = Follow(dog, offset: _offset, damping: 0.15),
+    // The lens fits the view's height, so a tall view (a phone held
+    // upright) sees less across: portraitFit goes back as far again as
+    // it's narrower.
+    : _follow = Follow(dog, offset: _offset, damping: 0.15, portraitFit: 0.75),
       _look = LookAt(dog),
       super(name: 'camera');
 
@@ -865,16 +812,6 @@ class DogCamera extends GameObject {
     addComponent(camera);
     addComponent(_follow);
     addComponent(_look);
-  }
-
-  @override
-  void onUpdate() {
-    super.onUpdate();
-    // The lens fits the view's height, so a tall view (a phone held
-    // upright) sees less across: go back as far again as it's narrower.
-    final (w, h) = (input.width, input.height);
-    final fit = w > 0 && h > w ? math.min(2.0, 0.75 * h / w) : 1.0;
-    _follow.offset = _offset * fit;
   }
 
   /// Follows [dog] from now on.

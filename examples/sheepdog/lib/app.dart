@@ -6,7 +6,6 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:fynkel/fynkel.dart' show KeyCode;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game.dart';
@@ -17,7 +16,7 @@ import 'palette.dart';
 class Settings {
   final themeMode = ValueNotifier(ThemeMode.system);
   final minimap = ValueNotifier(true);
-  final controls = Controls();
+  final controls = sheepdogControls();
 }
 
 /// The whole app: the title screen first.
@@ -315,52 +314,12 @@ class SettingsPage extends StatelessWidget {
           ),
         ),
         const Divider(),
-        ListTile(
-          title: Text('Controls', style: Theme.of(context).textTheme.titleMedium),
-          subtitle: const Text('The arrow keys always move too.'),
-          trailing: TextButton(onPressed: settings.controls.reset, child: const Text('Reset')),
-        ),
-        ListenableBuilder(
-          listenable: settings.controls,
-          builder: (context, _) => Column(
-            children: [
-              for (final (name, what) in const [
-                ('up', 'Up'),
-                ('down', 'Down'),
-                ('left', 'Left'),
-                ('right', 'Right'),
-                ('bark', 'Bark'),
-              ])
-                ListTile(
-                  title: Text(what),
-                  trailing: OutlinedButton(
-                    onPressed: () async {
-                      final key = await askForKey(context, what);
-                      if (key != null) settings.controls.set(name, key);
-                    },
-                    child: Text(settings.controls[name].label),
-                  ),
-                ),
-            ],
-          ),
+        ControlsSettings(
+          settings.controls,
+          labels: const {'up': 'Up', 'down': 'Down', 'left': 'Left', 'right': 'Right', 'bark': 'Bark'},
+          note: 'The arrow keys always move too.',
         ),
       ],
     ),
   );
 }
-
-/// Waits for the player to press a key for [what], and gives it; null
-/// for Escape, or a key the game has none for.
-Future<KeyCode?> askForKey(BuildContext context, String what) => showDialog<KeyCode>(
-  context: context,
-  builder: (context) => Focus(
-    autofocus: true,
-    onKeyEvent: (node, event) {
-      if (event is KeyDownEvent) {
-        Navigator.of(context).pop(event.logicalKey == LogicalKeyboardKey.escape ? null : keyCodeOf(event));
-      }
-      return KeyEventResult.handled;
-    },
-    child: AlertDialog(title: Text('Press a key for $what'), content: const Text('Escape keeps the one it has.')),
-  ),
-);

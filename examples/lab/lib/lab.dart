@@ -60,8 +60,7 @@ abstract class LabScene extends GameObject {
     add(
       GameObject(
         name: 'sun',
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.5))),
-        components: [Light.sun(intensity: 2.5)],
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.5), intensity: 2.5)],
       ),
     );
     add(GameObject(name: 'ambient', components: [Light.ambient(intensity: 0.5)]));

@@ -130,7 +130,7 @@ class Health extends Behaviour {
     hp -= damage;
     hit.emit(hp);
     if (hp <= 0) {
-      died.emit(null);
+      died.emit();
       gameObject.destroy();
     }
   }

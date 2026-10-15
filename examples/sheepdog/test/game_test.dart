@@ -47,11 +47,11 @@ void main() {
   /// The middle of the sheep still in the field.
   Vec3 middle() {
     final free = round().free.toList();
-    return free.fold(Vec3.zero, (sum, s) => sum + flat(s.position)) / free.length.toDouble();
+    return free.fold(Vec3.zero, (sum, s) => sum + s.position.flat) / free.length.toDouble();
   }
 
   /// The widest a sheep in the field is from [middle].
-  double spread() => round().free.map((s) => flat(s.position - middle()).length).reduce((a, b) => a > b ? a : b);
+  double spread() => round().free.map((s) => (s.position - middle()).flat.length).reduce((a, b) => a > b ? a : b);
 
   /// The wolf of a round at level 2, come in after the calm.
   Future<Wolf> firstWolf() async {
@@ -129,7 +129,7 @@ void main() {
       final from = middle();
       // A step at a time towards a spot behind the flock, at a trot.
       for (var i = 0; i < 3 * 60; i++) {
-        final to = flat(middle() + Vec3(0, 0, 3.5) - dog().position);
+        final to = (middle() + Vec3(0, 0, 3.5) - dog().position).flat;
         if (to.length > 0.05) dog().position += to.normalized * (Dog.speed * 0.6 / 60);
         world.update(1 / 60);
       }
@@ -183,7 +183,7 @@ void main() {
       final wolf = world.all<Wolf>().single;
       expect(mark.isDestroyed, isTrue);
       expect(game.coming.value, isFalse);
-      expect(flat(wolf.position - marked).length, lessThan(1), reason: 'where its mark was');
+      expect((wolf.position - marked).flat.length, lessThan(1), reason: 'where its mark was');
       expect(wolf.has<WorldWidget>(), isTrue, reason: 'with its nerve over it');
     });
 
@@ -194,9 +194,9 @@ void main() {
       wolf.position = Vec3(0, 0.45, 6);
       sheep.position = Vec3(0, 0.4, 2.5);
       run(0.5);
-      final first = flat(sheep.position - wolf.position).length;
+      final first = (sheep.position - wolf.position).flat.length;
       run(1.5);
-      expect(flat(sheep.position - wolf.position).length, greaterThan(first + 0.5), reason: 'it runs faster');
+      expect((sheep.position - wolf.position).flat.length, greaterThan(first + 0.5), reason: 'it runs faster');
       // Cornered against the fence, near it.
       sheep.position = Vec3(wolf.position.x, 0.4, wolf.position.z - 1.5);
       run(1.5);
@@ -217,9 +217,9 @@ void main() {
       dog().position = Vec3(0, 0.35, 4.5);
       var nearest = double.infinity;
       for (var i = 0; i < 4 * 60 && wolf.isHunting; i++) {
-        final far = flat(wolf.position - dog().position).length;
+        final far = (wolf.position - dog().position).flat.length;
         if (far < nearest) nearest = far;
-        if (far > Wolf.fear + 1) dog().position += flat(wolf.position - dog().position).normalized * (Dog.speed / 60);
+        if (far > Wolf.fear + 1) dog().position += (wolf.position - dog().position).flat.normalized * (Dog.speed / 60);
         world.update(1 / 60);
       }
       expect(nearest, greaterThan(Wolf.fear - 0.5), reason: 'it never came close');
@@ -318,10 +318,10 @@ void main() {
       while (game.result.value == null) {
         final free = game.round.free.toList();
         if (!noDog && free.isNotEmpty) {
-          final middle = free.fold(Vec3.zero, (sum, s) => sum + flat(s.position)) / free.length.toDouble();
+          final middle = free.fold(Vec3.zero, (sum, s) => sum + s.position.flat) / free.length.toDouble();
           final behind = middle + (middle - Vec3(0, 0, penFront - 1)).normalized * 3.5;
-          var to = flat(behind - dog.position);
-          final fromMiddle = flat(dog.position - middle);
+          var to = (behind - dog.position).flat;
+          final fromMiddle = (dog.position - middle).flat;
           if (fromMiddle.length < 3 && to.length > 0.5) to = to.normalized + fromMiddle.normalized * 1.5;
           if (to.length > 0.05) {
             dog.position = walk(dog.position, dog.position + to.normalized * (Dog.speed * 0.6 / 60));
@@ -374,7 +374,7 @@ void main() {
     });
 
     test('a key another control has swaps with it; reset goes back', () {
-      final controls = Controls()..set('up', KeyCode.d);
+      final controls = sheepdogControls()..set('up', KeyCode.d);
       expect((controls['up'], controls['right']), (KeyCode.d, KeyCode.w));
       controls.reset();
       expect((controls['up'], controls['right']), (KeyCode.w, KeyCode.d));

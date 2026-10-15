@@ -65,12 +65,7 @@ class BowlingGame extends GameObject {
     // 100 steps a second: a ball rolling at 9 m/s turns 80 times a second,
     // and physics turns a body no more than a quarter turn a step.
     time.fixedDelta = 1 / 100;
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(0.3, -1, -0.5))),
-        components: [Light.sun(intensity: 2.5)],
-      ),
-    );
+    add(GameObject(components: [Light.sun(direction: Vec3(0.3, -1, -0.5), intensity: 2.5)]));
     add(GameObject(components: [Light.ambient(color: Color.rgb(0.75, 0.8, 1), intensity: 0.7)]));
     add(Alley());
     add(ChaseCamera(this));
@@ -207,11 +202,11 @@ class Bowler extends Behaviour {
       final way = finger.totalDelta;
       _placing = way.x.abs() > way.y.abs();
       _letGo = false;
-      game.trail.value = [_at(finger.startPosition), _at(finger.position)];
+      game.trail.value = [finger.startPosition.toVec2(), finger.position.toVec2()];
     });
     on(input.onDrag, (finger) {
       if (_placing == null) return;
-      game.trail.value = [...game.trail.value.skip(game.trail.value.length > 24 ? 1 : 0), _at(finger.position)];
+      game.trail.value = [...game.trail.value.skip(game.trail.value.length > 24 ? 1 : 0), finger.position.toVec2()];
       if (_placing!) {
         final hit = physics.raycast(world.camera!.screenPointToRay(finger.position), layers: LayerMask.of([lane]));
         if (hit != null) game.aimX = hit.point.x;
@@ -257,8 +252,6 @@ class Bowler extends Behaviour {
       game.message.value = 'Flick faster to bowl';
     }
   }
-
-  static Vec2 _at(ViewPoint p) => Vec2(p.x, p.y);
 }
 
 /// The lane, its gutters and the pit behind the pins, and the triggers in
