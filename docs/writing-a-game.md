@@ -454,7 +454,8 @@ class Beacon extends GameObject {
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
-  `orthographic` with an `orthographicSize`, and a `cullingMask` (§13). The view draws
+  `orthographic` with an `orthographicSize`, a `cullingMask` (§13), and
+  `showSky` (below). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`). Keep `near`
   below `far`: a view drawing from a camera that isn't throws an
   `ArgumentError` naming it, each frame, rather than drawing nothing. It's
@@ -568,6 +569,65 @@ MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..cas
 - `light.shadows`, `renderer.castShadows` and `renderer.receiveShadows`
   can change at any time. The lab's 'Look: shadows' scene shows the sun's
   and a spotlight's, at each level.
+
+### The sky and fog
+
+`world.sky` is what's behind everything, and it lights the scene. A new
+world has none: the camera's `clearColor` shows.
+
+```dart
+/// A clear day: deep blue overhead, pale at the horizon, the far field
+/// fading into it.
+void clearDay(World world) {
+  world.sky = Sky.gradient(
+    zenith: Color.rgb(0.25, 0.49, 0.78),
+    horizon: Color.rgb(0.83, 0.89, 0.94),
+    ground: Color.rgb(0.43, 0.42, 0.38),
+  );
+  world.fog = const Fog(start: 20, end: 120);
+}
+
+/// A photographed sky, which shiny things mirror.
+Future<void> photographedSky(World world) async {
+  world.sky = Sky.image(await world.assets.skyImage('sky.hdr'), rotation: 90.deg);
+}
+```
+
+- **`Sky.gradient`** goes from `zenith` straight up to `horizon` level,
+  and to `ground` (the horizon's, unless given) straight down. Its
+  colours are shown as picked, so a game can take them from its theme:
+  `scheme.tertiary.toFynkel()` (§15). Sheepdog sets a day sky in its
+  light theme and a night one in its dark.
+- **`Sky.image`** is a Radiance `.hdr`, equirectangular (twice as wide as
+  high): its middle is ahead (−Z), its top row straight up. Poly Haven
+  has hundreds, CC0; the 1k or 2k ones are plenty, as the sky is seen
+  only behind everything. Its `intensity` scales its light; `rotation`
+  turns it to the right. Load it as an asset, `assets.skyImage(name)`
+  (§12), or from bytes with `SkyImage.load`.
+- **`Sky.color`** is one colour, as `clearColor` is, but it lights the
+  scene too: it adds to the ambient light.
+- **It lights the scene.** A gradient or an image is blurred once, on the
+  GPU, when it's set (a few milliseconds), into the light each way gets.
+  What faces up is lit by the zenith and what faces down by the ground; a
+  shiny surface mirrors the sky, a rough one shows only its colour, and
+  metal in between shows it blurred. `lighting` scales that light (0 for
+  none) without changing what's seen of the sky. A sky that lights does
+  the ambient light's work: a scene that had a `Light.ambient` wants it
+  dimmer.
+- **What's mirrored is the sky alone**: the ground and other objects
+  aren't seen in a shiny surface, nor do they hide the sky from it. A
+  ball in a room still mirrors the sky outside.
+- **`camera.showSky = false`** keeps a camera's `clearColor` behind
+  everything (a minimap looking down on the field), while the sky still
+  lights what it shows.
+
+**Fog** fades what's further than `start` metres from the camera into
+its `color`, all of it by `end`. Without a `color` it's the sky's
+horizon, so far things melt into the sky; with no sky, the camera's
+clear colour. `height` thins it upwards, halving every `height` metres
+above y = 0: mist lying in a valley. It costs almost nothing, at every
+level. The lab's 'Look: sky and fog' scene shows each kind of sky, metal
+from a mirror to rough, and fog over an avenue 100 m long.
 
 ## 6. The frame, the lifecycle and time
 
@@ -987,9 +1047,9 @@ when the game pauses, from wherever it's paused, with
 
 ## 12. Assets
 
-Models (`.glb`) and textures (`.png`, `.jpg`) are loaded by name, from the
-app's `assets/` folder (list it under `flutter: assets:` in
-`pubspec.yaml`):
+Models (`.glb`), textures (`.png`, `.jpg`) and sky images (`.hdr`, §5)
+are loaded by name, from the app's `assets/` folder (list it under
+`flutter: assets:` in `pubspec.yaml`):
 
 ```dart
 class Tree extends GameObject {
@@ -2317,7 +2377,8 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-- **Drawing:** a sky, bloom, particles, sprites and 2D, 3D text,
+- **Drawing:** reflections of the scene itself (a mirror shows the sky
+  alone), bloom, particles, sprites and 2D, 3D text,
   see-through materials, vertex colours.
 - **Models:** animation, skinned meshes and morph targets (a model shows
   its rest pose).
