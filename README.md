@@ -55,6 +55,7 @@ class Cube extends GameObject {
   | [garden](examples/garden) | A character in a garden, loaded from models; an orbit camera |
   | [coins](examples/coins) | Walk about picking up coins, level after level; triggers and a Flutter HUD |
   | [arena](examples/arena) | A small top-down game: waves, health, signals, tweens, pause |
+  | [sheepdog](examples/sheepdog) | A whole game that feels like an app: a title screen, pause menu, settings, rebindable keys, levels and a minimap |
   | [bowling](examples/bowling) | Ten-pin bowling on physics: rigidbodies, a mesh collider, gestures |
   | [lab](examples/lab) | One scene per feature, with buttons and sliders to try it by hand |
   | [scale](examples/scale) | Not a lesson: 10,000 objects, to measure speed |
@@ -64,7 +65,13 @@ class Cube extends GameObject {
 - Flutter 3.47 or later.
 - Rust, from [rustup](https://rustup.rs). The engine is built from source:
   the **first build takes a few minutes** (later ones only rebuild what
-  changed). `rust-toolchain.toml` picks the version, and rustup fetches it.
+  changed; `flutter run -v` shows cargo working). `rust-toolchain.toml`
+  picks the version and its targets, and rustup installs them itself on
+  the first build. Except rustup 1.28.0, which doesn't: `rustup self
+  update`, or run `rustup toolchain install` in this repository once. A
+  toolchain installed earlier without a target needs `rustup target add`
+  (the build says which). The build uses the crate versions in
+  `Cargo.lock` (`--locked`), never newer ones.
 - For Android, the Android NDK, and Android 11 (API 30) or later on a
   64-bit device.
 
@@ -76,7 +83,7 @@ repository, with `path:` dependencies (guide §1).
 
 | Package | What it is |
 | --- | --- |
-| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. No Flutter in it, so games test in plain `dart test` |
+| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. Plain Dart, with no window: a game runs frame by frame in `flutter test` (guide §17) |
 | [`fynkel_flutter`](packages/fynkel_flutter) | `FynkelApp`, `FynkelGame` and `FynkelView`: the game in a Flutter app |
 | [`fynkel_physics`](packages/fynkel_physics) | Physics (Rapier), as Unity's: rigidbodies, colliders, triggers, joints, a character controller. Optional |
 | [`fynkel_measure`](packages/fynkel_measure) | The tool that measures frame rate and memory on devices |
