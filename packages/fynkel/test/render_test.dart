@@ -12,7 +12,8 @@ import 'golden.dart';
   world.add(
     GameObject(
       transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
-      components: [Camera()],
+      // As the Rust tests' camera, whose goldens it's held to.
+      components: [Camera(bloom: null, ambientOcclusion: null)],
     ),
   );
   world.add(

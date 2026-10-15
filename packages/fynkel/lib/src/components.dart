@@ -202,6 +202,68 @@ int cameraObjectId(Camera camera, World world) {
   return object._id;
 }
 
+/// Light brighter than white glowing into what's around it: a lamp's
+/// bulb, a glowing sword, the sun on metal ([Camera.bloom]). Drawn at
+/// medium and high quality; at low, never.
+final class Bloom {
+  /// Bloom of [strength] from [threshold]: by default, about as much glow
+  /// as light, from what's brighter than white.
+  const Bloom({this.strength = 1, this.threshold = 1});
+
+  /// How much of the light glows, 0 to 10: 0, none; 1, about as much as
+  /// it gives off itself, spread wide.
+  final double strength;
+
+  /// How bright light must be to glow, 0 to 100: at 1, only what's
+  /// brighter than white (a lit white wall stays as it is), fading in over
+  /// half as much again. A material glows with [Material.emissive] times an
+  /// [Material.emissiveIntensity] above 1.
+  final double threshold;
+
+  /// A copy with the values given changed.
+  Bloom copyWith({double? strength, double? threshold}) =>
+      Bloom(strength: strength ?? this.strength, threshold: threshold ?? this.threshold);
+
+  @override
+  bool operator ==(Object other) => other is Bloom && other.strength == strength && other.threshold == threshold;
+
+  @override
+  int get hashCode => Object.hash(strength, threshold);
+
+  @override
+  String toString() => 'Bloom(strength: ${strength.toDouble()}, threshold: ${threshold.toDouble()})';
+}
+
+/// Surfaces darkening where they meet, in corners and creases and under
+/// things on the ground: a soft hint of contact ([Camera.ambientOcclusion]).
+/// Only the ambient and sky light darken; lights and their shadows stay as
+/// they are. Drawn at high quality only.
+final class AmbientOcclusion {
+  /// Ambient occlusion of [intensity] over [radius] metres: by default, as
+  /// dark as corners are closed in, over half a metre.
+  const AmbientOcclusion({this.intensity = 1, this.radius = 0.5});
+
+  /// How dark, 0 to 4: 0, not at all; 1, as dark as the corner is closed
+  /// in.
+  final double intensity;
+
+  /// How far, in metres, a surface darkens one near it, 0 to 10.
+  final double radius;
+
+  /// A copy with the values given changed.
+  AmbientOcclusion copyWith({double? intensity, double? radius}) =>
+      AmbientOcclusion(intensity: intensity ?? this.intensity, radius: radius ?? this.radius);
+
+  @override
+  bool operator ==(Object other) => other is AmbientOcclusion && other.intensity == intensity && other.radius == radius;
+
+  @override
+  int get hashCode => Object.hash(intensity, radius);
+
+  @override
+  String toString() => 'AmbientOcclusion(intensity: ${intensity.toDouble()}, radius: ${radius.toDouble()})';
+}
+
 /// Makes the object a camera. A view is drawn from the shown object
 /// with a camera and the lowest id ([World.camera]), unless it has a
 /// camera of its own ([WorldView.camera]): a minimap, the other half of a
@@ -211,8 +273,9 @@ int cameraObjectId(Camera camera, World world) {
 /// [ArgumentError] from the setter and leaves the old value in place.
 final class Camera extends Component {
   /// A perspective camera with a 60° [fovY], [near] 0.1 m, [far] 1,000 m,
-  /// a dark grey [clearColor], drawing every layer. Pass [orthographic]
-  /// for a parallel one, [orthographicSize] 5 unless given.
+  /// a dark grey [clearColor], drawing every layer, with [bloom] and
+  /// [ambientOcclusion]. Pass [orthographic] for a parallel one,
+  /// [orthographicSize] 5 unless given.
   Camera({
     this._fovY = 60 * (math.pi / 180),
     this._near = 0.1,
@@ -222,12 +285,16 @@ final class Camera extends Component {
     this._orthographicSize = 5,
     this._cullingMask = LayerMask.all,
     this._showSky = true,
+    this._bloom = const Bloom(),
+    this._ambientOcclusion = const AmbientOcclusion(),
   }) : super._();
 
   double _fovY, _near, _far, _orthographicSize;
   Color _clearColor;
   bool _orthographic, _showSky;
   LayerMask _cullingMask;
+  Bloom? _bloom;
+  AmbientOcclusion? _ambientOcclusion;
 
   /// Vertical field of view in radians, 1° to 179°: 60.deg unless set.
   double get fovY => _fovY;
@@ -337,6 +404,34 @@ final class Camera extends Component {
     }
   }
 
+  /// Whether light brighter than white glows into what's around it, and
+  /// how: `const Bloom()` unless set; null, it doesn't (a minimap's, say).
+  /// Drawn at medium and high [Quality]: low has none.
+  Bloom? get bloom => _bloom;
+  set bloom(Bloom? value) {
+    _checkChangeable();
+    final old = _bloom;
+    _bloom = value;
+    if (_write() case final failed?) {
+      _bloom = old;
+      failed.raise();
+    }
+  }
+
+  /// Whether surfaces darken where they meet, and how:
+  /// `const AmbientOcclusion()` unless set; null, they don't. Drawn at
+  /// high [Quality] only.
+  AmbientOcclusion? get ambientOcclusion => _ambientOcclusion;
+  set ambientOcclusion(AmbientOcclusion? value) {
+    _checkChangeable();
+    final old = _ambientOcclusion;
+    _ambientOcclusion = value;
+    if (_write() case final failed?) {
+      _ambientOcclusion = old;
+      failed.raise();
+    }
+  }
+
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
   /// [World.raycast] to find what's drawn there (Unity's
@@ -420,7 +515,9 @@ final class Camera extends Component {
   String toString() =>
       'Camera(${orthographic ? 'orthographic, orthographicSize: $orthographicSize' : 'fovY: $fovY'}, near: $near, far: $far, '
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'}'
-      '${showSky ? '' : ', showSky: false'})';
+      '${showSky ? '' : ', showSky: false'}'
+      '${bloom == const Bloom() ? '' : ', bloom: $bloom'}'
+      '${ambientOcclusion == const AmbientOcclusion() ? '' : ', ambientOcclusion: $ambientOcclusion'})';
 }
 
 /// What kind of light a [Light] is.
