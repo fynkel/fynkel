@@ -17,8 +17,9 @@ theme). `examples/lab` has a scene for each feature, to try by hand.
 You need Flutter 3.47 or later and Rust ([rustup](https://rustup.rs)); the
 repository's `rust-toolchain.toml` picks the version. The engine is built
 from source the first time you run a game, and again only when it changes.
-That first build takes a few minutes and prints nothing while it runs, the
-first `flutter test` too: it isn't stuck.
+That first build takes a few minutes, the first `flutter test` too, and
+Flutter shows cargo working only with `-v` (`flutter run -v`): it isn't
+stuck. The README says what rustup needs.
 
 Make a Flutter app and add Fynkel to it:
 
@@ -472,8 +473,7 @@ nothing in the game reaches it any more.
 
 A world is drawn at one of three levels, `Quality.low`, `medium` or
 `high`. Each is meant to hold its devices' frame rate, and the effects
-(shadows, and to come a sky and bloom) each say what they do at each
-level.
+(shadows and lamps, below) each say what they do at each level.
 
 When the game doesn't choose, the device picks: high on Apple's GPUs and
 desktops', medium on phones' Mali and Adreno, low on a software GPU or
@@ -1021,6 +1021,29 @@ class Tree extends GameObject {
   it's loaded, preloaded, shared and freed in the same way.
 - A level that's `async` in `onLoad` appears only when all of it is there:
   `await add(level).loaded` waits for that.
+
+**Flutter's asset folders aren't recursive.** `- assets/` lists the files
+in `assets/`, not those in `assets/props/`: list each folder,
+
+```yaml
+flutter:
+  assets:
+    - assets/
+    - assets/props/
+```
+
+as examples/coins does. A file in a folder that isn't listed isn't in
+the app, and loading it fails with its name.
+
+**A level from Blender.** Make the level in Blender and export it as a
+`.glb` (File → Export → glTF 2.0, glTF Binary, +Y Up). Every Blender
+object comes in as an object of the same name, placed as it was, empties
+too: name the places the code needs (`start`, `gate`) and `find` them
+(§16 has a level that does). The meshes and their materials come in; the
+file's lights, cameras and animations are skipped (`Model.warnings` says
+what was), so light the level from code (§5). To walk on it, give it
+colliders: `MeshCollider.addToParts(level)` (§14) gives every part its
+own shape.
 
 ## 13. Cameras, layers and debug drawing
 
@@ -2012,10 +2035,115 @@ its `onDestroy`, its routines, tweens and listeners; what the root keeps
 (the score, the HUD's notifiers, the settings) stays. `FynkelGame`'s
 `restart()` is the bigger hammer: a new root in a new world.
 
+**Levels.** There are no scene files: a level is an object, and what it
+adds hangs from it. The root holds one at a time, and what outlives them:
+
+```dart
+// lib/levels.dart
+import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:fynkel/fynkel.dart';
+
+/// One level, made in Blender (§12). Destroying it clears it: its
+/// objects, its routines, and the assets only it held.
+class Level extends GameObject {
+  Level(this.number) : super(name: 'level $number');
+
+  static const last = 3;
+  final int number;
+
+  /// Where the player starts: the empty named `start` in Blender.
+  var start = Vec3.zero;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final scene = add(await assets.instantiate('levels/level_$number.glb'));
+    start = scene.find('start')?.worldTransform.position ?? Vec3.zero;
+    // The next one loads while this one is played, so it comes at once.
+    if (number < last) assets.preload(['levels/level_${number + 1}.glb']);
+  }
+}
+
+/// The game's root.
+class Levels extends GameObject {
+  Levels({this.first = 1});
+
+  final int first;
+  final level = ValueNotifier(0);
+  Level? _current;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await go(first);
+  }
+
+  /// Swaps the level there is for level [number]. The new one comes
+  /// whole before the old one goes: no empty frame, and what both use
+  /// stays loaded.
+  Future<void> go(int number) async {
+    final old = _current;
+    final next = _current = add(Level(number));
+    await next.loaded;
+    old?.destroy();
+    level.value = number;
+  }
+}
+```
+
+**Saving.** What's kept between runs is plain data, never objects: the
+level reached, the best score, the settings (`Controls` has `toJson` and
+`fromJson`, §15). Write it as JSON to a file in the app's own folder,
+which the app finds with the `path_provider` package
+(`getApplicationSupportDirectory()`) and hands to the game:
+
+```dart
+// lib/save.dart
+import 'dart:convert';
+import 'dart:io';
+
+/// What the game keeps between runs.
+class Save {
+  Save({this.level = 1, this.best = 0});
+
+  int level;
+  int best;
+
+  Map<String, Object?> toJson() => {'level': level, 'best': best};
+
+  /// Reads [file]; a new save when there's none, or it can't be read
+  /// (an older game's, or cut short).
+  static Save read(File file) {
+    try {
+      final json = jsonDecode(file.readAsStringSync()) as Map<String, Object?>;
+      return Save(level: json['level'] as int? ?? 1, best: json['best'] as int? ?? 0);
+    } catch (_) {
+      return Save();
+    }
+  }
+
+  /// Writes it whole: to a file beside [file] first, then renamed over
+  /// it, so a crash halfway leaves the last save, not half of this one.
+  void write(File file) {
+    File('${file.path}.new')
+      ..writeAsStringSync(jsonEncode(toJson()))
+      ..renameSync(file.path);
+  }
+}
+```
+
+Save when something worth keeping happens (a level done), not every
+frame: a write is a few milliseconds on a phone.
+
 ## 17. Testing a game
 
-package:fynkel has no Flutter in it, so a game runs in a plain test, frame
-by frame, with made-up input:
+A game runs in a test with no window and no app around it, frame by
+frame, with made-up input. Run the tests with **`flutter test`**, not
+`dart test`: package:fynkel itself is plain Dart, but a game is a Flutter
+package (it uses `ValueNotifier` and the rest of `foundation.dart`, and
+its tests `flutter_test`), and only Flutter's tool resolves those.
+`flutter test` builds the engine through the same hook as `flutter run`,
+for the Mac it runs on.
 
 ```dart
 // test/walker_test.dart
@@ -2189,10 +2317,16 @@ What keeps a game fast:
 
 ## 19. What isn't there yet
 
-Audio, animation of models, shadows, saving,
-gamepads, scene files and an editor. In physics: 2D physics,
-`ConfigurableJoint`, and chains of joints that don't stretch (Rapier's
-multibody joints).
+- **Drawing:** a sky, bloom, particles, sprites and 2D, 3D text,
+  see-through materials, vertex colours.
+- **Models:** animation, skinned meshes and morph targets (a model shows
+  its rest pose).
+- **Sound:** none yet.
+- **Input:** gamepads.
+- **The game:** navmeshes and path finding; scene files and saving, which
+  a game does itself for now (§16 shows how); an editor.
+- **Physics:** 2D physics, `ConfigurableJoint`, and chains of joints that
+  don't stretch (Rapier's multibody joints).
 
 ## 20. From Unity
 
@@ -2283,6 +2417,14 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Hardening, the build hook and the guide** (2026-10-15):
+  - The build hook builds on any Mac Flutter builds on: Android's linker
+    comes from Flutter's NDK and the app's `minSdkVersion`, and cargo
+    runs `--locked` (the versions in `Cargo.lock`) with Flutter's
+    macOS and iOS deployment targets. `flutter run -v` shows it working.
+  - New in the guide: asset folders aren't recursive, and a level made in
+    Blender (§12); levels and saving (§16); why `flutter test` (§17).
 
 - **Hardening, what a game writes** (2026-10-15):
   - `Camera`, `Light` and `MeshRenderer` have `enabled`, as behaviours

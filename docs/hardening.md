@@ -705,6 +705,22 @@ Flutter's asset folders aren't recursive (coins lists two); `fynkel_physics/exam
 is a benchmark, not a lesson. Add a scene/level and a save-game recipe
 to §15 or §16, and a Blender-glb-as-level note to §12.
 
+*Done* 2026-10-15. B1: what the hook decides is in
+`lib/src/build_plan.dart`, each part tested first
+(`test/hooks_test.dart`). Android links with the clang wrapper beside the
+NDK clang Flutter hands the hook, for the API the app's `minSdkVersion`
+gives. Without one, it uses ANDROID_NDK_HOME or the newest NDK by
+version number (names that aren't versions are skipped), on whatever
+host the NDK was made for. cargo runs `--locked`, with
+`MACOSX_DEPLOYMENT_TARGET` or `IPHONEOS_DEPLOYMENT_TARGET` from Flutter
+(13.0 for both). Its output streams as it comes: Flutter shows it with
+`-v`, and an error keeps its last 16 KB. hello builds for macOS, Android
+arm64 and iOS with it. B2: everything in the row is fixed: §1, §5, §12
+(asset folders, a level from Blender), §16 (levels and saving, both
+compiled by tools/check_guide.py), §17, §19, the README (Sheepdog, rustup,
+`flutter test`), and a README in fynkel_physics/example saying it's a
+benchmark.
+
 ## The order
 
 | # | Phase | Why here |
@@ -773,7 +789,7 @@ planned; neither needs anything here changed again.
   what a frame doesn't use, which these two scenes do use.
 - [x] Phase 4b: lights by place, not by object (L1)
 - [x] Phase 5: what a game writes (G1–G8)
-- [ ] Phase 6: the hook and the guide
+- [x] Phase 6: the hook and the guide (B1, B2)
 - [ ] Stage 8 phase 4 resumes
 
 ## Raised and left
