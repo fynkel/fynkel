@@ -18,6 +18,7 @@
 //! up to the level's [`ShadowLevel::spot_maps`](crate::ShadowLevel).
 //!
 //! 0. The shadow maps: each one's casters' depth, as its light sees them.
+//!    Then light ambient occlusion, when the camera has it (`ao`).
 //! 1. The scene: every draw, then the debug lines on top. Above
 //!    [`Quality::Low`] it is drawn into a half-float image (the scene
 //!    image); at low, straight into the view.
@@ -30,14 +31,15 @@ use std::sync::{Arc, OnceLock};
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
 
+use crate::ao::{self, AoImages};
 use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
 use crate::bloom::BloomChain;
 use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{
-    Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind,
-    TextureKey,
+    AmbientOcclusion, Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene,
+    ShadowFilter, SkyKind, TextureKey,
 };
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
 use crate::sky::{self, Environment, SPECULAR_MIPS};
@@ -107,6 +109,8 @@ struct FrameUniforms {
     fog: [f32; 4],
     /// x: multiplies the sky's light. y: the specular cube's last mip.
     sky_light: [f32; 4],
+    /// x, y: 1 / the view's width and height, in pixels.
+    view_size: [f32; 4],
 }
 
 /// `Sky` in forward.wgsl and sky.wgsl.
@@ -209,6 +213,8 @@ struct Targets {
     color: wgpu::TextureView,
     depth: wgpu::TextureView,
     image: Option<SceneImage>,
+    /// Ambient occlusion's images, made the first frame a camera has it.
+    ao: Option<AoImages>,
 }
 
 /// The image the scene is drawn into, its format, and the bind group the
@@ -286,17 +292,21 @@ struct Variant {
     textured: bool,
     /// The sky lights the scene from its cubes (a gradient or an image).
     sky_lit: bool,
+    /// Ambient occlusion darkens it.
+    ao: bool,
 }
 
 impl Variant {
-    const COUNT: usize = Cover::COUNT * Faces::ALL.len() * 2 * 2 * 2;
+    const COUNT: usize = Cover::COUNT * Faces::ALL.len() * 2 * 2 * 2 * 2;
 
     /// Its index in `Pipelines::forward`.
     fn index(self) -> usize {
-        (((self.cover as usize * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+        ((((self.cover as usize * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
             + usize::from(self.textured))
             * 2
-            + usize::from(self.sky_lit)
+            + usize::from(self.sky_lit))
+            * 2
+            + usize::from(self.ao)
     }
 }
 
@@ -421,6 +431,10 @@ pub struct Renderer {
     /// This frame's bloom: the camera's, where the level draws it and it
     /// glows at all.
     bloom: Option<Bloom>,
+    /// This frame's ambient occlusion, as `bloom`, and what its passes
+    /// read.
+    ao: Option<AmbientOcclusion>,
+    ao_params: ao::Params,
     /// The cubes (and image) of the last such sky, kept until another.
     environment: Option<Environment>,
     size: (u32, u32),
@@ -438,7 +452,7 @@ const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// How many frames shadow maps a view stops using are kept: about a
 /// second.
 const KEEP_UNUSED_MAPS: u32 = 60;
-const INSTANCE_SIZE: u64 = std::mem::size_of::<Instance>() as u64;
+pub(crate) const INSTANCE_SIZE: u64 = std::mem::size_of::<Instance>() as u64;
 
 impl Renderer {
     /// MSAA sample count.
@@ -508,6 +522,8 @@ impl Renderer {
             sky_next: None,
             sky_drawn: false,
             bloom: None,
+            ao: None,
+            ao_params: bytemuck::Zeroable::zeroed(),
             environment: None,
             size: (0, 0),
             kit,
@@ -587,6 +603,7 @@ impl Renderer {
         self.sky_next = None;
         self.sky_drawn = false;
         self.bloom = None;
+        self.ao = None;
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
@@ -617,11 +634,18 @@ impl Renderer {
             Some(_) => camera.view.inverse().transform_vector3(Vec3::Z).normalize().extend(0.0),
             None => camera.position.extend(1.0),
         };
+        self.ao = camera
+            .ambient_occlusion
+            .filter(|a| self.quality.ambient_occlusion() && a.intensity > 0.0 && a.radius > 0.0);
+        if let Some(ao) = self.ao {
+            self.ao_params = ao::Params::new(ao, projection, camera.orthographic.is_none(), self.size.1);
+        }
         let planes = frustum_planes(projection * camera.view);
         let u = &mut self.uniforms;
         u.view_proj = (projection * camera.view).to_cols_array_2d();
         u.camera_position = to_viewer.into();
         u.ambient = scene.ambient.extend(0.0).into();
+        u.view_size = [1.0 / self.size.0 as f32, 1.0 / self.size.1 as f32, 0.0, 0.0];
 
         // The sky: a plain one is the clear colour and more ambient light;
         // a gradient or an image is drawn after the scene and lights it
@@ -949,7 +973,25 @@ impl Renderer {
             self.image_pipelines = Some(self.kit.pipelines(format));
         }
         if self.shadow_maps.as_ref().is_none_or(|m| m.shape != self.shadow_next) {
-            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, self.shadow_next));
+            let none = (0, &self.kit.ao.none, &self.kit.ao.sampler);
+            self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, self.shadow_next, none));
+        }
+        // Ambient occlusion's images, and the forward pass reading them, or
+        // the stand-in.
+        if let Some(targets) = &mut self.targets {
+            if self.ao.is_some() && targets.ao.is_none() {
+                targets.ao = Some(AoImages::new(&self.kit.ao, width, height));
+            }
+            let ao = match (&self.ao, &mut targets.ao) {
+                (Some(_), Some(images)) => {
+                    images.set(&self.kit.gpu.queue, self.ao_params);
+                    (images.id, &images.blurred, &self.kit.ao.sampler)
+                }
+                _ => (0, &self.kit.ao.none, &self.kit.ao.sampler),
+            };
+            if let Some(maps) = &mut self.shadow_maps {
+                maps.read_ao(&self.kit.gpu.device, &self.kit.shadows, ao);
+            }
         }
         // A new sky's light, worked out before anything reads it.
         if let Some(kind) = &self.sky_next
@@ -1033,6 +1075,23 @@ impl Renderer {
             }
         }
 
+        // Ambient occlusion: the solid scene's depth, then how hidden each
+        // pixel is, blurred. Cut-outs and blended draws aren't in it.
+        if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
+            {
+                let mut pass = images.depth_pass(&kit.ao, encoder);
+                pass.set_bind_group(0, frame.bind_group, &[]);
+                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+                for batch in self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque) {
+                    let Some(mesh) = meshes.get(&batch.mesh) else { continue };
+                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+                }
+            }
+            images.encode(&kit.ao, encoder);
+        }
+
         // 1. The scene, into the scene image or straight into the view.
         let (scene_pipelines, resolve) = match &targets.image {
             Some(image) => (image_pipelines.as_deref().expect("got above"), &image.view),
@@ -1067,6 +1126,7 @@ impl Renderer {
                 pass.set_bind_group(3, sky_light, &[]);
             }
             let sky_lit = self.sky_next.is_some();
+            let ao = self.ao.is_some();
             if !self.batches.is_empty() {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
@@ -1092,6 +1152,8 @@ impl Renderer {
                             shadowed,
                             textured: textured(batch),
                             sky_lit,
+                            // Blended surfaces aren't in its depth.
+                            ao: ao && !cover.blended(),
                         }));
                     }
                     if last.is_none_or(|l| l.textures != batch.textures) {
@@ -1204,6 +1266,7 @@ impl Renderer {
             color: make("msaa colour", color_format),
             depth: make("msaa depth", DEPTH_FORMAT),
             image,
+            ao: None,
         }
     }
 
@@ -1246,7 +1309,7 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let Variant { cover, faces, shadowed, textured, sky_lit } = variant;
+        let Variant { cover, faces, shadowed, textured, sky_lit, ao } = variant;
         let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
             let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
@@ -1298,6 +1361,7 @@ impl Pipelines {
             ("double_sided", on(faces == Faces::Both)),
             ("shadowed", on(shadowed)),
             ("textured", on(textured)),
+            ("ao", on(ao)),
             ("sky_lit", on(sky_lit)),
         ];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };

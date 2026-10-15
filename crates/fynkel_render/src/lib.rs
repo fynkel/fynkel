@@ -3,6 +3,7 @@
 //! See `docs/stage-1.md` §3.6. Nothing here knows about the world,
 //! platforms, Flutter or Dart.
 
+mod ao;
 mod assets;
 mod bloom;
 mod clusters;
@@ -20,7 +21,7 @@ pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
-    Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial,
-    Quality, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
+    AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures,
+    MeshKey, PbrMaterial, Quality, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
 };
 pub use wgpu;

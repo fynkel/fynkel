@@ -92,6 +92,8 @@ struct Frame {
     fog: vec4<f32>,
     // The sky's light: x multiplies it, y is the specular cube's last mip.
     sky_light: vec4<f32>,
+    // x, y: 1 / the view's width and height, in pixels.
+    view_size: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -114,6 +116,9 @@ override textured: bool = true;
 // Off without a sky that lights the scene from its cubes (a gradient or an
 // image's): a plain sky is in the ambient term.
 override sky_lit: bool = false;
+// On where the camera has ambient occlusion (ao.rs): the ambient and sky
+// light darken where surfaces meet.
+override ao: bool = false;
 
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
@@ -133,6 +138,10 @@ override sky_lit: bool = false;
 @group(2) @binding(0) var cascade_maps: texture_depth_2d_array;
 @group(2) @binding(1) var spot_maps: texture_depth_2d_array;
 @group(2) @binding(2) var shadow_sampler: sampler_comparison;
+// How much of the ambient light reaches each pixel, at half the view's
+// size; 1 × 1 white without.
+@group(2) @binding(3) var ao_texture: texture_2d<f32>;
+@group(2) @binding(4) var ao_sampler: sampler;
 
 // The sky's light (env.wgsl): its radiance blurred for each roughness, a
 // mip each, and the light a surface facing each way gets. 1 × 1 black
@@ -411,6 +420,9 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         mr_sample = textureSample(metallic_roughness_texture, material_sampler, in.uv);
         occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
         emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
+    }
+    if ao {
+        occlusion *= textureSampleLevel(ao_texture, ao_sampler, in.clip.xy * frame.view_size.xy, 0.0).r;
     }
 
     let base = in.base_color * base_sample;
