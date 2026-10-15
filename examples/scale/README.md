@@ -25,7 +25,7 @@ Its settings are `--dart-define`s:
 
 ## Measuring
 
-package:fynkel_measure's tool runs the profile build of `lib/measured.dart`,
+package:fynkel_measure's tool runs the profile build of `tool/measured.dart`,
 the same world in `MeasuredApp`. Run it from this directory, and keep the
 display awake while it runs. The tool's `--define` passes the settings above;
 `--define FRAME_TIMES=true` also prints, once a second, how long each

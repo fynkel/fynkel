@@ -3,7 +3,6 @@
 
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
-
-import 'main.dart';
+import 'package:hello/main.dart';
 
 void main() => runApp(const MeasuredApp(Hello.new));

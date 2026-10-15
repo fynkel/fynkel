@@ -20,7 +20,7 @@ flutter run -d emulator-5554   # Android 11 or later, with the NDK installed
 ## Measuring
 
 As hello's, with package:fynkel_measure's tool, from this directory. It
-builds and runs `lib/measured.dart`, the same game in `MeasuredApp`. Keep
+builds and runs `tool/measured.dart`, the same game in `MeasuredApp`. Keep
 the display awake while it runs.
 
 ```sh

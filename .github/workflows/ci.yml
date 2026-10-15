@@ -66,7 +66,7 @@ jobs:
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
           (cd example && flutter pub get)
           dart pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool hook example/lib
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool hook example/lib example/tool
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
@@ -96,36 +96,36 @@ jobs:
           flutter test
           cd ../../examples/hello
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib
+          dart format -l 120 --output=none --set-exit-if-changed lib tool
           flutter analyze --fatal-infos
           flutter build macos --debug
           cd ../garden
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
           cd ../coins
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
           cd ../arena
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
           cd ../bowling
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
           cd ../sheepdog
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
@@ -137,7 +137,7 @@ jobs:
           flutter build macos --debug
           cd ../scale
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug

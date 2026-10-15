@@ -5,8 +5,7 @@
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
-
-import 'garden.dart';
+import 'package:garden/garden.dart';
 
 void main() => runApp(MeasuredApp(Garden.new, timings: _tap));
 

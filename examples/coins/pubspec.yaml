@@ -13,12 +13,12 @@ dependencies:
     path: ../../packages/fynkel
   fynkel_flutter:
     path: ../../packages/fynkel_flutter
-  fynkel_measure:
-    path: ../../packages/fynkel_measure
   fynkel_physics:
     path: ../../packages/fynkel_physics
 
 dev_dependencies:
+  fynkel_measure:
+    path: ../../packages/fynkel_measure
   flutter_test:
     sdk: flutter
   lints: ^6.1.0

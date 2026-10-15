@@ -2,11 +2,10 @@
 // lib/main.dart. Its lifecycle check also starts a new round again and
 // again.
 
+import 'package:arena/arena.dart';
+import 'package:arena/hud.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
-
-import 'arena.dart';
-import 'hud.dart';
 
 void main() => runApp(
   MeasuredApp(

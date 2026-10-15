@@ -2177,13 +2177,14 @@ What keeps a game fast:
   mass, as Unity advises.
 - **Short-reaching lamps.** A lamp costs something for each object it
   reaches, and the pixels it lights; one that reaches no further than it
-  needs to costs least. Turn a lamp off with `intensity = 0`: it's left
-  out altogether.
+  needs to costs least. Turn a lamp off with `enabled = false`: it's
+  left out altogether.
 - **A lower quality level for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
   screen (§5).
 - **Measure** on the slowest phone you support. Each example has a
-  `lib/measured.dart` for package:fynkel_measure's tool, which gives the
+  `tool/measured.dart` for package:fynkel_measure's tool (a
+  dev_dependency, so the game itself doesn't carry it), which gives the
   frame rate and memory: `dart run fynkel_measure:measure rate`.
 
 ## 19. What isn't there yet
@@ -2295,6 +2296,13 @@ For code written before: each change that breaks it, newest first.
     `ViewPoint.toVec2()`, and `emit()` for a `Signal<void>`
     (`emit(null)` still works). `addWith(component)` adds an object
     holding a component and returns the component (§3).
+  - `input.stick()` (a finger dragging as a stick), `Follow.portraitFit`
+    (a follow camera that goes further back upright), and in
+    package:fynkel_flutter `Controls`, `ControlsSettings` and
+    `askForKey` (keys a player changes, §11).
+  - The examples' `lib/measured.dart` is `tool/measured.dart`, and
+    package:fynkel_measure is a dev_dependency: move yours, and the tool
+    finds it there (it still finds the old place).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

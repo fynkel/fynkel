@@ -2,10 +2,12 @@
 // docs/stage-2.md §3.5): builds and runs the profile build of the app in
 // the current directory and reports the fresh frame rate, the Dart allocation per
 // frame, and the memory over the cycles of the app's lifecycle check.
-// The app runs `lib/measured.dart` when it has one: the game wrapped in
-// this package's MeasuredApp (lib/src/measured_app.dart), so the game's
-// own code knows nothing of measuring. Otherwise it runs lib/main.dart,
-// which uses this package's Measurement itself.
+// The app runs `tool/measured.dart` when it has one (or, as before,
+// `lib/measured.dart`): the game wrapped in this package's MeasuredApp
+// (lib/src/measured_app.dart), so the game's own code knows nothing of
+// measuring, and the app has this package only as a dev_dependency.
+// Otherwise it runs lib/main.dart, which uses this package's Measurement
+// itself.
 //
 //   dart run fynkel_measure:measure rate [--seconds 60] [--fullscreen]
 //   dart run fynkel_measure:measure lifecycle [--cycles 10]
@@ -77,7 +79,10 @@ String get _app => 'build/macos/Build/Products/Profile/$_name.app/Contents/MacOS
 
 /// The entry point measured: the game wrapped in MeasuredApp, if the app
 /// has one.
-final String _target = File('lib/measured.dart').existsSync() ? 'lib/measured.dart' : 'lib/main.dart';
+final String _target = [
+  'tool/measured.dart',
+  'lib/measured.dart',
+].firstWhere((path) => File(path).existsSync(), orElse: () => 'lib/main.dart');
 
 /// Seconds of a run that aren't measured: startup and the first frames.
 const _warmUp = 5;
