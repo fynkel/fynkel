@@ -71,7 +71,7 @@ fn set_refuses_bad_values_and_changes_nothing() {
         assert!(camera.set(index, value).is_err(), "accepted {why}");
         assert_eq!(camera, Camera::default(), "{why} changed the camera");
     }
-    assert_eq!(camera.set(9, Value::F32(1.0)), Err(FieldError::NoField { ty: "Camera", index: 9 }));
+    assert_eq!(camera.set(14, Value::F32(1.0)), Err(FieldError::NoField { ty: "Camera", index: 14 }));
 
     let mut light = Light::default();
     assert_eq!(light.set(0, Value::Enum(4)), Err(FieldError::WrongKind { ty: "Light", field: "kind" }));

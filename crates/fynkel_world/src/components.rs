@@ -193,6 +193,16 @@ pub struct Camera {
     /// Whether it shows the world's sky behind everything; without it,
     /// `clear_color`. The sky lights the scene either way.
     pub show_sky: bool,
+    /// Whether light brighter than white glows into what's around it (at
+    /// medium and high quality), and how much and from how bright.
+    pub bloom: bool,
+    pub bloom_strength: f32,
+    pub bloom_threshold: f32,
+    /// Whether surfaces darken where they meet (at high quality), how
+    /// dark, and how far in metres.
+    pub ambient_occlusion: bool,
+    pub ambient_occlusion_intensity: f32,
+    pub ambient_occlusion_radius: f32,
 }
 
 impl Camera {
@@ -205,6 +215,12 @@ impl Camera {
         size: 5.0,
         culling_mask: u32::MAX,
         show_sky: true,
+        bloom: true,
+        bloom_strength: 1.0,
+        bloom_threshold: 1.0,
+        ambient_occlusion: true,
+        ambient_occlusion_intensity: 1.0,
+        ambient_occlusion_radius: 0.5,
     };
 }
 
@@ -228,6 +244,14 @@ impl Describe for Camera {
             Field::new("size", FieldKind::F32, Value::F32(D.size)).range(1e-4, 1e6),
             Field::new("culling_mask", FieldKind::Mask, Value::Mask(D.culling_mask)),
             Field::new("show_sky", FieldKind::Bool, Value::Bool(D.show_sky)),
+            Field::new("bloom", FieldKind::Bool, Value::Bool(D.bloom)),
+            Field::new("bloom_strength", FieldKind::F32, Value::F32(D.bloom_strength)).range(0.0, 10.0),
+            Field::new("bloom_threshold", FieldKind::F32, Value::F32(D.bloom_threshold)).range(0.0, 100.0),
+            Field::new("ambient_occlusion", FieldKind::Bool, Value::Bool(D.ambient_occlusion)),
+            Field::new("ambient_occlusion_intensity", FieldKind::F32, Value::F32(D.ambient_occlusion_intensity))
+                .range(0.0, 4.0),
+            Field::new("ambient_occlusion_radius", FieldKind::F32, Value::F32(D.ambient_occlusion_radius))
+                .range(0.0, 10.0),
         ];
         FIELDS
     }
@@ -242,6 +266,12 @@ impl Describe for Camera {
             5 => Value::F32(self.size),
             6 => Value::Mask(self.culling_mask),
             7 => Value::Bool(self.show_sky),
+            8 => Value::Bool(self.bloom),
+            9 => Value::F32(self.bloom_strength),
+            10 => Value::F32(self.bloom_threshold),
+            11 => Value::Bool(self.ambient_occlusion),
+            12 => Value::F32(self.ambient_occlusion_intensity),
+            13 => Value::F32(self.ambient_occlusion_radius),
             _ => return None,
         })
     }
@@ -256,6 +286,12 @@ impl Describe for Camera {
             (5, Value::F32(v)) => self.size = v,
             (6, Value::Mask(v)) => self.culling_mask = v,
             (7, Value::Bool(v)) => self.show_sky = v,
+            (8, Value::Bool(v)) => self.bloom = v,
+            (9, Value::F32(v)) => self.bloom_strength = v,
+            (10, Value::F32(v)) => self.bloom_threshold = v,
+            (11, Value::Bool(v)) => self.ambient_occlusion = v,
+            (12, Value::F32(v)) => self.ambient_occlusion_intensity = v,
+            (13, Value::F32(v)) => self.ambient_occlusion_radius = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }
