@@ -532,36 +532,41 @@ before merging, and the numbers go in the PR.
 *Done when* the tests pass, the bars hold, and the guide no longer
 mentions tiles.
 
-*Done* 2026-10-15 (PR #109). The cells, as planned: 16 × 9 × 16, 8 a
-cell at low and medium, 16 at high, one storage buffer in the frame
-ring. The four tests above pass (the first two failed on main); no
-golden changed, so none was re-blessed.
-- **The first build cost 8 fps on the Note10+**, all of it on the CPU:
-  clearing and reading every cell's whole list (313 KB) a frame,
-  working out 2,304 cell spheres a frame, and copying all 46 KB of
-  cells. Found by turning each off in turn (the shader's read alone
-  cost nothing measurable, nor did the buffer's STORAGE use). Now the
-  counts sit apart from the lists, the spheres are kept while the
-  grid's shape holds (its far end is rounded up a quarter octave at a
-  time so a moving camera seldom changes it), and only the words a
-  frame wrote are copied.
+*Done* 2026-10-15 (PR #109). The cells, 16 × 9 × 16, are one storage
+buffer in the frame ring.
+- **No cap a cell.** The first build kept 8 lamps a cell at low and
+  medium, 16 at high, as planned. The user's screenshots of the lamps
+  room showed squares of light at low and medium again, now on screen
+  cells: looking down the floor, one cell spans a long stretch and more
+  than 8 lamps reach it, and neighbours kept different ones. The cap
+  had never been checked against the lab's scenes. Now a cell is a
+  64-bit mask of the frame's lamps, as Unity's Forward+ and Godot's
+  clustered renderer do, and a level sets how many lamps the frame takes
+  (`Quality::lights_in_view`: 32 at low, 64 above); one left out is out
+  everywhere. `FrameStats::full_cells` went with the cap.
+- **Tests**: the two planned (the big wall, the seam) failed on main and
+  pass; `a_cell_is_lit_by_every_lamp_that_reaches_it` (twenty dim lamps
+  each change the middle pixel, at every level) failed with the cap and
+  passes; binning by brute force for both cameras; Low takes 32. No
+  golden changed.
+- **The first build cost 8 fps on the Note10+**, all on the CPU:
+  clearing and reading every cell's list (313 KB) a frame, working out
+  2,304 cell spheres a frame, copying 46 KB. Found by turning each off
+  in turn (the shader's read cost nothing measurable, nor did the
+  buffer's STORAGE use). Now the spheres are kept while the grid's
+  shape holds (its far end rounded up a quarter octave at a time, so a
+  moving camera seldom changes it), and the masks are 18 KB, unsorted.
 - **Note10+, medium, 60 s, branch and main in turn, each from below
-  33 °C**: lamps 55.9 and 54.9 against main's 54.9 and 56.9; shadows
-  54.9 and 53.9 against 55.9 and 55.9. Main itself no longer reaches
-  the 56.9 and 57.9 written above, so the bar is read as "as main,
-  side by side": lamps hold, shadows are about 1.5 fps under, inside
-  a single run's ±5 swing but in all four runs. Left as is.
-- **iPhone 16 Pro Max, lamps, 30 s each**: 120 at low, medium and high,
-  branch and main alike. **Mac**: 120 whenever the lab's window was on
-  screen; too few samples for a side-by-side.
+  33 °C**: lamps 56.9 and 57.9, main 56.9 and 57.9; shadows 53.9 and
+  54.9, main 55.9 and 54.9. Main no longer reaches the 57.9 written
+  above for shadows, so the bar is read as "as main, side by side":
+  lamps hold, shadows about 1 fps under, inside a run's ±5 swing.
+- **iPhone 16 Pro Max** (the capped build), lamps at each level: 120,
+  as main. **Mac**: 120 whenever the lab's window was on screen.
 - **Bench (M3 Max, 1280×720)**, prepare, main → branch: 1,000 objects
-  and 32 lamps 0.087 → 0.048 ms at low, 0.095 → 0.047 at high; 10,000
-  and 32 lamps 0.64 → 0.23 ms (whole frame 1.15 → 0.81). The worst case
-  is one object with 32 lamps filling the view near the camera: 0.001 →
-  0.30 ms (0.46 at high), bounded by 64 lamps × 2,304 cells. Rows
-  without lamps are as before.
-- **Not checked**: whether the lab's scenes ever fill a cell
-  (`FrameStats::full_cells` isn't shown in the lab yet).
+  and 32 lamps 0.087 → 0.032 ms at low; 10,000 and 32 lamps 0.64 → 0.22
+  ms (whole frame 1.15 → 0.85). One object with 32 lamps filling the
+  view near the camera: 0.001 → 0.07 ms. Rows without lamps as before.
 
 ## Phase 5: what a game writes
 
