@@ -55,12 +55,13 @@ fn count<T>(f: impl FnOnce() -> T) -> (T, u64) {
 }
 
 /// 1,000 cubes moving every frame, some of them see-through, seen with
-/// bloom.
+/// bloom and ambient occlusion.
 fn busy_scene(t: f32) -> RenderScene {
     let mut scene = stage1_scene();
     // High above the 40 × 25 grid, so every cube is seen.
     scene.camera = Some(CameraView {
         bloom: Some(Bloom::DEFAULT),
+        ambient_occlusion: Some(AmbientOcclusion::DEFAULT),
         ..CameraView::looking_at(Vec3::new(20.0, 60.0, 30.0), Vec3::new(20.0, 0.0, 12.0))
     });
     let material = scene.draws[0].material;

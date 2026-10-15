@@ -10,6 +10,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use glam::Vec3;
 
+use crate::ao::AoKit;
 use crate::bloom::BloomKit;
 use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
@@ -36,6 +37,8 @@ pub struct Kit {
     pub(crate) sky: SkyKit,
     /// Bloom's layout, sampler and pipelines.
     pub(crate) bloom: BloomKit,
+    /// Ambient occlusion's.
+    pub(crate) ao: AoKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
     pub(crate) maker: PipelineMaker,
 }
@@ -186,6 +189,7 @@ impl Kit {
             shadows: ShadowKit::new(&gpu.device, &textures.layout, &maker),
             sky: SkyKit::new(&gpu.device, &gpu.queue, &maker),
             bloom: BloomKit::new(&gpu.device, &maker),
+            ao: AoKit::new(&gpu.device, &gpu.queue, &maker, &frame_layout, crate::renderer::INSTANCE_SIZE),
             maker,
             gpu: gpu.clone(),
             quality: Quality::for_adapter(&gpu.adapter.get_info()),

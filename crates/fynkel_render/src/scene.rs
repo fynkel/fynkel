@@ -100,6 +100,33 @@ pub struct CameraView {
     /// how: `None`, it doesn't (a minimap's, say). Only where the quality
     /// level draws it ([`Quality::bloom`]).
     pub bloom: Option<Bloom>,
+    /// Whether surfaces darken where they meet, and how: `None`, they
+    /// don't. Only where the quality level draws it
+    /// ([`Quality::ambient_occlusion`]).
+    pub ambient_occlusion: Option<AmbientOcclusion>,
+}
+
+/// Surfaces darkening where they meet, in corners and creases and under
+/// things on the ground: a soft hint of contact
+/// ([`CameraView::ambient_occlusion`]). Only the ambient and sky light
+/// darken; lights and their shadows are left as they are.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AmbientOcclusion {
+    /// How dark: 0, not at all; 1, as dark as the corner is closed in; up
+    /// to about 4, darker.
+    pub intensity: f32,
+    /// How far, in metres, a surface darkens one near it.
+    pub radius: f32,
+}
+
+impl AmbientOcclusion {
+    pub const DEFAULT: Self = Self { intensity: 1.0, radius: 0.5 };
+}
+
+impl Default for AmbientOcclusion {
+    fn default() -> Self {
+        Self::DEFAULT
+    }
 }
 
 /// Light brighter than white glowing into what's around it: a lamp's
@@ -138,6 +165,7 @@ impl CameraView {
             clear_color: [0.0; 3],
             sky: true,
             bloom: None,
+            ambient_occlusion: None,
         }
     }
 }
@@ -296,6 +324,12 @@ impl Quality {
     /// there's no scene image to work it out from (`image_format`).
     pub fn bloom(self) -> bool {
         self != Self::Low
+    }
+
+    /// Whether cameras' [`CameraView::ambient_occlusion`] is drawn: at
+    /// high only. It's a depth pass and two half-size passes more.
+    pub fn ambient_occlusion(self) -> bool {
+        self == Self::High
     }
 
     /// The format of the image the scene is drawn into, with a last pass

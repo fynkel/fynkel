@@ -318,6 +318,24 @@ impl ShadowKit {
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                     count: None,
                 },
+                // And the ambient occlusion (`ao`), which comes and goes
+                // with the view's size, as the maps with its level.
+                wgpu::BindGroupLayoutEntry {
+                    binding: 3,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 4,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
             ],
         });
         // Linear: each compare is smoothed across the four texels around
@@ -440,23 +458,48 @@ pub(crate) struct ShadowMaps {
     pub(crate) shape: [(u32, u32); 2],
     arrays: [Arc<MapArray>; 2],
     pub(crate) bind_group: wgpu::BindGroup,
+    /// Which ambient occlusion the bind group reads ([`Ao`]).
+    ao: u64,
 }
+
+/// The ambient occlusion the forward pass reads, bound with the maps: its
+/// images' id (0 for the white stand-in), view and sampler.
+pub(crate) type Ao<'a> = (u64, &'a wgpu::TextureView, &'a wgpu::Sampler);
 
 impl ShadowMaps {
     /// Maps of `shape`: the cascades' size and layers, then the spot maps'.
     /// A shape of 0 layers is a 1×1 map that stands in for none.
-    pub(crate) fn new(device: &wgpu::Device, kit: &ShadowKit, shape: [(u32, u32); 2]) -> Self {
+    pub(crate) fn new(device: &wgpu::Device, kit: &ShadowKit, shape: [(u32, u32); 2], ao: Ao<'_>) -> Self {
         let arrays = [0, 1].map(|k| kit.array(device, k, shape[k]));
-        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        let bind_group = Self::bind(device, kit, &arrays, ao);
+        Self { shape, arrays, bind_group, ao: ao.0 }
+    }
+
+    /// Reads `ao` from now on, if it doesn't already.
+    pub(crate) fn read_ao(&mut self, device: &wgpu::Device, kit: &ShadowKit, ao: Ao<'_>) {
+        if self.ao != ao.0 {
+            self.bind_group = Self::bind(device, kit, &self.arrays, ao);
+            self.ao = ao.0;
+        }
+    }
+
+    fn bind(
+        device: &wgpu::Device,
+        kit: &ShadowKit,
+        arrays: &[Arc<MapArray>; 2],
+        (_, view, sampler): Ao<'_>,
+    ) -> wgpu::BindGroup {
+        device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow maps"),
             layout: &kit.maps_layout,
             entries: &[
                 wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&arrays[0].array) },
                 wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&arrays[1].array) },
                 wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
+                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view) },
+                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(sampler) },
             ],
-        });
-        Self { shape, arrays, bind_group }
+        })
     }
 
     /// The view to draw cascade `i` into, or spot map `i`.
