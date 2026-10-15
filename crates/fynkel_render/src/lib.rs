@@ -4,6 +4,7 @@
 //! platforms, Flutter or Dart.
 
 mod assets;
+mod bloom;
 mod clusters;
 mod frame_ring;
 mod gpu;
@@ -19,7 +20,7 @@ pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
-    Blend, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
-    RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
+    Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial,
+    Quality, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
 };
 pub use wgpu;
