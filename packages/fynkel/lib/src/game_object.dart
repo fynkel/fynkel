@@ -412,6 +412,23 @@ class GameObject with _Moving {
     return child;
   }
 
+  /// Adds a new object below this one with [component] on it, and returns
+  /// the component, for a field: `_sun = addWith(Light.sun(shadows:
+  /// true))`, where `add(GameObject(components: [...])).get<Light>()!`
+  /// would. [name], [transform] and [layer] are the new object's, and
+  /// [components] go on it after [component], as a camera's rig:
+  /// `addWith(VirtualCamera(), components: [Orbit(player)])`.
+  T addWith<T extends Component>(
+    T component, {
+    String? name,
+    Transform? transform,
+    Iterable<Component> components = const [],
+    int layer = 0,
+  }) {
+    add(GameObject(name: name, transform: transform, components: [component, ...components], layer: layer));
+    return component;
+  }
+
   void _checkAddable() {
     if (_destroyed) throw StateError('$this was destroyed; make a new one to add');
     if (_world != null || _queuedIn != null) {

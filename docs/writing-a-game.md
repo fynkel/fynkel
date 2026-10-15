@@ -164,7 +164,9 @@ class Yard extends GameObject {
 
 - **`add(child)`** puts an object below this one and returns it, typed:
   `final crate = add(Crate(at));`. The world's root is added with
-  `world.add`; `FynkelApp` does that for you.
+  `world.add`; `FynkelApp` does that for you. For a component in a
+  field, `addWith` adds an object holding it and returns the component:
+  `_sun = addWith(Light.sun(shadows: true))`.
 - **`destroy()`** takes an object and everything below it out of the game.
   A field still pointing at it says `isDestroyed`; reading its transform
   then throws a clear error instead of giving a stale value.
@@ -1037,10 +1039,11 @@ class CameraRig extends GameObject {
   void onLoad() {
     super.onLoad();
     add(GameObject(components: [Camera()])); // the view's camera
-    close = add(
-      GameObject(components: [VirtualCamera(priority: 1), Follow(_player, offset: Vec3(0, 3, 6), damping: 0.2), LookAt(_player)]),
-    ).get<VirtualCamera>()!;
-    wide = add(GameObject(components: [VirtualCamera(fovY: 70.deg), Orbit(_player, distance: 15)])).get<VirtualCamera>()!;
+    close = addWith(
+      VirtualCamera(priority: 1),
+      components: [Follow(_player, offset: Vec3(0, 3, 6), damping: 0.2), LookAt(_player)],
+    );
+    wide = addWith(VirtualCamera(fovY: 70.deg), components: [Orbit(_player, distance: 15)]);
   }
 
   void zoomOut() {
@@ -2290,7 +2293,8 @@ For code written before: each change that breaks it, newest first.
   - New helpers: `Vec3.withX`/`withY`/`withZ`, `flat` and `Vec3.all`,
     `Transform.lookAt(eye, target)`, `Light.sun(direction:)`,
     `ViewPoint.toVec2()`, and `emit()` for a `Signal<void>`
-    (`emit(null)` still works).
+    (`emit(null)` still works). `addWith(component)` adds an object
+    holding a component and returns the component (§3).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

@@ -51,4 +51,28 @@ void main() {
   test('a ViewPoint as a Vec2', () {
     expect(const ViewPoint(3, 4, width: 10, height: 10).toVec2(), Vec2(3, 4));
   });
+
+  test('addWith adds a child holding the component and gives the component back (hardening G6)', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final root = world.add(GameObject());
+    final Light sun = root.addWith(
+      Light.sun(),
+      name: 'sun',
+      transform: Transform(position: Vec3(0, 5, 0)),
+      layer: 3,
+    );
+    expect(sun.gameObject.parent, same(root));
+    expect(sun.gameObject.name, 'sun');
+    expect(sun.gameObject.position, Vec3(0, 5, 0));
+    expect(sun.gameObject.layer, 3);
+    expect(root.find('sun')!.get<Light>(), same(sun));
+    final renderer = root.addWith(MeshRenderer(), components: [Light.ambient()]);
+    expect(renderer.gameObject.get<Light>()!.kind, LightKind.ambient, reason: 'the others go on it too');
+
+    final unadded = GameObject();
+    final camera = unadded.addWith(Camera());
+    world.add(unadded);
+    expect(world.camera, same(camera));
+  });
 }

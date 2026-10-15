@@ -165,15 +165,10 @@ class SheepdogGame extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    _sun = add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.6))),
-        // The sun's (and the moon's) shadows: the sheep and the dog on the
-        // grass, the fences across it.
-        components: [Light.sun(shadows: true)],
-      ),
-    ).get<Light>()!;
-    _ambient = add(GameObject(components: [Light.ambient()])).get<Light>()!;
+    // The sun's (and the moon's) shadows: the sheep and the dog on the
+    // grass, the fences across it.
+    _sun = addWith(Light.sun(direction: Vec3(-0.4, -1, -0.6), shadows: true));
+    _ambient = addWith(Light.ambient());
     // Lamp posts at the pen's gate and halfway down the sides.
     for (final at in [Vec3(-penHalf, 0, penFront), Vec3(penHalf, 0, penFront), Vec3(-size, 0, 4), Vec3(size, 0, 4)]) {
       add(

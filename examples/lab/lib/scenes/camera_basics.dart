@@ -25,13 +25,11 @@ class CameraBasicsScene extends LabScene {
     above = _virtual('above', Vec3(0, 8, 2), priority: 0);
   }
 
-  VirtualCamera _virtual(String name, Vec3 at, {required int priority}) => add(
-    GameObject(
-      name: name,
-      transform: Transform(position: at, rotation: Quat.lookRotation(Vec3(0, 0.5, 0) - at)),
-      components: [VirtualCamera(priority: priority, orthographicSize: 3)],
-    ),
-  ).get<VirtualCamera>()!;
+  VirtualCamera _virtual(String name, Vec3 at, {required int priority}) => addWith(
+    VirtualCamera(priority: priority, orthographicSize: 3),
+    name: name,
+    transform: Transform.lookAt(at, Vec3(0, 0.5, 0)),
+  );
 
   void _switch() {
     final was = front.priority;

@@ -55,7 +55,7 @@ class JointsChainScene extends LabScene {
     time.fixedDelta = 1 / 120;
     add(floorCollider());
     add(shape('hook', Mesh.cube(), const Color(0xFF7A8290), at: hook + Vec3(0, 0.1, 0), size: Vec3(0.6, 0.2, 0.6)));
-    hand = add(GameObject(name: 'hand', components: [Rigidbody(isKinematic: true)])).get<Rigidbody>()!;
+    hand = addWith(Rigidbody(isKinematic: true), name: 'hand');
     hang();
   }
 
