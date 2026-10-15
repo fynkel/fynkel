@@ -216,16 +216,13 @@ impl Quality {
         }
     }
 
-    /// How many point and spot lights a frame takes, at most
-    /// [`Renderer::MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS): those in view
-    /// nearest the camera. One left out is left out everywhere, never in
-    /// part of the view. A pixel is lit by every one of them that reaches
-    /// it, so a level's cost is how many overlap.
-    pub fn lights_in_view(self) -> usize {
-        match self {
-            Self::Low => 32,
-            Self::Medium | Self::High => crate::Renderer::MAX_LIGHTS,
-        }
+    /// Whether point and spot lights give shiny surfaces a highlight, as
+    /// suns always do. Without, a lamp only lights a surface's colour,
+    /// which keeps a low level's cost down where many overlap (a Note10+
+    /// with 63 lamps over its screen: 54 fps with, 59 without), much as
+    /// Unity's low tiers light extra lights per vertex.
+    pub fn lamp_highlights(self) -> bool {
+        !matches!(self, Self::Low)
     }
 
     /// How its shadows are drawn.
@@ -378,8 +375,8 @@ pub struct RenderScene {
     /// Every light. Suns light every object, up to
     /// [`Renderer::MAX_SUNS`](crate::Renderer::MAX_SUNS) of them in order.
     /// Point and spot lights light the objects they reach: up to
-    /// [`Quality::lights_in_view`] a frame, the ones nearest the camera,
-    /// each lighting everything it reaches.
+    /// [`Renderer::MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS) a frame, the
+    /// ones nearest the camera, each lighting everything it reaches.
     pub lights: Vec<Light>,
     /// Linear radiance arriving equally from every direction. 1.0 alone
     /// shows a rough surface at its albedo.

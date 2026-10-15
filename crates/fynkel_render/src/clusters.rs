@@ -12,9 +12,7 @@
 //! Godot's clustered renderer do: a bit for each of the frame's
 //! [`MAX_LIGHTS`](crate::Renderer::MAX_LIGHTS) lamps, two `u32` words a
 //! cell, sent as one storage buffer. A cell that kept only some would show
-//! its edge where its neighbour kept others; what a level can afford is
-//! set by how many lamps the frame takes instead
-//! ([`Quality::lights_in_view`](crate::Quality::lights_in_view)).
+//! its edge where its neighbour kept others.
 
 use glam::{Mat4, Vec3};
 

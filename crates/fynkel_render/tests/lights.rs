@@ -153,9 +153,8 @@ fn a_cell_is_lit_by_every_lamp_that_reaches_it() {
     }
 }
 
-/// A frame takes its level's `lights_in_view` point and spot lights,
-/// `MAX_LIGHTS` at most: past that, the ones furthest from the camera are
-/// left out, and counted. Lamps out of view,
+/// A frame takes `MAX_LIGHTS` point and spot lights: past that, the ones
+/// furthest from the camera are left out, and counted. Lamps out of view,
 /// or off, don't count.
 #[test]
 fn a_frame_keeps_the_lamps_nearest_the_camera() {
@@ -181,12 +180,28 @@ fn a_frame_keeps_the_lamps_nearest_the_camera() {
     let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
     assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 0));
     assert_ne!(image.pixel(32, 32), [0, 0, 0, 255], "with room for it, it lights the wall");
+}
 
-    // Low takes fewer.
-    let (_, stats) = render(&gpu, &mut r, &wall(4.0, near, Quality::Low), 64, 64);
-    let low = Quality::Low.lights_in_view();
-    assert!(low < Renderer::MAX_LIGHTS);
-    assert_eq!((stats.lights, stats.lights_left_out), (low as u32, (Renderer::MAX_LIGHTS - low) as u32));
+/// At low, a lamp lights a surface's colour but gives no highlight: a
+/// polished metal wall (no colour of its own to light) shows the lamp
+/// above low and stays dark at low, while a matte wall is lit about alike.
+#[test]
+fn lamps_give_highlights_above_low() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let lamp = || vec![Light::point(Vec3::new(0.0, 0.0, 1.0), 10.0, Vec3::ONE)];
+    let centre = |r: &mut Renderer, scene: &RenderScene| render(&gpu, r, scene, 64, 64).0.pixel(32, 32);
+    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        let mut metal = wall(1.0, lamp(), quality);
+        metal.draws[0].material.metallic = 1.0;
+        metal.draws[0].material.roughness = 0.3;
+        let shine = centre(&mut r, &metal);
+        assert_eq!(shine[0] > 20, quality.lamp_highlights(), "{quality:?}: {shine:?}");
+    }
+    let low = centre(&mut r, &wall(1.0, lamp(), Quality::Low));
+    let high = centre(&mut r, &wall(1.0, lamp(), Quality::High));
+    // Even a fully rough surface has a faint highlight above low.
+    assert!(low[0] > 20 && low[0].abs_diff(high[0]) <= 6, "matte: low {low:?}, high {high:?}");
 }
 
 /// Hardening L1: a big surface is lit by every lamp over it, not only the

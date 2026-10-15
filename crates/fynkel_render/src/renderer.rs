@@ -8,9 +8,9 @@
 //!
 //! Lights: every sun lights every object. Point and spot lights go into a
 //! list for the frame, the ones in view, nearest the camera first, up to
-//! the level's [`Quality::lights_in_view`]. The view is cut into cells
-//! (`clusters`), each holding every one of those that reaches it; a pixel
-//! loops over its cell's.
+//! [`Renderer::MAX_LIGHTS`]. The view is cut into cells (`clusters`), each
+//! holding every one of those that reaches it; a pixel loops over its
+//! cell's.
 //!
 //! Shadows (`shadows`): the first sun with shadows casts them through
 //! [`ShadowLevel::cascades`](crate::ShadowLevel) maps fitted to the view,
@@ -52,11 +52,11 @@ pub struct FrameStats {
     /// Debug lines drawn.
     pub lines: u32,
     /// Point and spot lights in the frame's list: in view, up to
-    /// [`Quality::lights_in_view`].
+    /// [`Renderer::MAX_LIGHTS`].
     pub lights: u32,
     /// Lights left out: suns past [`Renderer::MAX_SUNS`], and point and spot
-    /// lights in view past [`Quality::lights_in_view`] (the furthest from
-    /// the camera).
+    /// lights in view past [`Renderer::MAX_LIGHTS`] (the furthest from the
+    /// camera).
     pub lights_left_out: u32,
     /// Shadow maps drawn: the sun's cascades and the spot lights'.
     pub shadow_maps: u32,
@@ -75,7 +75,8 @@ struct FrameUniforms {
     camera_position: [f32; 4],
     ambient: [f32; 4],
     /// x: how many of `suns` are used. y: the one that casts shadows, or
-    /// [`NO_SHADOWS`].
+    /// [`NO_SHADOWS`]. z: 1 if lamps give highlights
+    /// ([`Quality::lamp_highlights`]).
     counts: [u32; 4],
     suns: [SunUniform; MAX_SUNS],
     lights: [LightUniform; MAX_LIGHTS],
@@ -358,8 +359,8 @@ impl Renderer {
     pub const SAMPLES: u32 = 4;
     /// The most suns that light a frame: the first ones in the scene.
     pub const MAX_SUNS: usize = MAX_SUNS;
-    /// The most point and spot lights in a frame at any level: the ones in
-    /// view nearest the camera. [`Quality::lights_in_view`] sets a level's.
+    /// The most point and spot lights in a frame: the ones in view nearest
+    /// the camera.
     pub const MAX_LIGHTS: usize = MAX_LIGHTS;
 
     /// A renderer for target views of `format`, which must be an sRGB
@@ -545,7 +546,8 @@ impl Renderer {
             }
             suns += 1;
         }
-        u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), 0, 0];
+        let highlights = u32::from(self.quality.lamp_highlights());
+        u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), highlights, 0];
 
         // The point and spot lights that can light what's seen: their reach
         // is in view, and they give some light. Past the cap, the ones
@@ -557,11 +559,10 @@ impl Renderer {
                 self.in_view_lights.push((position.distance_squared(camera.position), i as u32));
             }
         }
-        let most = self.quality.lights_in_view().min(MAX_LIGHTS);
-        if self.in_view_lights.len() > most {
-            stats.lights_left_out += (self.in_view_lights.len() - most) as u32;
-            self.in_view_lights.select_nth_unstable_by(most, |a, b| a.0.total_cmp(&b.0));
-            self.in_view_lights.truncate(most);
+        if self.in_view_lights.len() > MAX_LIGHTS {
+            stats.lights_left_out += (self.in_view_lights.len() - MAX_LIGHTS) as u32;
+            self.in_view_lights.select_nth_unstable_by(MAX_LIGHTS, |a, b| a.0.total_cmp(&b.0));
+            self.in_view_lights.truncate(MAX_LIGHTS);
         }
         self.frame_lights.clear();
         for (slot, &(_, i)) in self.in_view_lights.iter().enumerate() {

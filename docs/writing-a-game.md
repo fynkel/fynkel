@@ -520,11 +520,12 @@ GameObject handTorch() => GameObject(
 - **A lamp lights everything it reaches**, whatever it falls on: a big
   floor, terrain or a room in one piece is lit by every lamp over it,
   however many overlap. What costs is how many overlap: each pixel adds
-  up every lamp that reaches it.
-- **A frame takes 64 lamps** in view at medium and high quality, 32 at
-  low: the ones nearest the camera. One left out is out everywhere, as
-  if switched off. A world with more than 64 point and spot lights, or
-  more than four suns, says so once.
+  up every lamp that reaches it. At low quality lamps light a surface's
+  colour but give shiny surfaces no highlight (suns still do), which
+  keeps a crowded room fast on phones.
+- **A frame takes 64 lamps** in view, the ones nearest the camera. A
+  world with more than 64 point and spot lights, or more than four suns,
+  says so once.
 
 ### Shadows
 

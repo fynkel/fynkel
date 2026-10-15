@@ -27,7 +27,7 @@ class LampsScene extends LabScene {
   @override
   String get about =>
       'A dark room, lit by coloured lamps and a torch that follows the pointer. Every lamp lights whatever it '
-      'reaches, at every level; a frame takes 64 lamps, 32 at low. Try 64 lights, and low.';
+      'reaches, up to 64 a frame; at low, lamps give no highlights. Try 64 lights, and low.';
 
   @override
   Vec3 get eye => Vec3(0, 8, 11);

@@ -59,7 +59,7 @@ struct Frame {
     camera_position: vec4<f32>,
     ambient: vec4<f32>,
     // x: how many suns there are. y: the one that casts shadows, or
-    // 0xFFFFFFFF.
+    // 0xFFFFFFFF. z: 1 if lamps give highlights (Quality::lamp_highlights).
     counts: vec4<u32>,
     suns: array<Sun, 4>,
     lamps: array<Lamp, 64>,
@@ -450,7 +450,12 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
             if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
                 falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
             }
-            color += reflected(surface, l, lamp.color.rgb * (PI * falloff));
+            let irradiance = lamp.color.rgb * (PI * falloff);
+            if frame.counts.z != 0u {
+                color += reflected(surface, l, irradiance);
+            } else {
+                color += surface.diffuse / PI * irradiance * max(dot(surface.n, l), 0.0);
+            }
         }
     }
     color += in.emissive.rgb * emissive_sample;

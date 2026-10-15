@@ -478,8 +478,8 @@ extension _Objects on World {
   /// Counts [light], on [object], as [count] now: a sun, a lamp or
   /// neither. Says once, in a debug build, when more suns or lamps are put
   /// in the world than light a frame, which are left out: past four suns,
-  /// the ones made last; past 64 point and spot lights in view (32 at low
-  /// quality), the ones furthest from the camera.
+  /// the ones made last; past 64 point and spot lights in view, the ones
+  /// furthest from the camera.
   void _countLight(GameObject object, Light light, _LightCount count) {
     final before = light._counted;
     if (before == count) return;
@@ -507,7 +507,7 @@ extension _Objects on World {
     if (const bool.fromEnvironment('dart.vm.product')) return;
     final what = count == _LightCount.sun
         ? 'suns: the first four made light the scene, the others are left out'
-        : 'point and spot lights: at most 64 in view light a frame (32 at low quality), the ones nearest the camera';
+        : 'point and spot lights: at most 64 in view light a frame, the ones nearest the camera';
     final named = object.name == null ? '$object' : '$object (${object.name})';
     print('Fynkel: with $named, the world has $now $what.');
   }
