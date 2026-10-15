@@ -5,9 +5,8 @@
 
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
-
-import 'game.dart';
-import 'hud.dart';
+import 'package:sheepdog/game.dart';
+import 'package:sheepdog/hud.dart';
 
 void main() => runApp(
   MeasuredApp(

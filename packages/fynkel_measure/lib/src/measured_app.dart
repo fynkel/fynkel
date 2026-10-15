@@ -8,7 +8,7 @@ import 'bench.dart';
 import 'measurement.dart';
 import 'on_screen.dart';
 
-/// A game, run as bin/measure.dart asks: the game's `lib/measured.dart`
+/// A game, run as bin/measure.dart asks: the game's `tool/measured.dart`
 /// is `void main() => runApp(MeasuredApp(Garden.new));`, and the tool runs
 /// that in place of `lib/main.dart`, so the game's own code knows nothing
 /// of measuring.

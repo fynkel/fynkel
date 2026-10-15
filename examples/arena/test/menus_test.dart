@@ -131,7 +131,7 @@ void main() {
   });
 
   test('controls: a key another one has swaps with it; reset goes back', () {
-    final controls = Controls()..set('up', KeyCode.d);
+    final controls = arenaControls()..set('up', KeyCode.d);
     expect((controls['up'], controls['right']), (KeyCode.d, KeyCode.w));
     controls.reset();
     expect((controls['up'], controls['right']), (KeyCode.w, KeyCode.d));

@@ -37,16 +37,12 @@ class CameraRigsScene extends LabScene {
     corner = _camera('corner', 0, [LookAt(ball)], at: Vec3(6, 5, 6));
   }
 
-  VirtualCamera _camera(String name, int priority, List<Component> rigs, {Vec3 at = Vec3.zero}) => add(
-    GameObject(
-      name: name,
-      transform: Transform(position: at),
-      components: [
-        VirtualCamera(priority: priority),
-        ...rigs,
-      ],
-    ),
-  ).get<VirtualCamera>()!;
+  VirtualCamera _camera(String name, int priority, List<Component> rigs, {Vec3 at = Vec3.zero}) => addWith(
+    VirtualCamera(priority: priority),
+    name: name,
+    transform: Transform(position: at),
+    components: rigs,
+  );
 
   @override
   void onStart() {

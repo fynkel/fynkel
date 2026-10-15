@@ -20,7 +20,7 @@ on such a device the game stops at once with an error that says so.
 ## Measuring
 
 package:fynkel_measure's tool (`packages/fynkel_measure/bin/measure.dart`)
-builds and runs the profile build of `lib/measured.dart`, the same game
+builds and runs the profile build of `tool/measured.dart`, the same game
 wrapped in `MeasuredApp`, and prints the numbers recorded in
 docs/stage-1.md §7. Run it from this directory, and keep the display awake
 while it runs. The top-left line shows what the view did in the last

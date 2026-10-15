@@ -77,8 +77,7 @@ class Level extends GameObject {
 
     add(
       GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun(color: sun, intensity: 2.5)],
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3), color: sun, intensity: 2.5)],
       ),
     );
     add(GameObject(components: [Light.ambient(color: sky, intensity: 0.6)]));
@@ -192,7 +191,7 @@ class Player extends GameObject {
     addComponent(Collector());
   }
 
-  void walkTo(Vec3 point) => _goal = Vec3(point.x, 0, point.z);
+  void walkTo(Vec3 point) => _goal = point.flat;
 
   /// Puts down what it carries and takes [item] in its right hand.
   void carry(GameObject item) {

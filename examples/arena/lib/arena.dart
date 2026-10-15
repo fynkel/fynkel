@@ -6,10 +6,10 @@
 
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ChangeNotifier, ValueNotifier;
+import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:flutter/widgets.dart' show Alignment;
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel_flutter/fynkel_flutter.dart' show ListenableSignal, WorldWidget;
+import 'package:fynkel_flutter/fynkel_flutter.dart' show Controls, ListenableSignal, WorldWidget;
 
 import 'hud.dart' show HealthBar;
 
@@ -29,58 +29,15 @@ const bars = bool.fromEnvironment('BARS', defaultValue: true);
 /// [point] moved inside the walls, on the floor.
 Vec3 inside(Vec3 point) => Vec3(point.x.clamp(-size + 0.5, size - 0.5), 0, point.z.clamp(-size + 0.5, size - 0.5));
 
-/// The keys the player chose on the settings page. The game binds them
-/// as it starts, and again each time they change; the arrow keys always
-/// move too.
-class Controls extends ChangeNotifier {
-  static const defaults = {
-    'up': KeyCode.w,
-    'down': KeyCode.s,
-    'left': KeyCode.a,
-    'right': KeyCode.d,
-    'dash': KeyCode.space,
-  };
-
-  final _keys = Map.of(defaults);
-
-  /// The key for [name]: one of [defaults]' names.
-  KeyCode operator [](String name) => _keys[name]!;
-
-  /// Gives [name] the [key]. What had that key takes [name]'s old one, so
-  /// no two share a key.
-  void set(String name, KeyCode key) {
-    final old = _keys[name]!;
-    if (old == key) return;
-    for (final other in _keys.keys) {
-      if (_keys[other] == key) _keys[other] = old;
-    }
-    _keys[name] = key;
-    notifyListeners();
-  }
-
-  /// Back to [defaults].
-  void reset() {
-    _keys.addAll(defaults);
-    notifyListeners();
-  }
-
-  /// Binds 'move' and 'dash' in [input] to these keys.
-  void bindTo(Input input) {
-    input.bindAxis2(
-      'move',
-      up: [this['up'], KeyCode.arrowUp],
-      down: [this['down'], KeyCode.arrowDown],
-      left: [this['left'], KeyCode.arrowLeft],
-      right: [this['right'], KeyCode.arrowRight],
-    );
-    input.bindAction('dash', [this['dash']]);
-  }
-}
+/// The keys the player can change on the settings page; the arrow keys
+/// always move too.
+Controls arenaControls() =>
+    Controls({'up': KeyCode.w, 'down': KeyCode.s, 'left': KeyCode.a, 'right': KeyCode.d, 'dash': KeyCode.space});
 
 /// The root: the camera, what the HUD shows, and the round being played.
 class ArenaGame extends GameObject {
   /// [seed] makes every round the same, for tests.
-  ArenaGame({this.seed, Controls? controls}) : controls = controls ?? Controls();
+  ArenaGame({this.seed, Controls? controls}) : controls = controls ?? arenaControls();
 
   final int? seed;
   final Controls controls;
@@ -95,12 +52,7 @@ class ArenaGame extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.3, -1, -0.5))),
-        components: [Light.sun(intensity: 2.5)],
-      ),
-    );
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.3, -1, -0.5), intensity: 2.5)]));
     add(GameObject(components: [Light.ambient(intensity: 0.5)]));
     round = add(Round(math.Random(seed)));
     camera = add(ArenaCamera(round.player));
@@ -258,7 +210,7 @@ class Flash extends Behaviour {
     on(get<Health>()!.hurt, (left) {
       if (left == 0) return;
       sequence([colorTo(Color.white, seconds: 0.05), colorTo(color, seconds: 0.25)]);
-      punchScale(Vec3.one * 0.3, seconds: 0.3);
+      punchScale(Vec3.all(0.3), seconds: 0.3);
     });
   }
 }
@@ -289,7 +241,7 @@ class Player extends GameObject {
     // A nose, to show which way it faces.
     add(
       GameObject(
-        transform: Transform(position: Vec3(0, 0, -0.5), scale: Vec3.one * 0.25),
+        transform: Transform(position: Vec3(0, 0, -0.5), scale: Vec3.all(0.25)),
         components: [MeshRenderer(Mesh.cube(), Material(color: Color.white))],
       ),
     );
@@ -309,8 +261,8 @@ class Player extends GameObject {
       _hitWhatsNear();
       return;
     }
-    final keys = input.axis2('move');
-    final direction = _stick() ?? Vec3(keys.x, 0, -keys.y);
+    final move = input.stick() ?? input.axis2('move');
+    final direction = Vec3(move.x, 0, -move.y);
     if (direction.length > 0) {
       facing = direction.normalized;
       rotation = Quat.lookRotation(facing);
@@ -319,20 +271,10 @@ class Player extends GameObject {
     if (input.action('dash').wasPressed) dash(facing);
   }
 
-  /// A finger dragging alone, as a stick: from where it went down to where
-  /// it is, full speed at 60 pixels.
-  Vec3? _stick() {
-    final down = input.fingers.where((f) => f.isPressed).toList();
-    if (down.length != 1 || !down.single.isDragging) return null;
-    final d = down.single.totalDelta;
-    final v = Vec3(d.x, 0, d.y) * (1 / 60);
-    return v.length > 1 ? v.normalized : v;
-  }
-
   /// Goes 5 metres along [direction] in a blink, hitting every enemy it
   /// passes.
   void dash(Vec3 direction) {
-    final flat = Vec3(direction.x, 0, direction.z);
+    final flat = direction.flat;
     if (dashing || health.isDead || world.paused || flat.length < 1e-6) return;
     facing = flat.normalized;
     rotation = Quat.lookRotation(facing);
@@ -378,7 +320,7 @@ class Enemy extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    scaleTo(Vec3.one * _size, seconds: 0.4, ease: Ease.outBack).then((_) => _ready = true);
+    scaleTo(Vec3.all(_size), seconds: 0.4, ease: Ease.outBack).then((_) => _ready = true);
     on(health.died, (_) => _die());
     // Its health over it: a Flutter widget, placed where the camera sees
     // it (hud.dart).
@@ -393,13 +335,12 @@ class Enemy extends GameObject {
   void onUpdate() {
     super.onUpdate();
     if (!_ready || health.isDead || player.health.isDead) return;
-    final to = player.position - position;
-    final flat = Vec3(to.x, 0, to.z);
-    if (flat.length < 0.9) {
+    final to = (player.position - position).flat;
+    if (to.length < 0.9) {
       if (!player.dashing && crowd == 0) player.health.damage(1);
       return;
     }
-    position += flat.normalized * (speed * time.delta);
+    position += to.normalized * (speed * time.delta);
     rotate(Vec3.up, 2 * time.delta);
   }
 
@@ -430,7 +371,7 @@ class Sparks extends GameObject {
       final angle = 2 * math.pi * (i + _random.nextDouble()) / 8;
       final spark = add(
         GameObject(
-          transform: Transform(scale: Vec3.one * 0.2),
+          transform: Transform(scale: Vec3.all(0.2)),
           layer: effects,
           components: [MeshRenderer(Mesh.cube(), _glow)],
         ),
@@ -438,10 +379,7 @@ class Sparks extends GameObject {
       spark.moveBy(Vec3(math.cos(angle), 0.5 + _random.nextDouble(), math.sin(angle)) * 1.5, seconds: 0.5);
       spark.scaleTo(Vec3.zero, seconds: 0.5, ease: Ease.inQuad);
     }
-    startRoutine(() async {
-      await wait(0.5);
-      destroy();
-    });
+    destroy(after: 0.5);
   }
 }
 
@@ -461,7 +399,7 @@ class Heart extends GameObject {
   @override
   void onStart() {
     super.onStart();
-    scaleTo(Vec3.one * 0.5, seconds: 0.3, ease: Ease.outBack);
+    scaleTo(Vec3.all(0.5), seconds: 0.3, ease: Ease.outBack);
     moveBy(Vec3(0, 0.25, 0), seconds: 0.6, ease: Ease.inOutSine, loops: -1, yoyo: true);
   }
 
@@ -469,10 +407,10 @@ class Heart extends GameObject {
   void onUpdate() {
     super.onUpdate();
     final to = player.position - position;
-    if (_taken || Vec3(to.x, 0, to.z).length > 1) return;
+    if (_taken || to.flat.length > 1) return;
     _taken = true;
     player.health.heal(1);
-    player.punchScale(Vec3.one * 0.4, seconds: 0.3);
+    player.punchScale(Vec3.all(0.4), seconds: 0.3);
     scaleTo(Vec3.zero, seconds: 0.2).then((_) => destroy());
   }
 }
@@ -481,7 +419,7 @@ class Heart extends GameObject {
 /// the mouse wheel zooms.
 class ArenaCamera extends GameObject {
   ArenaCamera(Player player)
-    : _follow = Follow(player, offset: _offset, damping: 0.15),
+    : _follow = Follow(player, offset: _offset, damping: 0.15, portraitFit: 0.75),
       _look = LookAt(player),
       super(name: 'camera');
 
@@ -500,16 +438,12 @@ class ArenaCamera extends GameObject {
     on(input.onScroll, (scroll) => _zoomBy(1 - scroll.y * 0.002));
   }
 
-  void _zoomBy(double factor) => _zoom = (_zoom * factor).clamp(0.5, 1.6);
-
-  @override
-  void onUpdate() {
-    super.onUpdate();
-    // The lens fits the view's height, so a tall view (a phone held
-    // upright) sees less across: go back as far again as it's narrower.
-    final (w, h) = (input.width, input.height);
-    final fit = w > 0 && h > w ? math.min(2.0, 0.75 * h / w) : 1.0;
-    _follow.offset = _offset * (_zoom * fit);
+  // The lens fits the view's height, so a tall view (a phone held upright)
+  // sees less across: the Follow's portraitFit goes back as far again as
+  // it's narrower.
+  void _zoomBy(double factor) {
+    _zoom = (_zoom * factor).clamp(0.5, 1.6);
+    _follow.offset = _offset * _zoom;
   }
 
   /// Follows [player] from now on.

@@ -10,7 +10,7 @@ part of 'world.dart';
 // nothing holds it.
 
 /// Something that happens, for whoever wants to hear it, with a value of
-/// type [T]: `final died = Signal<void>();`, then `died.emit(null)` where
+/// type [T]: `final died = Signal<void>();`, then `died.emit()` where
 /// it happens, and `on(health.died, (_) => score.value++)` in the object
 /// or behaviour that cares. Plain Dart: it needs no world, and works in
 /// tests and in Flutter code too.
@@ -60,7 +60,15 @@ final class Signal<T> {
   /// throws. One added with [listen] that throws doesn't stop the rest
   /// either: once they have all heard it, this throws the first such
   /// error.
-  void emit(T value) {
+  ///
+  /// A `Signal<void>` (or of a nullable type) is emitted with no value:
+  /// `died.emit()`. One of values throws an [ArgumentError] without one.
+  void emit([T? value]) {
+    if (value == null && null is! T) throw ArgumentError('Signal<$T>.emit needs a value: emit() is for a Signal<void>');
+    _emit(value as T);
+  }
+
+  void _emit(T value) {
     Object? error;
     StackTrace? stack;
     _emitting++;

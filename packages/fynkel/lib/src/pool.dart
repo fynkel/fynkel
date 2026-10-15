@@ -103,6 +103,7 @@ final class Pool<T extends GameObject> {
     if (object._pooled != _PoolState.out) throw StateError('$object was released already');
     _takeOut(object);
     object._generation++;
+    object._due = null;
     if (maxSize case final max? when _freeCount >= max) {
       object._pooled = _PoolState.none;
       object._pool = null;

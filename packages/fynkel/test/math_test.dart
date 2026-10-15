@@ -4,6 +4,15 @@ import 'package:fynkel/fynkel.dart';
 import 'package:test/test.dart';
 
 void main() {
+  test('normalizedOrZero is zero for a zero vector, where normalized throws (hardening G1)', () {
+    // The chase idiom, the frame the two meet.
+    const position = Vec3(1, 2, 3), target = Vec3(1, 2, 3);
+    expect((target - position).normalizedOrZero * 5, Vec3.zero);
+    expect(() => (target - position).normalized, throwsArgumentError);
+    expect(Vec3(3, 0, 4).normalizedOrZero, Vec3(0.6, 0, 0.8));
+    expect(Vec3(double.nan, 0, 0).normalizedOrZero, Vec3.zero);
+  });
+
   test('lookRotation matches the engine: the camera at (0, 1.5, 4) looking at the origin', () {
     final q = Quat.lookRotation(Vec3.zero - Vec3(0, 1.5, 4));
     // A pure pitch down by atan(1.5 / 4), the value glam's look_at gives.

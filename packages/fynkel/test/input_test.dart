@@ -825,4 +825,24 @@ void main() {
       expect(taps, isEmpty, reason: 'held 1 s, though the game counted 1/3 s');
     });
   });
+
+  test('stick: one finger dragging, from where it went down, as axis2 gives it (hardening G7)', () {
+    expect(input.stick(), isNull, reason: 'no finger');
+    input.simulate.fingerDown(1, 50, 50);
+    step();
+    expect(input.stick(), isNull, reason: 'down, not dragging yet');
+    input.simulate.fingerMove(1, 80, 50);
+    step();
+    expect(input.stick(), const Vec2(0.5, 0), reason: 'half of 60 pixels to the right');
+    input.simulate.fingerMove(1, 50, 20);
+    step();
+    expect(input.stick(), const Vec2(0, 0.5), reason: 'up the view is +y, as the keys');
+    input.simulate.fingerMove(1, 50, 200);
+    step();
+    expect(input.stick(), const Vec2(0, -1), reason: 'no longer than 1');
+    expect(input.stick(radius: 300), const Vec2(0, -0.5));
+    input.simulate.fingerDown(2, 10, 10);
+    step();
+    expect(input.stick(), isNull, reason: 'two fingers: a pinch, not a stick');
+  });
 }

@@ -639,6 +639,45 @@ Each example's tests rewrite `run(seconds)`, `tap`, a hand-built
 *Done when* the examples are shorter than before, the guide uses the
 new helpers, and §21 lists what changed.
 
+*Done* 2026-10-15. Each row had its test first; the examples lost 628
+lines and gained 222 (lib, test and tool: arena 1,308 → 1,153, sheepdog
+2,086 → 1,970, coins 508 → 460, garden 313 → 254, hello 48 → 37).
+- **G3** went further than the row: `enabled` is on `Component`, as
+  Unity's `Behaviour.enabled`, so a `Component` variable has it too. Off,
+  an engine component is taken out of the engine and written again when
+  it's on, so changes made while off show; a light off isn't counted
+  toward the 64. A model part's renderer was suspected of losing its
+  mesh when written back; a test showed it doesn't (the model's meshes
+  are the world's).
+- **G1**: `normalizedOrZero`; `lookAt` and `lookAtOver` of the point the
+  object is at leave it as it is. `Quat.axisAngle`, `lookRotation`,
+  `Ray` and `Plane` still throw for a zero direction: they're given one
+  on purpose, and the guide says so in §7.
+- **G2 and G4**: `destroy(after:)` counts game time, hidden or not, from
+  when the object is added; the sooner of two wins. `release(after:)`
+  too, dropped when the object is released sooner, so a reused shot
+  isn't cut short. An object's own `release()` again does nothing;
+  `Pool.release(object)` twice still throws, as the pool's own misuse.
+- **G5**: `Vec3.withX/withY/withZ`, `flat`, `Vec3.all`,
+  `Transform.lookAt`, `Light.sun(direction:)` (it turns the object it's
+  put on), `ViewPoint.toVec2()` (a finger's position stays a `ViewPoint`,
+  for `screenPointToRay`), and `emit()` for a `Signal<void>`, which
+  throws an `ArgumentError` on a signal of values.
+- **G6**: `addWith(component, {name, transform, components, layer})`.
+- **G7**: `input.stick()`, `Follow.portraitFit` (both examples moved the
+  camera back rather than widen the lens, so the fit is a Follow
+  setting, not a `Camera` one; it never comes closer, where the copies
+  did between square and 4:3 upright), and in package:fynkel_flutter
+  `Controls` (with `toJson`/`fromJson`; saving them is the app's, which
+  has no storage plugin here), `ControlsSettings` and `askForKey`, the
+  settings list both examples had. `measured.dart` is in each example's
+  `tool/`, with package:fynkel_measure a dev_dependency; the tool looks
+  there first. hello measured through it on the Mac at 120. `Health`
+  stays the game's: the guide has one (§10), and the examples' differ.
+- **G8**: package:fynkel/testing.dart, `world.run`, `world.tap` and
+  `world.viewPoint`; the PNG and CRC copies went for `view.png()`. The
+  lab's tests keep their own finger ids.
+
 ## Phase 6: the build hook and the guide
 
 **B1. The hook is one machine's.** (M)
@@ -733,7 +772,7 @@ planned; neither needs anything here changed again.
   open item stays open; without them it does. R11's variants leave out
   what a frame doesn't use, which these two scenes do use.
 - [x] Phase 4b: lights by place, not by object (L1)
-- [ ] Phase 5: what a game writes
+- [x] Phase 5: what a game writes (G1–G8)
 - [ ] Phase 6: the hook and the guide
 - [ ] Stage 8 phase 4 resumes
 

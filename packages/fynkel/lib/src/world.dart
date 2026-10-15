@@ -424,7 +424,9 @@ final class World implements Finalizable {
   ///    counts from the next frame.
   /// 5. **Motions and routines.** Each running [Motion] moves on
   ///    ([GameObject.tween], [GameObject.moveTo]...), in the order they
-  ///    were made, then the routines' waits end ([GameObject.start]).
+  ///    were made, then the routines' waits end ([GameObject.start]),
+  ///    then the objects whose `destroy(after:)` or `release(after:)` is
+  ///    due go.
   ///    Then the systems' `afterUpdate` (where an animator poses).
   /// 6. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
@@ -521,6 +523,8 @@ final class World implements Finalizable {
     _runMotions();
     _runRoutines();
     if (_disposeAsked) return;
+    if (_dueObjects.isNotEmpty) _runDue();
+    if (_disposeAsked) return;
     _runSystems(_SystemHook.afterUpdate);
     if (_disposeAsked) return;
 
@@ -539,6 +543,10 @@ final class World implements Finalizable {
 
   // The running motions not in a group, in the order they were made.
   final _motions = <Motion>[];
+
+  // The objects with a [GameObject.destroy] or [GameObject.release] due,
+  // and the ones whose was done or dropped, which [_runDue] takes out.
+  final _dueObjects = <GameObject>[];
 
   // --- Systems ---
 

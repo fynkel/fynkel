@@ -392,6 +392,23 @@ void main() {
       expect(rig.rotation, Quat.axisAngle(Vec3.up, 0.5));
     });
 
+    test('Follow with portraitFit goes further back in a view taller than wide (hardening G7)', () {
+      final follow = Follow(target, offset: const Vec3(0, 2, 5), portraitFit: 0.75);
+      final rig = world.add(GameObject(components: [follow]));
+      Vec3 at(double width, double height) {
+        world.input.simulate.resize(width, height);
+        frames(1);
+        return rig.position;
+      }
+
+      expect(at(200, 100), const Vec3(1, 2, 5), reason: 'wide: as it is');
+      expect(at(100, 200), const Vec3(1, 3, 7.5), reason: '0.75 × 2 as far');
+      expect(at(100, 400), const Vec3(1, 4, 10), reason: 'at most twice');
+      expect(at(100, 110), const Vec3(1, 2, 5), reason: 'never closer');
+      follow.portraitFit = 0;
+      expect(at(100, 200), const Vec3(1, 2, 5), reason: '0 leaves it');
+    });
+
     test("Follow in the target's space turns with it; in its heading, stays level", () {
       Vec3 at(FollowSpace space) {
         final rig = world.add(

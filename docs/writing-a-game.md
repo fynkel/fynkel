@@ -73,18 +73,8 @@ class Hello extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
-        components: [Camera()],
-      ),
-    );
-    add(
-      GameObject(
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun()],
-      ),
-    );
+    add(GameObject(transform: Transform.lookAt(Vec3(0, 1.5, 4), Vec3.zero), components: [Camera()]));
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))]));
     add(Cube());
   }
 }
@@ -174,10 +164,16 @@ class Yard extends GameObject {
 
 - **`add(child)`** puts an object below this one and returns it, typed:
   `final crate = add(Crate(at));`. The world's root is added with
-  `world.add`; `FynkelApp` does that for you.
+  `world.add`; `FynkelApp` does that for you. For a component in a
+  field, `addWith` adds an object holding it and returns the component:
+  `_sun = addWith(Light.sun(shadows: true))`.
 - **`destroy()`** takes an object and everything below it out of the game.
   A field still pointing at it says `isDestroyed`; reading its transform
   then throws a clear error instead of giving a stale value.
+  `destroy(after: 0.5)` destroys it that many seconds of game time later
+  (Unity's `Destroy(go, t)`), for sparks and shots, without a routine
+  each; hidden or not, and slowed by `time.scale` and pauses as the game
+  is. Destroying again does nothing.
 - **`active = false`** hides an object and everything below it: not drawn,
   not touched, not updated. `activeInHierarchy` says whether it and all its
   parents are on.
@@ -251,6 +247,9 @@ class Turret extends GameObject {
   fields are the game's.
 - **`release()` on the object** gives it back to its pool, or destroys
   it if it didn't come from one: write it where you'd write `destroy()`.
+  As `destroy()`, releasing again does nothing (a shot that hits two
+  enemies in one step), and `release(after: 2)` releases it later, unless
+  it's released sooner: its next use isn't cut short.
 - **Hold pooled objects with an `ObjectHandle`.** A field pointing at a
   shot still points at it once it's released and handed out again as a
   new shot; `ObjectHandle(shot).object` is null from the release on (and
@@ -449,7 +448,8 @@ class Beacon extends GameObject {
   own (Unity's `MaterialPropertyBlock`): it replaces the material's color
   for that object, and `null` gives it back. `material.copy()` makes a
   material of its own to change every value.
-- **Lights**: `Light.sun` (from the object's forward), `Light.ambient`,
+- **Lights**: `Light.sun` (along the object's forward, which
+  `Light.sun(direction: …)` turns the object to), `Light.ambient`,
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
@@ -458,6 +458,12 @@ class Beacon extends GameObject {
   below `far`: a view drawing from a camera that isn't throws an
   `ArgumentError` naming it, each frame, rather than drawing nothing. It's
   checked only then, so setting `near` and then `far` is fine.
+- **`enabled = false`** turns any of them off, as a behaviour's (§4): a
+  camera draws nothing (the next one draws), a light lights nothing and
+  isn't one of the frame's 64 lamps, a renderer draws nothing. The object
+  and its other components go on; scripts and physics still run. Each
+  keeps what it was given, and what's changed while it's off shows when
+  it's on again.
 
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
@@ -534,10 +540,8 @@ them and has them fall on it, unless its renderer says not, as in Unity:
 
 ```dart
 /// A low evening sun, casting long shadows.
-GameObject eveningSun() => GameObject(
-  transform: Transform(rotation: Quat.lookRotation(Vec3(-0.6, -0.5, -0.4))),
-  components: [Light.sun(intensity: 2, shadows: true)],
-);
+GameObject eveningSun() =>
+    GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.5, -0.4), intensity: 2, shadows: true)]);
 
 /// A puddle: it shadows nothing, but shadows fall on it.
 MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
@@ -670,7 +674,16 @@ class Pilot extends GameObject {}
 - **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
-  `Transform(position: eye, rotation: Quat.lookRotation(target - eye))`.
+  `Transform.lookAt(eye, target)`.
+- `v.withY(0.5)` (and `withX`, `withZ`) changes one part, `v.flat` puts
+  it on the ground (y = 0) for walking, and `Vec3.all(2)` is a uniform
+  scale.
+- **A zero vector has no direction**: `normalized` throws for one, so a
+  vector that should never be zero says so where it is. Where one can be,
+  as the way to a target the object may have reached, write
+  `normalizedOrZero`, which gives zero (as Unity's `normalized`):
+  `position += (target - position).normalizedOrZero * speed * time.delta`.
+  `lookAt` the point the object is at leaves it as it is.
 - Unity's Mathf: `lerp`, `inverseLerp`, `clamp01`, `moveTowards`,
   `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`, and
   `Vec3.lerp`, `Vec3.moveTowards`, `Quat.slerp`, `Color.lerp`.
@@ -823,8 +836,9 @@ class Scoreboard extends GameObject {
 ```
 
 - A signal with nothing to tell is a `Signal<void>`, emitted with
-  `emit(null)`.
-- `emit(value)` calls every listener at once, in order. A handler that
+  `emit()`.
+- `emit(value)` calls every listener at once, in order; a
+  `Signal<void>` is emitted with `emit()`. A handler that
   throws goes to `world.errors`, and the others still hear.
 - `signal.listen(handler)` listens without an owner: cancel it yourself.
 - `await signal.next` waits for the next value.
@@ -889,7 +903,8 @@ class Button3D extends GameObject {
 - **A `Finger`** is one touch, or the mouse: `position`, `startPosition`,
   `delta`, `totalDelta`, `velocity`, `age`, `tapCount`, `isPressed`,
   `isDragging`, and `over` (what's under it in the world: `gameObject`,
-  `point`, `normal`). `input.fingers` lists them.
+  `point`, `normal`). `input.fingers` lists them. `position` is a
+  `ViewPoint`, for `screenPointToRay`; `position.toVec2()` for a `Vec2`.
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
@@ -1024,10 +1039,11 @@ class CameraRig extends GameObject {
   void onLoad() {
     super.onLoad();
     add(GameObject(components: [Camera()])); // the view's camera
-    close = add(
-      GameObject(components: [VirtualCamera(priority: 1), Follow(_player, offset: Vec3(0, 3, 6), damping: 0.2), LookAt(_player)]),
-    ).get<VirtualCamera>()!;
-    wide = add(GameObject(components: [VirtualCamera(fovY: 70.deg), Orbit(_player, distance: 15)])).get<VirtualCamera>()!;
+    close = addWith(
+      VirtualCamera(priority: 1),
+      components: [Follow(_player, offset: Vec3(0, 3, 6), damping: 0.2), LookAt(_player)],
+    );
+    wide = addWith(VirtualCamera(fovY: 70.deg), components: [Orbit(_player, distance: 15)]);
   }
 
   void zoomOut() {
@@ -2004,6 +2020,7 @@ by frame, with made-up input:
 ```dart
 // test/walker_test.dart
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:my_game/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -2013,21 +2030,21 @@ void main() {
     addTearDown(world.dispose);
     final walker = world.add(Walker());
     world.input.simulate.keyDown(KeyCode.d);
-    for (var i = 0; i < 60; i++) {
-      world.update(1 / 60); // a second at 60 fps
-    }
+    world.run(1); // a second at 60 fps
     expect(walker.position.x, closeTo(4, 0.1));
   });
 }
 ```
 
-`world.input.simulate` also takes `fingerDown`, `fingerMove`, `fingerUp`,
-`resize` and the rest, so taps, drags and swipes can be tested too; it's
-what the view itself calls. A plain test has no view, so give the input a
-size first, `world.input.simulate.resize(800, 600)`, and then a finger
-lands where you say. To put one on an object, ask the camera where it is
-on screen: `world.camera!.worldToScreenPoint(target.position, width: 800,
-height: 600)`.
+package:fynkel/testing.dart gives a world `run(seconds)`, `tap(x, y)`
+and `viewPoint(x, y)`. `world.input.simulate` takes `fingerDown`,
+`fingerMove`, `fingerUp`, `resize` and the rest, so drags and swipes can
+be tested too; it's what the view itself calls. A plain test has no view,
+so give the input a size first, `world.input.simulate.resize(800, 600)`,
+and then `world.tap(400, 300)` lands where you say, on the next frame. To
+put one on an object, ask the camera where it is on screen:
+`world.camera!.worldToScreenPoint(target.position, width: 800, height:
+600)`.
 `HeadlessView(world, width:, height:)` renders a frame without a window,
 for a picture of the game: `File('shot.png').writeAsBytesSync(view.png())`
 saves it to look at, which finds an unlit side or a camera too far fast. `examples/arena/test` tests a whole game this
@@ -2043,6 +2060,7 @@ the test passes whatever happened:
 ```dart
 // test/errors_test.dart
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class Fragile extends GameObject {
@@ -2060,9 +2078,7 @@ void main() {
     final errors = <ObjectError>[];
     world.errors.listen(errors.add);
     world.add(Fragile());
-    for (var i = 0; i < 3; i++) {
-      world.update(1 / 60);
-    }
+    world.run(3 / 60);
     await pumpEventQueue(); // let the stream deliver what the frames sent
     expect(errors, hasLength(3));
   });
@@ -2161,13 +2177,14 @@ What keeps a game fast:
   mass, as Unity advises.
 - **Short-reaching lamps.** A lamp costs something for each object it
   reaches, and the pixels it lights; one that reaches no further than it
-  needs to costs least. Turn a lamp off with `intensity = 0`: it's left
-  out altogether.
+  needs to costs least. Turn a lamp off with `enabled = false`: it's
+  left out altogether.
 - **A lower quality level for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
   screen (§5).
 - **Measure** on the slowest phone you support. Each example has a
-  `lib/measured.dart` for package:fynkel_measure's tool, which gives the
+  `tool/measured.dart` for package:fynkel_measure's tool (a
+  dev_dependency, so the game itself doesn't carry it), which gives the
   frame rate and memory: `dart run fynkel_measure:measure rate`.
 
 ## 19. What isn't there yet
@@ -2184,7 +2201,7 @@ multibody joints).
 | `GameObject`, a prefab | `GameObject`, a subclass of it |
 | `MonoBehaviour` | `Behaviour` |
 | `AddComponent<T>()`, `GetComponent<T>()` | `addComponent(T())`, `get<T>()` |
-| `Destroy(go)` | `go.destroy()` |
+| `Destroy(go)`, `Destroy(go, t)` | `go.destroy()`, `go.destroy(after: t)` |
 | `SetActive(false)`, `enabled = false` | `active = false`, `enabled = false` |
 | `ObjectPool<T>`: `Get`, `Release` | `Pool(parent, make)`: `get`, `release` |
 | `Awake`, `Start`, `Update`, `LateUpdate`, `OnDestroy` | `onLoad`, `onStart`, `onUpdate`, `onLateUpdate`, `onDestroy` |
@@ -2266,6 +2283,28 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Hardening, what a game writes** (2026-10-15):
+  - `Camera`, `Light` and `MeshRenderer` have `enabled`, as behaviours
+    did: it's on `Component` now (§5).
+  - `lookAt` the point the object is at leaves it as it is; it threw.
+    `Vec3.normalizedOrZero` is new (§7).
+  - An object's own `release()` on one released already does nothing; it
+    threw. `destroy(after:)` and `release(after:)` are new (§3).
+  - New helpers: `Vec3.withX`/`withY`/`withZ`, `flat` and `Vec3.all`,
+    `Transform.lookAt(eye, target)`, `Light.sun(direction:)`,
+    `ViewPoint.toVec2()`, and `emit()` for a `Signal<void>`
+    (`emit(null)` still works). `addWith(component)` adds an object
+    holding a component and returns the component (§3).
+  - `input.stick()` (a finger dragging as a stick), `Follow.portraitFit`
+    (a follow camera that goes further back upright), and in
+    package:fynkel_flutter `Controls`, `ControlsSettings` and
+    `askForKey` (keys a player changes, §11).
+  - package:fynkel/testing.dart: `world.run(seconds)`, `world.tap(x, y)`
+    and `world.viewPoint(x, y)` for tests (§17).
+  - The examples' `lib/measured.dart` is `tool/measured.dart`, and
+    package:fynkel_measure is a dev_dependency: move yours, and the tool
+    finds it there (it still finds the old place).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

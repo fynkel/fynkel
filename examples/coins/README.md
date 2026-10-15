@@ -38,7 +38,7 @@ flutter run -d emulator-5554   # Android 11 or later, with the NDK installed
 ## Measuring
 
 As the garden's ([../garden/README.md](../garden/README.md)): the tool
-runs `lib/measured.dart`, the same game and HUD in `MeasuredApp`. Its
+runs `tool/measured.dart`, the same game and HUD in `MeasuredApp`. Its
 lifecycle check first changes the level back and forth (`changed`), then
 destroys and re-adds the whole game, shows a new view, and resizes it.
 

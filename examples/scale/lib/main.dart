@@ -143,8 +143,7 @@ class Scale extends GameObject {
     add(
       GameObject(
         name: 'sun',
-        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun()],
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))],
       ),
     );
     add(GameObject(name: 'sky', components: [Light.ambient(intensity: 0.3)]));

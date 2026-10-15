@@ -178,7 +178,10 @@ void main() {
       child.lookAt(const Vec3(1, 0, 3));
       expectVec(child.forward, Vec3.back);
       expect(child.up.y, closeTo(1, 1e-6));
-      expect(() => root.lookAt(Vec3.zero), throwsArgumentError, reason: 'it is there');
+      // Hardening G1: at the point already, it has nowhere to look, and stays as it was (as Unity's).
+      final before = root.transform.rotation;
+      root.lookAt(Vec3.zero);
+      expect(root.transform.rotation, before, reason: 'it is there');
     });
 
     test('transformPoint goes from its space to the world, and inverseTransformPoint back', () {

@@ -82,6 +82,13 @@ class GameObject with _Moving {
   int _generation = 0;
   bool _started = false;
 
+  // When a [destroy] or [release] given `after` is due, in the world's game
+  // time ([Time.sinceStart]), and which; before it's added, the time after
+  // it's added. Whether it's in the world's list of them.
+  double? _due;
+  bool _dueRelease = false;
+  bool _dueListed = false;
+
   // Whether it had onEnable and not onDisable since: it's shown.
   bool _enabled = false;
 
@@ -405,6 +412,22 @@ class GameObject with _Moving {
     return child;
   }
 
+  /// Adds a new object below this one with [component] on it, and returns
+  /// the component, for a field: `_sun = addWith(Light.sun())` where
+  /// `add(GameObject(components: [Light.sun()])).get<Light>()!` would. [name], [transform] and [layer] are the new object's, and
+  /// [components] go on it after [component], as a camera's rig:
+  /// `addWith(VirtualCamera(), components: [Orbit(player)])`.
+  T addWith<T extends Component>(
+    T component, {
+    String? name,
+    Transform? transform,
+    Iterable<Component> components = const [],
+    int layer = 0,
+  }) {
+    add(GameObject(name: name, transform: transform, components: [component, ...components], layer: layer));
+    return component;
+  }
+
   void _checkAddable() {
     if (_destroyed) throw StateError('$this was destroyed; make a new one to add');
     if (_world != null || _queuedIn != null) {
@@ -416,8 +439,15 @@ class GameObject with _Moving {
   /// and onDestroy calls first, while it can still be read; using any of
   /// them after that throws a [StateError] saying it was destroyed
   /// ([isDestroyed] tells). Destroying an object again does nothing.
-  void destroy() {
+  ///
+  /// With [after], it's destroyed that many seconds of game time later
+  /// (Unity's `Destroy(obj, t)`), at the end of that frame's routines,
+  /// hidden or not: `world.add(Spark()).destroy(after: 0.5)`. Time slowed
+  /// by [Time.scale] or a pause counts as it does for the game. Before it's
+  /// added, it counts from when it is. Given twice, the sooner wins.
+  void destroy({double after = 0}) {
     if (_destroyed) return;
+    if (after != 0) return _later(after, release: false);
     final world = _world;
     if (world == null) {
       _queuedIn?._described?.children.remove(this);
@@ -436,10 +466,28 @@ class GameObject with _Moving {
 
   /// Gives this object back to the [Pool] it came from ([Pool.release]),
   /// or destroys it if it didn't come from one: what a pooled object calls
-  /// where it would call [destroy].
-  void release() {
-    if (_pool case final pool?) return pool.release(this);
+  /// where it would call [destroy]. Releasing it again before it's handed
+  /// out again does nothing, as destroying again does. With [after], it's
+  /// released that much later, as [destroy] does: unless it's released
+  /// sooner, so its next use isn't cut short.
+  void release({double after = 0}) {
+    if (after != 0) return _later(after, release: true);
+    if (_pool case final pool?) {
+      if (_pooled == _PoolState.free) return;
+      return pool.release(this);
+    }
     destroy();
+  }
+
+  void _later(double after, {required bool release}) {
+    if (!(after >= 0)) throw ArgumentError.value(after, 'after', 'must be 0 or more');
+    if (_destroyed) return;
+    final world = _world;
+    final due = world == null ? after : world.time._sinceStart + after;
+    if (_due case final d? when d <= due) return;
+    _due = due;
+    _dueRelease = release;
+    if (world != null) world._listDue(this);
   }
 
   /// Destroys an object that was never added, and what was added to it:
@@ -670,6 +718,10 @@ class GameObject with _Moving {
     }
     component._owner = this;
     (_components ??= []).add(component);
+    if (component case Light(:final _facing?)) {
+      component._facing = null;
+      rotation = _facing;
+    }
     if (_world case final world?) {
       try {
         _write(component);
@@ -712,13 +764,8 @@ class GameObject with _Moving {
         b._listening?.cancelAll();
         b._ending = true;
         world._safely(this, b.onDestroy);
-      case Camera():
-        check(fy_camera_remove(world.pointer, id));
-      case Light l:
-        check(fy_light_remove(world.pointer, id));
-        world._countLight(this, l, _LightCount.none);
-      case MeshRenderer():
-        check(fy_mesh_renderer_remove(world.pointer, id));
+      case Camera() || Light() || MeshRenderer():
+        if (component._enabledFlag) _unwrite(component);
     }
     component
       .._removed = true
@@ -832,7 +879,25 @@ class GameObject with _Moving {
     return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness, l.shadows);
   }
 
+  /// Puts an engine component that was turned on or off into the engine,
+  /// or takes it out.
+  void _enabledChanged(Component component) => component._enabledFlag ? _write(component) : _unwrite(component);
+
+  void _unwrite(Component component) {
+    switch (component) {
+      case Camera():
+        check(fy_camera_remove(world.pointer, id));
+      case Light l:
+        check(fy_light_remove(world.pointer, id));
+        world._countLight(this, l, _LightCount.none);
+      case MeshRenderer():
+        check(fy_mesh_renderer_remove(world.pointer, id));
+      case Behaviour():
+    }
+  }
+
   void _write(Component component) => switch (component) {
+    _ when !component._enabledFlag => null,
     Camera c => _writeCamera(c),
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),

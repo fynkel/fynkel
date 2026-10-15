@@ -1,7 +1,7 @@
 // package:fynkel_physics's example, on the raw world of stage 5 step 1
 // (docs/stage-5.md): a pile of cubes that fall, tumble and settle,
 // dropped again every 8 seconds. Each fixed step's moved cubes are written
-// to their objects. lib/measured.dart runs the same for the tool, with the
+// to their objects. tool/measured.dart runs the same for the tool, with the
 // step's timings.
 //
 //   flutter run --dart-define=TUMBLE_CUBES=500 [--dart-define=TUMBLE_PHYSICS=false]

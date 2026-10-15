@@ -8,8 +8,7 @@ import 'package:flutter/widgets.dart';
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
-
-import 'main.dart';
+import 'package:scale/main.dart';
 
 const _frameTimes = bool.fromEnvironment('FRAME_TIMES');
 

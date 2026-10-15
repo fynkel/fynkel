@@ -58,7 +58,7 @@ no dog the wolves win.
 
 ## Measuring
 
-package:fynkel_measure's tool runs the profile build of `lib/measured.dart`:
+package:fynkel_measure's tool runs the profile build of `tool/measured.dart`:
 the game at level 3 with its HUD and minimap, nobody playing.
 
 ```sh
