@@ -118,6 +118,7 @@ final class Model implements Finalizable {
       uvOffset: Vec2(m.uv_offset.x, m.uv_offset.y),
       alphaCutoff: m.alpha_cutoff,
       doubleSided: m.double_sided,
+      blending: Blending.values[m.blend],
       baseColorTexture: texture(m.base_color_texture),
       normalTexture: texture(m.normal_texture),
       metallicRoughnessTexture: texture(m.metallic_roughness_texture),

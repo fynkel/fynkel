@@ -76,6 +76,9 @@ void main() {
     final alpha = await Model.load(glb('AlphaBlendModeTest.glb'));
     final cutoff = alpha.materials.firstWhere((m) => m.name == 'MatCutoff25');
     expect((cutoff.alphaCutoff, cutoff.doubleSided), (0.25, true));
+    expect(cutoff.blending, Blending.opaque);
+    final blend = alpha.materials.firstWhere((m) => m.name == 'MatBlend');
+    expect(blend.blending, Blending.transparent, reason: "glTF's BLEND");
     // Four images; one packs metallic-roughness and occlusion, as glTF does.
     final bed = alpha.materials.firstWhere((m) => m.name == 'MatBed');
     final t = alpha.textures;

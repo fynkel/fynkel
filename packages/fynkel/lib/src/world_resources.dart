@@ -177,6 +177,7 @@ extension _Resources on World {
       ..y = material.uvOffset.y;
     m.alpha_cutoff = material.alphaCutoff;
     m.double_sided = material.doubleSided;
+    m.blend = material.blending.index;
     m.base_color_texture = base;
     m.normal_texture = normal;
     m.metallic_roughness_texture = metallicRoughness;
