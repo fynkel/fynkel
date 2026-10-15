@@ -549,11 +549,17 @@ buffer in the frame ring.
   against 58.9); lighting only a surface's colour from lamps at low
   (`Quality::lamp_highlights`, as Unity's low tiers light extra lights
   per vertex) holds 58.9, as main (58.9). Suns keep their highlights.
+- **Metal at low.** Without highlights, lamps lit only a surface's matte
+  colour, and metal has none: the user saw the lab's chrome balls and
+  metal boxes pitch black at low. Low now spreads what the highlight
+  would reflect (f0) like the matte part, so metal is lit in its own
+  colour (`lamps_light_metal_at_every_level` failed black, passes).
+  Note10+, low, 63 lamps: 59.9, main 59.9.
 - **Tests**: the two planned (the big wall, the seam) failed on main and
   pass; `a_cell_is_lit_by_every_lamp_that_reaches_it` (twenty dim lamps
   each change the middle pixel, at every level) failed with the cap and
   passes; binning by brute force for both cameras;
-  `lamps_give_highlights_above_low`. No golden changed.
+  `lamps_light_metal_at_every_level`. No golden changed.
 - **The first build cost 8 fps on the Note10+**, all on the CPU:
   clearing and reading every cell's list (313 KB) a frame, working out
   2,304 cell spheres a frame, copying 46 KB. Found by turning each off
