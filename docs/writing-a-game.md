@@ -2020,6 +2020,7 @@ by frame, with made-up input:
 ```dart
 // test/walker_test.dart
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:my_game/game.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -2029,21 +2030,21 @@ void main() {
     addTearDown(world.dispose);
     final walker = world.add(Walker());
     world.input.simulate.keyDown(KeyCode.d);
-    for (var i = 0; i < 60; i++) {
-      world.update(1 / 60); // a second at 60 fps
-    }
+    world.run(1); // a second at 60 fps
     expect(walker.position.x, closeTo(4, 0.1));
   });
 }
 ```
 
-`world.input.simulate` also takes `fingerDown`, `fingerMove`, `fingerUp`,
-`resize` and the rest, so taps, drags and swipes can be tested too; it's
-what the view itself calls. A plain test has no view, so give the input a
-size first, `world.input.simulate.resize(800, 600)`, and then a finger
-lands where you say. To put one on an object, ask the camera where it is
-on screen: `world.camera!.worldToScreenPoint(target.position, width: 800,
-height: 600)`.
+package:fynkel/testing.dart gives a world `run(seconds)`, `tap(x, y)`
+and `viewPoint(x, y)`. `world.input.simulate` takes `fingerDown`,
+`fingerMove`, `fingerUp`, `resize` and the rest, so drags and swipes can
+be tested too; it's what the view itself calls. A plain test has no view,
+so give the input a size first, `world.input.simulate.resize(800, 600)`,
+and then `world.tap(400, 300)` lands where you say, on the next frame. To
+put one on an object, ask the camera where it is on screen:
+`world.camera!.worldToScreenPoint(target.position, width: 800, height:
+600)`.
 `HeadlessView(world, width:, height:)` renders a frame without a window,
 for a picture of the game: `File('shot.png').writeAsBytesSync(view.png())`
 saves it to look at, which finds an unlit side or a camera too far fast. `examples/arena/test` tests a whole game this
@@ -2059,6 +2060,7 @@ the test passes whatever happened:
 ```dart
 // test/errors_test.dart
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 class Fragile extends GameObject {
@@ -2076,9 +2078,7 @@ void main() {
     final errors = <ObjectError>[];
     world.errors.listen(errors.add);
     world.add(Fragile());
-    for (var i = 0; i < 3; i++) {
-      world.update(1 / 60);
-    }
+    world.run(3 / 60);
     await pumpEventQueue(); // let the stream deliver what the frames sent
     expect(errors, hasLength(3));
   });
@@ -2300,6 +2300,8 @@ For code written before: each change that breaks it, newest first.
     (a follow camera that goes further back upright), and in
     package:fynkel_flutter `Controls`, `ControlsSettings` and
     `askForKey` (keys a player changes, §11).
+  - package:fynkel/testing.dart: `world.run(seconds)`, `world.tap(x, y)`
+    and `world.viewPoint(x, y)` for tests (§17).
   - The examples' `lib/measured.dart` is `tool/measured.dart`, and
     package:fynkel_measure is a dev_dependency: move yours, and the tool
     finds it there (it still finds the old place).

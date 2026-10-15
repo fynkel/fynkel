@@ -1,9 +1,9 @@
 import 'dart:io';
-import 'dart:typed_data';
 
 import 'package:coins/coins.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 
 const width = 320, height = 200;
 
@@ -48,9 +48,8 @@ void main() {
 
     final view = HeadlessView(world, width: width, height: height);
     addTearDown(view.dispose);
-    final frame = view.read(view.frame());
     final shot = Platform.environment['COINS_SHOT'];
-    if (shot != null) File(shot).writeAsBytesSync(_png(frame.rgba, width, height));
+    if (shot != null) File(shot).writeAsBytesSync(view.png());
 
     final coin = world.all<Coin>().first;
     pickUp([coin]);
@@ -106,15 +105,10 @@ void main() {
     await game.loaded;
     world.update(0);
     // Below the middle of the view: the ground in front of the player.
-    final at = ViewPoint(width / 2, height * 0.8, width: width.toDouble(), height: height.toDouble());
-    world.input.simulate
-      ..resize(width.toDouble(), height.toDouble())
-      ..fingerDown(1, at.x, at.y)
-      ..fingerUp(1, at.x, at.y);
+    world.input.simulate.resize(width.toDouble(), height.toDouble());
+    world.tap(width / 2, height * 0.8);
     world.update(0);
-    for (var i = 0; i < 120; i++) {
-      world.update(1 / 60);
-    }
+    world.run(2);
     final position = game.player.transform.position;
     expect(position.z, greaterThan(1), reason: 'towards the camera');
     expect(position.x.abs(), lessThan(0.5));
@@ -132,44 +126,4 @@ void main() {
     expect(mote.transform.position, isNot(moteAt));
     expect(swarm.children, hasLength(300));
   });
-}
-
-/// [rgba] as a PNG, unfiltered.
-Uint8List _png(Uint8List rgba, int width, int height) {
-  final raw = BytesBuilder();
-  for (var y = 0; y < height; y++) {
-    raw.addByte(0);
-    raw.add(Uint8List.sublistView(rgba, y * width * 4, (y + 1) * width * 4));
-  }
-  Uint8List chunk(String kind, List<int> data) {
-    final body = [...kind.codeUnits, ...data];
-    final b = ByteData(8 + data.length + 4);
-    b.setUint32(0, data.length);
-    final out = b.buffer.asUint8List()..setAll(4, body);
-    b.setUint32(8 + data.length, _crc(body));
-    return out;
-  }
-
-  final header = ByteData(13)
-    ..setUint32(0, width)
-    ..setUint32(4, height)
-    ..setUint8(8, 8)
-    ..setUint8(9, 6);
-  return Uint8List.fromList([
-    0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A, //
-    ...chunk('IHDR', header.buffer.asUint8List()),
-    ...chunk('IDAT', zlib.encode(raw.takeBytes())),
-    ...chunk('IEND', const []),
-  ]);
-}
-
-int _crc(List<int> bytes) {
-  var c = 0xFFFFFFFF;
-  for (final byte in bytes) {
-    c ^= byte;
-    for (var k = 0; k < 8; k++) {
-      c = c & 1 != 0 ? 0xEDB88320 ^ (c >> 1) : c >> 1;
-    }
-  }
-  return c ^ 0xFFFFFFFF;
 }
