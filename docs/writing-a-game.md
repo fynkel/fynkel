@@ -719,6 +719,10 @@ void dreamy(Camera camera) {
   them, and cost nothing. Where the quality level doesn't draw one, it
   costs nothing either. The lab's 'Look: glow and contact' page turns
   both on and off, at each level.
+- **What they cost:** little on an iPhone 16 Pro Max (120 fps at every
+  level with both) or a Mac. On an older Android phone they cost a lot:
+  a Galaxy Note10+ at medium goes from 58 to 40 fps with bloom. If your
+  game runs on phones like it, turn bloom off there, or pick `low`.
 
 ## 6. The frame, the lifecycle and time
 
