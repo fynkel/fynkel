@@ -40,10 +40,15 @@ fn position(px: vec2<i32>) -> vec4<f32> {
     return vec4<f32>(p.xyz / p.w, select(1.0, 0.0, d <= 0.0));
 }
 
-// Noise from the pixel's place (Jimenez's interleaved gradient noise),
-// turning each pixel's spiral differently: the blur then averages it out.
-fn noise(px: vec2<f32>) -> f32 {
-    return fract(52.9829189 * fract(dot(px, vec2<f32>(0.06711056, 0.00583715))));
+// How far round each pixel's spiral of samples starts: every 4 × 4 of
+// pixels takes each of 16 turns once (a Bayer matrix), so fs_blur, which
+// averages 4 × 4, averages every turn and leaves no blotches.
+fn spin(px: vec2<i32>) -> f32 {
+    let x = vec2<u32>(px) & vec2<u32>(3u);
+    // The 2 × 2 Bayer matrix, 0 2 / 3 1, at the low bits and at the high.
+    let low = ((x.x ^ x.y) & 1u) * 2u + (x.y & 1u);
+    let high = ((x.x ^ x.y) >> 1u) * 2u + (x.y >> 1u);
+    return (f32(low * 4u + high) + 0.5) / 16.0;
 }
 
 @fragment
@@ -79,12 +84,12 @@ fn fs_ao(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     }
     let r2 = radius * radius;
     // Less than this above the surface is the surface itself.
-    let bias = 0.05 * radius;
-    let spin = noise(at.xy) * 6.2831853;
+    let bias = 0.1 * radius;
+    let turn = spin(px) * 6.2831853;
     var sum = 0.0;
     for (var i = 0u; i < SAMPLES; i++) {
         let along = (f32(i) + 0.5) / f32(SAMPLES);
-        let angle = along * TURNS * 6.2831853 + spin;
+        let angle = along * TURNS * 6.2831853 + turn;
         let q = position(px + vec2<i32>(vec2<f32>(cos(angle), sin(angle)) * along * pixels));
         let v = q.xyz - c;
         let vv = dot(v, v);

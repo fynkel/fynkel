@@ -47,13 +47,17 @@ fn max_difference(a: &Image, b: &Image) -> u8 {
 /// The floor just in front of the box's foot, and as far from the camera
 /// but well to the side.
 fn at_the_foot(image: &Image) -> (u8, u8) {
-    // Where the foot's middle, (0, 0, 0.5), is in the view.
+    let y = foot_row();
+    (image.pixel(SIZE / 2, y + 2)[0], image.pixel(8, y + 2)[0])
+}
+
+/// The row of the view the foot's middle, (0, 0, 0.5), is in.
+fn foot_row() -> u32 {
     let camera = CameraView::looking_at(Vec3::new(0.0, 3.0, 3.0), Vec3::ZERO);
     let projection =
         fynkel_render::glam::camera::rh::proj::directx::perspective(camera.fov_y, 1.0, camera.near, camera.far);
     let p = (projection * camera.view).project_point3(Vec3::new(0.0, 0.0, 0.5));
-    let y = ((1.0 - p.y) / 2.0 * SIZE as f32) as u32;
-    (image.pixel(SIZE / 2, y + 2)[0], image.pixel(8, y + 2)[0])
+    ((1.0 - p.y) / 2.0 * SIZE as f32) as u32
 }
 
 #[test]
@@ -173,4 +177,22 @@ fn a_box_alone_does_not_darken_its_own_edges() {
         camera.ambient_occlusion = Some(AmbientOcclusion::DEFAULT);
     }
     assert_golden("cube", &render(&gpu, &mut r, &scene, 256, 256).0);
+}
+
+/// Along the foot of a long wall the darkening is smooth: each pixel's
+/// samples turn differently, and the blur evens that out rather than
+/// leaving blotches.
+#[test]
+fn the_darkening_along_a_wall_is_smooth() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), Quality::High, 1.0, vec![]);
+    let wall = Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0)) * Mat4::from_scale(Vec3::new(10.0, 1.0, 1.0));
+    scene.draws.push(Draw::new(CUBE, wall, grey()));
+    let image = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    let y = foot_row();
+    // Across the middle half of the view, on the floor just past the foot.
+    let row: Vec<u8> = (SIZE / 4..SIZE * 3 / 4).map(|x| image.pixel(x, y + 2)[0]).collect();
+    let (darkest, lightest) = (*row.iter().min().unwrap(), *row.iter().max().unwrap());
+    assert!(lightest - darkest <= 3, "even along the foot: {darkest}..{lightest} in {row:?}");
 }
