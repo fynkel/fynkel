@@ -55,9 +55,10 @@ impl Gpu {
             // Buffers the CPU writes and the GPU reads in place, with no
             // staging copy (frame_ring.rs). Every native backend has it.
             // And a pipeline cache where there is one (Vulkan), kept
-            // between runs (assets.rs).
+            // between runs (assets.rs). And drawing into 32-bit float
+            // images where it can, for bloom's (bloom.rs).
             required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
-                | (adapter.features() & wgpu::Features::PIPELINE_CACHE),
+                | (adapter.features() & (wgpu::Features::PIPELINE_CACHE | wgpu::Features::RG11B10UFLOAT_RENDERABLE)),
             // WebGPU's defaults, lowered wherever this adapter offers less
             // (the iOS simulator sits below a few of them). The renderer
             // stays within the lower set.

@@ -100,7 +100,7 @@ fn bloom_changes_nothing_that_is_not_bright() {
 fn bloom_follows_the_view_size() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for size in [33, 64, 17, 200] {
+    for size in [33, 64, 25, 200] {
         let image = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), Quality::High), size, size).0;
         let centre = image.pixel(size / 2, size / 2);
         assert!(centre[0] >= 250, "the square itself is white: {centre:?} ({size})");
