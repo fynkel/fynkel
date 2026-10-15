@@ -629,6 +629,56 @@ above y = 0: mist lying in a valley. It costs almost nothing, at every
 level. The lab's 'Look: sky and fog' scene shows each kind of sky, metal
 from a mirror to rough, and fog over an avenue 100 m long.
 
+### See-through: glass, water and glows
+
+A material's `opacity` (its colour's alpha) is how much of it there is.
+Made with one below 1, the material is see-through:
+
+```dart
+/// Tinted glass, and a pool's water: a third and a half of them there.
+final glass = Material(color: Color.rgb(1, 0.7, 0.3), opacity: 0.35, roughness: 0.1, doubleSided: true);
+final water = Material(color: Color.rgb(0.12, 0.44, 0.55), opacity: 0.55, roughness: 0.05);
+
+/// A spark: black, so all it shows is its glow, added to what's behind.
+final spark = Material(color: Color.black, emissive: Color.rgb(1, 0.4, 0.1), blending: Blending.additive);
+
+/// A ghost fading out over a second.
+void fadeOut(GameObject ghost) {
+  final material = ghost.get<MeshRenderer>()!.material!..blending = Blending.transparent;
+  ghost.tween(1.0, 0.0, seconds: 1, onUpdate: (v) => material.opacity = v);
+}
+```
+
+- **`Blending.transparent`** lays the surface over what's behind it: at
+  an opacity of 0.35, about a third of it and two thirds of what's
+  behind. Everything it shows fades with it, its highlights and glow
+  too (glTF's BLEND, Unity's Fade). A model's BLEND materials load as
+  this.
+- **`Blending.additive`** adds the surface's light, times its opacity,
+  to what's behind: glows, flames, sparks and beams. Black adds nothing,
+  so give it an `emissive`. It brightens what's behind, so it shows best
+  against the dark.
+- **`blending`** is picked for you only by `Material(opacity:)` below 1.
+  Setting `opacity` later changes the alpha alone: a material made
+  opaque stays opaque (`blending` changes it), and its alpha is
+  ignored.
+- **They're drawn after everything solid**, the furthest object first
+  (by its middle), each over what's behind it, and after the sky. Within
+  one object the order is its triangles': a glass jar can draw its far
+  side over its near one. If that shows, split the object in two. Two
+  see-through objects that cross each other can't both be in front, so
+  one of them is wrong where they cross.
+- **They hide nothing.** What's drawn later shows through them, so they
+  don't write to the depth buffer; a solid object behind one is still
+  drawn, and a solid one in front of it hides it.
+- **They take light and fog** as solid surfaces do, and **cast no
+  shadow**.
+- With an `alphaCutoff` too, what's below the cutoff isn't there, and
+  the rest is see-through.
+- Many see-through objects on top of each other cost more than solid
+  ones: each pixel is drawn once per layer. The lab's 'Look: glass, water
+  and glows' scene adds 400 panes to measure it.
+
 ## 6. The frame, the lifecycle and time
 
 Each object and behaviour gets these calls, in the order they were added:
@@ -2378,8 +2428,8 @@ What keeps a game fast:
 ## 19. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
-  alone), bloom, particles, sprites and 2D, 3D text,
-  see-through materials, vertex colours.
+  alone), bloom, particles, sprites and 2D, 3D text, vertex colours;
+  see-through objects don't cast shadows, and glass doesn't bend light.
 - **Models:** animation, skinned meshes and morph targets (a model shows
   its rest pose).
 - **Sound:** none yet.
@@ -2428,6 +2478,7 @@ What keeps a game fast:
 | A small ball rolling fast at 50 steps a second | physics turns a body at most a quarter turn a step: take more steps (`time.fixedDelta = 1 / 100`) |
 | `MaterialPropertyBlock` for one object's colour | `renderer.color` |
 | `new Material(material)` | `material.copy()` |
+| Rendering Mode Fade, Transparent; an additive shader | `Material(opacity:)`, `blending: Blending.transparent` or `.additive` |
 | `Camera.orthographicSize` | `orthographicSize`, on `Camera` and `VirtualCamera` |
 | Cinemachine's binding modes (world space, lock to target, lock to target on assign/with world up) | `Follow(space: FollowSpace.world / target / targetYaw)` |
 | `Input.mouseScrollDelta` | `input.scroll`: +y with the wheel turned away, as Unity's |
@@ -2478,6 +2529,13 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **See-through materials** (2026-10-15):
+  - A model's see-through (BLEND) materials are drawn see-through, as
+    glTF means: they were opaque, with a warning. They're
+    `Blending.transparent` (§5).
+  - A material's alpha shows when it blends: `Material(opacity:)` below
+    1 makes it see-through. An opaque one still ignores it.
 
 - **Hardening, the build hook and the guide** (2026-10-15):
   - The build hook builds on any Mac Flutter builds on: Android's linker

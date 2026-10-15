@@ -469,6 +469,80 @@ objects into the sky.
 *Done when* glass and water read right in front of and behind other
 objects, with a golden test of the order.
 
+**Done** (2026-10-15):
+
+- **`Material(opacity:, blending:)`**: `opacity` is the colour's alpha;
+  made below 1, a material is `Blending.transparent` unless `blending`
+  says otherwise. Setting `opacity` later changes the alpha alone.
+  *Changed from the plan:* Dart calls it `Blending`, as `Blend` is
+  already the camera rigs' blend and Flutter has `BlendMode`; in Rust
+  and the C interface it's `blend`.
+- **Transparent** is laid over what's behind as glTF's BLEND says (the
+  "over" operator): everything the surface shows, its light, highlights,
+  glow and fog, times its alpha, plus what's behind times one minus it.
+  The shader returns its colour premultiplied, so the blend is one
+  multiply-add, and a cutoff still drops what's below it. A model's
+  BLEND materials load as this; the warning that they're drawn opaque is
+  gone, and the Khronos AlphaBlendModeTest golden now shows the wall
+  through its blend panel.
+- **Additive** adds the surface's light times its alpha (`ONE, ONE`),
+  fading to nothing in fog, for glows now and particles later.
+- **Order**: the solid draws are batched and sorted as before; the
+  blended ones go in a list of their own, sorted furthest first by the
+  depth of their bounds' centre along the view (ties keep the scene's
+  order, so equal ones don't flicker), and drawn after the solid scene
+  and the sky. Runs of the same pipeline, textures and mesh are still
+  one instanced call: instances are drawn in order, so a run of 400
+  panes is one call and still back to front. They test the depth but
+  don't write it, and alpha-to-coverage is off for them.
+- **Shadows**: blended draws aren't casters; they receive shadows and
+  every light, and fog.
+- **The pipelines**: `Cover {Opaque, Cutout, Transparent, Additive}`
+  replaces the cut-out flag in a pipeline's variant (96 now, still made
+  only when first used); the two new ones have their own fragment
+  entries, `fs_transparent` and `fs_additive`.
+- ABI 26: `FyMaterial.blend` (`FY_BLEND_OPAQUE`, `_TRANSPARENT`,
+  `_ADDITIVE`); another number is refused with "N isn't a kind of
+  blend". fynkel_world's `Material.blend` and fynkel_load's
+  `MaterialData.transparent`. Steady frames with see-through draws
+  still allocate nothing in `prepare` (the alloc test's busy scene has
+  them now).
+- **Tests**: the renderer's (`tests/blend.rs`): glass in front of a wall
+  shows half of each and behind the wall is hidden, at every level; three
+  half see-through squares given in three orders come out the same,
+  furthest first (the golden `transparent_order`); five of one kind are
+  one call; glass over the sky; additive glows adding up; a cutoff on a
+  see-through surface; thick fog hiding glass and glow alike; and no
+  shadow from a see-through or additive pane where an opaque one casts
+  one. Then the C interface, the loader, and Dart (`blend_test.dart`),
+  and the lab page driven as a player would.
+- **The lab** ("Look: glass, water and glows"): three tinted panes
+  turning among a ring of cubes, so each is in front of the glass and
+  then behind it; balls half in a pool of water; additive sparks
+  circling over it; the camera swinging round. A slider sets the glass's
+  opacity, and a switch adds a crowd of 400 see-through panes
+  (`LAB_CROWD` starts with it, for measuring).
+- **The guide**: §5 "See-through: glass, water and glows", the Unity
+  table, §19 (glass doesn't bend light; see-through objects cast no
+  shadow), and §21 (BLEND materials are see-through now).
+- **Measured**, the glass page, 60 s each, alone, under `caffeinate`:
+
+  | | low | medium | high | medium, 400 more panes |
+  |---|---|---|---|---|
+  | iPhone (1320×1309) | 119.9 fps (min 115) | 120 (min 120) | 120 (min 119) | 120 (min 120) |
+  | Note10+ (1080×1068) | 59.8 (min 56.9) | 56.7 (min 39.9) | 53.5 (min 40.9) | 48.7 (min 35.9) |
+
+  The iPhone holds 120 everywhere, the crowd included. The Note10+
+  holds 60 at low; at medium it's the shortfall phases 2 and 3 left to
+  phase 6, and see-through surfaces add to it, as each pixel under them
+  is drawn once per layer: the crowd of 400 overlapping panes costs it
+  about 8 fps more. Left to phase 6 with the rest.
+
+  From the renderer's bench (M3 Max, best of 50), every cube see-through
+  with the sun's shadows: `prepare` 0.04 ms for 1,000 cubes (as opaque)
+  and 0.46–0.48 ms for 10,000 (0.26–0.38 opaque), the sort by distance;
+  a whole frame of 10,000 1.2–1.9 ms against 1.1–1.2.
+
 ### Phase 6: bloom, and a light AO
 
 - **Bloom.** What's brighter than white glows: emissive materials, the
@@ -536,6 +610,6 @@ say otherwise.
 - [x] Phase 2: lights (the Note10+ at medium left to phase 6)
 - [x] Phase 3: shadows (the Note10+ at medium left to phase 6)
 - [x] Phase 4: the sky and what reflects it
-- [ ] Phase 5: see-through
+- [x] Phase 5: see-through (the Note10+ at medium left to phase 6)
 - [ ] Phase 6: bloom, and a light AO
 - [ ] Phase 7: the look scene, Sheepdog, and the report
