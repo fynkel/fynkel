@@ -75,6 +75,20 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
         let textured =
             FyMaterial { base_color_texture: id, normal_texture: id, emissive_texture: id, ..FyMaterial::default() };
         ok(fy_material_set(world.0, renderer.material, &textured));
+        // A sky that lights and fog, which every frame takes from the world.
+        let c = FyColor { r: 0.4, g: 0.6, b: 0.9, a: 1.0 };
+        let sky = FySky {
+            kind: FY_SKY_GRADIENT,
+            zenith: c,
+            horizon: c,
+            ground: c,
+            image: std::ptr::null(),
+            intensity: 1.0,
+            rotation: 0.0,
+            lighting: 1.0,
+        };
+        ok(fy_world_sky_set(world.0, &sky));
+        ok(fy_world_fog_set(world.0, &FyFog { start: 10.0, end: 50.0, ..FyFog::default() }));
     }
     let cubes: Vec<u64> = (0..1000)
         .map(|_| {
@@ -138,7 +152,10 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
         }
     });
     view.read(*numbers.last().unwrap(), 64, 64);
-    assert_eq!(allocations, 0, "allocations in 100 frames of 1,000 transform writes and 143 flags each");
+    assert_eq!(
+        allocations, 0,
+        "allocations in 100 frames of 1,000 transform writes and 143 flags each, under a sky in fog"
+    );
 }
 
 /// Flutter's raster thread calls `fy_apple_acquire` once per frame.

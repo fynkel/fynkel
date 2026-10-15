@@ -37,8 +37,8 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    CameraView, ColorSpace, Draw, Light as RenderLight, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
-    RenderScene, TextureKey,
+    CameraView, ColorSpace, Draw, Fog, Light as RenderLight, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
+    RenderScene, Sky, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
@@ -87,6 +87,9 @@ pub(crate) struct Extract {
     pub(crate) shake: Option<(ObjectId, Vec3)>,
     /// The world's quality level, or `None` for the device's.
     pub(crate) quality: Option<Quality>,
+    /// The world's sky and fog.
+    pub(crate) sky: Option<Sky>,
+    pub(crate) fog: Option<Fog>,
     /// The lights found, by id, before they're put in order. Kept so a
     /// frame allocates nothing.
     lights: Vec<(ObjectId, RenderLight)>,
@@ -230,9 +233,12 @@ impl Extract {
             near: c.near,
             far: c.far,
             clear_color: rgb(c.clear_color),
+            sky: c.show_sky,
         });
 
         scene.quality = self.quality;
+        scene.sky.clone_from(&self.sky);
+        scene.fog = self.fog;
         let lights = &mut self.lights;
         lights.clear();
         world.for_each2::<Light, Transform>(|id, light, t| {

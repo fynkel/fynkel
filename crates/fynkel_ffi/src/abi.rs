@@ -15,11 +15,11 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
-use fynkel_render::{Gpu, Quality, Renderer};
+use fynkel_render::{Fog, Gpu, Quality, Renderer, Sky, SkyImage, SkyKind};
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    Camera, Color, Component, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
+    Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData, MeshId,
     MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId, Transform, Vec2, Vec3, World,
 };
 
@@ -28,7 +28,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 24;
+pub const FY_ABI_VERSION: u32 = 25;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -116,6 +116,9 @@ pub struct FyCamera {
     pub size: f32,
     /// The layers it draws: bit n for layer n. `0xFFFFFFFF` for all.
     pub culling_mask: u32,
+    /// Shows the world's sky (`fy_world_sky_set`) behind everything;
+    /// without it, `clear_color`.
+    pub show_sky: bool,
 }
 
 /// `FyLight::kind`.
@@ -343,6 +346,7 @@ impl CComponent for FyCamera {
             orthographic: self.orthographic,
             size: self.size,
             culling_mask: self.culling_mask,
+            show_sky: self.show_sky,
         })
     }
     fn from_component(c: Camera) -> Self {
@@ -354,6 +358,7 @@ impl CComponent for FyCamera {
             orthographic: c.orthographic,
             size: c.size,
             culling_mask: c.culling_mask,
+            show_sky: c.show_sky,
         }
     }
 }
@@ -474,6 +479,9 @@ pub struct FyWorld {
     shake: Mutex<Option<(ObjectId, Vec3)>>,
     /// The quality level its views draw at, or `None` for the device's.
     quality: Mutex<Option<Quality>>,
+    /// Its sky and fog, as its views draw them.
+    sky: Mutex<Option<Sky>>,
+    fog: Mutex<Option<Fog>>,
 }
 
 impl FyWorld {
@@ -604,6 +612,8 @@ pub extern "C" fn fy_world_new() -> *mut FyWorld {
         gpu: Mutex::default(),
         shake: Mutex::default(),
         quality: Mutex::default(),
+        sky: Mutex::default(),
+        fog: Mutex::default(),
     };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
@@ -961,6 +971,236 @@ pub unsafe extern "C" fn fy_quality_auto(out: *mut u32) -> FyStatus {
         let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { write(out, level_of(device.kit.quality()), "out") }
+    })
+}
+
+// --- Sky and fog --------------------------------------------------------------
+
+/// `FySky::kind`: none; the camera's clear colour shows.
+pub const FY_SKY_NONE: u32 = 0;
+/// `FySky::kind`: one colour, `horizon`, seen and lighting as ambient light.
+pub const FY_SKY_COLOR: u32 = 1;
+/// `FySky::kind`: `zenith` straight up, `horizon` level, `ground` straight
+/// down, shown as picked.
+pub const FY_SKY_GRADIENT: u32 = 2;
+/// `FySky::kind`: `image`, an equirectangular `.hdr`, tone mapped as the
+/// scene is.
+pub const FY_SKY_IMAGE: u32 = 3;
+
+/// The world's sky. A gradient or an image lights the scene, a shiny
+/// surface mirroring it and a rough one taking its colour; a plain colour
+/// adds to the ambient light.
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FySky {
+    /// A `FY_SKY_*`.
+    pub kind: u32,
+    pub zenith: FyColor,
+    pub horizon: FyColor,
+    pub ground: FyColor,
+    /// `FY_SKY_IMAGE`'s; the world takes a share of it.
+    pub image: *const FySkyImage,
+    /// What the image's light is multiplied by.
+    pub intensity: f32,
+    /// How far the image is turned about the vertical, in degrees: positive
+    /// turns it to the right.
+    pub rotation: f32,
+    /// What the light the sky gives is multiplied by: 0 for none. What's
+    /// seen of it is unchanged.
+    pub lighting: f32,
+}
+
+/// The world's fog: what's further than `start` fades into `color`, all of
+/// it by `end`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyFog {
+    pub color: FyColor,
+    /// Whether `color` is used: without it, the fog is the sky's horizon.
+    pub use_color: bool,
+    /// Metres from the camera.
+    pub start: f32,
+    pub end: f32,
+    /// The fog thins with height, halving every `height` metres above
+    /// y = 0: 0 for as thick everywhere.
+    pub height: f32,
+}
+
+/// A sky's image on its own, before any world has it. Opaque to C. Made
+/// with `fy_sky_image_decode` on any thread, freed with
+/// `fy_sky_image_free`. Worlds that use it share it.
+#[derive(Debug)]
+pub struct FySkyImage(Arc<SkyImage>);
+
+/// Decodes a Radiance `.hdr` (equirectangular: −Z the middle, straight up
+/// the top row) of `len` bytes into a sky image handle and writes it to
+/// `out`. Anything else, or one over 8192 pixels on a side, is refused
+/// (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+///
+/// Decoding takes tens of milliseconds: call it off the UI thread.
+///
+/// # Safety
+///
+/// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_sky_image_decode(bytes: *const u8, len: usize, out: *mut *mut FySkyImage) -> FyStatus {
+    guard(|| {
+        let bytes = if len == 0 {
+            &[][..]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(bytes, "bytes")?, len) }
+        };
+        if out.is_null() {
+            return Err(Error::null("out"));
+        }
+        let invalid = |message: String| Error::new(FyStatus::InvalidValue, message);
+        let hdr = HdrData::decode(bytes).map_err(|e| invalid(e.to_string()))?;
+        let image = SkyImage::from_rgb(hdr.width(), hdr.height(), hdr.rgb()).map_err(invalid)?;
+        // SAFETY: checked non-null; the caller promises it's writable.
+        unsafe { out.write(Box::into_raw(Box::new(FySkyImage(Arc::new(image))))) };
+        Ok(())
+    })
+}
+
+/// Frees a sky image handle. Worlds that use it keep their share. Null is
+/// ignored.
+///
+/// # Safety
+///
+/// `image` is null or live, not used again after this.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_sky_image_free(image: *mut FySkyImage) {
+    if !image.is_null() {
+        // A panic here leaks the image rather than abort (fy_world_free).
+        let _ = guard(|| {
+            // SAFETY: made by Box::into_raw in fy_sky_image_decode; the
+            // caller gives it up.
+            drop(unsafe { Box::from_raw(image) });
+            Ok(())
+        });
+    }
+}
+
+/// Writes the sky image's width and height in pixels.
+///
+/// # Safety
+///
+/// `image` is null or live; the outs are null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_sky_image_size(
+    image: *const FySkyImage,
+    out_width: *mut u32,
+    out_height: *mut u32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let image = unsafe { handle(image, "image") }?;
+        // SAFETY: per this function's contract.
+        unsafe {
+            write(out_width, image.0.width(), "out_width")?;
+            write(out_height, image.0.height(), "out_height")
+        }
+    })
+}
+
+fn linear(c: FyColor) -> Vec3 {
+    let [r, g, b, _] = Color::from(c).to_linear();
+    Vec3::new(r, g, b)
+}
+
+/// Checks `value` is finite and at least 0.
+fn not_negative(value: f32, what: &str) -> Result<f32, Error> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(Error::new(FyStatus::InvalidValue, format!("{what} {value} must be 0 or more")))
+    }
+}
+
+/// Sets the world's sky, or clears it when `sky` is null or its kind is
+/// `FY_SKY_NONE`. Taken by each `fy_view_frame` after; a new gradient or
+/// image costs its views a few milliseconds of GPU work, once.
+///
+/// # Safety
+///
+/// `world` is null or live; `sky` is null or readable, its `image` null or
+/// live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_sky_set(world: *const FyWorld, sky: *const FySky) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        // SAFETY: per this function's contract.
+        let sky = match unsafe { sky.as_ref() } {
+            None => None,
+            Some(s) if s.kind == FY_SKY_NONE => None,
+            Some(s) => {
+                let kind = match s.kind {
+                    FY_SKY_COLOR => SkyKind::Color(linear(s.horizon)),
+                    FY_SKY_GRADIENT => SkyKind::Gradient {
+                        zenith: linear(s.zenith),
+                        horizon: linear(s.horizon),
+                        ground: linear(s.ground),
+                    },
+                    FY_SKY_IMAGE => {
+                        // SAFETY: per this function's contract.
+                        let image = unsafe { handle(s.image, "sky.image") }?;
+                        if !s.rotation.is_finite() {
+                            return Err(Error::new(FyStatus::InvalidValue, "sky.rotation must be finite"));
+                        }
+                        SkyKind::Image {
+                            image: Arc::clone(&image.0),
+                            intensity: not_negative(s.intensity, "sky.intensity")?,
+                            rotation: s.rotation.to_radians(),
+                        }
+                    }
+                    other => {
+                        return Err(Error::new(FyStatus::InvalidValue, format!("{other} isn't a kind of sky")));
+                    }
+                };
+                Some(Sky { kind, lighting: not_negative(s.lighting, "sky.lighting")? })
+            }
+        };
+        *world.sky.lock().unwrap_or_else(PoisonError::into_inner) = sky;
+        Ok(())
+    })
+}
+
+/// Sets the world's fog, or clears it when `fog` is null. Taken by each
+/// `fy_view_frame` after.
+///
+/// # Safety
+///
+/// `world` is null or live; `fog` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_fog_set(world: *const FyWorld, fog: *const FyFog) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        // SAFETY: per this function's contract.
+        let fog = match unsafe { fog.as_ref() } {
+            None => None,
+            Some(f) => {
+                let start = not_negative(f.start, "fog.start")?;
+                if !(f.end.is_finite() && f.end > start) {
+                    return Err(Error::new(
+                        FyStatus::InvalidValue,
+                        format!("fog.end {} must be beyond its start {start}", f.end),
+                    ));
+                }
+                let height = not_negative(f.height, "fog.height")?;
+                Some(Fog {
+                    color: f.use_color.then(|| linear(f.color)),
+                    start,
+                    end: f.end,
+                    height: (height > 0.0).then_some(height),
+                })
+            }
+        };
+        *world.fog.lock().unwrap_or_else(PoisonError::into_inner) = fog;
+        Ok(())
     })
 }
 
@@ -2306,6 +2546,8 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
         let mut scene = view.worker.scene();
         clock.extract.shake = *view.world.shake.lock().unwrap_or_else(PoisonError::into_inner);
         clock.extract.quality = *view.world.quality.lock().unwrap_or_else(PoisonError::into_inner);
+        clock.extract.sky.clone_from(&view.world.sky.lock().unwrap_or_else(PoisonError::into_inner));
+        clock.extract.fog = *view.world.fog.lock().unwrap_or_else(PoisonError::into_inner);
         let world = match view.world.lock() {
             Ok(world) => world,
             Err(error) => {
@@ -2488,6 +2730,9 @@ pub struct FyViewStats {
     pub texture_bytes: u64,
     /// GPU memory the world's meshes hold, in bytes.
     pub mesh_bytes: u64,
+    /// GPU memory the sky's light holds for this view, in bytes: 0 for no
+    /// sky or a plain one.
+    pub sky_bytes: u64,
 }
 
 /// # Safety
@@ -2506,6 +2751,7 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             skipped: w.skipped,
             texture_bytes: w.texture_bytes,
             mesh_bytes: w.mesh_bytes,
+            sky_bytes: w.sky_bytes,
             ..Default::default()
         };
         #[cfg(target_vendor = "apple")]

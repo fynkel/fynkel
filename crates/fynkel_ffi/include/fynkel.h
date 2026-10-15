@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 24
+#define FY_ABI_VERSION 25
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -53,6 +53,20 @@
 
 // `fy_mesh_new_shape`'s shape: a 1×1 quad in XY facing +Z.
 #define FY_MESH_QUAD 5
+
+// `FySky::kind`: none; the camera's clear colour shows.
+#define FY_SKY_NONE 0
+
+// `FySky::kind`: one colour, `horizon`, seen and lighting as ambient light.
+#define FY_SKY_COLOR 1
+
+// `FySky::kind`: `zenith` straight up, `horizon` level, `ground` straight
+// down, shown as picked.
+#define FY_SKY_GRADIENT 2
+
+// `FySky::kind`: `image`, an equirectangular `.hdr`, tone mapped as the
+// scene is.
+#define FY_SKY_IMAGE 3
 
 // `fy_apple_acquire`: a surface was written to `out_surface`.
 #define FY_APPLE_SHOWN 1
@@ -124,6 +138,11 @@ typedef struct FyMesh FyMesh;
 // `fy_model_texture` give, and with every world that spawns it.
 typedef struct FyModel FyModel;
 
+// A sky's image on its own, before any world has it. Opaque to C. Made
+// with `fy_sky_image_decode` on any thread, freed with
+// `fy_sky_image_free`. Worlds that use it share it.
+typedef struct FySkyImage FySkyImage;
+
 // An image on its own, before any world has it. Opaque to C. Made with
 // `fy_texture_decode` or `fy_texture_new_rgba` on any thread, freed with
 // `fy_texture_free`. Worlds that add it share its pixels, so freeing it
@@ -143,6 +162,49 @@ typedef struct FyVec3 {
   float y;
   float z;
 } FyVec3;
+
+// sRGB, 0–1 per channel.
+typedef struct FyColor {
+  float r;
+  float g;
+  float b;
+  float a;
+} FyColor;
+
+// The world's sky. A gradient or an image lights the scene, a shiny
+// surface mirroring it and a rough one taking its colour; a plain colour
+// adds to the ambient light.
+typedef struct FySky {
+  // A `FY_SKY_*`.
+  uint32_t kind;
+  struct FyColor zenith;
+  struct FyColor horizon;
+  struct FyColor ground;
+  // `FY_SKY_IMAGE`'s; the world takes a share of it.
+  const struct FySkyImage *image;
+  // What the image's light is multiplied by.
+  float intensity;
+  // How far the image is turned about the vertical, in degrees: positive
+  // turns it to the right.
+  float rotation;
+  // What the light the sky gives is multiplied by: 0 for none. What's
+  // seen of it is unchanged.
+  float lighting;
+} FySky;
+
+// The world's fog: what's further than `start` fades into `color`, all of
+// it by `end`.
+typedef struct FyFog {
+  struct FyColor color;
+  // Whether `color` is used: without it, the fog is the sky's horizon.
+  bool use_color;
+  // Metres from the camera.
+  float start;
+  float end;
+  // The fog thins with height, halving every `height` metres above
+  // y = 0: 0 for as thick everywhere.
+  float height;
+} FyFog;
 
 // A rotation, as a unit quaternion.
 typedef struct FyQuat {
@@ -175,14 +237,6 @@ typedef struct FyRayHit {
   // From the ray's origin to `point`.
   float distance;
 } FyRayHit;
-
-// sRGB, 0–1 per channel.
-typedef struct FyColor {
-  float r;
-  float g;
-  float b;
-  float a;
-} FyColor;
 
 // A line from `a` to `b` in world space.
 typedef struct FyDebugLine {
@@ -220,6 +274,9 @@ typedef struct FyCamera {
   float size;
   // The layers it draws: bit n for layer n. `0xFFFFFFFF` for all.
   uint32_t culling_mask;
+  // Shows the world's sky (`fy_world_sky_set`) behind everything;
+  // without it, `clear_color`.
+  bool show_sky;
 } FyCamera;
 
 // `Default` is the engine's default light: a white sun of intensity 1,
@@ -326,6 +383,9 @@ typedef struct FyViewStats {
   uint64_t texture_bytes;
   // GPU memory the world's meshes hold, in bytes.
   uint64_t mesh_bytes;
+  // GPU memory the sky's light holds for this view, in bytes: 0 for no
+  // sky or a plain one.
+  uint64_t sky_bytes;
 } FyViewStats;
 
 // Called on a GPU thread each time an Apple view finishes a frame.
@@ -489,6 +549,54 @@ FyStatus fy_world_quality_set(const struct FyWorld *world, uint32_t level);
 //
 // `out` is null or writable.
 FyStatus fy_quality_auto(uint32_t *out);
+
+// Decodes a Radiance `.hdr` (equirectangular: −Z the middle, straight up
+// the top row) of `len` bytes into a sky image handle and writes it to
+// `out`. Anything else, or one over 8192 pixels on a side, is refused
+// (`FY_STATUS_INVALID_VALUE`) with a message saying why.
+//
+// Decoding takes tens of milliseconds: call it off the UI thread.
+//
+// # Safety
+//
+// `bytes` is valid for `len` bytes (it may be null when `len` is 0);
+// `out` is null or writable.
+FyStatus fy_sky_image_decode(const uint8_t *bytes, size_t len, struct FySkyImage **out);
+
+// Frees a sky image handle. Worlds that use it keep their share. Null is
+// ignored.
+//
+// # Safety
+//
+// `image` is null or live, not used again after this.
+void fy_sky_image_free(struct FySkyImage *image);
+
+// Writes the sky image's width and height in pixels.
+//
+// # Safety
+//
+// `image` is null or live; the outs are null or writable.
+FyStatus fy_sky_image_size(const struct FySkyImage *image,
+                           uint32_t *out_width,
+                           uint32_t *out_height);
+
+// Sets the world's sky, or clears it when `sky` is null or its kind is
+// `FY_SKY_NONE`. Taken by each `fy_view_frame` after; a new gradient or
+// image costs its views a few milliseconds of GPU work, once.
+//
+// # Safety
+//
+// `world` is null or live; `sky` is null or readable, its `image` null or
+// live.
+FyStatus fy_world_sky_set(const struct FyWorld *world, const struct FySky *sky);
+
+// Sets the world's fog, or clears it when `fog` is null. Taken by each
+// `fy_view_frame` after.
+//
+// # Safety
+//
+// `world` is null or live; `fog` is null or readable.
+FyStatus fy_world_fog_set(const struct FyWorld *world, const struct FyFog *fog);
 
 // Names the object with `len` bytes of UTF-8 at `name`, or clears its name
 // when `len` is 0. Names needn't be unique.

@@ -50,6 +50,8 @@ pub(crate) struct WorkerStats {
     /// scene taken.
     pub(crate) texture_bytes: u64,
     pub(crate) mesh_bytes: u64,
+    /// GPU memory the sky's light holds, as of the last scene drawn.
+    pub(crate) sky_bytes: u64,
 }
 
 #[derive(Debug)]
@@ -505,7 +507,8 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                 let drawn = match target.begin() {
                     Some(frame) => {
                         let (width, height) = target.size();
-                        renderer.prepare(&scene, width, height);
+                        let stats = renderer.prepare(&scene, width, height);
+                        shared.lock().stats.sky_bytes = stats.sky_bytes;
                         let mut encoder =
                             gpu.device.create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor {
                                 label: Some("frame"),

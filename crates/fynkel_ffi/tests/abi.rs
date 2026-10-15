@@ -43,6 +43,7 @@ fn a_sphere_lit_from_the_left_matches_its_golden() {
                 orthographic: false,
                 size: 5.0,
                 culling_mask: u32::MAX,
+                show_sky: true,
             },
         ));
         let looking = Transform::from_position(Vec3::new(0.0, 0.0, 2.2)).looking_at(Vec3::ZERO);
@@ -151,6 +152,7 @@ fn values_are_validated_with_a_message_that_names_the_field() {
             orthographic: false,
             size: 5.0,
             culling_mask: u32::MAX,
+            show_sky: true,
         };
         assert_eq!(fy_camera_set(world.0, id, &camera), FyStatus::InvalidValue);
         assert!(last_error().contains("Camera.fov_y"), "{}", last_error());
@@ -231,6 +233,7 @@ fn every_component_reads_back_what_was_written() {
         orthographic: true,
         size: 3.0,
         culling_mask: u32::MAX,
+        show_sky: true,
     };
     let light = FyLight { kind: FY_LIGHT_AMBIENT, color: srgb(0.5, 0.5, 0.5), intensity: 2.0, ..Default::default() };
     // SAFETY: a live world and pointers to locals.
@@ -417,6 +420,7 @@ fn hidden_rig(world: &World) -> u64 {
             orthographic: false,
             size: 5.0,
             culling_mask: u32::MAX,
+            show_sky: true,
         };
         ok(fy_camera_set(w, camera, &wide));
         ok(fy_transform_set(w, camera, &transform(Transform::from_position(Vec3::new(0.0, 0.0, 6.0)))));
