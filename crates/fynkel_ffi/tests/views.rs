@@ -118,6 +118,7 @@ fn add_camera(world: &World, eye: Vec3, clear: FyColor) -> u64 {
         size: 5.0,
         culling_mask: u32::MAX,
         show_sky: true,
+        ..Default::default()
     };
     let looking = Transform::from_position(eye).looking_at(Vec3::ZERO);
     // SAFETY: a live world and pointers to locals.

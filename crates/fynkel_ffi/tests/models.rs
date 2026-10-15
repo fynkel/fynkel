@@ -192,6 +192,7 @@ fn render_at(name: &str, from: Vec3, zoom: f32, level: u32) -> fynkel_golden::Im
                 size: 5.0,
                 culling_mask: u32::MAX,
                 show_sky: true,
+                ..Default::default()
             },
         ));
         let distance = radius / (FOV.to_radians() / 2.0).sin() * 1.05 / zoom;
