@@ -120,6 +120,8 @@ pub fn stage1_scene() -> RenderScene {
         quality: None,
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_rotation_y(30f32.to_radians()),

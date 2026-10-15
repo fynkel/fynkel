@@ -33,8 +33,11 @@ use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
 use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
-use crate::scene::{ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, TextureKey};
+use crate::scene::{
+    ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShadowFilter, SkyKind, TextureKey,
+};
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
+use crate::sky::{self, Environment, SPECULAR_MIPS};
 use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
@@ -65,6 +68,9 @@ pub struct FrameStats {
     /// GPU memory of the shadow maps the view holds, shared with the kit's
     /// other views or not.
     pub shadow_bytes: u64,
+    /// GPU memory the view holds for the sky's light, and an image sky's
+    /// pixels.
+    pub sky_bytes: u64,
 }
 
 /// `Frame` in forward.wgsl.
@@ -72,6 +78,7 @@ pub struct FrameStats {
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct FrameUniforms {
     view_proj: [[f32; 4]; 4],
+    sky: SkyUniform,
     camera_position: [f32; 4],
     ambient: [f32; 4],
     /// x: how many of `suns` are used. y: the one that casts shadows, or
@@ -90,6 +97,25 @@ struct FrameUniforms {
     cells_eye: [f32; 4],
     /// xyz: the way the camera looks.
     cells_forward: [f32; 4],
+    /// rgb: what fog fades into, as seen. w: 1 if there's fog.
+    fog_color: [f32; 4],
+    /// x: where it starts. y: 1 / how far it takes to be whole. z: 1 / the
+    /// height it halves over, or 0.
+    fog: [f32; 4],
+    /// x: multiplies the sky's light. y: the specular cube's last mip.
+    sky_light: [f32; 4],
+}
+
+/// `Sky` in forward.wgsl and sky.wgsl.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct SkyUniform {
+    inverse_view_proj: [[f32; 4]; 4],
+    /// rgb: the colours. zenith's w: 1 gradient, 2 image. horizon's: the
+    /// image's intensity. ground's: its turn.
+    zenith: [f32; 4],
+    horizon: [f32; 4],
+    ground: [f32; 4],
 }
 
 /// `Shadows` in forward.wgsl.
@@ -224,15 +250,19 @@ struct Variant {
     shadowed: bool,
     /// The material has a texture.
     textured: bool,
+    /// The sky lights the scene from its cubes (a gradient or an image).
+    sky_lit: bool,
 }
 
 impl Variant {
-    const COUNT: usize = 2 * Faces::ALL.len() * 2 * 2;
+    const COUNT: usize = 2 * Faces::ALL.len() * 2 * 2 * 2;
 
     /// Its index in `Pipelines::forward`.
     fn index(self) -> usize {
-        ((usize::from(self.cutout) * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
-            + usize::from(self.textured)
+        (((usize::from(self.cutout) * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+            + usize::from(self.textured))
+            * 2
+            + usize::from(self.sky_lit)
     }
 }
 
@@ -281,10 +311,14 @@ pub(crate) struct Pipelines {
     textures_layout: wgpu::BindGroupLayout,
     maps_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
+    sky_light_layout: wgpu::BindGroupLayout,
+    sky_image_layout: wgpu::BindGroupLayout,
     forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
     /// One for each [`Variant`], at its index.
     forward: [OnceLock<wgpu::RenderPipeline>; Variant::COUNT],
     lines: OnceLock<wgpu::RenderPipeline>,
+    /// The sky, behind everything.
+    sky: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
     finish: OnceLock<wgpu::RenderPipeline>,
 }
@@ -337,6 +371,12 @@ pub struct Renderer {
     shadow_next: [(u32, u32); 2],
     shadow_idle: [u32; 2],
     clear: wgpu::Color,
+    /// The sky this frame lights the scene with from cubes, and whether
+    /// it's drawn behind everything.
+    sky_next: Option<SkyKind>,
+    sky_drawn: bool,
+    /// The cubes (and image) of the last such sky, kept until another.
+    environment: Option<Environment>,
     size: (u32, u32),
     /// This frame's level: the scene's, or the device's.
     quality: Quality,
@@ -417,6 +457,9 @@ impl Renderer {
             shadow_next: [(1, 0); 2],
             shadow_idle: [0; 2],
             clear: wgpu::Color::BLACK,
+            sky_next: None,
+            sky_drawn: false,
+            environment: None,
             size: (0, 0),
             kit,
         }
@@ -491,6 +534,8 @@ impl Renderer {
         self.caster_batches.clear();
         self.shadow_maps_drawn = (0, 0);
         self.shadow_shape = [None; 2];
+        self.sky_next = None;
+        self.sky_drawn = false;
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
@@ -525,6 +570,52 @@ impl Renderer {
         u.view_proj = (projection * camera.view).to_cols_array_2d();
         u.camera_position = to_viewer.into();
         u.ambient = scene.ambient.extend(0.0).into();
+
+        // The sky: a plain one is the clear colour and more ambient light;
+        // a gradient or an image is drawn after the scene and lights it
+        // from its cubes.
+        u.sky = SkyUniform {
+            inverse_view_proj: (projection * camera.view).inverse().to_cols_array_2d(),
+            ..SkyUniform::zeroed()
+        };
+        u.sky_light = [0.0, (SPECULAR_MIPS - 1) as f32, 0.0, 0.0];
+        let mut horizon = Vec3::from(camera.clear_color);
+        if let Some(sky) = &scene.sky {
+            match &sky.kind {
+                SkyKind::Color(c) => {
+                    u.ambient = (scene.ambient + *c * sky.lighting).extend(0.0).into();
+                    if camera.sky {
+                        let [r, g, b] = c.to_array().map(f64::from);
+                        self.clear = wgpu::Color { r, g, b, a: 1.0 };
+                    }
+                    horizon = *c;
+                }
+                SkyKind::Gradient { zenith, horizon: level, ground } => {
+                    u.sky.zenith = zenith.extend(1.0).into();
+                    u.sky.horizon = level.extend(0.0).into();
+                    u.sky.ground = ground.extend(0.0).into();
+                    horizon = *level;
+                }
+                SkyKind::Image { image, intensity, rotation } => {
+                    u.sky.zenith = [0.0, 0.0, 0.0, 2.0];
+                    u.sky.horizon = [0.0, 0.0, 0.0, *intensity];
+                    u.sky.ground = [0.0, 0.0, 0.0, *rotation];
+                    horizon = sky::tonemap_neutral(image.horizon() * *intensity);
+                }
+            }
+            stats.sky_bytes = sky::bytes(&sky.kind);
+            if !matches!(sky.kind, SkyKind::Color(_)) {
+                u.sky_light[0] = sky.lighting;
+                self.sky_next = Some(sky.kind.clone());
+                self.sky_drawn = camera.sky;
+            }
+        }
+        u.fog_color = [0.0; 4];
+        if let Some(fog) = scene.fog {
+            u.fog_color = fog.color.unwrap_or(horizon).extend(1.0).into();
+            let height = fog.height.filter(|h| *h > 0.0).map_or(0.0, |h| 1.0 / h);
+            u.fog = [fog.start, 1.0 / (fog.end - fog.start).max(1e-4), height, 0.0];
+        }
 
         // The suns, in the scene's order; one with no direction lights
         // nothing.
@@ -811,7 +902,18 @@ impl Renderer {
         if self.shadow_maps.as_ref().is_none_or(|m| m.shape != self.shadow_next) {
             self.shadow_maps = Some(ShadowMaps::new(&self.kit.gpu.device, &self.kit.shadows, self.shadow_next));
         }
-        let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, .. } = self;
+        // A new sky's light, worked out before anything reads it.
+        if let Some(kind) = &self.sky_next
+            && self.environment.as_ref().is_none_or(|e| e.kind != *kind)
+        {
+            self.environment = Some(Environment::new(&self.kit.sky, encoder, kind));
+        }
+        let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, environment, .. } = self;
+        let sky_light = match (&self.sky_next, &*environment) {
+            (Some(_), Some(environment)) => &environment.light,
+            _ => &kit.sky.no_light,
+        };
+        let sky_image = environment.as_ref().and_then(|e| e.image.as_ref()).unwrap_or(&kit.sky.no_image);
         let targets = targets.as_ref().expect("made above");
         let shadow_maps = shadow_maps.as_ref().expect("made above");
 
@@ -903,12 +1005,14 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if !self.batches.is_empty() || !self.line_vertices.is_empty() {
+            if !self.batches.is_empty() || !self.line_vertices.is_empty() || self.sky_drawn {
                 pass.set_bind_group(0, frame.bind_group, &[]);
             }
             if !self.batches.is_empty() {
                 pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
+                pass.set_bind_group(3, sky_light, &[]);
             }
+            let sky_lit = self.sky_next.is_some();
             if !self.batches.is_empty() {
                 pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
             }
@@ -929,6 +1033,7 @@ impl Renderer {
                         faces,
                         shadowed,
                         textured: textured(batch),
+                        sky_lit,
                     }));
                 }
                 if last.is_none_or(|l| l.textures != batch.textures) {
@@ -938,6 +1043,12 @@ impl Renderer {
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            }
+            // After the scene, so it's drawn only where nothing else is.
+            if self.sky_drawn {
+                pass.set_pipeline(scene_pipelines.sky());
+                pass.set_bind_group(1, sky_image, &[]);
+                pass.draw(0..3, 0..1);
             }
             if !self.line_vertices.is_empty() {
                 pass.set_pipeline(scene_pipelines.lines());
@@ -1044,9 +1155,12 @@ impl Pipelines {
             textures_layout: kit.textures.layout.clone(),
             maps_layout: kit.shadows.maps_layout.clone(),
             image_layout: kit.image_layout.clone(),
+            sky_light_layout: kit.sky.light_layout.clone(),
+            sky_image_layout: kit.sky.image_layout.clone(),
             forward_shader: OnceLock::new(),
-            forward: Default::default(),
+            forward: std::array::from_fn(|_| OnceLock::new()),
             lines: OnceLock::new(),
+            sky: OnceLock::new(),
             finish: OnceLock::new(),
         }
     }
@@ -1057,13 +1171,18 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let Variant { cutout, faces, shadowed, textured } = variant;
+        let Variant { cutout, faces, shadowed, textured, sky_lit } = variant;
         let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
             let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("forward"),
-                bind_group_layouts: &[Some(&self.frame_layout), Some(&self.textures_layout), Some(&self.maps_layout)],
+                bind_group_layouts: &[
+                    Some(&self.frame_layout),
+                    Some(&self.textures_layout),
+                    Some(&self.maps_layout),
+                    Some(&self.sky_light_layout),
+                ],
                 immediate_size: 0,
             });
             (shader, layout)
@@ -1097,8 +1216,12 @@ impl Pipelines {
             Faces::Both => (wgpu::FrontFace::Ccw, None),
         };
         let on = |yes: bool| if yes { 1.0 } else { 0.0 };
-        let constants =
-            [("double_sided", on(faces == Faces::Both)), ("shadowed", on(shadowed)), ("textured", on(textured))];
+        let constants = [
+            ("double_sided", on(faces == Faces::Both)),
+            ("shadowed", on(shadowed)),
+            ("textured", on(textured)),
+            ("sky_lit", on(sky_lit)),
+        ];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
         self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some(if cutout { "forward cut-out" } else { "forward" }),
@@ -1195,6 +1318,50 @@ impl Pipelines {
             }),
             multiview_mask: None,
             cache: None,
+        })
+    }
+
+    /// The sky's pipeline: one triangle at the far plane, drawn where
+    /// nothing is (reversed-Z: the depth is still its clear value, 0).
+    fn sky(&self) -> &wgpu::RenderPipeline {
+        self.sky.get_or_init(|| {
+            let shader = self.device.create_shader_module(wgpu::include_wgsl!("sky.wgsl"));
+            let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("sky"),
+                bind_group_layouts: &[Some(&self.frame_layout), Some(&self.sky_image_layout)],
+                immediate_size: 0,
+            });
+            self.maker.make(wgpu::RenderPipelineDescriptor {
+                label: Some("sky"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: &shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::GreaterEqual),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: &shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
         })
     }
 

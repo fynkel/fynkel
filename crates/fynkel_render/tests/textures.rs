@@ -29,6 +29,8 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
         quality: None,
         ambient: Vec3::ZERO,
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws: vec![Draw {
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(2.0)),
@@ -217,6 +219,8 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
             quality: None,
             ambient: Vec3::ZERO,
             lines: Vec::new(),
+            sky: None,
+            fog: None,
             draws: vec![Draw {
                 mesh: PLANE,
                 model: Mat4::from_scale(Vec3::new(400.0, 1.0, 400.0)),

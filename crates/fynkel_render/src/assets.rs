@@ -14,6 +14,7 @@ use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
 use crate::scene::{ColorSpace, MeshKey, Quality, TextureKey};
 use crate::shadows::ShadowKit;
+use crate::sky::SkyKit;
 use crate::texture::{GpuTexture, TextureKit, Textures};
 use fynkel_mesh::MeshData;
 
@@ -30,6 +31,8 @@ pub struct Kit {
     pub(crate) textures: TextureKit,
     /// Shadow maps' layouts, sampler and pipelines.
     pub(crate) shadows: ShadowKit,
+    /// Skies' layouts, samplers and the pipelines that work out their light.
+    pub(crate) sky: SkyKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
     pub(crate) maker: PipelineMaker,
 }
@@ -178,6 +181,7 @@ impl Kit {
         let textures = TextureKit::new(gpu, &maker);
         Arc::new(Self {
             shadows: ShadowKit::new(&gpu.device, &textures.layout, &maker),
+            sky: SkyKit::new(&gpu.device, &gpu.queue, &maker),
             maker,
             gpu: gpu.clone(),
             quality: Quality::for_adapter(&gpu.adapter.get_info()),

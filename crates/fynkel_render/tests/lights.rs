@@ -19,6 +19,8 @@ fn wall(size: f32, lights: Vec<Light>, quality: Quality) -> RenderScene {
         quality: Some(quality),
         ambient: Vec3::ZERO,
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws: vec![Draw {
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(size)),

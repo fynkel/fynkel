@@ -32,6 +32,8 @@ fn scene(n: u32, lamps: u32, shadows: bool, t: f32) -> RenderScene {
             }))
             .collect(),
         quality: None,
+        sky: None,
+        fog: None,
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         draws: (0..n)

@@ -6,6 +6,8 @@
 //! The renderer converts nothing and looks nothing up except mesh and
 //! texture keys.
 
+use std::sync::Arc;
+
 use glam::{Mat4, Vec3};
 
 /// Names a mesh uploaded with [`crate::Renderer::upload_mesh`]. The
@@ -87,8 +89,13 @@ pub struct CameraView {
     pub near: f32,
     pub far: f32,
     /// Linear RGB. Shown as-is behind everything (not tonemapped), so the
-    /// colour picked is the colour seen.
+    /// colour picked is the colour seen. Behind a [`RenderScene::sky`],
+    /// only when [`CameraView::sky`] is off.
     pub clear_color: [f32; 3],
+    /// Whether it shows the scene's sky behind everything, if there is
+    /// one: off, its clear colour (a minimap's, say). The sky lights the
+    /// scene either way.
+    pub sky: bool,
 }
 
 impl CameraView {
@@ -102,6 +109,7 @@ impl CameraView {
             near: 0.1,
             far: 1000.0,
             clear_color: [0.0; 3],
+            sky: true,
         }
     }
 }
@@ -368,6 +376,165 @@ pub struct Line {
     pub color: [f32; 4],
 }
 
+/// What is seen behind everything, and lights it: every surface takes its
+/// light from the sky around it, a rough one its colour, a shiny one its
+/// mirror image.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Sky {
+    pub kind: SkyKind,
+    /// Multiplies the light it gives (not what's seen of it): 1 lights a
+    /// rough white surface under a plain sky of colour c to c.
+    pub lighting: f32,
+}
+
+/// What a [`Sky`] is. Two images are the same when they're the same
+/// [`Arc`], not when their pixels are.
+#[derive(Clone, Debug)]
+pub enum SkyKind {
+    /// One colour, linear, seen as-is: [`RenderScene::ambient`] of that
+    /// colour, behind everything.
+    Color(Vec3),
+    /// Linear colours seen as-is: straight up the zenith, level the
+    /// horizon, straight down the ground, blended between.
+    Gradient { zenith: Vec3, horizon: Vec3, ground: Vec3 },
+    /// A picture all round, light values (tone mapped as the scene is).
+    Image {
+        image: Arc<SkyImage>,
+        /// Multiplies its values.
+        intensity: f32,
+        /// Turns it about the vertical, in radians: positive to the right
+        /// (clockwise, seen from above).
+        rotation: f32,
+    },
+}
+
+impl PartialEq for SkyKind {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Color(a), Self::Color(b)) => a == b,
+            (
+                Self::Gradient { zenith: a, horizon: b, ground: c },
+                Self::Gradient { zenith: d, horizon: e, ground: f },
+            ) => (a, b, c) == (d, e, f),
+            (
+                Self::Image { image: a, intensity: b, rotation: c },
+                Self::Image { image: d, intensity: e, rotation: f },
+            ) => Arc::ptr_eq(a, d) && (b, c) == (e, f),
+            _ => false,
+        }
+    }
+}
+
+/// A picture of everything around, equirectangular: x the way round from
+/// behind (−Z is the middle, +X three quarters across), y from straight up
+/// to straight down. Linear RGB light values, as `.hdr` files hold.
+#[derive(Debug)]
+pub struct SkyImage {
+    width: u32,
+    height: u32,
+    /// Each pixel packed as `Rgb9e5Ufloat`, rows from the top.
+    packed: Vec<u32>,
+    horizon: Vec3,
+}
+
+impl SkyImage {
+    /// The most pixels on a side.
+    pub const MAX_SIDE: u32 = 8192;
+
+    /// A sky image `width` × `height` from `rgb`, three linear values a
+    /// pixel, rows from the top. Refused when the length doesn't match, a
+    /// side is 0 or over [`SkyImage::MAX_SIDE`], or a value is negative or
+    /// not finite.
+    pub fn from_rgb(width: u32, height: u32, rgb: &[f32]) -> Result<Self, String> {
+        if width == 0 || height == 0 || width > Self::MAX_SIDE || height > Self::MAX_SIDE {
+            return Err(format!("a sky image is 1 to {} pixels a side, not {width} × {height}", Self::MAX_SIDE));
+        }
+        let pixels = width as usize * height as usize;
+        if rgb.len() != pixels * 3 {
+            return Err(format!("{width} × {height} needs {} values, not {}", pixels * 3, rgb.len()));
+        }
+        if let Some(bad) = rgb.iter().find(|v| !v.is_finite() || **v < 0.0) {
+            return Err(format!("a sky image's values are light, 0 or more, not {bad}"));
+        }
+        let packed = rgb.chunks_exact(3).map(|c| pack_rgb9e5(c[0], c[1], c[2])).collect();
+        // The rows within 10° of level, or the two (or one) nearest it.
+        let degrees = |row: u32| 90.0 - (row as f32 + 0.5) * 180.0 / height as f32;
+        let mut rows: Vec<u32> = (0..height).filter(|&r| degrees(r).abs() <= 10.0).collect();
+        if rows.is_empty() {
+            rows = if height.is_multiple_of(2) { vec![height / 2 - 1, height / 2] } else { vec![height / 2] };
+        }
+        let mut sum = Vec3::ZERO;
+        for &row in &rows {
+            let start = row as usize * width as usize * 3;
+            for c in rgb[start..start + width as usize * 3].chunks_exact(3) {
+                sum += Vec3::new(c[0], c[1], c[2]);
+            }
+        }
+        let horizon = sum / (rows.len() as f32 * width as f32);
+        Ok(Self { width, height, packed, horizon })
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+
+    /// The average colour within 10° of level: what fog fades into by
+    /// default.
+    pub fn horizon(&self) -> Vec3 {
+        self.horizon
+    }
+
+    pub(crate) fn packed(&self) -> &[u32] {
+        &self.packed
+    }
+
+    /// Its size in memory, on the GPU as here.
+    pub fn bytes(&self) -> u64 {
+        self.packed.len() as u64 * 4
+    }
+}
+
+/// Three non-negative values as one `Rgb9e5Ufloat`: a shared exponent and
+/// nine bits each (the GL_EXT_texture_shared_exponent rules).
+fn pack_rgb9e5(r: f32, g: f32, b: f32) -> u32 {
+    const BIAS: i32 = 15;
+    const MANTISSA: i32 = 9;
+    const MAX: f32 = 65408.0;
+    let (r, g, b) = (r.clamp(0.0, MAX), g.clamp(0.0, MAX), b.clamp(0.0, MAX));
+    let largest = r.max(g).max(b);
+    if largest == 0.0 {
+        return 0;
+    }
+    let mut exponent = (largest.log2().floor() as i32).max(-BIAS - 1) + 1 + BIAS;
+    let mut scale = 2f32.powi(exponent - BIAS - MANTISSA);
+    if (largest / scale + 0.5).floor() as i32 == 1 << MANTISSA {
+        exponent += 1;
+        scale *= 2.0;
+    }
+    let m = |v: f32| ((v / scale + 0.5).floor() as u32).min(511);
+    (exponent as u32) << 27 | m(b) << 18 | m(g) << 9 | m(r)
+}
+
+/// Fog: what's far fades into its colour.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fog {
+    /// Linear, seen as-is; `None` for the sky's horizon (tone mapped for an
+    /// image's), or with no sky the camera's clear colour.
+    pub color: Option<Vec3>,
+    /// From this far from the camera, in metres...
+    pub start: f32,
+    /// ...to this far, where there's only fog.
+    pub end: f32,
+    /// Thinner with height: as thick as given at y = 0 and below, half as
+    /// thick this many metres above, a quarter twice as high. `None`: the
+    /// same at every height.
+    pub height: Option<f32>,
+}
+
 /// One frame's worth of things to draw.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct RenderScene {
@@ -385,6 +552,10 @@ pub struct RenderScene {
     pub draws: Vec<Draw>,
     /// Drawn after the draws, over them, one pixel wide.
     pub lines: Vec<Line>,
+    /// Behind everything, and lighting it, as well as [`Self::ambient`].
+    /// `None`: the camera's clear colour, and the ambient light alone.
+    pub sky: Option<Sky>,
+    pub fog: Option<Fog>,
     /// The level to draw at; `None` for the device's own
     /// ([`Kit::quality`](crate::Kit::quality)).
     pub quality: Option<Quality>,
@@ -407,6 +578,8 @@ impl RenderScene {
         self.ambient = Vec3::ZERO;
         self.draws.clear();
         self.lines.clear();
+        self.sky = None;
+        self.fog = None;
         self.quality = None;
     }
 }
