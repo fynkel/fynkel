@@ -26,5 +26,5 @@ pub use hierarchy::WorldMatrices;
 pub use id::{MaterialId, MeshId, ObjectId, TextureId};
 pub use model::ModelIds;
 pub use raycast::{Ray, RayHit, Raycaster};
-pub use resources::Material;
+pub use resources::{Blend, Material};
 pub use world::{Result, World, WorldError};

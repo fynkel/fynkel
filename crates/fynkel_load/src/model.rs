@@ -55,6 +55,8 @@ pub struct MaterialData {
     pub emissive_strength: f32,
     /// 0 for opaque.
     pub alpha_cutoff: f32,
+    /// glTF's BLEND: laid over what's behind by its alpha.
+    pub transparent: bool,
     pub double_sided: bool,
     /// `KHR_texture_transform`, without rotation.
     pub uv_scale: [f32; 2],
@@ -76,6 +78,7 @@ impl MaterialData {
         emissive: [0.0; 3],
         emissive_strength: 1.0,
         alpha_cutoff: 0.0,
+        transparent: false,
         double_sided: false,
         uv_scale: [1.0; 2],
         uv_offset: [0.0; 2],
@@ -526,10 +529,7 @@ impl Reader<'_> {
         let alpha_cutoff = match m.alpha_mode() {
             gltf::material::AlphaMode::Opaque => 0.0,
             gltf::material::AlphaMode::Mask => m.alpha_cutoff().unwrap_or(0.5).clamp(0.0, 1.0),
-            gltf::material::AlphaMode::Blend => {
-                self.warn("see-through (BLEND) materials are drawn opaque; only cut-outs (MASK) are supported");
-                0.0
-            }
+            gltf::material::AlphaMode::Blend => 0.0,
         };
         if m.extension_value("KHR_materials_unlit").is_some() {
             self.warn("unlit materials are drawn lit");
@@ -595,6 +595,7 @@ impl Reader<'_> {
             emissive: m.emissive_factor().map(|c| clamp(c, 0.0, 1.0)),
             emissive_strength: clamp(m.emissive_strength().unwrap_or(1.0), 0.0, MAX_EMISSIVE_STRENGTH),
             alpha_cutoff,
+            transparent: m.alpha_mode() == gltf::material::AlphaMode::Blend,
             double_sided: m.double_sided(),
             uv_scale: uv_scale.map(|x| clamp(x, -MAX_UV, MAX_UV)),
             uv_offset: uv_offset.map(|x| clamp(x, -MAX_UV, MAX_UV)),

@@ -102,12 +102,11 @@ fn materials_keep_their_factors_textures_and_modes() {
     assert_eq!(material("MatCutoffDefault").alpha_cutoff, 0.5);
     assert_eq!(material("MatCutoff25").alpha_cutoff, 0.25);
     assert!(material("MatCutoff25").double_sided);
-    // BLEND is drawn opaque, said once though two nodes use it.
+    // BLEND is see-through, as it's meant to be; the rest aren't.
+    assert!(material("MatBlend").transparent);
     assert_eq!(material("MatBlend").alpha_cutoff, 0.0);
-    assert_eq!(
-        model.warnings(),
-        ["see-through (BLEND) materials are drawn opaque; only cut-outs (MASK) are supported"]
-    );
+    assert!(!material("MatOpaque").transparent && !material("MatCutoff75").transparent);
+    assert!(model.warnings().is_empty(), "{:?}", model.warnings());
     // One image for both metallic-roughness and occlusion, as glTF packs
     // them; decoded once.
     let bed = material("MatBed");
@@ -180,17 +179,6 @@ fn what_the_engine_cant_draw_is_skipped_with_one_warning_per_kind() {
         ["nearest-neighbour texture filtering isn't supported; textures are filtered smoothly"]
     );
 
-    // Said once however often it's met: three see-through materials.
-    let tower = edited("tower.glb", |j| {
-        for material in j["materials"].as_array_mut().unwrap() {
-            material["alphaMode"] = json!("BLEND");
-        }
-    });
-    assert_eq!(
-        tower.unwrap().warnings(),
-        ["see-through (BLEND) materials are drawn opaque; only cut-outs (MASK) are supported"]
-    );
-
     // Edits of a plain box, one kind each.
     let warnings = |edit: fn(&mut Value)| edited("Box.glb", edit).unwrap().warnings().to_vec();
     assert_eq!(
@@ -204,10 +192,7 @@ fn what_the_engine_cant_draw_is_skipped_with_one_warning_per_kind() {
         warnings(|j| j["meshes"][0]["primitives"][0]["mode"] = json!(1)),
         ["points and lines are skipped; only triangles are drawn"]
     );
-    assert_eq!(
-        warnings(|j| j["materials"][0]["alphaMode"] = json!("BLEND")),
-        ["see-through (BLEND) materials are drawn opaque; only cut-outs (MASK) are supported"]
-    );
+    assert_eq!(warnings(|j| j["materials"][0]["alphaMode"] = json!("BLEND")), [""; 0]);
     assert_eq!(
         // Box's root is placed by a matrix; one that squashes everything
         // flat has no rotation to decompose into.
