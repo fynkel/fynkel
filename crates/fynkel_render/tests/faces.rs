@@ -31,6 +31,8 @@ fn scene(draws: Vec<Draw>) -> RenderScene {
         quality: None,
         ambient: Vec3::splat(0.1),
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws,
     }
 }

@@ -32,6 +32,8 @@ fn stage(lights: Vec<Light>, quality: Quality) -> RenderScene {
         quality: Some(quality),
         ambient: Vec3::splat(0.1),
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws: vec![
             Draw::new(PLANE, Mat4::from_scale(Vec3::splat(12.0)), material(0.7)),
             Draw::new(CUBE, Mat4::from_translation(Vec3::new(0.0, 1.5, 0.0)), material(0.5)),
@@ -251,6 +253,8 @@ fn picture_the_cascades_meet() {
             quality: Some(quality),
             ambient: Vec3::splat(0.1),
             lines: Vec::new(),
+            sky: None,
+            fog: None,
             draws,
         };
         picture(&gpu, &mut r, &format!("shadow_cascades_{}", level_name(quality)), &scene);

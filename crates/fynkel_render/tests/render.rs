@@ -134,6 +134,8 @@ fn light_units_match_the_documented_maths() {
             quality: None,
             ambient: Vec3::splat(ambient),
             lines: Vec::new(),
+            sky: None,
+            fog: None,
             draws: vec![draw],
         };
         let (image, _) = render(&gpu, &mut r, &scene, 64, 64);
@@ -176,6 +178,8 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
             quality: None,
             ambient: Vec3::splat(0.05),
             lines: Vec::new(),
+            sky: None,
+            fog: None,
             draws: vec![Draw {
                 mesh: SPHERE,
                 model: Mat4::IDENTITY,
@@ -503,6 +507,8 @@ fn non_uniform_scale_keeps_normals_right() {
         quality: None,
         ambient: Vec3::ZERO,
         lines: Vec::new(),
+        sky: None,
+        fog: None,
         draws: vec![Draw {
             mesh: CUBE,
             model: Mat4::from_scale(squash) * Mat4::from_quat(turn),

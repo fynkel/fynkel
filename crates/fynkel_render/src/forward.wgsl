@@ -1,6 +1,6 @@
 // The forward pass: metallic-roughness PBR lit by suns, point and spot
-// lights and an ambient term, tonemapped (Khronos PBR Neutral) in the same
-// pass. Materials are
+// lights, an ambient term and the sky, tonemapped (Khronos PBR Neutral)
+// and fogged in the same pass. Materials are
 // glTF's: factors times textures, a tangent-space normal map, occlusion of
 // the ambient light, emission, and cut-outs (MASK).
 //
@@ -52,8 +52,20 @@ struct Shadows {
     camera_at: vec4<f32>,
 };
 
+// The sky behind everything (sky.wgsl draws it).
+struct Sky {
+    // Clip space back to the world.
+    inverse_view_proj: mat4x4<f32>,
+    // rgb: the colours. zenith.w: 1 gradient, 2 image. horizon.w: the
+    // image's intensity. ground.w: its turn, in radians.
+    zenith: vec4<f32>,
+    horizon: vec4<f32>,
+    ground: vec4<f32>,
+};
+
 struct Frame {
     view_proj: mat4x4<f32>,
+    sky: Sky,
     // w = 1: the camera's position. w = 0 (orthographic): the unit vector
     // towards the camera, the same everywhere.
     camera_position: vec4<f32>,
@@ -72,6 +84,14 @@ struct Frame {
     cells_eye: vec4<f32>,
     // xyz: the way the camera looks.
     cells_forward: vec4<f32>,
+    // rgb: what fog fades into, as seen (tone mapped already). w: 1 if
+    // there's fog.
+    fog_color: vec4<f32>,
+    // x: where it starts, metres from the camera. y: 1 / how far it takes
+    // to be whole. z: 1 / the height it halves over, or 0.
+    fog: vec4<f32>,
+    // The sky's light: x multiplies it, y is the specular cube's last mip.
+    sky_light: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -91,6 +111,9 @@ override double_sided: bool = false;
 // textures: the work is left out, rather than done and thrown away.
 override shadowed: bool = true;
 override textured: bool = true;
+// Off without a sky that lights the scene from its cubes (a gradient or an
+// image's): a plain sky is in the ambient term.
+override sky_lit: bool = false;
 
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
@@ -110,6 +133,13 @@ override textured: bool = true;
 @group(2) @binding(0) var cascade_maps: texture_depth_2d_array;
 @group(2) @binding(1) var spot_maps: texture_depth_2d_array;
 @group(2) @binding(2) var shadow_sampler: sampler_comparison;
+
+// The sky's light (env.wgsl): its radiance blurred for each roughness, a
+// mip each, and the light a surface facing each way gets. 1 × 1 black
+// stand-ins without such a sky.
+@group(3) @binding(0) var sky_specular: texture_cube<f32>;
+@group(3) @binding(1) var sky_irradiance: texture_cube<f32>;
+@group(3) @binding(2) var sky_sampler: sampler;
 
 struct VertexIn {
     @location(0) position: vec3<f32>,
@@ -413,7 +443,16 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
 
     // Occlusion darkens only the ambient light: the sun's shadows are
     // another matter (glTF's rule).
-    var color = frame.ambient.rgb * (diffuse_color + env_brdf(f0, roughness, n_dot_v)) * occlusion;
+    let ambient_specular = env_brdf(f0, roughness, n_dot_v);
+    var color = frame.ambient.rgb * (diffuse_color + ambient_specular) * occlusion;
+    if sky_lit {
+        // What the surface mirrors, blurred by its roughness, and what
+        // lights it from its side of the sky.
+        let r = reflect(-v, n);
+        let mirrored = textureSampleLevel(sky_specular, sky_sampler, r, roughness * frame.sky_light.y).rgb;
+        let irradiance = textureSampleLevel(sky_irradiance, sky_sampler, n, 0.0).rgb;
+        color += frame.sky_light.x * (irradiance * diffuse_color + mirrored * ambient_specular) * occlusion;
+    }
 
     let surface = Surface(n, v, n_dot_v, f0, diffuse_color, alpha);
     for (var i = 0u; i < frame.counts.x; i++) {
@@ -465,11 +504,24 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
     return vec4<f32>(color, base.a);
 }
 
+// What's at `p`, `seen` (tone mapped), behind the fog between it and the
+// camera: more the further it is, less the higher, as seen too.
+fn fogged(seen: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
+    if frame.fog_color.w == 0.0 {
+        return seen;
+    }
+    var amount = saturate((distance(p, frame.cells_eye.xyz) - frame.fog.x) * frame.fog.y);
+    if frame.fog.z > 0.0 {
+        amount *= exp2(-max(p.y, 0.0) * frame.fog.z);
+    }
+    return mix(seen, frame.fog_color.rgb, amount);
+}
+
 // Opaque surfaces: alpha is ignored. The target is always an sRGB view,
 // so the hardware encodes, and the MSAA resolve averages in linear light.
 @fragment
 fn fs_main(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    return vec4<f32>(tonemap_neutral(shade(in, front_facing).rgb), 1.0);
+    return vec4<f32>(fogged(tonemap_neutral(shade(in, front_facing).rgb), in.world_position), 1.0);
 }
 
 // Cut-outs (glTF's MASK): the surface is there where alpha reaches the
@@ -488,5 +540,5 @@ fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locat
     let shaded = shade(in, front_facing);
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
-    return vec4<f32>(tonemap_neutral(shaded.rgb), clamp(sharp, 0.0, 1.0));
+    return vec4<f32>(fogged(tonemap_neutral(shaded.rgb), in.world_position), clamp(sharp, 0.0, 1.0));
 }

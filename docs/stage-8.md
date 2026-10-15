@@ -373,6 +373,89 @@ holds at each level.
 with the app's theme (day and night, as in Sheepdog), and fog fades far
 objects into the sky.
 
+**Done** (2026-10-15):
+
+- **`world.sky`**: `Sky.gradient(zenith:, horizon:, ground:)`,
+  `Sky.color(c)` or `Sky.image(skyImage, intensity:, rotation:)`, each
+  with `lighting` (what its light is multiplied by; 0 for none). A
+  gradient's colours are shown as picked, not tone mapped, so a theme's
+  colours come out as they are; an image is light, tone mapped as the
+  scene is. `Camera.showSky = false` shows the clear colour instead (a
+  minimap), while the sky still lights.
+- **`.hdr` images**: `SkyImage.load(bytes)` decodes on a helper isolate,
+  or `assets.skyImage('sky.hdr')` (and `preload` by `.hdr`).
+  fynkel_load decodes Radiance RGBE into floats (the `image` crate's
+  `hdr` feature); the GPU keeps it as RGB9E5, 4 bytes a pixel. The lab's
+  is Poly Haven's "Kloofendal 48d Partly Cloudy (Pure Sky)", 1k, CC0,
+  credited in `examples/lab/assets/CREDITS.md`.
+- **The sky lights the scene.** When a gradient or an image is set, the
+  GPU works out three cubes once: the sky itself (128² with mips), a
+  copy blurred for each roughness (64², 6 mips, GGX importance samples
+  as Karis's split sum) and the light each way gets (16², cosine
+  weighted). The forward shader reads the blurred copy along the
+  reflection at the surface's roughness and the light cube along its
+  normal, so a mirror ball shows the clouds and a rough one only the
+  sky's colour, lit from above by the zenith and below by the ground.
+  The cubes kept take 0.27 MB of GPU memory, and an image 4 bytes a
+  pixel more (2 MB for a 1k one): `ViewStats.skyBytes`. A plain colour
+  makes no cubes: it adds to the ambient light. *Changed from the plan:*
+  the scene doesn't hide the sky from itself (no occlusion), so a ball
+  under a roof still mirrors the sky; reflections of the scene are for
+  later.
+- **The sky behind everything**: one triangle at the far plane, drawn
+  after the opaque objects where nothing was.
+- **Fog**: `world.fog = Fog(color:, start:, end:, height:)`, by distance
+  from the camera between `start` and `end`, thinning upwards when
+  `height` is given; without a colour it's the sky's horizon (an image's
+  is the average of its rows within 10° of level). In the forward
+  shader, after tone mapping, so it costs a few instructions a pixel.
+- ABI 25: `fy_sky_image_decode`, `_free` and `_size`,
+  `fy_world_sky_set` (`FySky`), `fy_world_fog_set` (`FyFog`),
+  `FyCamera.show_sky` and `FyViewStats.sky_bytes`. Steady frames under a
+  sky in fog still allocate nothing, on the calling thread and in
+  `prepare`.
+- **Tests**: the renderer's (`tests/sky.rs`): a gradient's colours seen
+  as picked straight up, level and down; a plain sky lighting as ambient
+  light does, and a gradient or image of one colour the same; a rough
+  ball blue on top and red below under a blue sky over red ground; a
+  mirror ball showing the sky's colours where a rough one shows their
+  mix; an image seen turned and scaled; fog fading a wall by distance,
+  into its colour or the horizon. Then the same through the C interface
+  and in Dart, and the lab page driven as a player would.
+- **The lab** ("Look: sky and fog"): metal balls from a mirror to fully
+  rough, plastic ones in front, and an avenue of pillars 100 m long,
+  under the Poly Haven sky, a gradient day or night, a plain colour or
+  none, with fog. The camera swings, so reflections move over the balls.
+  `LAB_SKY` and `LAB_FOG` start it otherwise, for measuring.
+- **Sheepdog**'s sky is a gradient of its theme's colours, a day in the
+  light theme and a night in the dark one, lighting the field; the far
+  field fades into its horizon. Its minimap shows the ground's colour.
+- **The guide**: §5 "The sky and fog".
+- **Measured**, the sky scene under the Poly Haven image with fog, 60 s
+  each, alone, under `caffeinate`:
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | iPhone (1320×1309) | 118.8 fps (min 82) | 120 (min 120) | 120 (min 119) |
+  | Note10+ (1080×1068) | 59.8 (min 52.9) | 59.2 (min 54.9) | 55.9 (min 50.9) |
+  | Note10+, no sky, no fog | | 59.9 (min 58.9) | |
+
+  The iPhone's low run held 120 but for one second at 82 and a few at
+  111–117 near its end, over the wireless link; medium and high, which
+  draw more, held 120 throughout. On the Note10+ the sky and fog cost
+  medium about 0.7 fps, inside its 60. High isn't the Note10+'s level
+  (phases 2 and 3 have it there for the record).
+
+  The Mac is on a 60 Hz display, so from the renderer's bench (M3 Max,
+  1280×720, best of 50): a sky that lights, with fog, adds 0.0–0.02 ms to
+  a frame of 1,000 cubes (0.37–0.41 → 0.38–0.39 ms) and nothing
+  measurable at 10,000. **Setting a new sky costs about 6 ms, once**
+  (5.9–6.5 ms for the frame that works out its light, a gradient or a
+  1k image alike), on the GPU. On a phone that's several frames: a game
+  changes its sky between scenes or behind a fade, not every frame. A
+  sky's light could later be worked out over a few frames if a game
+  needs to change it live.
+
 ### Phase 5: see-through
 
 - Materials that blend: `Material(opacity:)`, and glTF's "blend"
@@ -452,7 +535,7 @@ say otherwise.
 - [x] Phase 1: groundwork
 - [x] Phase 2: lights (the Note10+ at medium left to phase 6)
 - [x] Phase 3: shadows (the Note10+ at medium left to phase 6)
-- [ ] Phase 4: the sky and what reflects it
+- [x] Phase 4: the sky and what reflects it
 - [ ] Phase 5: see-through
 - [ ] Phase 6: bloom, and a light AO
 - [ ] Phase 7: the look scene, Sheepdog, and the report

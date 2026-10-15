@@ -10,6 +10,7 @@ mod gpu;
 mod renderer;
 mod scene;
 mod shadows;
+mod sky;
 mod texture;
 
 pub use assets::{Assets, Kit, MadeMesh, MadeTexture, SharedAssets, lock as lock_assets, set_pipeline_cache_dir};
@@ -18,7 +19,7 @@ pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
-    CameraView, ColorSpace, Draw, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality, RenderScene,
-    ShadowFilter, ShadowLevel, TextureKey,
+    CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures, MeshKey, PbrMaterial, Quality,
+    RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
 };
 pub use wgpu;

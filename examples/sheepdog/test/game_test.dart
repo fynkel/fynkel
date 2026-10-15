@@ -377,13 +377,16 @@ void main() {
 
   test("the game wears the app's theme: a day in the light one, a night in the dark", () async {
     world.run(0.1);
-    final camera = world.camera!;
     world.theme = sheepdogTheme(Brightness.light);
-    final day = (camera.clearColor, game.grass.color);
+    final day = (world.sky as GradientSky, game.grass.color);
     world.theme = sheepdogTheme(Brightness.dark);
-    final night = (camera.clearColor, game.grass.color);
-    expect(night, isNot(day));
-    expect(game.map.clearColor, camera.clearColor, reason: 'the minimap too');
+    final night = (world.sky as GradientSky, game.grass.color);
+    expect(night.$2, isNot(day.$2));
+    expect(night.$1.zenith, isNot(day.$1.zenith), reason: 'a gradient sky of the theme\'s colours');
+    expect(night.$1.horizon, isNot(day.$1.horizon));
+    expect(world.fog?.color, isNull, reason: 'the far field fades into the horizon');
+    expect(game.map.showSky, isFalse, reason: 'the minimap looks down at the field, on its own colour');
+    expect(game.map.clearColor, night.$1.ground);
     await at(2);
     world.run(calm + 1);
     shot('night');

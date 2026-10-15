@@ -221,11 +221,12 @@ final class Camera extends Component {
     this._orthographic = false,
     this._orthographicSize = 5,
     this._cullingMask = LayerMask.all,
+    this._showSky = true,
   }) : super._();
 
   double _fovY, _near, _far, _orthographicSize;
   Color _clearColor;
-  bool _orthographic;
+  bool _orthographic, _showSky;
   LayerMask _cullingMask;
 
   /// Vertical field of view in radians, 1° to 179°: 60.deg unless set.
@@ -322,6 +323,20 @@ final class Camera extends Component {
     }
   }
 
+  /// Whether it shows the world's [World.sky] behind everything: true
+  /// unless set. Without it, [clearColor] shows; the sky still lights
+  /// the scene.
+  bool get showSky => _showSky;
+  set showSky(bool value) {
+    _checkChangeable();
+    final old = _showSky;
+    _showSky = value;
+    if (_write() case final failed?) {
+      _showSky = old;
+      failed.raise();
+    }
+  }
+
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
   /// [World.raycast] to find what's drawn there (Unity's
@@ -404,7 +419,8 @@ final class Camera extends Component {
   @override
   String toString() =>
       'Camera(${orthographic ? 'orthographic, orthographicSize: $orthographicSize' : 'fovY: $fovY'}, near: $near, far: $far, '
-      'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'})';
+      'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'}'
+      '${showSky ? '' : ', showSky: false'})';
 }
 
 /// What kind of light a [Light] is.

@@ -318,6 +318,7 @@ dependencies = [
  "fynkel_present",
  "fynkel_render",
  "fynkel_world",
+ "image",
  "jni-sys 0.3.1",
 ]
 

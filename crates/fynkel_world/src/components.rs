@@ -190,6 +190,9 @@ pub struct Camera {
     pub size: f32,
     /// The layers it draws: bit `n` for layer `n` (Unity's `cullingMask`).
     pub culling_mask: u32,
+    /// Whether it shows the world's sky behind everything; without it,
+    /// `clear_color`. The sky lights the scene either way.
+    pub show_sky: bool,
 }
 
 impl Camera {
@@ -201,6 +204,7 @@ impl Camera {
         orthographic: false,
         size: 5.0,
         culling_mask: u32::MAX,
+        show_sky: true,
     };
 }
 
@@ -223,6 +227,7 @@ impl Describe for Camera {
             Field::new("orthographic", FieldKind::Bool, Value::Bool(D.orthographic)),
             Field::new("size", FieldKind::F32, Value::F32(D.size)).range(1e-4, 1e6),
             Field::new("culling_mask", FieldKind::Mask, Value::Mask(D.culling_mask)),
+            Field::new("show_sky", FieldKind::Bool, Value::Bool(D.show_sky)),
         ];
         FIELDS
     }
@@ -236,6 +241,7 @@ impl Describe for Camera {
             4 => Value::Bool(self.orthographic),
             5 => Value::F32(self.size),
             6 => Value::Mask(self.culling_mask),
+            7 => Value::Bool(self.show_sky),
             _ => return None,
         })
     }
@@ -249,6 +255,7 @@ impl Describe for Camera {
             (4, Value::Bool(v)) => self.orthographic = v,
             (5, Value::F32(v)) => self.size = v,
             (6, Value::Mask(v)) => self.culling_mask = v,
+            (7, Value::Bool(v)) => self.show_sky = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

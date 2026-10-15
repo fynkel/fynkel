@@ -3,11 +3,13 @@
 //! `cargo run --release -p fynkel_render --example bench`
 //!
 //! For each quality level, screen size and scene size, with the sun alone,
-//! the sun casting shadows, and 32 lamps over the cubes as well: the CPU
-//! time of `prepare`, and
-//! the wall time of a whole frame (prepare, encode, submit, wait for the
-//! GPU), best of 50 frames after 10 warm-up frames.
+//! the sun casting shadows, 32 lamps over the cubes as well, and a sky
+//! that lights with fog: the CPU time of `prepare`, and the wall time of a
+//! whole frame (prepare, encode, submit, wait for the GPU), best of 50
+//! frames after 10 warm-up frames. Then what a new sky costs, once: the
+//! whole frame that works out its light.
 
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use fynkel_render::glam::{Mat4, Quat, Vec3};
@@ -32,6 +34,8 @@ fn scene(n: u32, lamps: u32, shadows: bool, t: f32) -> RenderScene {
             }))
             .collect(),
         quality: None,
+        sky: None,
+        fog: None,
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         draws: (0..n)
@@ -51,6 +55,23 @@ fn scene(n: u32, lamps: u32, shadows: bool, t: f32) -> RenderScene {
             })
             .collect(),
     }
+}
+
+/// A day: blue overhead, pale at the horizon.
+fn day(zenith: Vec3) -> SkyKind {
+    SkyKind::Gradient { zenith, horizon: Vec3::new(0.65, 0.75, 0.85), ground: Vec3::splat(0.2) }
+}
+
+/// A sky image as big as Poly Haven's 1k ones, bright towards the top.
+fn image(brightness: f32) -> SkyKind {
+    let (w, h) = (1024u32, 512u32);
+    let rgb: Vec<f32> = (0..w * h)
+        .flat_map(|i| {
+            let up = 1.0 - (i / w) as f32 / h as f32;
+            [0.3 * up * brightness, 0.5 * up * brightness, brightness * up]
+        })
+        .collect();
+    SkyKind::Image { image: Arc::new(SkyImage::from_rgb(w, h, &rgb).unwrap()), intensity: 1.0, rotation: 0.0 }
 }
 
 fn main() {
@@ -75,18 +96,25 @@ fn main() {
         for quality in [Quality::Low, Quality::Medium, Quality::High] {
             let mut renderer = Renderer::new(&gpu, format);
             renderer.upload_mesh(MeshKey(1), &MeshData::cube());
-            for (n, lamps, shadows) in [
-                (1, 0, false),
-                (1_000, 0, false),
-                (10_000, 0, false),
-                (1_000, 0, true),
-                (10_000, 0, true),
-                (1, 32, false),
-                (1_000, 32, false),
-                (10_000, 32, false),
+            for (n, lamps, shadows, sky) in [
+                (1, 0, false, false),
+                (1_000, 0, false, false),
+                (10_000, 0, false, false),
+                (1_000, 0, true, false),
+                (10_000, 0, true, false),
+                (1, 32, false, false),
+                (1_000, 32, false, false),
+                (10_000, 32, false, false),
+                (1_000, 0, false, true),
+                (10_000, 0, false, true),
             ] {
                 let scenes: Vec<RenderScene> = (0..60)
-                    .map(|f| RenderScene { quality: Some(quality), ..scene(n, lamps, shadows, f as f32 / 60.0) })
+                    .map(|f| RenderScene {
+                        quality: Some(quality),
+                        sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
+                        fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
+                        ..scene(n, lamps, shadows, f as f32 / 60.0)
+                    })
                     .collect();
                 let (mut prepare, mut frame) = (Duration::MAX, Duration::MAX);
                 for (f, s) in scenes.iter().enumerate() {
@@ -105,9 +133,39 @@ fn main() {
                     }
                 }
                 let shadows = if shadows { ", shadows" } else { "" };
+                let sky = if sky { ", sky and fog" } else { "" };
                 println!(
-                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
+                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}{sky}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
                     prepare.as_secs_f64() * 1e3,
+                    frame.as_secs_f64() * 1e3
+                );
+            }
+            // A new sky every frame, two of a kind in turn, so each frame
+            // works out its light: the cost of setting one, over a frame
+            // of 1,000 cubes.
+            for (what, kinds) in [
+                ("gradient", [day(Vec3::new(0.2, 0.4, 0.8)), day(Vec3::new(0.3, 0.4, 0.7))]),
+                ("1024x512 image", [image(1.0), image(2.0)]),
+            ] {
+                let mut frame = Duration::MAX;
+                for f in 0..60 {
+                    let s = RenderScene {
+                        quality: Some(quality),
+                        sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
+                        ..scene(1_000, 0, false, 0.0)
+                    };
+                    let start = Instant::now();
+                    renderer.prepare(&s, width, height);
+                    let mut encoder = gpu.device.create_command_encoder(&Default::default());
+                    renderer.encode(&mut encoder, &view);
+                    gpu.queue.submit([encoder.finish()]);
+                    gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                    if f >= 10 {
+                        frame = frame.min(start.elapsed());
+                    }
+                }
+                println!(
+                    "  {quality:?} a new {what} sky, 1000 cubes: whole frame {:>7.3} ms",
                     frame.as_secs_f64() * 1e3
                 );
             }
