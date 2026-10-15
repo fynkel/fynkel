@@ -13,6 +13,7 @@ import 'scenes/contacts_basics.dart';
 import 'scenes/controls_basics.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
+import 'scenes/glow.dart';
 import 'scenes/flutter_basics.dart';
 import 'scenes/theme_basics.dart';
 import 'scenes/world_widgets_basics.dart';
@@ -98,4 +99,5 @@ final List<LabScene Function()> scenes = [
   ShadowsScene.new,
   SkyScene.new,
   SeeThroughScene.new,
+  GlowScene.new,
 ];

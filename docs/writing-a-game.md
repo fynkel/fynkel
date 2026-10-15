@@ -679,6 +679,47 @@ void fadeOut(GameObject ghost) {
   ones: each pixel is drawn once per layer. The lab's 'Look: glass, water
   and glows' scene adds 400 panes to measure it.
 
+### Glow and contact: bloom and ambient occlusion
+
+A camera has two effects, both on unless it's told otherwise:
+
+- **Bloom:** light brighter than white glows into what's around it: a
+  lamp's bulb, a glowing sword, the sun on a metal ball. Something glows
+  when its `emissive` times `emissiveIntensity` (or the light it
+  reflects) is above 1. Drawn at medium and high quality.
+- **Ambient occlusion:** surfaces darken a little where they meet, in
+  corners and creases and under a crate on the ground. Only the ambient
+  and sky light darken; a sun and its shadows stay as they are. Drawn at
+  high quality only: a soft hint of contact, not a shadow.
+
+```dart
+/// A bulb bright enough to glow, and a minimap camera without either
+/// effect, which it doesn't need.
+final bulb = Material(color: Color.black, emissive: Color.rgb(1, 0.8, 0.4), emissiveIntensity: 6);
+final minimap = Camera(orthographic: true, bloom: null, ambientOcclusion: null);
+
+/// More glow, and from dimmer light, for a dreamy look; darker corners.
+void dreamy(Camera camera) {
+  camera.bloom = const Bloom(strength: 2, threshold: 0.8);
+  camera.ambientOcclusion = const AmbientOcclusion(intensity: 2);
+}
+```
+
+- **`Bloom(strength:, threshold:)`**: `strength` 1 glows about as much
+  as the light gives off, spread wide; 0 not at all. `threshold` is how
+  bright light must be to glow: at 1, only what's brighter than white,
+  so a lit white wall doesn't glow but the sun's glint on it may.
+- **`AmbientOcclusion(intensity:, radius:)`**: `intensity` 1 is as dark
+  as a corner is closed in, up to 4; `radius` is how far, in metres, a
+  surface darkens one near it (half a metre unless given).
+- **Colours shown as picked don't glow:** the camera's `clearColor` and
+  a `Sky.gradient`, however bright. A `Sky.image` is light, and its sun
+  glows.
+- **Each camera has its own**, so a minimap or a second view can skip
+  them, and cost nothing. Where the quality level doesn't draw one, it
+  costs nothing either. The lab's 'Look: glow and contact' page turns
+  both on and off, at each level.
+
 ## 6. The frame, the lifecycle and time
 
 Each object and behaviour gets these calls, in the order they were added:
@@ -2428,7 +2469,7 @@ What keeps a game fast:
 ## 19. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
-  alone), bloom, particles, sprites and 2D, 3D text, vertex colours;
+  alone), particles, sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows, and glass doesn't bend light.
 - **Models:** animation, skinned meshes and morph targets (a model shows
   its rest pose).
@@ -2479,6 +2520,7 @@ What keeps a game fast:
 | `MaterialPropertyBlock` for one object's colour | `renderer.color` |
 | `new Material(material)` | `material.copy()` |
 | Rendering Mode Fade, Transparent; an additive shader | `Material(opacity:)`, `blending: Blending.transparent` or `.additive` |
+| Bloom and SSAO (a Volume, a renderer feature) | `Camera(bloom: Bloom(...), ambientOcclusion: AmbientOcclusion(...))`, on unless `null` |
 | `Camera.orthographicSize` | `orthographicSize`, on `Camera` and `VirtualCamera` |
 | Cinemachine's binding modes (world space, lock to target, lock to target on assign/with world up) | `Follow(space: FollowSpace.world / target / targetYaw)` |
 | `Input.mouseScrollDelta` | `input.scroll`: +y with the wheel turned away, as Unity's |
@@ -2529,6 +2571,13 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Bloom and ambient occlusion** (2026-10-15):
+  - A camera has both unless given `bloom: null` and
+    `ambientOcclusion: null` (§5): at medium quality, light brighter than
+    white glows; at high, corners darken a little too. A material whose
+    `emissiveIntensity` is above 1 now glows, and the sun's glint on
+    metal may.
 
 - **See-through materials** (2026-10-15):
   - A model's see-through (BLEND) materials are drawn see-through, as

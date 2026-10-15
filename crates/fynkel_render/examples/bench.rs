@@ -103,26 +103,37 @@ fn main() {
         for quality in [Quality::Low, Quality::Medium, Quality::High] {
             let mut renderer = Renderer::new(&gpu, format);
             renderer.upload_mesh(MeshKey(1), &MeshData::cube());
-            for (n, lamps, shadows, sky, see_through) in [
-                (1, 0, false, false, false),
-                (1_000, 0, false, false, false),
-                (10_000, 0, false, false, false),
-                (1_000, 0, true, false, false),
-                (10_000, 0, true, false, false),
-                (1, 32, false, false, false),
-                (1_000, 32, false, false, false),
-                (10_000, 32, false, false, false),
-                (1_000, 0, false, true, false),
-                (10_000, 0, false, true, false),
-                (1_000, 0, true, false, true),
-                (10_000, 0, true, false, true),
+            for (n, lamps, shadows, sky, see_through, effects) in [
+                (1, 0, false, false, false, false),
+                (1_000, 0, false, false, false, false),
+                (10_000, 0, false, false, false, false),
+                (1_000, 0, true, false, false, false),
+                (10_000, 0, true, false, false, false),
+                (1, 32, false, false, false, false),
+                (1_000, 32, false, false, false, false),
+                (10_000, 32, false, false, false, false),
+                (1_000, 0, false, true, false, false),
+                (10_000, 0, false, true, false, false),
+                (1_000, 0, true, false, true, false),
+                (10_000, 0, true, false, true, false),
+                (1_000, 0, true, false, false, true),
+                (10_000, 0, true, false, false, true),
             ] {
                 let scenes: Vec<RenderScene> = (0..60)
-                    .map(|f| RenderScene {
-                        quality: Some(quality),
-                        sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
-                        fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
-                        ..scene(n, lamps, shadows, see_through, f as f32 / 60.0)
+                    .map(|f| {
+                        let base = scene(n, lamps, shadows, see_through, f as f32 / 60.0);
+                        let camera = base.camera.map(|c| CameraView {
+                            bloom: effects.then_some(Bloom::DEFAULT),
+                            ambient_occlusion: effects.then_some(AmbientOcclusion::DEFAULT),
+                            ..c
+                        });
+                        RenderScene {
+                            camera,
+                            quality: Some(quality),
+                            sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
+                            fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
+                            ..base
+                        }
                     })
                     .collect();
                 let (mut prepare, mut frame) = (Duration::MAX, Duration::MAX);
@@ -144,8 +155,9 @@ fn main() {
                 let shadows = if shadows { ", shadows" } else { "" };
                 let sky = if sky { ", sky and fog" } else { "" };
                 let see_through = if see_through { ", see-through" } else { "" };
+                let effects = if effects { ", bloom and AO" } else { "" };
                 println!(
-                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}{sky}{see_through}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
+                    "  {quality:?} {n:>6} cubes, {lamps:>2} lamps{shadows}{sky}{see_through}{effects}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
                     prepare.as_secs_f64() * 1e3,
                     frame.as_secs_f64() * 1e3
                 );
