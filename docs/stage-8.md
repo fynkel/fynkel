@@ -562,6 +562,96 @@ objects, with a golden test of the order.
 *Done when* both hold the budget at the levels where they're on, and
 cost nothing where they're off (measured).
 
+**Done** (2026-10-15), with the Note10+ short of the budget (below):
+
+- **`Camera(bloom: Bloom(strength:, threshold:), ambientOcclusion:
+  AmbientOcclusion(intensity:, radius:))`**, both on unless set to
+  null. A minimap or second view turns them off and costs nothing.
+  Sheepdog's minimap does. ABI 27: six `FyCamera` fields; fynkel_world's
+  Camera fields 8–13.
+- **Bloom** (`bloom.rs`, `bloom.wgsl`): at medium and high, off at low.
+  - The scene image's alpha now says how much of a pixel is light.
+    Colours shown as picked (the clear colour, a gradient sky) don't
+    glow however bright; an image sky's sun does.
+  - A prefilter takes what's over the threshold (eased in over half of
+    it, weighed down where bright so a lone pixel doesn't flicker) into
+    a chain of five images. The first is a quarter of the view's size,
+    each half the one before. Then 13-tap downs and tent ups add each
+    back into the larger.
+  - The last pass adds the glow to the light and tone maps again. It
+    adds the change, so a pixel with no glow is exactly as it was.
+  - The chain is `Rg11b10Ufloat` where the GPU can draw into it,
+    half-float otherwise. *Changed from the plan:* it was to start at
+    half size; on the Note10+ that cost 30–36 fps at medium against 40
+    now.
+- **Ambient occlusion** (`ao.rs`, `ao.wgsl`): at high only.
+  - The solid scene's depth again, at half size.
+  - From it, 8 samples in a spiral per pixel (as McGuire's Scalable
+    Ambient Obscurance), the normal taken from the nearer neighbours so
+    edges don't bend it.
+  - A 4 × 4 blur across pixels at about the same depth.
+  - Each 4 × 4 of pixels turns its spirals all 16 ways once (a Bayer
+    matrix), so the blur leaves it even. Random turns left blotches
+    along a wall's foot (97..119 against 2/255 now).
+  - The forward pass darkens only the ambient and sky light by it, and
+    only for solid surfaces.
+- **Tests**: the renderer's `tests/bloom.rs`, 6 tests: what glows and
+  where; nothing at low; colours shown as picked; view sizes; the
+  golden `bloom`. And `tests/ambient_occlusion.rs`, 9 tests: the floor
+  at a box's foot; nothing below high; an open floor and a lone box
+  unchanged; lights untouched; view sizes; nothing solid; smooth along a
+  wall; the golden `ambient_occlusion`. Then the C interface, the
+  world, Dart (`camera_look_test.dart`), Sheepdog's minimap, and the lab
+  page driven as a player would (`glow_test.dart`).
+- **The lab** ("Look: glow and contact"): lamp bulbs and a turning ring
+  of glowing blocks, metal balls in the sun, crates against a wall. It
+  has switches and sliders for both, and `LAB_BLOOM` / `LAB_AO` for
+  measuring.
+- **The guide**: §5 "Glow and contact", the Unity table, §21.
+- **Measured**, the glow page, 60 s each, alone, under `caffeinate`, on
+  and off:
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | iPhone (1320×1309), on | 119.8 (min 110) | 120 (min 120) | 120 (min 118) |
+  | iPhone, off | 119.9 (min 116) | 120 (min 120) | 120 (min 120) |
+  | Note10+ (1080×1068), on | 59.9 (min 59.9) | 40.4 (min 32.0) | 27.2 (min 24.0) |
+  | Note10+, off | 59.9 (min 59.9) | 58.5 (min 50.9) | 55.5 (min 50.9) |
+
+  The iPhone holds 120 at every level, with them and without.
+
+  On the Mac (M3 Max, best of 50, 2796×1290, 1,000 cubes with the
+  sun's shadows), bloom adds about 0.5 ms at medium, and bloom and AO
+  0.4–0.7 ms at high. At low both cost nothing.
+
+- **The Note10+ doesn't hold the budget** at medium or high with them
+  on. That's accepted (your call, 2026-10-15) and left as found. What
+  was found, with GPU timestamps and the GPU's clock read during the
+  runs:
+  - Its GPU runs at its lowest clock, 156 of 754 MHz, 72–84 % busy.
+    The governor raises it only when the GPU is busier than that.
+  - It isn't, because frames are serial. Flutter draws on the same GPU,
+    and its small job waits behind ours. So Flutter's frames, and
+    Dart's ticks with them, come at about 37 a second. The render
+    thread idles about 20 ms of each 27 waiting for the next scene, and
+    the GPU idles with it.
+  - At that clock each pass has a large fixed cost:
+
+    | pass | ms |
+    |---|---|
+    | the last pass, alone | 3–4 |
+    | bloom's prefilter | 3.8 |
+    | each small pass | about 0.7 |
+    | all of AO | about 3 |
+
+    A whole frame at medium is 13.6 ms without bloom and 22.6 with it;
+    at low, 7.2.
+  - This is also the medium shortfall phases 2–5 left here: at low the
+    whole frame fits even at the lowest clock.
+  - Not waiting for the GPU before presenting didn't raise the clock.
+    Keeping the GPU fed would mean pacing frames differently on
+    Android, a piece of work of its own.
+
 ### Phase 7: the look scene, Sheepdog, and the report
 
 - **A lab "look" scene** that uses everything: a sun with shadows, a
@@ -611,5 +701,5 @@ say otherwise.
 - [x] Phase 3: shadows (the Note10+ at medium left to phase 6)
 - [x] Phase 4: the sky and what reflects it
 - [x] Phase 5: see-through (the Note10+ at medium left to phase 6)
-- [ ] Phase 6: bloom, and a light AO
+- [x] Phase 6: bloom, and a light AO (the Note10+ short at medium and high, accepted)
 - [ ] Phase 7: the look scene, Sheepdog, and the report
