@@ -458,6 +458,12 @@ class Beacon extends GameObject {
   below `far`: a view drawing from a camera that isn't throws an
   `ArgumentError` naming it, each frame, rather than drawing nothing. It's
   checked only then, so setting `near` and then `far` is fine.
+- **`enabled = false`** turns any of them off, as a behaviour's (§4): a
+  camera draws nothing (the next one draws), a light lights nothing and
+  isn't one of the frame's 64 lamps, a renderer draws nothing. The object
+  and its other components go on; scripts and physics still run. Each
+  keeps what it was given, and what's changed while it's off shows when
+  it's on again.
 
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
@@ -671,6 +677,12 @@ class Pilot extends GameObject {}
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
   `Transform(position: eye, rotation: Quat.lookRotation(target - eye))`.
+- **A zero vector has no direction**: `normalized` throws for one, so a
+  vector that should never be zero says so where it is. Where one can be,
+  as the way to a target the object may have reached, write
+  `normalizedOrZero`, which gives zero (as Unity's `normalized`):
+  `position += (target - position).normalizedOrZero * speed * time.delta`.
+  `lookAt` the point the object is at leaves it as it is.
 - Unity's Mathf: `lerp`, `inverseLerp`, `clamp01`, `moveTowards`,
   `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`, and
   `Vec3.lerp`, `Vec3.moveTowards`, `Quat.slerp`, `Color.lerp`.
@@ -2266,6 +2278,12 @@ multibody joints).
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Hardening, what a game writes** (2026-10-15):
+  - `Camera`, `Light` and `MeshRenderer` have `enabled`, as behaviours
+    did: it's on `Component` now (§5).
+  - `lookAt` the point the object is at leaves it as it is; it threw.
+    `Vec3.normalizedOrZero` is new (§7).
 
 - **Hardening** (2026-10-14):
   - `time.maxDelta` limits the game's time after `time.scale`, as

@@ -523,12 +523,17 @@ mixin _Moving {
   Vec3 get up => _self.worldTransform.rotation.rotate(Vec3.up);
 
   /// Turns the object to look at [point], in the world, with its up as
-  /// close to [worldUp] as it can be. Throws an [ArgumentError] when it's
-  /// at [point] already.
-  void lookAt(Vec3 point, {Vec3 worldUp = Vec3.up}) => _setRotation(_rotationToLookAt(point, worldUp));
+  /// close to [worldUp] as it can be. At [point] already, it has nowhere
+  /// to look, and stays as it is.
+  void lookAt(Vec3 point, {Vec3 worldUp = Vec3.up}) {
+    if (_rotationToLookAt(point, worldUp) case final rotation?) _setRotation(rotation);
+  }
 
-  Quat _rotationToLookAt(Vec3 point, Vec3 worldUp) =>
-      Quat.lookRotation(point - _self.worldTransform.position, up: worldUp);
+  // Null at [point].
+  Quat? _rotationToLookAt(Vec3 point, Vec3 worldUp) {
+    final way = point - _self.worldTransform.position;
+    return way.length < 1e-12 ? null : Quat.lookRotation(way, up: worldUp);
+  }
 
   /// [point], given in the object's own space, in the world's: where a
   /// point on it is.
@@ -886,7 +891,7 @@ mixin _Moving {
     void Function()? onComplete,
   }) => _value<Quat>(
     () => _self.worldTransform.rotation,
-    (_) => _rotationToLookAt(point, worldUp),
+    (from) => _rotationToLookAt(point, worldUp) ?? from,
     Quat.slerp,
     _angle,
     _setRotation,

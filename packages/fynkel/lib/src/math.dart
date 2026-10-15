@@ -130,11 +130,21 @@ final class Vec3 {
   double get length => math.sqrt(dot(this));
 
   /// This direction with length 1. Throws for a zero vector, which has no
-  /// direction.
+  /// direction, so a vector that should never be zero says so where it is;
+  /// for one that can be, such as the way to a target the object may have
+  /// reached, use [normalizedOrZero].
   Vec3 get normalized {
     final l = length;
     if (l < 1e-12 || !l.isFinite) throw ArgumentError('$this has no direction');
     return this / l;
+  }
+
+  /// This direction with length 1, or [zero] for a zero vector (as Unity's
+  /// `normalized`): `(target - position).normalizedOrZero * speed` stops
+  /// the frame the two meet.
+  Vec3 get normalizedOrZero {
+    final l = length;
+    return l < 1e-12 || !l.isFinite ? zero : this / l;
   }
 
   /// Whether every component is within [tolerance] of [o]'s.
