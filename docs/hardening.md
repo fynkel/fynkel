@@ -541,14 +541,19 @@ buffer in the frame ring.
   than 8 lamps reach it, and neighbours kept different ones. The cap
   had never been checked against the lab's scenes. Now a cell is a
   64-bit mask of the frame's lamps, as Unity's Forward+ and Godot's
-  clustered renderer do, and a level sets how many lamps the frame takes
-  (`Quality::lights_in_view`: 32 at low, 64 above); one left out is out
-  everywhere. `FrameStats::full_cells` went with the cap.
+  clustered renderer do. `FrameStats::full_cells` went with the cap.
+- **Every level takes 64 lamps; low gives them no highlights.** A
+  second try had low take only the 32 nearest the camera: with 64
+  lights the back of the room went dark while its lamps still glowed.
+  On the Note10+ at low with 63 lamps, taking all 64 cost 5 fps (53.9
+  against 58.9); lighting only a surface's colour from lamps at low
+  (`Quality::lamp_highlights`, as Unity's low tiers light extra lights
+  per vertex) holds 58.9, as main (58.9). Suns keep their highlights.
 - **Tests**: the two planned (the big wall, the seam) failed on main and
   pass; `a_cell_is_lit_by_every_lamp_that_reaches_it` (twenty dim lamps
   each change the middle pixel, at every level) failed with the cap and
-  passes; binning by brute force for both cameras; Low takes 32. No
-  golden changed.
+  passes; binning by brute force for both cameras;
+  `lamps_give_highlights_above_low`. No golden changed.
 - **The first build cost 8 fps on the Note10+**, all on the CPU:
   clearing and reading every cell's list (313 KB) a frame, working out
   2,304 cell spheres a frame, copying 46 KB. Found by turning each off
