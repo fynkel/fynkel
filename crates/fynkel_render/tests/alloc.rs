@@ -70,7 +70,7 @@ fn busy_scene(t: f32) -> RenderScene {
         Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(true),
         Light::spot(Vec3::new(20.0, 8.0, 12.0), Vec3::NEG_Y, 20.0, 1.2, 0.2, Vec3::splat(5.0)).with_shadows(true),
     ];
-    scene.quality = Some(Quality::High);
+    scene.quality = Some(QualityLevel::High.quality());
     // A sky that lights, and fog.
     let c = Vec3::new(0.3, 0.5, 0.9);
     scene.sky = Some(Sky { kind: SkyKind::Gradient { zenith: c, horizon: Vec3::ONE, ground: c * 0.2 }, lighting: 1.0 });

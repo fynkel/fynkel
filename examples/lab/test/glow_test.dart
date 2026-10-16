@@ -47,7 +47,7 @@ void main() {
     expect(camera.ambientOcclusion, const AmbientOcclusion(intensity: 3));
 
     final shots = Platform.environment['LAB_SHOT'];
-    for (final quality in Quality.values) {
+    for (final quality in Quality.levels) {
       await tap(quality.name);
       expect(scene.world.quality, quality);
       expect(scene.readout.value, startsWith('drawn at ${quality.name} '));

@@ -452,7 +452,7 @@ class ChaseCamera extends GameObject {
   ChaseCamera(this.game)
     : super(
         name: 'camera',
-        components: [Camera(fovY: 45.deg)],
+        components: [Camera(fovY: 45.deg, bloom: const Bloom())],
       );
 
   final BowlingGame game;

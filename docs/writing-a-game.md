@@ -479,30 +479,61 @@ class Beacon extends GameObject {
 You never free a mesh, material or texture: the engine's copy goes when
 nothing in the game reaches it any more.
 
-### Quality levels
+### Quality
 
-A world is drawn at one of three levels, `Quality.low`, `medium` or
-`high`. Each is meant to hold its devices' frame rate, and the effects
-(shadows and lamps, below) each say what they do at each level.
+What a world draws, and how finely, is its `Quality`: whether there's
+bloom, ambient occlusion and shadows, and how fine the shadows are. As in
+Unity, a game can have one quality or several, and change them as it
+likes. Three levels come with the engine, to use as they are or start
+from:
 
-When the game doesn't choose, the device picks: high on Apple's GPUs and
-desktops', medium on phones' Mali and Adreno, low on a software GPU or
-one it doesn't know. `Quality.device` says which. A game can choose at
-any time, from its settings page for example, and every view of the
-world draws at the new level from its next frame:
+| | `Quality.low` | `Quality.medium` | `Quality.high` |
+|---|---|---|---|
+| `hdr`: drawn into a half-float image, then to the screen | no | yes | yes |
+| `bloom` | no | yes | yes |
+| `ambientOcclusion` | no | no | yes |
+| `lampHighlights`: lamps give shiny surfaces a highlight | no | yes | yes |
+| `shadows` | yes | yes | yes |
+| `shadowCascades`, `shadowResolution` | 1 × 1024 | 2 × 2048 | 3 × 2048 |
+| `shadowSoftness` | hard | soft | softer |
+| `shadowDistance` | 40 m | 60 m | 100 m |
+| `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
+
+When the game doesn't choose, the device picks a level: high on Apple's
+GPUs and desktops', medium on phones' Mali and Adreno, low on a software
+GPU or one it doesn't know. `Quality.device` says which. Most games set
+one quality and keep it; a game with a settings page can switch at any
+time, and every view draws the new one from its next frame:
 
 ```dart
-/// The settings page's choice: a level, or null to let the device pick.
-/// Gives the level drawn at.
+/// A game's one quality: medium's, without bloom, and with one sharp
+/// cascade of shadows.
+const myQuality = Quality(name: 'mine', bloom: false, shadowCascades: 1, shadowSoftness: ShadowSoftness.hard);
+
+/// Or levels of its own, for a settings page, each from the engine's.
+final myLevels = [
+  Quality.low.copyWith(shadowDistance: 25),
+  Quality.medium,
+  Quality.high.copyWith(ambientOcclusion: false),
+];
+
+/// The settings page's choice: one of them, or null to let the device
+/// pick. Gives what's drawn.
 Quality chooseQuality(World world, Quality? chosen) {
   world.quality = chosen;
   return world.quality ?? Quality.device;
 }
 ```
 
-Above low, the scene is drawn into a half-float image first and copied
-to the screen by a last pass, which is where bloom will go. At low it's
-drawn straight to the screen, in one pass.
+- **A camera asks, the quality decides.** A camera's bloom and ambient
+  occlusion (below) are drawn only where the quality has them on. A
+  debug build says once when a camera asks for one that the quality
+  drawn leaves out.
+- **Settings out of range** (`shadowCascades` 1 to 3, resolutions powers
+  of two from 256 to 4096, `spotShadows` 0 to 4, `shadowDistance` above
+  0) throw an `ArgumentError`, and the world keeps the quality it had.
+- **Without `hdr` or bloom**, the scene is drawn straight to the screen
+  in one pass: the cheapest.
 
 ### Lamps and spotlights
 
@@ -536,9 +567,9 @@ GameObject handTorch() => GameObject(
 - **A lamp lights everything it reaches**, whatever it falls on: a big
   floor, terrain or a room in one piece is lit by every lamp over it,
   however many overlap. What costs is how many overlap: each pixel adds
-  up every lamp that reaches it. At low quality lamps light a surface's
-  colour but give shiny surfaces no highlight (suns still do), which
-  keeps a crowded room fast on phones.
+  up every lamp that reaches it. Without `Quality.lampHighlights` (as at
+  low) lamps light a surface's colour but give shiny surfaces no
+  highlight (suns still do), which keeps a crowded room fast on phones.
 - **A frame takes 64 lamps** in view, the ones nearest the camera. A
   world with more than 64 point and spot lights, or more than four suns,
   says so once.
@@ -557,12 +588,13 @@ GameObject eveningSun() =>
 MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
 ```
 
-- **The sun's shadows** reach a set distance from the camera and fade
-  out there: 40 m at low quality, 60 m at medium, 100 m at high (less if
-  the camera's `far` is nearer). They're drawn into maps seen from the
-  sun: at low one map with hard edges, at medium two with soft ones, at
-  high three softer ones. With more than one, the nearest covers least,
-  so shadows near the camera are sharpest. The maps move with the camera
+- **The sun's shadows** reach the quality's `shadowDistance` from the
+  camera and fade out there (less if the camera's `far` is nearer).
+  They're drawn into `shadowCascades` maps seen from the sun, with
+  `shadowSoftness` edges: at low one map with hard edges, at medium two
+  with soft ones, at high three softer ones. With more than one, the
+  nearest covers least, so shadows near the camera are sharpest. A
+  quality with `shadows: false` draws none, whatever the lights ask. The maps move with the camera
   a whole texel at a time, so a still shadow's edge doesn't crawl as the
   camera moves. Only the first sun with `shadows` casts them.
 - **A spotlight's shadows** reach as far as its `range`. Each frame
@@ -690,22 +722,24 @@ void fadeOut(GameObject ghost) {
 
 ### Glow and contact: bloom and ambient occlusion
 
-A camera has two effects, both on unless it's told otherwise:
+A camera can have two effects, both off unless it's given them, as in
+Unity: a game that wants neither writes nothing.
 
 - **Bloom:** light brighter than white glows into what's around it: a
   lamp's bulb, a glowing sword, the sun on a metal ball. Something glows
   when its `emissive` times `emissiveIntensity` (or the light it
-  reflects) is above 1. Drawn at medium and high quality.
+  reflects) is above 1. Drawn where `Quality.bloom` is on (medium and
+  high).
 - **Ambient occlusion:** surfaces darken a little where they meet, in
   corners and creases and under a crate on the ground. Only the ambient
-  and sky light darken; a sun and its shadows stay as they are. Drawn at
-  high quality only: a soft hint of contact, not a shadow.
+  and sky light darken; a sun and its shadows stay as they are. Drawn
+  where `Quality.ambientOcclusion` is on (high): a soft hint of contact,
+  not a shadow.
 
 ```dart
-/// A bulb bright enough to glow, and a minimap camera without either
-/// effect, which it doesn't need.
+/// A bulb bright enough to glow, and a camera that makes it glow.
 final bulb = Material(color: Color.black, emissive: Color.rgb(1, 0.8, 0.4), emissiveIntensity: 6);
-final minimap = Camera(orthographic: true, bloom: null, ambientOcclusion: null);
+final camera = Camera(bloom: const Bloom());
 
 /// More glow, and from dimmer light, for a dreamy look; darker corners.
 void dreamy(Camera camera) {
@@ -724,14 +758,15 @@ void dreamy(Camera camera) {
 - **Colours shown as picked don't glow:** the camera's `clearColor` and
   a `Sky.gradient`, however bright. A `Sky.image` is light, and its sun
   glows.
-- **Each camera has its own**, so a minimap or a second view can skip
-  them, and cost nothing. Where the quality level doesn't draw one, it
-  costs nothing either. The lab's 'Look: glow and contact' page turns
+- **Each camera has its own**, so a minimap or a second view goes
+  without them, and costs nothing. Where the quality doesn't draw one,
+  it costs nothing either. The lab's 'Look: glow and contact' page turns
   both on and off, at each level.
 - **What they cost:** little on an iPhone 16 Pro Max (120 fps at every
   level with both) or a Mac. On an older Android phone they cost a lot:
   a Galaxy Note10+ at medium goes from 58 to 40 fps with bloom. If your
-  game runs on phones like it, turn bloom off there, or pick `low`.
+  game runs on phones like it, use a quality without bloom there
+  (`Quality.medium.copyWith(bloom: false)`), or `low`.
 
 ## 6. The frame, the lifecycle and time
 
@@ -2479,9 +2514,10 @@ What keeps a game fast:
   reaches, and the pixels it lights; one that reaches no further than it
   needs to costs least. Turn a lamp off with `enabled = false`: it's
   left out altogether.
-- **A lower quality level for an older phone.** `world.quality =
+- **A cheaper quality for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
-  screen (§5).
+  screen; or take from a level only what costs most there, bloom first
+  (§5).
 - **Measure** on the slowest phone you support. Each example has a
   `tool/measured.dart` for package:fynkel_measure's tool (a
   dev_dependency, so the game itself doesn't carry it), which gives the
@@ -2541,7 +2577,8 @@ What keeps a game fast:
 | `MaterialPropertyBlock` for one object's colour | `renderer.color` |
 | `new Material(material)` | `material.copy()` |
 | Rendering Mode Fade, Transparent; an additive shader | `Material(opacity:)`, `blending: Blending.transparent` or `.additive` |
-| Bloom and SSAO (a Volume, a renderer feature) | `Camera(bloom: Bloom(...), ambientOcclusion: AmbientOcclusion(...))`, on unless `null` |
+| Bloom and SSAO (a Volume, a renderer feature) | `Camera(bloom: Bloom(...), ambientOcclusion: AmbientOcclusion(...))`, off unless given |
+| Quality Settings, a URP asset per level | `world.quality = Quality(...)` or `Quality.low/medium/high.copyWith(...)` |
 | `Camera.orthographicSize` | `orthographicSize`, on `Camera` and `VirtualCamera` |
 | Cinemachine's binding modes (world space, lock to target, lock to target on assign/with world up) | `Follow(space: FollowSpace.world / target / targetYaw)` |
 | `Input.mouseScrollDelta` | `input.scroll`: +y with the wheel turned away, as Unity's |
@@ -2592,6 +2629,15 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Quality is settings, not three levels** (2026-10-16):
+  - `Quality` is a class, not an enum: `Quality.low`, `medium` and
+    `high` are still there, and `Quality.levels` replaces
+    `Quality.values`. A game can make its own (`Quality(...)`) or change
+    a level's (`Quality.medium.copyWith(bloom: false)`) (§5).
+  - A camera has no bloom or ambient occlusion unless given them: add
+    `bloom: const Bloom()` and `ambientOcclusion: const
+    AmbientOcclusion()` to a camera that had them by default.
 
 - **Bloom and ambient occlusion** (2026-10-15):
   - A camera has both unless given `bloom: null` and

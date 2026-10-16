@@ -31,10 +31,10 @@ fn square(z: f32, size: f32, material: PbrMaterial) -> Draw {
 }
 
 /// `draws` seen from 5 m along +Z, on black, with no light but theirs.
-fn scene(draws: Vec<Draw>, quality: Quality) -> RenderScene {
+fn scene(draws: Vec<Draw>, quality: QualityLevel) -> RenderScene {
     let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
     camera.clear_color = [0.0; 3];
-    RenderScene { camera: Some(camera), quality: Some(quality), draws, ..Default::default() }
+    RenderScene { camera: Some(camera), quality: Some(quality.quality()), draws, ..Default::default() }
 }
 
 fn assert_near(got: [u8; 4], want: Vec3, what: &str) {
@@ -52,7 +52,7 @@ fn over(front: Vec3, opacity: f32, behind: Vec3) -> Vec3 {
 #[test]
 fn a_see_through_surface_shows_what_is_behind_it() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let mut r = renderer(&gpu, SRGB);
         // Given first, the glass is still drawn over the wall behind it.
         let draws = vec![
@@ -88,7 +88,7 @@ fn see_through_surfaces_are_drawn_back_to_front() {
             .iter()
             .map(|&i| square(layers[i].0, 1.0 + i as f32, glow(layers[i].1, 0.5, Blend::Transparent)))
             .collect();
-        scene(draws, Quality::High)
+        scene(draws, QualityLevel::High)
     };
     for order in [[0, 1, 2], [2, 1, 0], [1, 2, 0]] {
         let (image, stats) = render(&gpu, &mut r, &squares(&order), 64, 64);
@@ -103,7 +103,7 @@ fn see_through_surfaces_of_one_kind_are_one_draw_call() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let draws = (0..5).map(|i| square(-(i as f32), 1.0, glow(GREEN, 0.3, Blend::Transparent))).collect();
-    let stats = render(&gpu, &mut r, &scene(draws, Quality::High), 32, 32).1;
+    let stats = render(&gpu, &mut r, &scene(draws, QualityLevel::High), 32, 32).1;
     assert_eq!(stats.draw_calls, 1);
     assert_eq!(stats.draws, 5);
 }
@@ -112,7 +112,7 @@ fn see_through_surfaces_of_one_kind_are_one_draw_call() {
 fn a_see_through_surface_is_drawn_over_the_sky() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let mut s = scene(vec![square(0.0, 4.0, glow(GREEN, 0.5, Blend::Transparent))], Quality::High);
+    let mut s = scene(vec![square(0.0, 4.0, glow(GREEN, 0.5, Blend::Transparent))], QualityLevel::High);
     s.sky = Some(Sky { kind: SkyKind::Color(RED), lighting: 0.0 });
     let image = render(&gpu, &mut r, &s, 33, 33).0;
     assert_near(image.pixel(16, 16), over(GREEN, 0.5, RED), "glass over the sky");
@@ -121,7 +121,7 @@ fn a_see_through_surface_is_drawn_over_the_sky() {
 #[test]
 fn an_additive_surface_adds_its_light() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::High] {
         let mut r = renderer(&gpu, SRGB);
         let draws = vec![
             square(1.0, 1.0, glow(RED, 0.5, Blend::Additive)),
@@ -140,9 +140,9 @@ fn below_its_cutoff_a_see_through_surface_is_not_there() {
     let faint = PbrMaterial { alpha_cutoff: 0.5, ..glow(GREEN, 0.4, Blend::Transparent) };
     let solid = PbrMaterial { alpha_cutoff: 0.5, ..glow(GREEN, 0.6, Blend::Transparent) };
     let draws = vec![square(0.0, 4.0, glow(RED, 1.0, Blend::Opaque)), square(1.0, 1.0, faint)];
-    assert_near(render(&gpu, &mut r, &scene(draws, Quality::High), 33, 33).0.pixel(16, 16), RED, "under 0.5");
+    assert_near(render(&gpu, &mut r, &scene(draws, QualityLevel::High), 33, 33).0.pixel(16, 16), RED, "under 0.5");
     let draws = vec![square(0.0, 4.0, glow(RED, 1.0, Blend::Opaque)), square(1.0, 1.0, solid)];
-    let image = render(&gpu, &mut r, &scene(draws, Quality::High), 33, 33).0;
+    let image = render(&gpu, &mut r, &scene(draws, QualityLevel::High), 33, 33).0;
     assert_near(image.pixel(16, 16), over(GREEN, 0.6, RED), "over 0.5, it blends");
 }
 
@@ -151,7 +151,7 @@ fn below_its_cutoff_a_see_through_surface_is_not_there() {
 #[test]
 fn fog_hides_see_through_surfaces_as_it_hides_solid_ones() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::High] {
         let mut r = renderer(&gpu, SRGB);
         let fog = Fog { color: Some(YELLOW), start: 1.0, end: 2.0, height: None };
         for blend in [Blend::Transparent, Blend::Additive] {
@@ -190,7 +190,7 @@ fn see_through_surfaces_cast_no_shadow() {
         let s = RenderScene {
             camera: Some(camera),
             lights: vec![Light::sun(Vec3::NEG_Y, Vec3::ONE).with_shadows(true)],
-            quality: Some(Quality::High),
+            quality: Some(QualityLevel::High.quality()),
             draws,
             ..Default::default()
         };

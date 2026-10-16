@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 27
+#define FY_ABI_VERSION 28
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -35,6 +35,15 @@
 
 // A quality level: Apple's GPUs and desktops'.
 #define FY_QUALITY_HIGH 3
+
+// `FyQuality::shadow_softness`: one sample, sharp.
+#define FY_SHADOWS_HARD 0
+
+// `FyQuality::shadow_softness`: 4 samples, across about 2 texels.
+#define FY_SHADOWS_SOFT 1
+
+// `FyQuality::shadow_softness`: 9 samples, across about 3 texels.
+#define FY_SHADOWS_SOFTER 2
 
 // `FyMaterial::blend`: covers what's behind.
 #define FY_BLEND_OPAQUE 0
@@ -172,6 +181,36 @@ typedef struct FyVec3 {
   float z;
 } FyVec3;
 
+// What a world's views draw, and how finely (`fy_world_quality_set`). A
+// level's, to start from: `fy_quality_preset`.
+typedef struct FyQuality {
+  // The scene drawn into a half-float image, with a last pass after it,
+  // rather than straight to the screen. Bloom draws into it either way.
+  bool hdr;
+  // Cameras' bloom is drawn.
+  bool bloom;
+  // Cameras' ambient occlusion is drawn.
+  bool ambient_occlusion;
+  // Point and spot lights give shiny surfaces a highlight.
+  bool lamp_highlights;
+  // Lights' shadows are drawn; without, none are, and the rest is
+  // unused.
+  bool shadows;
+  // The sun's shadow maps, nearest the camera first: 1 to 3.
+  uint32_t shadow_cascades;
+  // Each of the sun's maps' side, in texels: a power of two, 256 to 4096.
+  uint32_t shadow_resolution;
+  // `FY_SHADOWS_*`.
+  uint32_t shadow_softness;
+  // How far from the camera the sun's shadows reach, in metres.
+  float shadow_distance;
+  // The most spot lights casting shadows in a frame, the nearest the
+  // camera: 0 to 4.
+  uint32_t spot_shadows;
+  // Each spot light's map's side, as `shadow_resolution`.
+  uint32_t spot_shadow_resolution;
+} FyQuality;
+
 // sRGB, 0–1 per channel.
 typedef struct FyColor {
   float r;
@@ -286,13 +325,14 @@ typedef struct FyCamera {
   // Shows the world's sky (`fy_world_sky_set`) behind everything;
   // without it, `clear_color`.
   bool show_sky;
-  // Light brighter than white glows into what's around it, at medium
-  // and high quality: how much (0 none, 1 about what it gives off) and
+  // Light brighter than white glows into what's around it, where the
+  // world's quality draws bloom: how much (0 none, 1 about what it gives off) and
   // from how bright (1: only what's brighter than white).
   bool bloom;
   float bloom_strength;
   float bloom_threshold;
-  // Surfaces darken where they meet, at high quality: how dark (0 to 4)
+  // Surfaces darken where they meet, where the world's quality draws
+  // ambient occlusion: how dark (0 to 4)
   // and how far, in metres.
   bool ambient_occlusion;
   float ambient_occlusion_intensity;
@@ -555,18 +595,26 @@ FyStatus fy_camera_shake_set(const struct FyWorld *world,
                              uint64_t camera,
                              const struct FyVec3 *offset);
 
-// Sets the quality level the world's views draw at: a `FY_QUALITY_*`.
-// `FY_QUALITY_AUTO`, as a new world has, is the device's own. Taken by
-// each `fy_view_frame` after.
+// Sets what the world's views draw, and how finely, or the device's
+// level's (`fy_quality_auto`) when `quality` is null, as a new world has.
+// Taken by each `fy_view_frame` after.
 //
 // # Safety
 //
-// `world` is null or live.
-FyStatus fy_world_quality_set(const struct FyWorld *world, uint32_t level);
+// `world` is null or live; `quality` is null or readable.
+FyStatus fy_world_quality_set(const struct FyWorld *world, const struct FyQuality *quality);
 
-// Writes the quality level this device picks for a world left at
-// `FY_QUALITY_AUTO` to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`.
-// Makes the device if there's none yet.
+// Writes a level's quality to `out`: `level` is `FY_QUALITY_LOW`,
+// `_MEDIUM` or `_HIGH`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_quality_preset(uint32_t level, struct FyQuality *out);
+
+// Writes the level this device picks for a world without a quality of
+// its own to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`. Makes the
+// device if there's none yet.
 //
 // # Safety
 //

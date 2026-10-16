@@ -84,6 +84,7 @@ abstract base class WorldView implements Finalizable {
   WorldView._(this._world, this._width, this._height, Pointer<FyView> pointer, {required bool finalize})
     : _pointer = pointer {
     if (finalize) _finalizer.attach(this, pointer.cast(), detach: this);
+    _world.viewStarted();
   }
 
   static final _finalizer = NativeFinalizer(

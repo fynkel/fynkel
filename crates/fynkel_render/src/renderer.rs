@@ -19,9 +19,9 @@
 //!
 //! 0. The shadow maps: each one's casters' depth, as its light sees them.
 //!    Then light ambient occlusion, when the camera has it (`ao`).
-//! 1. The scene: every draw, then the debug lines on top. Above
-//!    [`Quality::Low`] it is drawn into a half-float image (the scene
-//!    image); at low, straight into the view.
+//! 1. The scene: every draw, then the debug lines on top. With
+//!    [`Quality::hdr`] or bloom it is drawn into a half-float image (the
+//!    scene image); otherwise, straight into the view.
 //! 2. Bloom, when the camera has it and there is a scene image (`bloom`).
 //!    The image's alpha says how much of each pixel is light, which may
 //!    glow: what's drawn and lit, and an image sky. Colours shown as
@@ -497,7 +497,7 @@ impl Renderer {
                 (kit.shadows.view_layout.clone(), kit.shadows.view_stride, MAX_MAPS as u64 * kit.shadows.view_stride),
                 64 * INSTANCE_SIZE,
             ),
-            quality: kit.quality(),
+            quality: kit.device_quality().quality(),
             format,
             image_pipelines: None,
             assets,
@@ -550,8 +550,8 @@ impl Renderer {
         self.format
     }
 
-    /// The level the last frame was prepared at: its scene's, or the
-    /// device's when the scene didn't choose.
+    /// The quality the last frame was prepared at: its scene's, or the
+    /// device's level's when the scene didn't choose.
     pub fn quality(&self) -> Quality {
         self.quality
     }
@@ -593,7 +593,7 @@ impl Renderer {
     /// nothing once its buffers have grown to the scene's size.
     pub fn prepare(&mut self, scene: &RenderScene, width: u32, height: u32) -> FrameStats {
         self.size = (width.max(1), height.max(1));
-        self.quality = scene.quality.unwrap_or(self.kit.quality());
+        self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
         self.instances.clear();
         self.batches.clear();
         self.blended_from = 0;
@@ -614,7 +614,7 @@ impl Renderer {
             self.clear = wgpu::Color::BLACK;
             return stats;
         };
-        self.bloom = camera.bloom.filter(|b| self.quality.bloom() && b.strength > 0.0);
+        self.bloom = camera.bloom.filter(|b| self.quality.bloom && b.strength > 0.0);
         let [r, g, b] = camera.clear_color.map(f64::from);
         // Linear: the sRGB target encodes it like everything else.
         self.clear = wgpu::Color { r, g, b, a: 1.0 };
@@ -638,9 +638,8 @@ impl Renderer {
             Some(_) => camera.view.inverse().transform_vector3(Vec3::Z).normalize().extend(0.0),
             None => camera.position.extend(1.0),
         };
-        self.ao = camera
-            .ambient_occlusion
-            .filter(|a| self.quality.ambient_occlusion() && a.intensity > 0.0 && a.radius > 0.0);
+        self.ao =
+            camera.ambient_occlusion.filter(|a| self.quality.ambient_occlusion && a.intensity > 0.0 && a.radius > 0.0);
         if let Some(ao) = self.ao {
             self.ao_params = ao::Params::new(ao, projection, camera.orthographic.is_none(), self.size.1);
         }
@@ -717,7 +716,7 @@ impl Renderer {
             }
             suns += 1;
         }
-        let highlights = u32::from(self.quality.lamp_highlights());
+        let highlights = u32::from(self.quality.lamp_highlights);
         u.counts = [suns as u32, shadow_sun.map_or(NO_SHADOWS, |(i, _)| i as u32), highlights, 0];
 
         // The point and spot lights that can light what's seen: their reach
@@ -851,7 +850,10 @@ impl Renderer {
         sun: Option<Vec3>,
         stats: &mut FrameStats,
     ) {
-        let level = self.quality.shadows();
+        // No shadows: no sun's maps and no spot maps, whatever lights ask.
+        let on = self.quality.shadows.is_some();
+        let level = self.quality.shadows.or(Quality::LOW.shadows).expect("low has shadows");
+        let sun = sun.filter(|_| on);
         let stride = self.kit.shadows.view_stride as usize;
         let u = &mut self.uniforms;
         u.shadows = ShadowUniforms::zeroed();
@@ -896,7 +898,7 @@ impl Renderer {
 
         // The spot lights that cast shadows, a map each, the nearest the
         // camera first: their slots in the frame's list.
-        let cap = level.spot_maps.min(MAX_SPOT_MAPS);
+        let cap = if on { level.spot_maps.min(MAX_SPOT_MAPS) } else { 0 };
         let mut nearest = [(f32::INFINITY, 0usize); MAX_SPOT_MAPS];
         for (slot, &(distance, i)) in self.in_view_lights.iter().enumerate() {
             let light = &scene.lights[i as usize];

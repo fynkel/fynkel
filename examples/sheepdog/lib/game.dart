@@ -113,8 +113,6 @@ class SheepdogGame extends GameObject {
     orthographic: true,
     orthographicSize: size + 0.5,
     cullingMask: LayerMask.except([effects]),
-    bloom: null,
-    ambientOcclusion: null,
   );
 
   late final Light _sun, _ambient;
@@ -833,7 +831,9 @@ class DogCamera extends GameObject {
       super(name: 'camera');
 
   static const _offset = Vec3(0, 13, 9);
-  final camera = Camera(fovY: 50.deg);
+  // Glow for the bulbs and the wolves' eyes at night, and darker
+  // corners, where the quality draws them.
+  final camera = Camera(fovY: 50.deg, bloom: const Bloom(), ambientOcclusion: const AmbientOcclusion());
   final Follow _follow;
   final LookAt _look;
 

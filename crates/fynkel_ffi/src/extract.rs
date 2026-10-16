@@ -85,7 +85,7 @@ pub(crate) struct Extract {
     /// The world's camera shake: how far its camera is moved, in the
     /// world, when this view draws from it.
     pub(crate) shake: Option<(ObjectId, Vec3)>,
-    /// The world's quality level, or `None` for the device's.
+    /// The world's quality, or `None` for the device's level's.
     pub(crate) quality: Option<Quality>,
     /// The world's sky and fog.
     pub(crate) sky: Option<Sky>,

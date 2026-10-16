@@ -20,24 +20,24 @@ fn gradient(zenith: Vec3, horizon: Vec3, ground: Vec3) -> Sky {
 }
 
 /// Nothing but a camera at the origin looking at `target`, under `sky`.
-fn empty(target: Vec3, sky: Sky, quality: Quality) -> RenderScene {
+fn empty(target: Vec3, sky: Sky, quality: QualityLevel) -> RenderScene {
     let up_or_down = target.x == 0.0 && target.z == 0.0;
     let mut camera = CameraView::looking_at(Vec3::ZERO, target);
     if up_or_down {
         camera.view = fynkel_render::glam::camera::rh::view::look_at_mat4(Vec3::ZERO, target, Vec3::Z);
     }
-    RenderScene { camera: Some(camera), sky: Some(sky), quality: Some(quality), ..Default::default() }
+    RenderScene { camera: Some(camera), sky: Some(sky), quality: Some(quality.quality()), ..Default::default() }
 }
 
 /// A rough grey square 4 m across at `at`, facing a camera 3 m in front of
 /// it along +Z, with `ambient` and `sky`.
-fn wall(at: Vec3, ambient: Vec3, sky: Option<Sky>, quality: Quality) -> RenderScene {
+fn wall(at: Vec3, ambient: Vec3, sky: Option<Sky>, quality: QualityLevel) -> RenderScene {
     let albedo = linear(0.5);
     RenderScene {
         camera: Some(CameraView::looking_at(at + Vec3::new(0.0, 0.0, 3.0), at)),
         ambient,
         sky,
-        quality: Some(quality),
+        quality: Some(quality.quality()),
         draws: vec![Draw::new(
             PLANE,
             Mat4::from_translation(at) * Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(4.0)),
@@ -53,7 +53,7 @@ fn ball(metallic: f32, roughness: f32, sky: Sky) -> RenderScene {
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 1.5), Vec3::ZERO)),
         sky: Some(sky),
-        quality: Some(Quality::High),
+        quality: Some(QualityLevel::High.quality()),
         draws: vec![Draw::new(
             SPHERE,
             Mat4::IDENTITY,
@@ -82,7 +82,7 @@ fn assert_near(got: [u8; 4], want: [u8; 3], within: u8, what: &str) {
 #[test]
 fn a_gradient_sky_is_drawn_behind_everything_as_its_colours_are_picked() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::High] {
         let mut r = renderer(&gpu, SRGB);
         let sky = gradient(BLUE, ORANGE, RED);
         // 33 pixels: the middle one's centre is the view's.
@@ -120,21 +120,22 @@ fn a_plain_sky_lights_as_ambient_light_does() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let c = Vec3::new(0.6, 0.5, 0.4);
-    let lit_by_ambient = render(&gpu, &mut r, &wall(Vec3::ZERO, c, None, Quality::High), 32, 32).0.pixel(16, 16);
+    let lit_by_ambient = render(&gpu, &mut r, &wall(Vec3::ZERO, c, None, QualityLevel::High), 32, 32).0.pixel(16, 16);
     let plain = Sky { kind: SkyKind::Color(c), lighting: 1.0 };
-    let lit_by_sky = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(plain), Quality::High), 32, 32).0;
+    let lit_by_sky = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(plain), QualityLevel::High), 32, 32).0;
     assert_near(lit_by_sky.pixel(16, 16), rgb(lit_by_ambient), 1, "a plain sky of c is ambient c");
     // A gradient of one colour and an image of one colour are the same sky.
-    let even = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(gradient(c, c, c)), Quality::High), 32, 32).0;
+    let even =
+        render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(gradient(c, c, c)), QualityLevel::High), 32, 32).0;
     assert_near(even.pixel(16, 16), rgb(lit_by_ambient), 2, "a gradient of one colour");
     let image = Arc::new(SkyImage::from_rgb(16, 8, &[c.x, c.y, c.z].repeat(16 * 8)).unwrap());
     let flat = Sky { kind: SkyKind::Image { image, intensity: 1.0, rotation: 0.0 }, lighting: 1.0 };
-    let from_image = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(flat), Quality::High), 32, 32).0;
+    let from_image = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(flat), QualityLevel::High), 32, 32).0;
     assert_near(from_image.pixel(16, 16), rgb(lit_by_ambient), 2, "an image of one colour");
     // `lighting` scales the light, not what's seen of the sky.
     let half = Sky { kind: SkyKind::Color(c), lighting: 0.5 };
-    let lit_by_half = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(half), Quality::High), 32, 32).0;
-    let want = render(&gpu, &mut r, &wall(Vec3::ZERO, c * 0.5, None, Quality::High), 32, 32).0;
+    let lit_by_half = render(&gpu, &mut r, &wall(Vec3::ZERO, Vec3::ZERO, Some(half), QualityLevel::High), 32, 32).0;
+    let want = render(&gpu, &mut r, &wall(Vec3::ZERO, c * 0.5, None, QualityLevel::High), 32, 32).0;
     assert_near(lit_by_half.pixel(16, 16), rgb(want.pixel(16, 16)), 1, "lighting 0.5");
 }
 
@@ -190,8 +191,9 @@ fn an_image_sky_is_seen_the_way_the_camera_looks_tone_mapped_turned_and_scaled()
     };
     // Each column is 45° wide: look at a column's middle.
     let at = |degrees: f32| Vec3::new(degrees.to_radians().sin(), 0.0, -degrees.to_radians().cos());
-    let mut seen =
-        |sky: Sky, degrees: f32| render(&gpu, &mut r, &empty(at(degrees), sky, Quality::High), 17, 17).0.pixel(8, 8);
+    let mut seen = |sky: Sky, degrees: f32| {
+        render(&gpu, &mut r, &empty(at(degrees), sky, QualityLevel::High), 17, 17).0.pixel(8, 8)
+    };
     assert_near(seen(sky(1.0, 0.0), 22.5), to_srgb8(tonemap(colour(4))), 2, "ahead and a little right: column 4");
     assert_near(seen(sky(1.0, 0.0), 112.5), to_srgb8(tonemap(colour(6))), 2, "right: column 6");
     assert_near(seen(sky(4.0, 0.0), 22.5), to_srgb8(tonemap(colour(4) * 4.0)), 2, "four times as bright");
@@ -214,7 +216,7 @@ fn an_image_sky_is_read_from_rgb_and_says_its_horizon() {
 #[test]
 fn fog_fades_what_is_far_into_its_colour() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::High] {
         let mut r = renderer(&gpu, SRGB);
         let wall_colour = wall_lit(Vec3::ONE);
         let mut seen = |fog: Fog, at: Vec3| {
@@ -238,7 +240,7 @@ fn fog_fades_what_is_far_into_its_colour() {
 fn fog_without_a_colour_takes_the_skys_horizon() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let mut scene = wall(Vec3::ZERO, Vec3::ONE, Some(gradient(BLUE, ORANGE, RED)), Quality::High);
+    let mut scene = wall(Vec3::ZERO, Vec3::ONE, Some(gradient(BLUE, ORANGE, RED)), QualityLevel::High);
     scene.fog = Some(Fog { color: None, start: 0.0, end: 1.0, height: None });
     assert_near(render(&gpu, &mut r, &scene, 32, 32).0.pixel(16, 16), to_srgb8(ORANGE), 1, "a gradient's horizon");
     // An image's is tone mapped, as the sky behind is.

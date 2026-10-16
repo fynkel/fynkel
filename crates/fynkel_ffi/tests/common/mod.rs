@@ -19,6 +19,22 @@ pub fn ok(status: FyStatus) {
     assert_eq!(status, FyStatus::Ok, "{}", last_error());
 }
 
+/// Sets `world`'s quality to a level's (`FY_QUALITY_*`), or the device's
+/// at `FY_QUALITY_AUTO`.
+#[track_caller]
+pub fn set_level(world: *mut FyWorld, level: u32) {
+    if level == FY_QUALITY_AUTO {
+        // SAFETY: a live world.
+        ok(unsafe { fy_world_quality_set(world, std::ptr::null()) });
+        return;
+    }
+    let mut quality = FyQuality::default();
+    // SAFETY: a local out-value.
+    ok(unsafe { fy_quality_preset(level, &mut quality) });
+    // SAFETY: a live world, a local value.
+    ok(unsafe { fy_world_quality_set(world, &quality) });
+}
+
 /// A world that frees itself.
 pub struct World(pub *mut FyWorld);
 

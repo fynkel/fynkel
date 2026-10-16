@@ -63,7 +63,7 @@ void main() {
     expect(sun.intensity, greaterThan(0));
 
     final shots = Platform.environment['LAB_SHOT'];
-    for (final quality in Quality.values) {
+    for (final quality in Quality.levels) {
       await tap(quality.name);
       expect(world.quality, quality);
       expect(scene.readout.value, startsWith('drawn at ${quality.name} '));

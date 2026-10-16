@@ -25,11 +25,11 @@ fn material(grey: f32) -> PbrMaterial {
 
 /// A 12 m floor, and a 1 m cube whose bottom is 1 m above it, at the
 /// origin; seen from above and in front.
-fn stage(lights: Vec<Light>, quality: Quality) -> RenderScene {
+fn stage(lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 7.0, 5.0), Vec3::ZERO)),
         lights,
-        quality: Some(quality),
+        quality: Some(quality.quality()),
         ambient: Vec3::splat(0.1),
         lines: Vec::new(),
         sky: None,
@@ -79,11 +79,15 @@ const IN_THE_OPEN: Vec3 = Vec3::new(-2.0, 0.0, 1.5);
 #[test]
 fn the_sun_casts_shadows_at_every_level() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let scene = stage(vec![sun()], quality);
         let (shade, stats) = shade_at(&gpu, &scene, IN_THE_SUNS_SHADOW);
         assert!(shade < 0.5, "{quality:?}: under the cube, the floor is in shadow ({shade})");
-        assert_eq!(stats.shadow_maps as usize, quality.shadows().cascades, "{quality:?}: a map per cascade");
+        assert_eq!(
+            stats.shadow_maps as usize,
+            quality.quality().shadows.unwrap().cascades,
+            "{quality:?}: a map per cascade"
+        );
         assert!(stats.shadow_casters >= 2, "{quality:?}: the floor and the cube cast ({stats:?})");
         let (open, _) = shade_at(&gpu, &scene, IN_THE_OPEN);
         assert!(open > 0.97, "{quality:?}: out in the open, it's lit as without shadows ({open})");
@@ -96,7 +100,7 @@ fn the_sun_casts_shadows_at_every_level() {
 #[test]
 fn a_caster_far_towards_the_sun_still_casts() {
     let gpu = gpu();
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let mut scene = stage(vec![sun()], quality);
         let towards_sun = -Vec3::new(1.0, -2.0, 0.0).normalize();
         let roof =
@@ -110,13 +114,13 @@ fn a_caster_far_towards_the_sun_still_casts() {
 #[test]
 fn a_draw_can_choose_not_to_cast_or_receive_shadows() {
     let gpu = gpu();
-    let mut scene = stage(vec![sun()], Quality::Medium);
+    let mut scene = stage(vec![sun()], QualityLevel::Medium);
     scene.draws[1].cast_shadows = false;
     let (shade, stats) = shade_at(&gpu, &scene, IN_THE_SUNS_SHADOW);
     assert!(shade > 0.97, "the cube casts none ({shade})");
     assert_eq!(stats.shadow_casters, 2, "only the floor casts, into each cascade: {stats:?}");
 
-    let mut scene = stage(vec![sun()], Quality::Medium);
+    let mut scene = stage(vec![sun()], QualityLevel::Medium);
     scene.draws[0].receive_shadows = false;
     let (shade, _) = shade_at(&gpu, &scene, IN_THE_SUNS_SHADOW);
     assert!(shade > 0.97, "the floor takes none ({shade})");
@@ -129,7 +133,7 @@ fn a_spot_light_casts_shadows() {
     // the cube's right.
     let from = Vec3::new(-1.5, 4.0, 0.0);
     let torch = Light::spot(from, Vec3::new(0.5, 0.0, 0.0) - from, 12.0, 1.4, 0.2, Vec3::splat(4.0));
-    let scene = stage(vec![torch.with_shadows(true)], Quality::Medium);
+    let scene = stage(vec![torch.with_shadows(true)], QualityLevel::Medium);
     let (shade, stats) = shade_at(&gpu, &scene, Vec3::new(0.9, 0.0, 0.0));
     assert!(shade < 0.5, "the cube's shadow ({shade})");
     assert_eq!(stats.shadow_maps, 1);
@@ -150,14 +154,14 @@ fn each_level_draws_its_own_number_of_maps() {
         .collect();
     lights.push(Light::point(Vec3::new(0.0, 3.0, 2.0), 5.0, Vec3::ONE).with_shadows(true));
     lights.push(sun());
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
-        let level = quality.shadows();
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
+        let level = quality.quality().shadows.unwrap();
         let (_, stats) = render(&gpu, &mut r, &stage(lights.clone(), quality), SIZE, SIZE);
         assert_eq!(stats.shadow_maps as usize, level.cascades + level.spot_maps, "{quality:?}");
     }
     // No light asks for them: no maps.
     lights.iter_mut().for_each(|l| l.shadows = false);
-    let (_, stats) = render(&gpu, &mut r, &stage(lights, Quality::High), SIZE, SIZE);
+    let (_, stats) = render(&gpu, &mut r, &stage(lights, QualityLevel::High), SIZE, SIZE);
     assert_eq!((stats.shadow_maps, stats.shadow_casters), (0, 0));
 }
 
@@ -173,11 +177,11 @@ fn picture(gpu: &Gpu, r: &mut Renderer, name: &str, scene: &RenderScene) {
     assert_golden_within(name, &image, PICTURE_PIXELS);
 }
 
-fn level_name(quality: Quality) -> &'static str {
+fn level_name(quality: QualityLevel) -> &'static str {
     match quality {
-        Quality::Low => "low",
-        Quality::Medium => "medium",
-        Quality::High => "high",
+        QualityLevel::Low => "low",
+        QualityLevel::Medium => "medium",
+        QualityLevel::High => "high",
     }
 }
 
@@ -188,7 +192,7 @@ fn level_name(quality: Quality) -> &'static str {
 fn picture_a_cube_on_the_floor() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let mut scene = stage(vec![Light::sun(Vec3::new(1.0, -0.6, 0.4), Vec3::ONE).with_shadows(true)], quality);
         scene.camera = Some(CameraView::looking_at(Vec3::new(-1.5, 2.0, 3.0), Vec3::new(0.5, 0.3, 0.0)));
         scene.draws[1].model = Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0));
@@ -208,7 +212,8 @@ fn picture_a_cutout_casts_its_holes() {
         .flat_map(|(x, y)| [255, 255, 255, if (x + y) % 2 == 0 { 255 } else { 0 }])
         .collect();
     r.upload_texture(CHECKER, ColorSpace::Srgb, 4, 4, &checker);
-    let mut scene = stage(vec![Light::sun(Vec3::new(0.3, -1.0, 0.9), Vec3::ONE).with_shadows(true)], Quality::Medium);
+    let mut scene =
+        stage(vec![Light::sun(Vec3::new(0.3, -1.0, 0.9), Vec3::ONE).with_shadows(true)], QualityLevel::Medium);
     scene.camera = Some(CameraView::looking_at(Vec3::new(0.0, 5.0, 5.0), Vec3::new(0.0, 0.0, 1.0)));
     scene.draws[1] = Draw::new(
         PLANE,
@@ -233,7 +238,7 @@ fn picture_a_cutout_casts_its_holes() {
 fn picture_the_cascades_meet() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Medium, QualityLevel::High] {
         let mut draws = vec![Draw::new(PLANE, Mat4::from_scale(Vec3::new(12.0, 1.0, 120.0)), material(0.7))];
         for i in 0..24 {
             let z = -2.0 - i as f32 * 2.5;
@@ -250,7 +255,7 @@ fn picture_the_cascades_meet() {
         let scene = RenderScene {
             camera: Some(CameraView::looking_at(Vec3::new(1.5, 2.5, 4.0), Vec3::new(-1.0, 0.0, -20.0))),
             lights: vec![Light::sun(Vec3::new(1.0, -0.8, -0.2), Vec3::ONE).with_shadows(true)],
-            quality: Some(quality),
+            quality: Some(quality.quality()),
             ambient: Vec3::splat(0.1),
             lines: Vec::new(),
             sky: None,
@@ -269,7 +274,7 @@ fn picture_a_spot_lights_cone() {
     let mut r = renderer(&gpu, SRGB);
     let from = Vec3::new(-1.0, 4.0, 0.5);
     let spot = Light::spot(from, Vec3::new(0.5, 0.0, 0.0) - from, 12.0, 1.0, 0.0, Vec3::splat(6.0));
-    let scene = stage(vec![spot.with_shadows(true)], Quality::Medium);
+    let scene = stage(vec![spot.with_shadows(true)], QualityLevel::Medium);
     picture(&gpu, &mut r, "shadow_spot", &scene);
 }
 
@@ -285,7 +290,12 @@ const SHIMMER_SIDE: u32 = 256;
 /// camera slid `shift` whole pixels to the right: each as its column and
 /// row on the floor, so a still shadow gives the same set however far the
 /// camera has slid.
-fn shadow_pixels(gpu: &Gpu, r: &mut Renderer, quality: Quality, shift: i32) -> std::collections::BTreeSet<(i32, u32)> {
+fn shadow_pixels(
+    gpu: &Gpu,
+    r: &mut Renderer,
+    quality: QualityLevel,
+    shift: i32,
+) -> std::collections::BTreeSet<(i32, u32)> {
     let metres = 2.0 * SHIMMER_HALF / SHIMMER_SIDE as f32;
     let x = shift as f32 * metres;
     let mut camera = CameraView::looking_at(Vec3::new(x, 10.0, 0.0), Vec3::new(x, 0.0, 0.0));
@@ -317,7 +327,7 @@ fn shadow_pixels(gpu: &Gpu, r: &mut Renderer, quality: Quality, shift: i32) -> s
 fn a_still_shadow_stays_still_as_the_camera_moves() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Low, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::High] {
         let first = shadow_pixels(&gpu, &mut r, quality, 0);
         for step in 1..10 {
             let shift = step * 3;
@@ -335,14 +345,14 @@ fn a_still_shadow_stays_still_as_the_camera_moves() {
 // --- Memory (hardening R3) ------------------------------------------------------
 
 /// A level's sun maps' bytes: 16-bit depth.
-fn cascade_bytes(quality: Quality) -> u64 {
-    let level = quality.shadows();
+fn cascade_bytes(quality: QualityLevel) -> u64 {
+    let level = quality.quality().shadows.unwrap();
     u64::from(level.map_size).pow(2) * level.cascades as u64 * 2
 }
 
 /// `n` of a level's spot maps' bytes: 32-bit depth.
-fn spot_bytes(quality: Quality, n: u64) -> u64 {
-    u64::from(quality.shadows().spot_map_size).pow(2) * n * 4
+fn spot_bytes(quality: QualityLevel, n: u64) -> u64 {
+    u64::from(quality.quality().shadows.unwrap().spot_map_size).pow(2) * n * 4
 }
 
 #[test]
@@ -351,9 +361,9 @@ fn one_shadowed_spot_holds_one_map() {
     let mut r = renderer(&gpu, SRGB);
     let from = Vec3::new(-1.5, 4.0, 0.0);
     let torch = Light::spot(from, Vec3::NEG_Y, 12.0, 1.0, 0.2, Vec3::ONE).with_shadows(true);
-    let (_, stats) = render(&gpu, &mut r, &stage(vec![torch], Quality::High), 32, 32);
+    let (_, stats) = render(&gpu, &mut r, &stage(vec![torch], QualityLevel::High), 32, 32);
     assert_eq!(stats.shadow_maps, 1);
-    assert_eq!(stats.shadow_bytes, spot_bytes(Quality::High, 1), "not the level's 4");
+    assert_eq!(stats.shadow_bytes, spot_bytes(QualityLevel::High, 1), "not the level's 4");
     assert_eq!(r.kit().shadow_bytes(), stats.shadow_bytes);
 }
 
@@ -361,14 +371,14 @@ fn one_shadowed_spot_holds_one_map() {
 fn maps_go_a_while_after_shadows_stop() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let lit = stage(vec![sun()], Quality::Medium);
+    let lit = stage(vec![sun()], QualityLevel::Medium);
     let (_, stats) = render(&gpu, &mut r, &lit, 32, 32);
-    assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium));
+    assert_eq!(stats.shadow_bytes, cascade_bytes(QualityLevel::Medium));
     // A frame or two without: still there, so shadows that flicker on and
     // off don't remake them.
-    let dark = stage(vec![sun().with_shadows(false)], Quality::Medium);
+    let dark = stage(vec![sun().with_shadows(false)], QualityLevel::Medium);
     let (_, stats) = render(&gpu, &mut r, &dark, 32, 32);
-    assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium));
+    assert_eq!(stats.shadow_bytes, cascade_bytes(QualityLevel::Medium));
     // A couple of seconds without: gone.
     for _ in 0..120 {
         render(&gpu, &mut r, &dark, 32, 32);
@@ -386,13 +396,13 @@ fn views_of_one_kit_share_their_maps() {
     for r in &mut views {
         r.upload_mesh(CUBE, &MeshData::cube());
         r.upload_mesh(PLANE, &MeshData::plane());
-        let (_, stats) = render(&gpu, r, &stage(vec![sun()], Quality::Medium), 32, 32);
-        assert_eq!(stats.shadow_bytes, cascade_bytes(Quality::Medium), "each view sees its maps");
+        let (_, stats) = render(&gpu, r, &stage(vec![sun()], QualityLevel::Medium), 32, 32);
+        assert_eq!(stats.shadow_bytes, cascade_bytes(QualityLevel::Medium), "each view sees its maps");
     }
-    assert_eq!(kit.shadow_bytes(), cascade_bytes(Quality::Medium), "one set between them");
+    assert_eq!(kit.shadow_bytes(), cascade_bytes(QualityLevel::Medium), "one set between them");
     // At another level, a view takes maps of its own.
-    render(&gpu, &mut views[1], &stage(vec![sun()], Quality::High), 32, 32);
-    assert_eq!(kit.shadow_bytes(), cascade_bytes(Quality::Medium) + cascade_bytes(Quality::High));
+    render(&gpu, &mut views[1], &stage(vec![sun()], QualityLevel::High), 32, 32);
+    assert_eq!(kit.shadow_bytes(), cascade_bytes(QualityLevel::Medium) + cascade_bytes(QualityLevel::High));
     drop(views);
     assert_eq!(kit.shadow_bytes(), 0, "gone with the views");
 }
@@ -411,7 +421,8 @@ fn a_fine_cutout_still_casts_its_share() {
     r.upload_texture(STRIPES, ColorSpace::Srgb, 64, 64, &stripes);
     // A standing screen at x = -3, facing +x, tiled 32 times: the sun,
     // from the left, throws it onto the floor at -2.5 < x < -0.5.
-    let mut scene = stage(vec![Light::sun(Vec3::new(1.0, -1.0, 0.0), Vec3::ONE).with_shadows(true)], Quality::Medium);
+    let mut scene =
+        stage(vec![Light::sun(Vec3::new(1.0, -1.0, 0.0), Vec3::ONE).with_shadows(true)], QualityLevel::Medium);
     scene.draws[1] = Draw::new(
         PLANE,
         Mat4::from_scale_rotation_translation(
@@ -445,4 +456,42 @@ fn a_fine_cutout_still_casts_its_share() {
     let share = shadowed / open;
     assert!(share < 0.85, "the screen casts some shadow: {share} of the light reaches the floor");
     assert!(share > 0.3, "not a whole one: {share}");
+}
+
+/// A quality without shadows draws no maps, whatever the lights ask: the
+/// floor under the cube is lit as in the open.
+#[test]
+fn a_quality_without_shadows_draws_none() {
+    let gpu = gpu();
+    let from = Vec3::new(-1.5, 4.0, 0.0);
+    let torch = Light::spot(from, Vec3::new(0.5, 0.0, 0.0) - from, 12.0, 1.4, 0.2, Vec3::splat(4.0));
+    for (lights, at) in [(vec![sun()], IN_THE_SUNS_SHADOW), (vec![torch.with_shadows(true)], Vec3::new(0.9, 0.0, 0.0))]
+    {
+        let mut scene = stage(lights, QualityLevel::High);
+        let (shade, _) = shade_at(&gpu, &scene, at);
+        assert!(shade < 0.5, "with shadows, in shadow ({shade})");
+        scene.quality = Some(Quality { shadows: None, ..Quality::HIGH });
+        let (shade, stats) = shade_at(&gpu, &scene, at);
+        assert_eq!((stats.shadow_maps, stats.shadow_casters), (0, 0), "{stats:?}");
+        assert!(shade > 0.97, "without, lit ({shade})");
+    }
+}
+
+/// Shadow settings out of range are said, not drawn.
+#[test]
+fn shadow_settings_out_of_range_are_invalid() {
+    let base = Quality::MEDIUM.shadows.unwrap();
+    assert_eq!(Quality::MEDIUM.invalid(), None);
+    assert_eq!(Quality { shadows: None, ..Quality::LOW }.invalid(), None);
+    for level in [
+        ShadowLevel { cascades: 0, ..base },
+        ShadowLevel { cascades: 4, ..base },
+        ShadowLevel { map_size: 1000, ..base },
+        ShadowLevel { spot_map_size: 8192, ..base },
+        ShadowLevel { spot_maps: 5, ..base },
+        ShadowLevel { distance: 0.0, ..base },
+        ShadowLevel { distance: f32::NAN, ..base },
+    ] {
+        assert!(Quality { shadows: Some(level), ..Quality::MEDIUM }.invalid().is_some(), "{level:?}");
+    }
 }

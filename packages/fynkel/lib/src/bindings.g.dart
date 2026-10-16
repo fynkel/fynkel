@@ -244,6 +244,9 @@ external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>()
 external int fy_quality_auto(ffi.Pointer<ffi.Uint32> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Uint32, ffi.Pointer<FyQuality>)>(isLeaf: true)
+external int fy_quality_preset(int level, ffi.Pointer<FyQuality> out);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyRay>, ffi.Float, ffi.Uint32, ffi.Pointer<FyRayHit>)>(
   isLeaf: true,
 )
@@ -388,8 +391,8 @@ external void fy_world_free(ffi.Pointer<FyWorld> world);
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32)>(isLeaf: true)
-external int fy_world_quality_set(ffi.Pointer<FyWorld> world, int level);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyQuality>)>(isLeaf: true)
+external int fy_world_quality_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyQuality> quality);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FySky>)>(isLeaf: true)
 external int fy_world_sky_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FySky> sky);
@@ -407,7 +410,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 27;
+const int FY_ABI_VERSION = 28;
 
 const int FY_APPLE_MORE = 2;
 
@@ -446,6 +449,12 @@ const int FY_QUALITY_HIGH = 3;
 const int FY_QUALITY_LOW = 1;
 
 const int FY_QUALITY_MEDIUM = 2;
+
+const int FY_SHADOWS_HARD = 0;
+
+const int FY_SHADOWS_SOFT = 1;
+
+const int FY_SHADOWS_SOFTER = 2;
 
 const int FY_SKY_COLOR = 1;
 
@@ -696,6 +705,67 @@ final class FyModelCounts extends ffi.Struct {
     ..ref.textures = textures
     ..ref.materials = materials
     ..ref.warnings = warnings;
+}
+
+final class FyQuality extends ffi.Struct {
+  @ffi.Bool()
+  external bool hdr;
+
+  @ffi.Bool()
+  external bool bloom;
+
+  @ffi.Bool()
+  external bool ambient_occlusion;
+
+  @ffi.Bool()
+  external bool lamp_highlights;
+
+  @ffi.Bool()
+  external bool shadows;
+
+  @ffi.Uint32()
+  external int shadow_cascades;
+
+  @ffi.Uint32()
+  external int shadow_resolution;
+
+  @ffi.Uint32()
+  external int shadow_softness;
+
+  @ffi.Float()
+  external double shadow_distance;
+
+  @ffi.Uint32()
+  external int spot_shadows;
+
+  @ffi.Uint32()
+  external int spot_shadow_resolution;
+
+  static ffi.Pointer<FyQuality> $allocate(
+    ffi.Allocator $allocator, {
+    required bool hdr,
+    required bool bloom,
+    required bool ambient_occlusion,
+    required bool lamp_highlights,
+    required bool shadows,
+    required int shadow_cascades,
+    required int shadow_resolution,
+    required int shadow_softness,
+    required double shadow_distance,
+    required int spot_shadows,
+    required int spot_shadow_resolution,
+  }) => $allocator<FyQuality>()
+    ..ref.hdr = hdr
+    ..ref.bloom = bloom
+    ..ref.ambient_occlusion = ambient_occlusion
+    ..ref.lamp_highlights = lamp_highlights
+    ..ref.shadows = shadows
+    ..ref.shadow_cascades = shadow_cascades
+    ..ref.shadow_resolution = shadow_resolution
+    ..ref.shadow_softness = shadow_softness
+    ..ref.shadow_distance = shadow_distance
+    ..ref.spot_shadows = spot_shadows
+    ..ref.spot_shadow_resolution = spot_shadow_resolution;
 }
 
 final class FyQuat extends ffi.Struct {

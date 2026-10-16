@@ -679,7 +679,14 @@ say otherwise.
    scene's shader and nearly free. AO is cheap and partial, on at high
    only by default. *Decided by you, 2026-10-14.*
 3. **Three quality levels**, picked by the device unless the game
-   chooses. *Decided by you, 2026-10-14.*
+   chooses. *Decided by you, 2026-10-14.* **Changed in phase 7
+   (2026-10-16), your call:** a quality is settings a game can change
+   (bloom, ambient occlusion, HDR, lamp highlights, shadows on or off,
+   cascades, resolutions, softness, distance), as Unity's quality levels
+   are; the three levels are where a game starts from. Cameras have no
+   bloom or ambient occlusion unless given them, and a debug build says
+   when the quality leaves out what a camera asks for. ABI 28. Volumes
+   (global and local, blended) come later, as their own work.
 4. **The final scene** is Sheepdog with the look, plus the lab's look
    scene, not a new showcase. *Recommended*: Sheepdog's night already
    asks for lamps, and a real game shows more than a demo would.

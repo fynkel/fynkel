@@ -13,14 +13,14 @@ const SIZE: u32 = 64;
 
 /// A square glowing `glow` (linear), a fifth of the view across, on black,
 /// seen through a camera with `bloom`.
-fn glowing(glow: f32, bloom: Option<Bloom>, quality: Quality) -> RenderScene {
+fn glowing(glow: f32, bloom: Option<Bloom>, quality: QualityLevel) -> RenderScene {
     let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 5.0), Vec3::ZERO);
     camera.bloom = bloom;
     let material = PbrMaterial { base_color: [0.0, 0.0, 0.0, 1.0], emissive: [glow; 3], ..PbrMaterial::DEFAULT };
     let model = Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(1.2));
     RenderScene {
         camera: Some(camera),
-        quality: Some(quality),
+        quality: Some(quality.quality()),
         draws: vec![Draw::new(PLANE, model, material)],
         ..Default::default()
     }
@@ -41,7 +41,7 @@ fn max_difference(a: &Image, b: &Image) -> u8 {
 fn light_brighter_than_white_glows_at_medium_and_high() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Medium, QualityLevel::High] {
         let plain = render(&gpu, &mut r, &glowing(8.0, None, quality), SIZE, SIZE).0;
         assert_eq!(beside(&plain, 3), 0, "no bloom: black beside the square ({quality:?})");
         let bloom = Bloom::DEFAULT;
@@ -61,8 +61,8 @@ fn light_brighter_than_white_glows_at_medium_and_high() {
 fn nothing_glows_at_low() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let plain = render(&gpu, &mut r, &glowing(8.0, None, Quality::Low), SIZE, SIZE).0;
-    let bloom = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), Quality::Low), SIZE, SIZE).0;
+    let plain = render(&gpu, &mut r, &glowing(8.0, None, QualityLevel::Low), SIZE, SIZE).0;
+    let bloom = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), QualityLevel::Low), SIZE, SIZE).0;
     assert_eq!(max_difference(&plain, &bloom), 0);
 }
 
@@ -72,7 +72,7 @@ fn nothing_glows_at_low() {
 fn bloom_changes_nothing_that_is_not_bright() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Medium, QualityLevel::High] {
         let plain = render(&gpu, &mut r, &glowing(0.5, None, quality), SIZE, SIZE).0;
         let bloom = render(&gpu, &mut r, &glowing(0.5, Some(Bloom::DEFAULT), quality), SIZE, SIZE).0;
         assert!(max_difference(&plain, &bloom) <= 1, "a dim square ({quality:?})");
@@ -86,8 +86,8 @@ fn bloom_changes_nothing_that_is_not_bright() {
     // The stage 1 cube, lit no brighter than white, is its golden with
     // bloom on.
     let mut scene = stage1_scene();
-    for quality in [Quality::Medium, Quality::High] {
-        scene.quality = Some(quality);
+    for quality in [QualityLevel::Medium, QualityLevel::High] {
+        scene.quality = Some(quality.quality());
         if let Some(camera) = &mut scene.camera {
             camera.bloom = Some(Bloom::DEFAULT);
         }
@@ -101,7 +101,7 @@ fn bloom_follows_the_view_size() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     for size in [33, 64, 25, 200] {
-        let image = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), Quality::High), size, size).0;
+        let image = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), QualityLevel::High), size, size).0;
         let centre = image.pixel(size / 2, size / 2);
         assert!(centre[0] >= 250, "the square itself is white: {centre:?} ({size})");
         let left = size / 2 - size / 10 - 2;
@@ -130,7 +130,7 @@ fn bloom_looks_like_its_golden() {
     };
     let scene = RenderScene {
         camera: Some(camera),
-        quality: Some(Quality::High),
+        quality: Some(QualityLevel::High.quality()),
         ambient: Vec3::splat(0.1),
         lights: vec![Light::sun(Vec3::new(-0.3, -1.0, -0.4), Vec3::splat(0.6))],
         draws: vec![floor, ball(-1.6, [6.0, 1.5, 0.3]), ball(0.0, [0.5, 4.0, 1.0]), ball(1.6, [0.4, 0.8, 0.9])],
@@ -145,7 +145,7 @@ fn bloom_looks_like_its_golden() {
 fn colours_shown_as_picked_do_not_glow() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let mut scene = glowing(0.5, Some(Bloom::DEFAULT), Quality::High);
+    let mut scene = glowing(0.5, Some(Bloom::DEFAULT), QualityLevel::High);
     if let Some(camera) = &mut scene.camera {
         camera.clear_color = [1.0, 0.0, 0.0];
     }
@@ -160,4 +160,20 @@ fn colours_shown_as_picked_do_not_glow() {
     }
     let plain = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
     assert!(max_difference(&image, &plain) <= 1, "a white sky, around a dim square");
+}
+
+/// A game's own quality decides, not the level it started from: bloom
+/// turned on at low glows, and turned off at high doesn't.
+#[test]
+fn a_games_own_quality_decides_bloom() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut scene = glowing(8.0, Some(Bloom::DEFAULT), QualityLevel::Low);
+    scene.quality = Some(Quality { bloom: true, ..Quality::LOW });
+    let glow = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    assert!(beside(&glow, 3) > 20, "low, with bloom: it glows ({})", beside(&glow, 3));
+
+    scene.quality = Some(Quality { bloom: false, ..Quality::HIGH });
+    let plain = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
+    assert_eq!(beside(&plain, 3), 0, "high, without bloom: black beside the square");
 }

@@ -1012,6 +1012,12 @@ class GameObject with _Moving {
     c.ambient_occlusion_intensity = ao?.intensity ?? 1;
     c.ambient_occlusion_radius = ao?.radius ?? 0.5;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
+    if (_world case final world? when (bloom != null && !world._bloomAsked) || (ao != null && !world._aoAsked)) {
+      world
+        .._bloomAsked |= bloom != null
+        .._aoAsked |= ao != null
+        .._checkEffects();
+    }
   }
 
   void _writeLight(Light value) {

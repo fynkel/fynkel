@@ -53,7 +53,12 @@ class LookScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
+    // Glow and darker corners: the camera asks, the quality says whether
+    // they're drawn.
+    _eye.get<Camera>()!
+      ..bloom = const Bloom()
+      ..ambientOcclusion = const AmbientOcclusion();
     _sun = find('sun')!.get<Light>()!..shadows = true;
     find('sun')!.rotation = Quat.lookRotation(Vec3(-0.5, -0.75, -0.45));
     _ambient = find('ambient')!.get<Light>()!;
@@ -225,7 +230,7 @@ class LookScene extends LabScene {
 
   @override
   List<Control> get controls => [
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     Toggle('night', () => night, (on) => night = on),
     Toggle('fog', () => fog, (on) => fog = on),

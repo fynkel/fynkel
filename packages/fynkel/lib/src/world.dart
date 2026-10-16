@@ -360,15 +360,49 @@ final class World implements Finalizable {
 
   var _applicationPaused = false;
 
-  /// The [Quality] level the world's views draw at, from their next
-  /// frame: null, as a new world has, for the one the device picks
+  /// What the world's views draw, and how finely ([Quality]), from their
+  /// next frame: null, as a new world has, for the level the device picks
   /// ([Quality.device]). A game can change it at any time, from its
-  /// settings page for example; `world.quality ?? Quality.device` is the
-  /// level drawn at.
+  /// settings page for example; `world.quality ?? Quality.device` is what's
+  /// drawn. Throws an ArgumentError for settings out of range.
   Quality? get quality => _quality;
   set quality(Quality? value) {
-    check(fy_world_quality_set(_engineWorld, value?._level ?? FY_QUALITY_AUTO));
+    using((arena) {
+      Pointer<FyQuality> q = nullptr;
+      if (value != null) value._write((q = arena<FyQuality>()).ref);
+      check(fy_world_quality_set(_engineWorld, q));
+    });
     _quality = value;
+    _checkEffects();
+  }
+
+  // Whether a camera has asked for bloom or ambient occlusion, whether a
+  // view draws the world, and whether the world has said its quality
+  // doesn't draw what was asked ([_checkEffects]).
+  var _bloomAsked = false, _aoAsked = false, _viewed = false;
+  var _warnedBloom = false, _warnedAo = false;
+
+  /// Says once, in a debug build, for each of bloom and ambient occlusion,
+  /// when a camera asks for it and the quality drawn doesn't draw it: the
+  /// world's own, or, once a view draws it, the device's level's.
+  void _checkEffects() {
+    if (const bool.fromEnvironment('dart.vm.product')) return;
+    final bloom = _bloomAsked && !_warnedBloom, ao = _aoAsked && !_warnedAo;
+    if (!bloom && !ao) return;
+    final quality = _quality ?? (_viewed ? Quality.device : null);
+    if (quality == null) return;
+    String says(String effect, String field) =>
+        'Fynkel: a camera asks for $effect, but the quality drawn (${quality.name}'
+        '${_quality == null ? ", the device's pick" : ''}) doesn\'t draw it. Set world.quality to one with '
+        '$field: true, or take the camera\'s away.';
+    if (bloom && !quality.bloom) {
+      _warnedBloom = true;
+      print(says('bloom', 'bloom'));
+    }
+    if (ao && !quality.ambientOcclusion) {
+      _warnedAo = true;
+      print(says('ambient occlusion', 'ambientOcclusion'));
+    }
   }
 
   Quality? _quality;
@@ -777,37 +811,230 @@ final class ObjectError {
 extension WorldPointer on World {
   /// The engine's world. Throws a StateError once the world is disposed.
   Pointer<FyWorld> get pointer => _engineWorld;
+
+  /// A view now draws the world: what it draws at is known.
+  void viewStarted() {
+    _viewed = true;
+    _checkEffects();
+  }
 }
 
-/// How much a frame may cost, for how it looks: set on [World.quality].
-/// Each level is meant to hold its devices' frame rate, and each effect
-/// says which levels it's on at. Every level draws the same picture until
-/// those effects come (stage 8).
-enum Quality {
-  /// For slow GPUs, and ones not known: the scene is drawn straight to the
-  /// screen, in one pass.
-  low(FY_QUALITY_LOW),
+/// What a world's views draw, and how finely: set on [World.quality]. A
+/// game sets its own, or starts from a level's ([Quality.low],
+/// [Quality.medium], [Quality.high]) and changes what it likes:
+///
+/// ```dart
+/// world.quality = Quality.medium.copyWith(bloom: false, shadowCascades: 1);
+/// ```
+///
+/// Cameras ask for their effects ([Camera.bloom],
+/// [Camera.ambientOcclusion]); a quality says whether they're drawn. Like
+/// Unity's quality levels: a game can have one, or as many as it likes,
+/// and switch between them at any time.
+final class Quality {
+  /// A quality of the game's own: by default, [Quality.medium]'s.
+  const Quality({
+    this.name = 'custom',
+    this.hdr = true,
+    this.bloom = true,
+    this.ambientOcclusion = false,
+    this.lampHighlights = true,
+    this.shadows = true,
+    this.shadowCascades = 2,
+    this.shadowResolution = 2048,
+    this.shadowSoftness = ShadowSoftness.soft,
+    this.shadowDistance = 60,
+    this.spotShadows = 2,
+    this.spotShadowResolution = 1024,
+  });
 
-  /// Phones' GPUs (Mali, Adreno).
-  medium(FY_QUALITY_MEDIUM),
+  /// The cheapest, for slow GPUs and ones not known: drawn straight to the
+  /// screen, hard shadows from the sun and one spot light, no bloom, no
+  /// ambient occlusion, lamps without highlights.
+  static const low = Quality(
+    name: 'low',
+    hdr: false,
+    bloom: false,
+    lampHighlights: false,
+    shadowCascades: 1,
+    shadowResolution: 1024,
+    shadowSoftness: ShadowSoftness.hard,
+    shadowDistance: 40,
+    spotShadows: 1,
+    spotShadowResolution: 512,
+  );
 
-  /// Apple's GPUs, and desktops'.
-  high(FY_QUALITY_HIGH);
+  /// Phones' (Mali, Adreno): bloom, and soft shadows in two cascades; no
+  /// ambient occlusion.
+  static const medium = Quality(name: 'medium');
 
-  const Quality(this._level);
+  /// Apple's GPUs, and desktops': everything, with softer shadows in three
+  /// cascades.
+  static const high = Quality(
+    name: 'high',
+    ambientOcclusion: true,
+    shadowCascades: 3,
+    shadowSoftness: ShadowSoftness.softer,
+    shadowDistance: 100,
+    spotShadows: 4,
+  );
 
-  final int _level;
+  /// The three levels, cheapest first.
+  static const levels = [low, medium, high];
 
-  /// The level this device picks for a world that doesn't choose: high on
-  /// Apple's GPUs and desktops', medium on Mali and Adreno, low on a
-  /// software GPU or one not known. Starts the GPU if no view has yet.
+  /// The level this device picks for a world without a quality of its own
+  /// ([World.quality] null): [high] on Apple's GPUs and desktops',
+  /// [medium] on Mali and Adreno, [low] on a software GPU or one not
+  /// known. Starts the GPU if no view has yet.
   static Quality get device {
     final out = malloc<Uint32>();
     try {
       check(fy_quality_auto(out));
-      return values.firstWhere((q) => q._level == out.value);
+      return levels[out.value - FY_QUALITY_LOW];
     } finally {
       malloc.free(out);
     }
   }
+
+  /// What it's called, for a settings page or a log: a level's own name,
+  /// or a game's.
+  final String name;
+
+  /// Whether the scene is drawn into a half-float image, with a last pass
+  /// after it, rather than straight to the screen: its brightest light is
+  /// kept and toned down evenly. Bloom draws into it whether this is on or
+  /// not.
+  final bool hdr;
+
+  /// Whether cameras' [Camera.bloom] is drawn.
+  final bool bloom;
+
+  /// Whether cameras' [Camera.ambientOcclusion] is drawn: a depth pass and
+  /// two half-size passes more.
+  final bool ambientOcclusion;
+
+  /// Whether point and spot lights give shiny surfaces a highlight, as
+  /// suns always do. Without, a lamp lights a surface evenly, which is
+  /// cheaper where many overlap.
+  final bool lampHighlights;
+
+  /// Whether lights' shadows are drawn ([Light.shadows]): without, none
+  /// are, whatever the lights ask, and the shadow settings below aren't
+  /// used.
+  final bool shadows;
+
+  /// How many maps the sun's shadows are split into, 1 to 3: the nearest
+  /// sharp, the further ones still there.
+  final int shadowCascades;
+
+  /// Each of the sun's maps' side, in texels: a power of two, 256 to 4096.
+  final int shadowResolution;
+
+  /// How shadows' edges are drawn.
+  final ShadowSoftness shadowSoftness;
+
+  /// How far from the camera the sun's shadows reach, in metres (or the
+  /// camera's far plane, if nearer). They fade out before it.
+  final double shadowDistance;
+
+  /// The most spot lights casting shadows in a frame, 0 to 4: the ones
+  /// nearest the camera.
+  final int spotShadows;
+
+  /// Each spot light's map's side, as [shadowResolution].
+  final int spotShadowResolution;
+
+  /// A copy with the values given changed.
+  Quality copyWith({
+    String? name,
+    bool? hdr,
+    bool? bloom,
+    bool? ambientOcclusion,
+    bool? lampHighlights,
+    bool? shadows,
+    int? shadowCascades,
+    int? shadowResolution,
+    ShadowSoftness? shadowSoftness,
+    double? shadowDistance,
+    int? spotShadows,
+    int? spotShadowResolution,
+  }) => Quality(
+    name: name ?? this.name,
+    hdr: hdr ?? this.hdr,
+    bloom: bloom ?? this.bloom,
+    ambientOcclusion: ambientOcclusion ?? this.ambientOcclusion,
+    lampHighlights: lampHighlights ?? this.lampHighlights,
+    shadows: shadows ?? this.shadows,
+    shadowCascades: shadowCascades ?? this.shadowCascades,
+    shadowResolution: shadowResolution ?? this.shadowResolution,
+    shadowSoftness: shadowSoftness ?? this.shadowSoftness,
+    shadowDistance: shadowDistance ?? this.shadowDistance,
+    spotShadows: spotShadows ?? this.spotShadows,
+    spotShadowResolution: spotShadowResolution ?? this.spotShadowResolution,
+  );
+
+  void _write(FyQuality q) {
+    q
+      ..hdr = hdr
+      ..bloom = bloom
+      ..ambient_occlusion = ambientOcclusion
+      ..lamp_highlights = lampHighlights
+      ..shadows = shadows
+      ..shadow_cascades = shadowCascades
+      ..shadow_resolution = shadowResolution
+      ..shadow_softness = shadowSoftness._value
+      ..shadow_distance = shadowDistance
+      ..spot_shadows = spotShadows
+      ..spot_shadow_resolution = spotShadowResolution;
+  }
+
+  List<Object> get _fields => [
+    name,
+    hdr,
+    bloom,
+    ambientOcclusion,
+    lampHighlights,
+    shadows,
+    shadowCascades,
+    shadowResolution,
+    shadowSoftness,
+    shadowDistance,
+    spotShadows,
+    spotShadowResolution,
+  ];
+
+  @override
+  bool operator ==(Object other) {
+    if (other is! Quality) return false;
+    final (a, b) = (_fields, other._fields);
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+
+  @override
+  int get hashCode => Object.hashAll(_fields);
+
+  @override
+  String toString() =>
+      'Quality($name: hdr $hdr, bloom $bloom, ambientOcclusion $ambientOcclusion, lampHighlights $lampHighlights, '
+      'shadows ${shadows ? '$shadowCascades × $shadowResolution ${shadowSoftness.name} to ${shadowDistance}m, '
+                'spot $spotShadows × $spotShadowResolution' : 'off'})';
+}
+
+/// How a shadow's edge is drawn ([Quality.shadowSoftness]).
+enum ShadowSoftness {
+  /// Sharp: one sample.
+  hard(FY_SHADOWS_HARD),
+
+  /// Soft: 4 samples, across about 2 texels.
+  soft(FY_SHADOWS_SOFT),
+
+  /// Softer: 9 samples, across about 3 texels.
+  softer(FY_SHADOWS_SOFTER);
+
+  const ShadowSoftness(this._value);
+
+  final int _value;
 }

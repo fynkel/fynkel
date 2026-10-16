@@ -50,7 +50,7 @@ class SeeThroughScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
     _camera = find('camera')!;
     world
       ..sky = Sky.gradient(
@@ -206,7 +206,7 @@ class SeeThroughScene extends LabScene {
 
   @override
   List<Control> get controls => [
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     Slider('glass opacity', () => opacity, (value) => opacity = value),
     Toggle('turn the glass', () => _turning, (on) => _turning = on),

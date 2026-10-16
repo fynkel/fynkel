@@ -100,7 +100,7 @@ fn main() {
         let view = target.create_view(&Default::default());
 
         println!("{width}x{height}, 4x MSAA, best of 50:");
-        for quality in [Quality::Low, Quality::Medium, Quality::High] {
+        for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
             let mut renderer = Renderer::new(&gpu, format);
             renderer.upload_mesh(MeshKey(1), &MeshData::cube());
             for (n, lamps, shadows, sky, see_through, effects) in [
@@ -129,7 +129,7 @@ fn main() {
                         });
                         RenderScene {
                             camera,
-                            quality: Some(quality),
+                            quality: Some(quality.quality()),
                             sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
                             fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
                             ..base
@@ -172,7 +172,7 @@ fn main() {
                 let mut frame = Duration::MAX;
                 for f in 0..60 {
                     let s = RenderScene {
-                        quality: Some(quality),
+                        quality: Some(quality.quality()),
                         sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
                         ..scene(1_000, 0, false, false, 0.0)
                     };

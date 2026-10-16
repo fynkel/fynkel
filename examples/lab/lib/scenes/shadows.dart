@@ -42,7 +42,7 @@ class ShadowsScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
     _camera = find('camera')!;
     // A low sun, for long shadows, over a big lawn.
     final sun = find('sun')!..rotation = Quat.lookRotation(Vec3(-0.6, -0.7, -0.45));
@@ -146,7 +146,7 @@ class ShadowsScene extends LabScene {
 
   @override
   List<Control> get controls => [
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     Toggle('sun shadows', () => _sun.shadows, (on) => _sun.shadows = on),
     Toggle('spotlight shadows', () => _torch.shadows, (on) => _torch.shadows = on),
