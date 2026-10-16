@@ -38,8 +38,9 @@ dependencies:
     path: <the repository>/packages/fynkel_flutter
 ```
 
-`--empty` also leaves out Material's icons, so every `Icon` shows as a
-box. If the game's Flutter side uses them, add the line back:
+Some Flutter versions' `--empty` leaves out Material's icons, so every
+`Icon` shows as a box. If the game's Flutter side uses them, check that
+`pubspec.yaml` has this line, and add it if not:
 
 ```yaml
 # my_game/pubspec.yaml
@@ -506,8 +507,8 @@ one quality and keep it; a game with a settings page can switch at any
 time, and every view draws the new one from its next frame:
 
 ```dart
-/// A game's one quality: medium's, without bloom, and with one sharp
-/// cascade of shadows.
+/// A game's one quality: `Quality(...)` starts from medium's settings;
+/// this one has no bloom, and one sharp cascade of shadows.
 const myQuality = Quality(name: 'mine', bloom: false, shadowCascades: 1, shadowSoftness: ShadowSoftness.hard);
 
 /// Or levels of its own, for a settings page, each from the engine's.
@@ -526,9 +527,15 @@ Quality chooseQuality(World world, Quality? chosen) {
 ```
 
 - **A camera asks, the quality decides.** A camera's bloom and ambient
-  occlusion (below) are drawn only where the quality has them on. A
-  debug build says once when a camera asks for one that the quality
-  drawn leaves out.
+  occlusion (below) are drawn only where the quality has them on, so a
+  cheaper quality for older phones can turn bloom off without touching
+  the cameras. A debug build says once when a camera asks for one that
+  the quality drawn leaves out; for a cheaper quality chosen on purpose,
+  that's expected, and there's nothing to change.
+- **Qualities compare by value**: `world.quality` gives back what was
+  set, and `Quality.medium.copyWith(bloom: false) ==
+  Quality.medium.copyWith(bloom: false)`. Give your own a `name` (in the
+  constructor or `copyWith`) for a settings page or a log.
 - **Settings out of range** (`shadowCascades` 1 to 3, resolutions powers
   of two from 256 to 4096, `spotShadows` 0 to 4, `shadowDistance` above
   0) throw an `ArgumentError`, and the world keeps the quality it had.
@@ -583,6 +590,12 @@ them and has them fall on it, unless its renderer says not, as in Unity:
 /// A low evening sun, casting long shadows.
 GameObject eveningSun() =>
     GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.5, -0.4), intensity: 2, shadows: true)]);
+
+/// A spotlight 4 m up, pointing straight down, casting shadows.
+GameObject stallLight() => GameObject(
+  transform: Transform(position: Vec3(0, 4, 0), rotation: Quat.lookRotation(Vec3(0, -1, 0), up: Vec3(0, 0, -1))),
+  components: [Light.spot(range: 8, angle: 60.deg, shadows: true)],
+);
 
 /// A puddle: it shadows nothing, but shadows fall on it.
 MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
@@ -2372,9 +2385,24 @@ and then `world.tap(400, 300)` lands where you say, on the next frame. To
 put one on an object, ask the camera where it is on screen:
 `world.camera!.worldToScreenPoint(target.position, width: 800, height:
 600)`.
-`HeadlessView(world, width:, height:)` renders a frame without a window,
-for a picture of the game: `File('shot.png').writeAsBytesSync(view.png())`
-saves it to look at, which finds an unlit side or a camera too far fast. `examples/arena/test` tests a whole game this
+`HeadlessView(world, width:, height:)` (package:fynkel) renders frames
+without a window, for a picture of the game: `view.png()` draws a frame of
+the world as it is now and gives it as a PNG, and
+`File('shot.png').writeAsBytesSync(view.png())` saves it to look at, which
+finds an unlit side or a camera too far fast. To check pixels in a test,
+`view.read(view.frame()).rgba` draws a frame and gives its pixels: RGBA,
+a byte each, rows from the top. Dispose of the view when done
+(`addTearDown(view.dispose)`):
+
+```dart
+/// The red, green and blue at (x, y) in a frame drawn now, 0 to 255.
+List<int> pixel(HeadlessView view, int x, int y) {
+  final i = (y * view.width + x) * 4;
+  return view.read(view.frame()).rgba.sublist(i, i + 3);
+}
+```
+
+ `examples/arena/test` tests a whole game this
 way.
 
 **An error in the game fails the test** by itself, as it would be an
@@ -2607,7 +2635,8 @@ What keeps a game fast:
 - **Angles are radians** everywhere, joints and `slopeLimit` too; write
   `90.deg`. `Orbit.pitch` is positive looking down.
 - **Key names are Flutter's**: `KeyCode.arrowUp`, `shiftLeft`, `digit1`,
-  not `UpArrow`, `LeftShift`, `Alpha1`.
+  not `UpArrow`, `LeftShift`, `Alpha1`. Letters are plain: `KeyCode.q`,
+  not `keyQ`.
 - **`MeshRenderer.material` is shared**, as Unity's `sharedMaterial`: change
   `renderer.color` for one object, or give it `material.copy()`.
 - **`find('name')` searches everything below**, not only the children

@@ -393,8 +393,8 @@ final class World implements Finalizable {
     if (quality == null) return;
     String says(String effect, String field) =>
         'Fynkel: a camera asks for $effect, but the quality drawn (${quality.name}'
-        '${_quality == null ? ", the device's pick" : ''}) doesn\'t draw it. Set world.quality to one with '
-        '$field: true, or take the camera\'s away.';
+        '${_quality == null ? ", the device's pick" : ''}) doesn\'t draw it. Fine for a cheaper quality chosen on '
+        'purpose; to draw it, use a quality with $field: true.';
     if (bloom && !quality.bloom) {
       _warnedBloom = true;
       print(says('bloom', 'bloom'));
