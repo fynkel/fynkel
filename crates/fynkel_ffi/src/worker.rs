@@ -52,6 +52,10 @@ pub(crate) struct WorkerStats {
     pub(crate) mesh_bytes: u64,
     /// GPU memory the sky's light holds, as of the last scene drawn.
     pub(crate) sky_bytes: u64,
+    /// Time the render thread spent on scenes, from taking one to being
+    /// done with it, in microseconds. On Android that includes waiting for
+    /// the GPU to finish the frame.
+    pub(crate) busy_micros: u64,
 }
 
 #[derive(Debug)]
@@ -445,6 +449,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
             }
         };
 
+        let started = std::time::Instant::now();
         // One pool per pass, so what Metal autoreleases on this thread is
         // freed every frame and every resize, not when the view goes. A GPU
         // error raised in it stops this view alone (the scopes are this
@@ -524,6 +529,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
         })?;
 
         let mut mailbox = shared.lock();
+        mailbox.stats.busy_micros += started.elapsed().as_micros() as u64;
         if drawn {
             first = false;
             mailbox.spare.push(scene);

@@ -168,7 +168,9 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     await Future<void>.delayed(const Duration(seconds: _warmUp));
     final heap = await _Heap.connect(app.service!);
     final from = app.windows.length;
+    final gpu = _android != null ? _GpuClock.sample() : null;
     await Future<void>.delayed(Duration(seconds: seconds));
+    final clocks = await gpu?.stop();
     final allocated = await heap.allocatedSinceStart();
     await heap.printReports();
     await heap.close();
@@ -194,6 +196,13 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
         'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
       );
       print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented $presented');
+      final ticks = windows.map((w) => w['ticks'] as num).toList()..sort();
+      print(
+        'dart ticks/s    median ${ticks[ticks.length ~/ 2].toStringAsFixed(1)}, min ${ticks.first.toStringAsFixed(1)}',
+      );
+      // Microseconds busy in each ~1 s window, over the window's length.
+      final busy = sum('busyMicros') / 1e6 / windows.length;
+      print('render thread   busy ${(busy * 100).toStringAsFixed(0)} % of the time');
       print('not shown       coalesced ${sum('coalesced')}, skipped ${sum('skipped')}, dropped ${sum('dropped')}');
     }
     final budget = ((windows.last['budget'] ?? 8333) as num) / 1000;
@@ -204,6 +213,7 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     );
     final longest = windows.fold(0, (most, w) => max(most, ((w['longestRaster'] ?? 0) as num).toInt()));
     print('longest raster  ${(longest / 1000).toStringAsFixed(2)} ms');
+    if (clocks != null) print('gpu             $clocks');
     print('mouse in view   ${sum('mouse')} of ${windows.length} windows (Flutter hit-tests it after every frame)');
     print(
       'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
@@ -432,6 +442,59 @@ class _Footprint {
     // the iPhone; they are in the rest, with the CPU's memory.
     if (surfaces == null) return '$all   Metal ${_mb(gpu)}, rest ${_mb(total - gpu)}';
     return '$all   GPU ${_mb(gpu)}, IOSurface ${_mb(surfaces)}';
+  }
+}
+
+/// An Android GPU's clock and how busy it is, read once a second through
+/// adb while a run goes on: whether the governor raised the clock. Exynos
+/// phones (the Galaxy Note10+) have them in `/sys/kernel/gpu`; on a phone
+/// without them, [stop] gives null.
+class _GpuClock {
+  _GpuClock._();
+
+  final _mhz = <int>[], _busy = <int>[];
+  int? _min, _max;
+  var _stopped = false;
+  late final Future<void> _loop;
+
+  static _GpuClock sample() {
+    final clock = _GpuClock._();
+    clock._loop = clock._run();
+    return clock;
+  }
+
+  Future<void> _run() async {
+    try {
+      final range = (await _adb(['shell', 'cat /sys/kernel/gpu/gpu_min_clock /sys/kernel/gpu/gpu_max_clock']))
+          .split('\n');
+      _min = int.parse(range[0].trim()) ~/ 1000;
+      _max = int.parse(range[1].trim()) ~/ 1000;
+    } on Object {
+      return;
+    }
+    while (!_stopped) {
+      final read = (await _adb(['shell', 'cat /sys/kernel/gpu/gpu_clock /sys/kernel/gpu/gpu_busy'])).split('\n');
+      final mhz = int.tryParse(read[0].trim()), busy = int.tryParse(read[1].replaceAll('%', '').trim());
+      if (mhz != null && busy != null) {
+        // A clock of 0 is a GPU powered off between frames.
+        _mhz.add(mhz ~/ (mhz > 10000 ? 1000 : 1));
+        _busy.add(busy);
+      }
+      await Future<void>.delayed(const Duration(seconds: 1));
+    }
+  }
+
+  /// What was read, or null if nothing could be.
+  Future<String?> stop() async {
+    _stopped = true;
+    await _loop;
+    if (_mhz.isEmpty) return null;
+    final sorted = [..._mhz]..sort();
+    final atMin = _mhz.where((m) => m <= _min!).length;
+    final busy = _busy.reduce((a, b) => a + b) / _busy.length;
+    return 'clock median ${sorted[sorted.length ~/ 2]} MHz (range $_min–$_max), '
+        'max seen ${sorted.last}, at the minimum ${(atMin * 100 / _mhz.length).toStringAsFixed(0)} % of '
+        '${_mhz.length} readings; busy ${busy.toStringAsFixed(0)} %';
   }
 }
 

@@ -21,6 +21,7 @@ final class ViewStats {
     this.textureBytes = 0,
     this.meshBytes = 0,
     this.skyBytes = 0,
+    this.busy = Duration.zero,
   });
 
   /// Scenes handed to the render worker by [WorldView.frame].
@@ -55,6 +56,11 @@ final class ViewStats {
   /// a sky or with a [ColorSky]. As of the last frame drawn.
   final int skyBytes;
 
+  /// Time the render thread spent on scenes, from taking one to being done
+  /// with it; the rest of the time it waited for the next. On Android this
+  /// includes waiting for the GPU to finish each frame.
+  final Duration busy;
+
   /// The counts since [earlier]. The memory is the newer one's.
   ViewStats operator -(ViewStats earlier) => ViewStats(
     posted: posted - earlier.posted,
@@ -66,12 +72,13 @@ final class ViewStats {
     textureBytes: textureBytes,
     meshBytes: meshBytes,
     skyBytes: skyBytes,
+    busy: busy - earlier.busy,
   );
 
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes';
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds}';
 }
 
 /// A view of a [World]: a render worker on its own thread that draws the
@@ -173,6 +180,7 @@ abstract base class WorldView implements Finalizable {
       textureBytes: r.texture_bytes,
       meshBytes: r.mesh_bytes,
       skyBytes: r.sky_bytes,
+      busy: Duration(microseconds: r.busy_micros),
     );
   }
 

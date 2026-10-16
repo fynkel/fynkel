@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 28
+#define FY_ABI_VERSION 29
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -27,10 +27,11 @@
 // A quality level: the device's own (`fy_quality_auto`).
 #define FY_QUALITY_AUTO 0
 
-// A quality level: the cheapest, for slow or unknown GPUs.
+// A quality level: the cheapest, for phones (Mali, Adreno) and slow or
+// unknown GPUs.
 #define FY_QUALITY_LOW 1
 
-// A quality level: phones' (Mali, Adreno).
+// A quality level: between, for a phone that keeps up with it.
 #define FY_QUALITY_MEDIUM 2
 
 // A quality level: Apple's GPUs and desktops'.
@@ -449,6 +450,10 @@ typedef struct FyViewStats {
   // GPU memory the sky's light holds for this view, in bytes: 0 for no
   // sky or a plain one.
   uint64_t sky_bytes;
+  // Microseconds the view's render thread spent on scenes, from taking
+  // one to being done with it: busy, against waiting for the next. On
+  // Android it includes waiting for the GPU to finish each frame.
+  uint64_t busy_micros;
 } FyViewStats;
 
 // Called on a GPU thread each time an Apple view finishes a frame.
