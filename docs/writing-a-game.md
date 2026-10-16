@@ -68,6 +68,23 @@ android {
 }
 ```
 
+**On Android, the game's activity is a `FynkelActivity`.** Then each
+`FynkelView` draws straight to the screen, behind Flutter's view, and
+Flutter never waits for the game's frames: on a Galaxy Note10+ that took
+Sheepdog from 51 to 59 fps ([the report](android-surface-report.md)).
+`flutter create` wrote a `FlutterActivity`; change it:
+
+```kotlin
+// my_game/android/app/src/main/kotlin/<your package>/MainActivity.kt
+import dev.fynkel.fynkel_flutter.FynkelActivity
+
+class MainActivity : FynkelActivity()
+```
+
+A game whose activity stays a `FlutterActivity` runs too, with its views
+drawn as textures Flutter shows. What this changes for widgets around
+the game is in §15.
+
 ## 2. Hello
 
 The whole of `lib/main.dart` for a lit, turning cube:
@@ -1858,6 +1875,25 @@ class ScoreHud extends StatelessWidget {
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
 ScoreHud(game)))`.
 
+**On Android the view is under Flutter, not in it** (with a
+`FynkelActivity`, §1). Widgets over the view draw over the game, as
+everywhere: the HUD, a pause menu, a dialog's dimmed background. Three
+things differ from macOS and iOS:
+
+- Whatever is painted under the view doesn't show: the view clears its
+  place, so the game shows through. That's what you want.
+- A transform, clip or opacity from the widgets above the view doesn't
+  reach the game. A page sliding in is followed (the view moves to where
+  its widget is, each frame); one that fades or zooms in shows the game
+  unfaded and at full size, and a view in a scrolling list isn't clipped
+  at the list's edges.
+- Two views stack, no more: a minimap over the game. A view lying within
+  another goes over it.
+
+Where one of those matters, give that view `androidSurface: false`: it's
+a texture Flutter draws, as on the other platforms, and slower on some
+phones.
+
 **From the game to the UI and back.** A `Signal` has a `stream`, for
 `StreamBuilder` or a `listen` that opens a dialog when the game is over
 (it hears each value a moment after `emit`). The other way, any
@@ -2547,6 +2583,8 @@ What keeps a game fast:
   reaches, and the pixels it lights; one that reaches no further than it
   needs to costs least. Turn a lamp off with `enabled = false`: it's
   left out altogether.
+- **On Android, a `FynkelActivity`** (§1), so Flutter doesn't wait for
+  the game's frames.
 - **A cheaper quality for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
   screen; or take from a level only what costs most there, bloom first
@@ -2663,6 +2701,13 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Android draws straight to the screen** (2026-10-16):
+  - With the activity a `FynkelActivity` (§1), a view draws to the
+    screen behind Flutter's, not to a texture, and what's painted under
+    it, or a fade over it, no longer shows on it (§15). An activity left a
+    `FlutterActivity` works as before.
+  - `Quality.device` is `low` on Android phones (§5); it was `medium`.
 
 - **Quality is settings, not three levels** (2026-10-16):
   - `Quality` is a class, not an enum: `Quality.low`, `medium` and
