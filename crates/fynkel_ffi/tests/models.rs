@@ -216,7 +216,7 @@ fn render_at(name: &str, from: Vec3, zoom: f32, level: u32) -> fynkel_golden::Im
         ));
     }
     // SAFETY: a live world.
-    ok(unsafe { fy_world_quality_set(w, level) });
+    set_level(w, level);
     let view = View::headless(&world, 256, 256);
     view.read(view.frame(), 256, 256)
 }

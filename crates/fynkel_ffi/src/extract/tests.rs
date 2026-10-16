@@ -159,9 +159,9 @@ fn the_worlds_quality_level_goes_with_its_scene() {
     let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
     extract.run(&world, &mut scene, &mut ops);
     assert_eq!(scene.quality, None, "the device's, unless the world picks");
-    extract.quality = Some(Quality::Low);
+    extract.quality = Some(Quality::LOW);
     extract.run(&world, &mut scene, &mut ops);
-    assert_eq!(scene.quality, Some(Quality::Low));
+    assert_eq!(scene.quality, Some(Quality::LOW));
 }
 
 #[test]

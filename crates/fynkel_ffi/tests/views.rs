@@ -232,13 +232,13 @@ fn a_world_draws_the_same_at_every_quality_level_and_refuses_others() {
     stage1(&world);
     let view = View::headless(&world, 256, 256);
     for level in [FY_QUALITY_LOW, FY_QUALITY_HIGH, FY_QUALITY_MEDIUM, FY_QUALITY_AUTO] {
-        // SAFETY: a live world.
-        ok(unsafe { fy_world_quality_set(world.0, level) });
+        set_level(world.0, level);
         assert_golden("cube", &view.read(view.frame(), 256, 256));
     }
-    // SAFETY: a live world.
-    assert_eq!(unsafe { fy_world_quality_set(world.0, 4) }, FyStatus::InvalidValue);
-    assert!(last_error().contains("4 isn't a quality level"), "{}", last_error());
+    let mut quality = FyQuality::default();
+    // SAFETY: a local out-value.
+    assert_eq!(unsafe { fy_quality_preset(4, &mut quality) }, FyStatus::InvalidValue);
+    assert!(last_error().contains("4 isn't a level"), "{}", last_error());
 
     let mut auto = 0;
     // SAFETY: a local out-value.
@@ -246,4 +246,38 @@ fn a_world_draws_the_same_at_every_quality_level_and_refuses_others() {
     assert!([FY_QUALITY_LOW, FY_QUALITY_MEDIUM, FY_QUALITY_HIGH].contains(&auto), "{auto}");
     #[cfg(target_os = "macos")]
     assert_eq!(auto, FY_QUALITY_HIGH, "an Apple GPU");
+}
+
+/// A game's own quality: a level's, changed, and what's out of range
+/// refused, the world keeping the one it had.
+#[test]
+fn a_world_takes_a_quality_of_its_own() {
+    let world = World::new();
+    stage1(&world);
+    let view = View::headless(&world, 256, 256);
+    let mut low = FyQuality::default();
+    // SAFETY: a local out-value.
+    ok(unsafe { fy_quality_preset(FY_QUALITY_LOW, &mut low) });
+    assert_eq!((low.hdr, low.bloom, low.ambient_occlusion, low.shadows), (false, false, false, true));
+    assert_eq!((low.shadow_cascades, low.shadow_resolution, low.shadow_softness), (1, 1024, FY_SHADOWS_HARD));
+    let mine = FyQuality { bloom: true, ambient_occlusion: true, shadows: false, ..low };
+    // SAFETY: a live world, a local value.
+    ok(unsafe { fy_world_quality_set(world.0, &mine) });
+    assert_golden("cube", &view.read(view.frame(), 256, 256));
+
+    for (bad, says) in [
+        (FyQuality { shadow_cascades: 0, ..low }, "0 cascades"),
+        (FyQuality { shadow_resolution: 1000, ..low }, "powers of two"),
+        (FyQuality { spot_shadows: 9, ..low }, "9 spot maps"),
+        (FyQuality { shadow_distance: -1.0, ..low }, "shadow distance"),
+        (FyQuality { shadow_softness: 7, ..low }, "7 isn't a shadow softness"),
+    ] {
+        // SAFETY: a live world, a local value.
+        assert_eq!(unsafe { fy_world_quality_set(world.0, &bad) }, FyStatus::InvalidValue, "{bad:?}");
+        assert!(last_error().contains(says), "{}", last_error());
+    }
+    // Shadows off: the rest isn't looked at.
+    let off = FyQuality { shadows: false, shadow_cascades: 0, ..low };
+    // SAFETY: a live world, a local value.
+    ok(unsafe { fy_world_quality_set(world.0, &off) });
 }

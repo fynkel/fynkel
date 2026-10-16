@@ -48,7 +48,7 @@ class SkyScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
     _camera = find('camera')!;
     _sun = find('sun')!.get<Light>()!;
     // The sky lights the scene; no ambient light on top.
@@ -163,7 +163,7 @@ class SkyScene extends LabScene {
 
   @override
   List<Control> get controls => [
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     for (final which in skies) Button('sky: $which', () => sky = which),
     Toggle('fog', () => fog, (on) => fog = on),

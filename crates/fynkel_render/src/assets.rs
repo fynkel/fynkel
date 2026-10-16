@@ -14,7 +14,7 @@ use crate::ao::AoKit;
 use crate::bloom::BloomKit;
 use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
-use crate::scene::{ColorSpace, MeshKey, Quality, TextureKey};
+use crate::scene::{ColorSpace, MeshKey, QualityLevel, TextureKey};
 use crate::shadows::ShadowKit;
 use crate::sky::SkyKit;
 use crate::texture::{GpuTexture, TextureKit, Textures};
@@ -26,7 +26,7 @@ use fynkel_mesh::MeshData;
 /// device picks.
 pub struct Kit {
     pub(crate) gpu: Gpu,
-    quality: Quality,
+    quality: QualityLevel,
     pub(crate) frame_layout: wgpu::BindGroupLayout,
     /// The last pass's input: the scene's half-float image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
@@ -192,7 +192,7 @@ impl Kit {
             ao: AoKit::new(&gpu.device, &gpu.queue, &maker, &frame_layout, crate::renderer::INSTANCE_SIZE),
             maker,
             gpu: gpu.clone(),
-            quality: Quality::for_adapter(&gpu.adapter.get_info()),
+            quality: QualityLevel::for_adapter(&gpu.adapter.get_info()),
             frame_layout,
             image_layout,
             textures,
@@ -205,9 +205,9 @@ impl Kit {
         &self.gpu
     }
 
-    /// The quality level this device picks ([`Quality::for_adapter`]),
-    /// for a scene that doesn't choose one.
-    pub fn quality(&self) -> Quality {
+    /// The quality level this device picks ([`QualityLevel::for_adapter`]),
+    /// for a scene that doesn't choose its quality.
+    pub fn device_quality(&self) -> QualityLevel {
         self.quality
     }
 

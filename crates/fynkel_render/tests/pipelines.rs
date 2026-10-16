@@ -23,11 +23,11 @@ fn a_first_frame_compiles_only_what_it_draws_with() {
     let gpu = gpu();
     // Low draws straight to the view: the opaque pipeline for its format.
     // Above, into the scene image, then the last pass onto the view.
-    for (quality, want) in [(Quality::Low, 1), (Quality::Medium, 2), (Quality::High, 2)] {
+    for (quality, want) in [(QualityLevel::Low, 1), (QualityLevel::Medium, 2), (QualityLevel::High, 2)] {
         let (kit, mut r) = fresh(&gpu);
         assert_eq!(kit.pipelines_made(), 0, "{quality:?}: none before a frame");
         let mut scene = stage1_scene();
-        scene.quality = Some(quality);
+        scene.quality = Some(quality.quality());
         render(&gpu, &mut r, &scene, 32, 32);
         assert_eq!(kit.pipelines_made(), want, "{quality:?}: an opaque cube under a sun without shadows");
         render(&gpu, &mut r, &scene, 32, 32);
@@ -40,7 +40,7 @@ fn shadows_lines_and_cutouts_compile_theirs_when_first_drawn() {
     let gpu = gpu();
     let (kit, mut r) = fresh(&gpu);
     let mut scene = stage1_scene();
-    scene.quality = Some(Quality::Medium);
+    scene.quality = Some(QualityLevel::Medium.quality());
     render(&gpu, &mut r, &scene, 32, 32);
     let plain = kit.pipelines_made();
 
@@ -71,7 +71,7 @@ fn shadows_and_textures_are_compiled_in_only_where_used() {
     let texture = TextureKey(1);
     r.upload_texture(texture, ColorSpace::Srgb, 2, 2, &[255; 16]);
     let mut scene = stage1_scene();
-    scene.quality = Some(Quality::Low);
+    scene.quality = Some(QualityLevel::Low.quality());
     let before = kit.pipelines_made();
     render(&gpu, &mut r, &scene, 32, 32);
     assert_eq!(kit.pipelines_made(), before + 1, "untextured and unshadowed");
@@ -96,7 +96,7 @@ fn compiled_pipelines_are_kept_for_the_next_run() {
     set_pipeline_cache_dir(&dir);
     let (kit, mut r) = fresh(&gpu);
     let mut scene = stage1_scene();
-    scene.quality = Some(Quality::Medium);
+    scene.quality = Some(QualityLevel::Medium.quality());
     render(&gpu, &mut r, &scene, 32, 32);
     let backend = gpu.adapter.get_info().backend;
     if !kit.caches_pipelines() {

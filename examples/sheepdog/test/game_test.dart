@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter/material.dart' show Brightness;
+import 'package:flutter/material.dart' show Brightness, ValueNotifier;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
@@ -392,5 +392,43 @@ void main() {
     await at(2);
     world.run(calm + 1);
     shot('night');
+  });
+
+  test("the look: the sun's shadows; at night, lamps along the fence and the wolves' eyes glowing", () async {
+    final lights = world.all<Light>();
+    expect(lights.firstWhere((l) => l.kind == LightKind.sun).shadows, isTrue, reason: 'under the sheep and fences');
+    final lamps = lights.where((l) => l.kind == LightKind.point).toList();
+    expect(lamps.length, greaterThanOrEqualTo(8));
+    for (final lamp in lamps) {
+      final p = lamp.gameObject.position;
+      final onFence =
+          p.x.abs() > size - 0.5 ||
+          p.z.abs() > size - 0.5 ||
+          ((p.x.abs() - penHalf).abs() < 0.5 && p.z <= penFront + 0.5);
+      expect(onFence, isTrue, reason: 'lamp at $p, along a fence');
+    }
+    expect(lamps.map((l) => l.intensity), everyElement(0), reason: 'off by day');
+    world.theme = sheepdogTheme(Brightness.dark);
+    expect(lamps.map((l) => l.intensity), everyElement(greaterThan(0)), reason: 'on at night');
+    final wolf = await firstWolf();
+    final eyes = wolf.children
+        .map((c) => c.get<MeshRenderer>()?.material)
+        .nonNulls
+        .where((m) => m.emissiveIntensity > 1);
+    expect(eyes, isNotEmpty, reason: 'bright enough to glow');
+  });
+
+  test('the quality setting is the world\'s: the device\'s pick until one is chosen', () {
+    final quality = ValueNotifier<Quality?>(null);
+    final other = World();
+    addTearDown(other.dispose);
+    other.theme = sheepdogTheme(Brightness.light);
+    other.add(SheepdogGame(seed: 1, quality: quality));
+    other.run(0.1);
+    expect(other.quality, isNull);
+    quality.value = Quality.low;
+    expect(other.quality, Quality.low);
+    quality.value = null;
+    expect(other.quality, isNull);
   });
 }

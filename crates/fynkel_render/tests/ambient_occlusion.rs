@@ -20,7 +20,7 @@ fn grey() -> PbrMaterial {
 fn floor_scene(
     boxed: bool,
     ao: Option<AmbientOcclusion>,
-    quality: Quality,
+    quality: QualityLevel,
     ambient: f32,
     lights: Vec<Light>,
 ) -> RenderScene {
@@ -32,7 +32,7 @@ fn floor_scene(
     }
     RenderScene {
         camera: Some(camera),
-        quality: Some(quality),
+        quality: Some(quality.quality()),
         ambient: Vec3::splat(ambient),
         lights,
         draws,
@@ -65,17 +65,17 @@ fn the_floor_darkens_where_a_box_stands_on_it_at_high() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let ao = Some(AmbientOcclusion::DEFAULT);
-    let plain = render(&gpu, &mut r, &floor_scene(true, None, Quality::High, 1.0, vec![]), SIZE, SIZE).0;
+    let plain = render(&gpu, &mut r, &floor_scene(true, None, QualityLevel::High, 1.0, vec![]), SIZE, SIZE).0;
     let (foot, far) = at_the_foot(&plain);
     assert_eq!(foot, far, "without it, the floor is even");
 
-    let shaded = render(&gpu, &mut r, &floor_scene(true, ao, Quality::High, 1.0, vec![]), SIZE, SIZE).0;
+    let shaded = render(&gpu, &mut r, &floor_scene(true, ao, QualityLevel::High, 1.0, vec![]), SIZE, SIZE).0;
     let (foot, far) = at_the_foot(&shaded);
     assert!(foot + 10 < far, "darker at the box's foot: {foot} against {far}");
     assert!(far.abs_diff(at_the_foot(&plain).1) <= 2, "and as it was away from it");
 
     let stronger = Some(AmbientOcclusion { intensity: 3.0, ..AmbientOcclusion::DEFAULT });
-    let darker = render(&gpu, &mut r, &floor_scene(true, stronger, Quality::High, 1.0, vec![]), SIZE, SIZE).0;
+    let darker = render(&gpu, &mut r, &floor_scene(true, stronger, QualityLevel::High, 1.0, vec![]), SIZE, SIZE).0;
     assert!(at_the_foot(&darker).0 < foot, "more intensity, darker");
 }
 
@@ -83,7 +83,7 @@ fn the_floor_darkens_where_a_box_stands_on_it_at_high() {
 fn nothing_darkens_below_high() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Low, Quality::Medium] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium] {
         let plain = render(&gpu, &mut r, &floor_scene(true, None, quality, 1.0, vec![]), SIZE, SIZE).0;
         let ao = Some(AmbientOcclusion::DEFAULT);
         let shaded = render(&gpu, &mut r, &floor_scene(true, ao, quality, 1.0, vec![]), SIZE, SIZE).0;
@@ -96,9 +96,9 @@ fn nothing_darkens_below_high() {
 fn an_open_floor_stays_as_it_is() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let plain = render(&gpu, &mut r, &floor_scene(false, None, Quality::High, 1.0, vec![]), SIZE, SIZE).0;
+    let plain = render(&gpu, &mut r, &floor_scene(false, None, QualityLevel::High, 1.0, vec![]), SIZE, SIZE).0;
     let ao = Some(AmbientOcclusion::DEFAULT);
-    let shaded = render(&gpu, &mut r, &floor_scene(false, ao, Quality::High, 1.0, vec![]), SIZE, SIZE).0;
+    let shaded = render(&gpu, &mut r, &floor_scene(false, ao, QualityLevel::High, 1.0, vec![]), SIZE, SIZE).0;
     assert!(max_difference(&plain, &shaded) <= 2, "{}", max_difference(&plain, &shaded));
 }
 
@@ -108,9 +108,9 @@ fn light_from_lights_is_left_as_it_is() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let sun = || vec![Light::sun(Vec3::new(0.0, -1.0, -0.2), Vec3::ONE)];
-    let plain = render(&gpu, &mut r, &floor_scene(true, None, Quality::High, 0.0, sun()), SIZE, SIZE).0;
+    let plain = render(&gpu, &mut r, &floor_scene(true, None, QualityLevel::High, 0.0, sun()), SIZE, SIZE).0;
     let ao = Some(AmbientOcclusion::DEFAULT);
-    let shaded = render(&gpu, &mut r, &floor_scene(true, ao, Quality::High, 0.0, sun()), SIZE, SIZE).0;
+    let shaded = render(&gpu, &mut r, &floor_scene(true, ao, QualityLevel::High, 0.0, sun()), SIZE, SIZE).0;
     assert_eq!(max_difference(&plain, &shaded), 0);
 }
 
@@ -121,8 +121,8 @@ fn ambient_occlusion_follows_the_view_size() {
     let mut r = renderer(&gpu, SRGB);
     let ao = Some(AmbientOcclusion::DEFAULT);
     for size in [SIZE, 65, 200, SIZE] {
-        let shaded = render(&gpu, &mut r, &floor_scene(true, ao, Quality::High, 1.0, vec![]), size, size).0;
-        let plain = render(&gpu, &mut r, &floor_scene(true, None, Quality::High, 1.0, vec![]), size, size).0;
+        let shaded = render(&gpu, &mut r, &floor_scene(true, ao, QualityLevel::High, 1.0, vec![]), size, size).0;
+        let plain = render(&gpu, &mut r, &floor_scene(true, None, QualityLevel::High, 1.0, vec![]), size, size).0;
         assert!(max_difference(&plain, &shaded) > 10, "it darkens something ({size})");
     }
 }
@@ -136,7 +136,7 @@ fn ambient_occlusion_looks_like_its_golden() {
     let mut scene = floor_scene(
         true,
         Some(AmbientOcclusion::DEFAULT),
-        Quality::High,
+        QualityLevel::High,
         0.6,
         vec![Light::sun(Vec3::new(-0.5, -1.0, -0.3), Vec3::splat(0.8))],
     );
@@ -158,7 +158,7 @@ fn ambient_occlusion_looks_like_its_golden() {
 fn ambient_occlusion_with_nothing_solid_to_draw() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), Quality::High, 1.0, vec![]);
+    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), QualityLevel::High, 1.0, vec![]);
     scene.draws.clear();
     render(&gpu, &mut r, &scene, SIZE, SIZE);
     scene.draws = vec![Draw::new(PLANE, Mat4::IDENTITY, PbrMaterial { blend: Blend::Transparent, ..grey() })];
@@ -172,7 +172,7 @@ fn a_box_alone_does_not_darken_its_own_edges() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let mut scene = stage1_scene();
-    scene.quality = Some(Quality::High);
+    scene.quality = Some(QualityLevel::High.quality());
     if let Some(camera) = &mut scene.camera {
         camera.ambient_occlusion = Some(AmbientOcclusion::DEFAULT);
     }
@@ -186,7 +186,7 @@ fn a_box_alone_does_not_darken_its_own_edges() {
 fn the_darkening_along_a_wall_is_smooth() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), Quality::High, 1.0, vec![]);
+    let mut scene = floor_scene(false, Some(AmbientOcclusion::DEFAULT), QualityLevel::High, 1.0, vec![]);
     let wall = Mat4::from_translation(Vec3::new(0.0, 0.5, 0.0)) * Mat4::from_scale(Vec3::new(10.0, 1.0, 1.0));
     scene.draws.push(Draw::new(CUBE, wall, grey()));
     let image = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
@@ -195,4 +195,22 @@ fn the_darkening_along_a_wall_is_smooth() {
     let row: Vec<u8> = (SIZE / 4..SIZE * 3 / 4).map(|x| image.pixel(x, y + 2)[0]).collect();
     let (darkest, lightest) = (*row.iter().min().unwrap(), *row.iter().max().unwrap());
     assert!(lightest - darkest <= 3, "even along the foot: {darkest}..{lightest} in {row:?}");
+}
+
+/// A game's own quality decides: ambient occlusion turned on at low (no
+/// scene image) darkens as at high, and turned off at high doesn't.
+#[test]
+fn a_games_own_quality_decides_ambient_occlusion() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let ao = Some(AmbientOcclusion::DEFAULT);
+    for (base, on) in [(Quality::LOW, true), (Quality::MEDIUM, true), (Quality::HIGH, false)] {
+        let mut plain = floor_scene(true, None, QualityLevel::High, 1.0, vec![]);
+        plain.quality = Some(Quality { ambient_occlusion: on, ..base });
+        let mut shaded = floor_scene(true, ao, QualityLevel::High, 1.0, vec![]);
+        shaded.quality = plain.quality;
+        let (plain, shaded) = (render(&gpu, &mut r, &plain, SIZE, SIZE).0, render(&gpu, &mut r, &shaded, SIZE, SIZE).0);
+        let changed = max_difference(&plain, &shaded);
+        assert_eq!(changed > 8, on, "{base:?} with ambient occlusion {on}: {changed}");
+    }
 }

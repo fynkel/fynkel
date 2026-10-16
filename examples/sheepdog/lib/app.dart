@@ -6,6 +6,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:fynkel/fynkel.dart' show Quality;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game.dart';
@@ -16,6 +17,9 @@ import 'palette.dart';
 class Settings {
   final themeMode = ValueNotifier(ThemeMode.system);
   final minimap = ValueNotifier(true);
+
+  /// The look's quality level; null lets the device pick.
+  final quality = ValueNotifier<Quality?>(null);
   final controls = sheepdogControls();
 }
 
@@ -88,7 +92,7 @@ class PlayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: () => SheepdogGame(seed: seed, controls: settings.controls),
+    make: () => SheepdogGame(seed: seed, controls: settings.controls, quality: settings.quality),
     builder: (context, game) {
       void pause() => showPauseMenu(context, game, settings);
       return PopScope(
@@ -302,6 +306,23 @@ class SettingsPage extends StatelessWidget {
               ],
               selected: {mode},
               onSelectionChanged: (chosen) => settings.themeMode.value = chosen.single,
+            ),
+          ),
+        ),
+        ListTile(
+          title: const Text('Quality'),
+          subtitle: const Text('Lower is smoother on older phones. Auto lets the phone pick.'),
+          trailing: ValueListenableBuilder(
+            valueListenable: settings.quality,
+            builder: (context, quality, _) => SegmentedButton<Quality?>(
+              segments: const [
+                ButtonSegment(value: Quality.low, label: Text('Low')),
+                ButtonSegment(value: Quality.medium, label: Text('Medium')),
+                ButtonSegment(value: Quality.high, label: Text('High')),
+                ButtonSegment(value: null, label: Text('Auto')),
+              ],
+              selected: {quality},
+              onSelectionChanged: (chosen) => settings.quality.value = chosen.single,
             ),
           ),
         ),

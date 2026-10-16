@@ -28,11 +28,15 @@ fn every_quality_level_draws_the_same_cube() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let (_, _) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
-    assert_eq!(r.quality(), r.assets().lock().unwrap().kit().quality(), "the device's level, unless the scene picks");
-    for quality in [Quality::Low, Quality::High, Quality::Medium, Quality::Low] {
-        let scene = RenderScene { quality: Some(quality), ..stage1_scene() };
+    assert_eq!(
+        r.quality(),
+        r.assets().lock().unwrap().kit().device_quality().quality(),
+        "the device's level, unless the scene picks"
+    );
+    for quality in [QualityLevel::Low, QualityLevel::High, QualityLevel::Medium, QualityLevel::Low] {
+        let scene = RenderScene { quality: Some(quality.quality()), ..stage1_scene() };
         let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
-        assert_eq!((r.quality(), stats.draws), (quality, 1));
+        assert_eq!((r.quality(), stats.draws), (quality.quality(), 1));
         assert_golden("cube", &image);
     }
 }
@@ -50,38 +54,38 @@ fn each_gpu_gets_its_quality_level() {
     };
     use wgpu::{Backend::*, DeviceType::*};
     let cases = [
-        (gpu(0x106B, IntegratedGpu, Metal), Quality::High),
-        (gpu(0x13B5, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x5143, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x10DE, DiscreteGpu, Vulkan), Quality::High),
-        (gpu(0x8086, IntegratedGpu, Dx12), Quality::High),
-        (gpu(0x10005, Cpu, Vulkan), Quality::Low),
-        (gpu(0x1234, Other, Vulkan), Quality::Low),
+        (gpu(0x106B, IntegratedGpu, Metal), QualityLevel::High),
+        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x10DE, DiscreteGpu, Vulkan), QualityLevel::High),
+        (gpu(0x8086, IntegratedGpu, Dx12), QualityLevel::High),
+        (gpu(0x10005, Cpu, Vulkan), QualityLevel::Low),
+        (gpu(0x1234, Other, Vulkan), QualityLevel::Low),
     ];
     for (info, want) in cases {
-        assert_eq!(Quality::for_adapter_on(&info, false), want, "{info:?}");
+        assert_eq!(QualityLevel::for_adapter_on(&info, false), want, "{info:?}");
     }
     #[cfg(target_os = "macos")]
-    assert_eq!(Quality::for_adapter(&this), Quality::High, "this Mac");
+    assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::High, "this Mac");
     #[cfg(target_os = "android")]
-    assert_eq!(Quality::for_adapter(&this), Quality::Medium, "this phone");
+    assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::Medium, "this phone");
 
     // On Android (hardening R4), a phone's GPU is medium whoever makes it,
     // not high because its maker isn't known: PowerVR, Samsung's Xclipse
     // (AMD's id), NVIDIA's Tegra. One that isn't a real GPU is low.
     let android = [
-        (gpu(0x13B5, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x5143, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x1010, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x1002, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x10DE, IntegratedGpu, Vulkan), Quality::Medium),
-        (gpu(0x10DE, DiscreteGpu, Gl), Quality::Medium),
-        (gpu(0x1234, Other, Vulkan), Quality::Low),
-        (gpu(0x1AE0, VirtualGpu, Vulkan), Quality::Low),
-        (gpu(0x10005, Cpu, Vulkan), Quality::Low),
+        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x1010, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x1002, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x10DE, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x10DE, DiscreteGpu, Gl), QualityLevel::Medium),
+        (gpu(0x1234, Other, Vulkan), QualityLevel::Low),
+        (gpu(0x1AE0, VirtualGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x10005, Cpu, Vulkan), QualityLevel::Low),
     ];
     for (info, want) in android {
-        assert_eq!(Quality::for_adapter_on(&info, true), want, "Android: {info:?}");
+        assert_eq!(QualityLevel::for_adapter_on(&info, true), want, "Android: {info:?}");
     }
 }
 
@@ -557,8 +561,8 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
     );
     assert_golden("lines", &image);
     // The same at every level.
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
-        let scene = RenderScene { quality: Some(quality), ..scene.clone() };
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
+        let scene = RenderScene { quality: Some(quality.quality()), ..scene.clone() };
         assert_golden("lines", &render(&gpu, &mut r, &scene, 256, 256).0);
     }
 

@@ -183,6 +183,69 @@ void main() {
     expect(light(), plain, reason: 'a floor that takes none');
     floor.get<MeshRenderer>()!.receiveShadows = true;
     expect(light(), shadowed);
+
+    // A quality without shadows draws none, whatever the lights ask, and
+    // turned back on, they're back: between frames, any number of times.
+    for (var i = 0; i < 3; i++) {
+      world.quality = Quality.high.copyWith(shadows: false);
+      expect(light(), plain, reason: 'no shadows ($i)');
+      world.quality = Quality.low;
+      expect(light(), lessThan(plain), reason: 'shadows again ($i)');
+    }
+  });
+
+  test("every light's shadows turned off while drawing, then on again, between frames", () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 6, 4), rotation: Quat.lookRotation(Vec3(0, -6, -4))),
+        components: [Camera()],
+      ),
+    );
+    final grey = Material(color: Color.rgb(0.7, 0.7, 0.7), roughness: 1);
+    world.add(
+      GameObject(
+        transform: Transform(scale: Vec3.one * 12),
+        components: [MeshRenderer(Mesh.plane(), grey)],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), grey)],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(rotation: Quat.lookRotation(Vec3(1, -2, 0))),
+        components: [Light.sun(shadows: true)],
+      ),
+    );
+    world.add(GameObject(components: [Light.ambient(intensity: 0.2)]));
+    for (var i = 0; i < 6; i++) {
+      world.add(
+        GameObject(
+          transform: Transform(position: Vec3(i - 3, 3, 1), rotation: Quat.lookRotation(Vec3(0, -1, 0))),
+          components: [i.isEven ? Light.point(range: 6) : Light.spot(range: 8, angle: 60.deg, shadows: true)],
+        ),
+      );
+    }
+    final view = HeadlessView(world, width: 64, height: 64);
+    addTearDown(view.dispose);
+    int light() => view.read(view.frame()).rgba.fold(0, (sum, v) => sum + v);
+    final shadowed = light();
+    for (var round = 0; round < 3; round++) {
+      for (final l in world.all<Light>()) {
+        l.shadows = false;
+      }
+      final plain = [for (var i = 0; i < 3; i++) light()];
+      expect(plain.first, greaterThan(shadowed), reason: 'round $round');
+      for (final l in world.all<Light>().where((l) => l.kind != LightKind.ambient && l.kind != LightKind.point)) {
+        l.shadows = true;
+      }
+      expect(light(), shadowed, reason: 'round $round');
+    }
   });
 
   test('changing a material changes the objects that use it', () {

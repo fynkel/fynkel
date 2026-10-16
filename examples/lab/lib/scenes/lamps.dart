@@ -43,7 +43,7 @@ class LampsScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
     // Night: no sun, a little ambient light, a dark sky.
     find('sun')!.active = false;
     find('floor')!.active = false;
@@ -169,7 +169,7 @@ class LampsScene extends LabScene {
   @override
   List<Control> get controls => [
     for (final count in [7, 31, 63]) Button('${count + 1} lights', () => lamps = count),
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     Toggle('move', () => _moving, (on) => _moving = on),
   ];

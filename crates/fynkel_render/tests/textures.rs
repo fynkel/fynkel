@@ -511,10 +511,10 @@ fn textured_materials_match_their_golden() {
     // The same at every level: drawn straight to the view at low, through
     // the scene image above it. The cut-out's edges, the glow and the
     // normal map are where the two could differ.
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
-        scene.quality = Some(quality);
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
+        scene.quality = Some(quality.quality());
         let (image, _) = render(&gpu, &mut r, &scene, 320, 180);
-        assert_eq!(r.quality(), quality);
+        assert_eq!(r.quality(), quality.quality());
         assert_golden("textured_materials", &image);
     }
 }

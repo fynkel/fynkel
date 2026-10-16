@@ -98,7 +98,7 @@ pub struct CameraView {
     pub sky: bool,
     /// Whether light brighter than white glows into what's around it, and
     /// how: `None`, it doesn't (a minimap's, say). Only where the quality
-    /// level draws it ([`Quality::bloom`]).
+    /// draws it ([`Quality::bloom`]).
     pub bloom: Option<Bloom>,
     /// Whether surfaces darken where they meet, and how: `None`, they
     /// don't. Only where the quality level draws it
@@ -244,25 +244,141 @@ impl Light {
     }
 }
 
-/// How much a frame may cost, for how it looks. Each level holds its
-/// devices' frame rate: [`Quality::for_adapter`] picks one for a GPU.
+/// How much a frame may cost, for how it looks: what's drawn, and how
+/// finely. A game sets its own, or starts from a level's
+/// ([`QualityLevel::quality`]) and changes what it likes. Cameras ask for
+/// their effects ([`CameraView::bloom`], [`CameraView::ambient_occlusion`]);
+/// these say whether they're drawn.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Quality {
+    /// Whether the scene is drawn into a half-float image, with a last
+    /// pass after it, rather than straight to the screen: its brightest
+    /// light is kept, for [`Quality::bloom`], and toned down evenly. Bloom
+    /// draws into it whether this is on or not.
+    pub hdr: bool,
+    /// Whether cameras' bloom is drawn.
+    pub bloom: bool,
+    /// Whether cameras' ambient occlusion is drawn: a depth pass and two
+    /// half-size passes more.
+    pub ambient_occlusion: bool,
+    /// Whether point and spot lights give shiny surfaces a highlight, as
+    /// suns always do. Without, a lamp lights a surface evenly, in its
+    /// colour (metal in its own, dimmer than its highlight would be), which
+    /// keeps the cost down where many overlap (a Note10+ with 63 lamps over
+    /// its screen: 54 fps with, 59 without), much as Unity's low tiers
+    /// light extra lights per vertex.
+    pub lamp_highlights: bool,
+    /// How lights' shadows are drawn, or `None` for none at all, whatever
+    /// the lights ask.
+    pub shadows: Option<ShadowLevel>,
+}
+
+impl Quality {
+    /// The cheapest: straight to the screen, hard shadows from the sun and
+    /// one spot light, no effects.
+    pub const LOW: Self = Self {
+        hdr: false,
+        bloom: false,
+        ambient_occlusion: false,
+        lamp_highlights: false,
+        shadows: Some(ShadowLevel {
+            cascades: 1,
+            map_size: 1024,
+            filter: ShadowFilter::Hard,
+            spot_maps: 1,
+            spot_map_size: 512,
+            distance: 40.0,
+        }),
+    };
+
+    /// Phones' (Mali, Adreno): the scene image, bloom, soft shadows in two
+    /// cascades.
+    pub const MEDIUM: Self = Self {
+        hdr: true,
+        bloom: true,
+        ambient_occlusion: false,
+        lamp_highlights: true,
+        shadows: Some(ShadowLevel {
+            cascades: 2,
+            map_size: 2048,
+            filter: ShadowFilter::Soft,
+            spot_maps: 2,
+            spot_map_size: 1024,
+            distance: 60.0,
+        }),
+    };
+
+    /// Apple's GPUs, and desktops': everything, with softer shadows in
+    /// three cascades.
+    pub const HIGH: Self = Self {
+        hdr: true,
+        bloom: true,
+        ambient_occlusion: true,
+        lamp_highlights: true,
+        shadows: Some(ShadowLevel {
+            cascades: 3,
+            map_size: 2048,
+            filter: ShadowFilter::Softer,
+            spot_maps: 4,
+            spot_map_size: 1024,
+            distance: 100.0,
+        }),
+    };
+
+    /// The format of the image the scene is drawn into, with a last pass
+    /// after it: half floats, with [`Quality::hdr`] or bloom, or `None`,
+    /// straight to the screen.
+    pub(crate) fn image_format(&self) -> Option<wgpu::TextureFormat> {
+        (self.hdr || self.bloom).then_some(wgpu::TextureFormat::Rgba16Float)
+    }
+
+    /// Why it can't be drawn, if it can't: a shadow level out of range.
+    pub fn invalid(&self) -> Option<String> {
+        let s = self.shadows?;
+        let size = |n: u32| (256..=4096).contains(&n) && n.is_power_of_two();
+        if !(1..=3).contains(&s.cascades) {
+            Some(format!("{} cascades: 1 to 3", s.cascades))
+        } else if !size(s.map_size) || !size(s.spot_map_size) {
+            Some(format!("shadow maps of {} and {}: powers of two, 256 to 4096", s.map_size, s.spot_map_size))
+        } else if s.spot_maps > 4 {
+            Some(format!("{} spot maps: 0 to 4", s.spot_maps))
+        } else if !(s.distance.is_finite() && s.distance > 0.0) {
+            Some(format!("a shadow distance of {}: more than 0", s.distance))
+        } else {
+            None
+        }
+    }
+}
+
+/// The three [`Quality`]s an engine starts with, one of which a device
+/// picks ([`QualityLevel::for_adapter`]).
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
-pub enum Quality {
+pub enum QualityLevel {
     Low,
     Medium,
     High,
 }
 
-impl Quality {
+impl QualityLevel {
+    /// Its settings: [`Quality::LOW`], [`Quality::MEDIUM`] or
+    /// [`Quality::HIGH`].
+    pub fn quality(self) -> Quality {
+        match self {
+            Self::Low => Quality::LOW,
+            Self::Medium => Quality::MEDIUM,
+            Self::High => Quality::HIGH,
+        }
+    }
+
     /// The level for a GPU: high on Apple's and on desktops', medium on
     /// phones' (Mali, Adreno), low on a software one or one not known.
     pub fn for_adapter(info: &wgpu::AdapterInfo) -> Self {
         Self::for_adapter_on(info, cfg!(target_os = "android"))
     }
 
-    /// [`Quality::for_adapter`], on Android or not. On Android every real
-    /// GPU is a phone's, medium whoever makes it: one isn't high because
-    /// its maker isn't known.
+    /// [`QualityLevel::for_adapter`], on Android or not. On Android every
+    /// real GPU is a phone's, medium whoever makes it: one isn't high
+    /// because its maker isn't known.
     pub fn for_adapter_on(info: &wgpu::AdapterInfo, android: bool) -> Self {
         const APPLE: u32 = 0x106B;
         const ARM: u32 = 0x13B5;
@@ -279,68 +395,9 @@ impl Quality {
             _ => Self::Low,
         }
     }
-
-    /// Whether point and spot lights give shiny surfaces a highlight, as
-    /// suns always do. Without, a lamp lights a surface evenly, in its
-    /// colour (metal in its own, dimmer than its highlight would be), which
-    /// keeps a low level's cost down where many overlap (a Note10+ with 63
-    /// lamps over its screen: 54 fps with, 59 without), much as Unity's low
-    /// tiers light extra lights per vertex.
-    pub fn lamp_highlights(self) -> bool {
-        !matches!(self, Self::Low)
-    }
-
-    /// How its shadows are drawn.
-    pub fn shadows(self) -> ShadowLevel {
-        match self {
-            Self::Low => ShadowLevel {
-                cascades: 1,
-                map_size: 1024,
-                filter: ShadowFilter::Hard,
-                spot_maps: 1,
-                spot_map_size: 512,
-                distance: 40.0,
-            },
-            Self::Medium => ShadowLevel {
-                cascades: 2,
-                map_size: 2048,
-                filter: ShadowFilter::Soft,
-                spot_maps: 2,
-                spot_map_size: 1024,
-                distance: 60.0,
-            },
-            Self::High => ShadowLevel {
-                cascades: 3,
-                map_size: 2048,
-                filter: ShadowFilter::Softer,
-                spot_maps: 4,
-                spot_map_size: 1024,
-                distance: 100.0,
-            },
-        }
-    }
-
-    /// Whether cameras' [`CameraView::bloom`] is drawn: above low. At low
-    /// there's no scene image to work it out from (`image_format`).
-    pub fn bloom(self) -> bool {
-        self != Self::Low
-    }
-
-    /// Whether cameras' [`CameraView::ambient_occlusion`] is drawn: at
-    /// high only. It's a depth pass and two half-size passes more.
-    pub fn ambient_occlusion(self) -> bool {
-        self == Self::High
-    }
-
-    /// The format of the image the scene is drawn into, with a last pass
-    /// after it, which later effects (bloom) need: half floats, or `None`
-    /// at low, which draws straight to the screen.
-    pub(crate) fn image_format(self) -> Option<wgpu::TextureFormat> {
-        (self != Self::Low).then_some(wgpu::TextureFormat::Rgba16Float)
-    }
 }
 
-/// How a quality level draws shadows ([`Quality::shadows`]).
+/// How shadows are drawn ([`Quality::shadows`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowLevel {
     /// How many maps the sun's shadows are split into, nearest the camera
@@ -650,8 +707,8 @@ pub struct RenderScene {
     /// `None`: the camera's clear colour, and the ambient light alone.
     pub sky: Option<Sky>,
     pub fog: Option<Fog>,
-    /// The level to draw at; `None` for the device's own
-    /// ([`Kit::quality`](crate::Kit::quality)).
+    /// What to draw, and how finely; `None` for the device's level's
+    /// ([`Kit::device_quality`](crate::Kit::device_quality)).
     pub quality: Option<Quality>,
 }
 

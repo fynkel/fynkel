@@ -50,7 +50,7 @@ void main() {
     await tap('night');
     expect((scene.night, sun.intensity), (true, 0));
 
-    for (final quality in Quality.values) {
+    for (final quality in Quality.levels) {
       await tap(quality.name);
       expect(scene.world.quality, quality);
       expect(scene.readout.value, startsWith('drawn at ${quality.name} '));

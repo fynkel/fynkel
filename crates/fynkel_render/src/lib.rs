@@ -22,6 +22,7 @@ pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
     AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures,
-    MeshKey, PbrMaterial, Quality, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
+    MeshKey, PbrMaterial, Quality, QualityLevel, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind,
+    TextureKey,
 };
 pub use wgpu;

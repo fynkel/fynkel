@@ -136,7 +136,7 @@ image and the extra pass is measured on all three devices.
   lines, the textured materials (a cut-out, a normal map, a glow) and the
   glTF cut-outs are each checked at all three levels, and a renderer
   switching level between frames.
-- **The lab's look scene** ("Look: quality levels"): metal and plastic
+- **The lab's look scene** ("Look: quality levels", grown into "Look: everything" in phase 7): metal and plastic
   spheres from smooth to rough, a ring of pillars, a glowing cube, a
   turning camera, and buttons for each level and the device's pick.
   `--dart-define=LAB_QUALITY=low` starts it at a level. The guide's §5
@@ -679,7 +679,14 @@ say otherwise.
    scene's shader and nearly free. AO is cheap and partial, on at high
    only by default. *Decided by you, 2026-10-14.*
 3. **Three quality levels**, picked by the device unless the game
-   chooses. *Decided by you, 2026-10-14.*
+   chooses. *Decided by you, 2026-10-14.* **Changed in phase 7
+   (2026-10-16), your call:** a quality is settings a game can change
+   (bloom, ambient occlusion, HDR, lamp highlights, shadows on or off,
+   cascades, resolutions, softness, distance), as Unity's quality levels
+   are; the three levels are where a game starts from. Cameras have no
+   bloom or ambient occlusion unless given them, and a debug build says
+   when the quality leaves out what a camera asks for. ABI 28. Volumes
+   (global and local, blended) come later, as their own work.
 4. **The final scene** is Sheepdog with the look, plus the lab's look
    scene, not a new showcase. *Recommended*: Sheepdog's night already
    asks for lamps, and a real game shows more than a demo would.
@@ -702,4 +709,4 @@ say otherwise.
 - [x] Phase 4: the sky and what reflects it
 - [x] Phase 5: see-through (the Note10+ at medium left to phase 6)
 - [x] Phase 6: bloom, and a light AO (the Note10+ short at medium and high, accepted)
-- [ ] Phase 7: the look scene, Sheepdog, and the report
+- [x] Phase 7: the look scene, Sheepdog, quality as settings, and the report (2026-10-16): STAGE 8 DONE

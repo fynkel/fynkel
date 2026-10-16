@@ -431,7 +431,7 @@ class ArenaCamera extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    addComponent(Camera(fovY: 50.deg, clearColor: Color.rgb(0.08, 0.09, 0.12)));
+    addComponent(Camera(fovY: 50.deg, clearColor: Color.rgb(0.08, 0.09, 0.12), bloom: const Bloom()));
     addComponent(_follow);
     addComponent(_look);
     on(input.onPinch, (pinch) => _zoomBy(1 / pinch.scale));

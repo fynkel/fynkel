@@ -40,7 +40,7 @@ class GlowScene extends LabScene {
 
   @override
   void build() {
-    world.quality = Quality.values.where((q) => q.name == _startQuality).firstOrNull;
+    world.quality = Quality.levels.where((q) => q.name == _startQuality).firstOrNull;
     _camera = find('camera')!.get<Camera>()!;
     _camera
       ..bloom = _startBloom ? const Bloom() : null
@@ -133,13 +133,13 @@ class GlowScene extends LabScene {
     String state(bool on, bool drawnHere) => !on ? 'off' : (drawnHere ? 'on' : 'on, not drawn at ${drawn.name}');
     readout.value =
         'drawn at ${drawn.name}${picked == null ? ' (the device picks)' : ''}   '
-        'bloom ${state(bloom, drawn != Quality.low)}   '
-        'ambient occlusion ${state(ambientOcclusion, drawn == Quality.high)}   $_fps fps';
+        'bloom ${state(bloom, drawn.bloom)}   '
+        'ambient occlusion ${state(ambientOcclusion, drawn.ambientOcclusion)}   $_fps fps';
   }
 
   @override
   List<Control> get controls => [
-    for (final quality in Quality.values) Button(quality.name, () => world.quality = quality),
+    for (final quality in Quality.levels) Button(quality.name, () => world.quality = quality),
     Button("device's", () => world.quality = null),
     Toggle('bloom', () => bloom, (on) => bloom = on),
     Slider('bloom strength', () => strength, (value) => strength = value, max: 3),

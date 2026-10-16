@@ -585,7 +585,7 @@ fn texel_bytes(format: wgpu::TextureFormat) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::scene::Quality;
+    use crate::scene::QualityLevel;
 
     fn camera(position: Vec3, target: Vec3) -> CameraView {
         CameraView { near: 0.1, far: 500.0, ..CameraView::looking_at(position, target) }
@@ -631,7 +631,7 @@ mod tests {
     // shadow edge falls on don't change.
     #[test]
     fn a_still_point_keeps_its_place_in_its_texel_as_the_camera_moves() {
-        let level = Quality::High.shadows();
+        let level = QualityLevel::High.quality().shadows.unwrap();
         let basis = light_basis(Vec3::new(-0.4, -1.0, -0.3));
         let point = Vec3::new(1.37, 0.0, -4.21);
         let mut first: Option<Vec<[f32; 2]>> = None;
@@ -674,8 +674,8 @@ mod tests {
         let perspective = camera(Vec3::new(0.0, 2.0, 5.0), Vec3::new(0.0, 0.0, -10.0));
         let ortho = CameraView { orthographic: Some(6.0), ..perspective };
         for cam in [perspective, ortho] {
-            for quality in [Quality::Medium, Quality::High] {
-                let level = quality.shadows();
+            for quality in [QualityLevel::Medium, QualityLevel::High] {
+                let level = quality.quality().shadows.unwrap();
                 let (cascades, splits) = cascades(&cam, aspect, &level, &basis);
                 let forward = camera_forward(&cam);
                 let right = forward.cross(Vec3::Y).normalize();

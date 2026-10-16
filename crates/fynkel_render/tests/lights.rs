@@ -11,12 +11,12 @@ const SRGB: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 
 /// A rough grey square `size` metres across at the origin, facing the
 /// camera 3 m away along +Z, lit by `lights` alone.
-fn wall(size: f32, lights: Vec<Light>, quality: Quality) -> RenderScene {
+fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
     let albedo = linear(0.5);
     RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
         lights,
-        quality: Some(quality),
+        quality: Some(quality.quality()),
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         sky: None,
@@ -57,7 +57,7 @@ fn a_lamp_one_metre_away_lights_as_a_sun_does_and_fades_with_distance() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let render_centre =
-        |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, Quality::High), 64, 64).0.pixel(32, 32);
+        |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, QualityLevel::High), 64, 64).0.pixel(32, 32);
 
     let sun = render_centre(&mut r, vec![Light::sun(Vec3::NEG_Z, Vec3::splat(2.0))]);
     assert_close(sun, head_on(2.0), "a sun of 2");
@@ -84,12 +84,12 @@ fn a_spot_lights_only_inside_its_cone() {
     let spot = |softness| {
         Light::spot(Vec3::new(0.0, 0.0, 2.0), Vec3::NEG_Z, 100.0, 60f32.to_radians(), softness, Vec3::splat(8.0))
     };
-    let (hard, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(0.0)], Quality::High), 64, 64);
-    let (soft, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(1.0)], Quality::High), 64, 64);
+    let (hard, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(0.0)], QualityLevel::High), 64, 64);
+    let (soft, _) = render(&gpu, &mut r, &wall(4.0, vec![spot(1.0)], QualityLevel::High), 64, 64);
     let (lamp, _) = render(
         &gpu,
         &mut r,
-        &wall(4.0, vec![Light::point(Vec3::new(0.0, 0.0, 2.0), 100.0, Vec3::splat(8.0))], Quality::High),
+        &wall(4.0, vec![Light::point(Vec3::new(0.0, 0.0, 2.0), 100.0, Vec3::splat(8.0))], QualityLevel::High),
         64,
         64,
     );
@@ -112,13 +112,13 @@ fn every_sun_lights_the_scene_up_to_the_cap() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     let suns = |n: usize, each: f32| (0..n).map(|_| Light::sun(Vec3::NEG_Z, Vec3::splat(each))).collect();
-    let (one, _) = render(&gpu, &mut r, &wall(4.0, suns(1, 1.0), Quality::High), 64, 64);
-    let (two, _) = render(&gpu, &mut r, &wall(4.0, suns(2, 0.5), Quality::High), 64, 64);
+    let (one, _) = render(&gpu, &mut r, &wall(4.0, suns(1, 1.0), QualityLevel::High), 64, 64);
+    let (two, _) = render(&gpu, &mut r, &wall(4.0, suns(2, 0.5), QualityLevel::High), 64, 64);
     assert_eq!(one.pixel(32, 32), two.pixel(32, 32), "two suns of 0.5 make one of 1");
 
-    let (four, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS, 0.25), Quality::Low), 64, 64);
+    let (four, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS, 0.25), QualityLevel::Low), 64, 64);
     assert_eq!((four.pixel(32, 32), stats.lights_left_out), (one.pixel(32, 32), 0));
-    let (five, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS + 1, 0.25), Quality::Low), 64, 64);
+    let (five, stats) = render(&gpu, &mut r, &wall(4.0, suns(Renderer::MAX_SUNS + 1, 0.25), QualityLevel::Low), 64, 64);
     assert_eq!((five.pixel(32, 32), stats.lights_left_out), (one.pixel(32, 32), 1), "the fifth is left out");
 }
 
@@ -143,7 +143,7 @@ fn reds(n: usize, distance: f32, red: f32) -> Vec<Light> {
 fn a_cell_is_lit_by_every_lamp_that_reaches_it() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let lamps = reds(20, 1.0, 0.05);
         let centre = |r: &mut Renderer, lights| render(&gpu, r, &wall(1.0, lights, quality), 64, 64).0.pixel(32, 32);
         let all = centre(&mut r, lamps.clone());
@@ -174,12 +174,12 @@ fn a_frame_keeps_the_lamps_nearest_the_camera() {
     let behind = Light::point(Vec3::new(0.0, 0.0, 10.0), 1.0, Vec3::ONE);
 
     let lights = [vec![by_the_wall, behind, off], near.clone()].concat();
-    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
+    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, QualityLevel::High), 64, 64);
     assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 1));
     assert_eq!(image.pixel(32, 32), [0, 0, 0, 255], "the lamp by the wall is the one left out");
 
     let lights = [vec![by_the_wall, behind, off], near[1..].to_vec()].concat();
-    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, Quality::High), 64, 64);
+    let (image, stats) = render(&gpu, &mut r, &wall(4.0, lights, QualityLevel::High), 64, 64);
     assert_eq!((stats.lights, stats.lights_left_out), (Renderer::MAX_LIGHTS as u32, 0));
     assert_ne!(image.pixel(32, 32), [0, 0, 0, 255], "with room for it, it lights the wall");
 }
@@ -194,15 +194,15 @@ fn lamps_light_metal_at_every_level() {
     let mut r = renderer(&gpu, SRGB);
     let lamp = || vec![Light::point(Vec3::new(0.0, 0.0, 1.0), 10.0, Vec3::ONE)];
     let centre = |r: &mut Renderer, scene: &RenderScene| render(&gpu, r, scene, 64, 64).0.pixel(32, 32);
-    for quality in [Quality::Low, Quality::Medium, Quality::High] {
+    for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
         let mut metal = wall(1.0, lamp(), quality);
         metal.draws[0].material.metallic = 1.0;
         metal.draws[0].material.roughness = 0.3;
         let shine = centre(&mut r, &metal);
         assert!(shine[0] > 20, "{quality:?}: the lamp lights the metal: {shine:?}");
     }
-    let low = centre(&mut r, &wall(1.0, lamp(), Quality::Low));
-    let high = centre(&mut r, &wall(1.0, lamp(), Quality::High));
+    let low = centre(&mut r, &wall(1.0, lamp(), QualityLevel::Low));
+    let high = centre(&mut r, &wall(1.0, lamp(), QualityLevel::High));
     // Even a fully rough surface has a faint highlight above low; low
     // spreads it evenly instead, a little brighter where it's seen.
     assert!(low[0] > 20 && low[0].abs_diff(high[0]) <= 10, "matte: low {low:?}, high {high:?}");
@@ -217,7 +217,7 @@ fn a_big_wall_is_lit_by_every_lamp_over_it() {
     let mut r = renderer(&gpu, SRGB);
     let lamps: Vec<Light> =
         (0..6).map(|i| Light::point(Vec3::new(-0.75 + 0.3 * i as f32, 0.0, 0.2), 0.4, Vec3::ONE)).collect();
-    let image = |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, Quality::Low), 64, 64).0;
+    let image = |r: &mut Renderer, lights| render(&gpu, r, &wall(4.0, lights, QualityLevel::Low), 64, 64).0;
     let all = image(&mut r, lamps.clone());
     for k in 0..lamps.len() {
         let mut fewer = lamps.clone();
@@ -234,7 +234,7 @@ fn a_big_wall_is_lit_by_every_lamp_over_it() {
 fn a_lamp_over_a_seam_lights_both_sides_alike() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
-    let quality = Quality::Low;
+    let quality = QualityLevel::Low;
     let mut scene = wall(1.0, Vec::new(), quality);
     let tile = scene.draws[0];
     scene.draws = [-0.5f32, 0.5]

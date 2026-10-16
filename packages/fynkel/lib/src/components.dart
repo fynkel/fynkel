@@ -203,8 +203,8 @@ int cameraObjectId(Camera camera, World world) {
 }
 
 /// Light brighter than white glowing into what's around it: a lamp's
-/// bulb, a glowing sword, the sun on metal ([Camera.bloom]). Drawn at
-/// medium and high quality; at low, never.
+/// bulb, a glowing sword, the sun on metal ([Camera.bloom]). Drawn where
+/// the world's [Quality.bloom] is on.
 final class Bloom {
   /// Bloom of [strength] from [threshold]: by default, about as much glow
   /// as light, from what's brighter than white.
@@ -237,7 +237,7 @@ final class Bloom {
 /// Surfaces darkening where they meet, in corners and creases and under
 /// things on the ground: a soft hint of contact ([Camera.ambientOcclusion]).
 /// Only the ambient and sky light darken; lights and their shadows stay as
-/// they are. Drawn at high quality only.
+/// they are. Drawn where the world's [Quality.ambientOcclusion] is on.
 final class AmbientOcclusion {
   /// Ambient occlusion of [intensity] over [radius] metres: by default, as
   /// dark as corners are closed in, over half a metre.
@@ -273,7 +273,7 @@ final class AmbientOcclusion {
 /// [ArgumentError] from the setter and leaves the old value in place.
 final class Camera extends Component {
   /// A perspective camera with a 60° [fovY], [near] 0.1 m, [far] 1,000 m,
-  /// a dark grey [clearColor], drawing every layer, with [bloom] and
+  /// a dark grey [clearColor], drawing every layer, without [bloom] or
   /// [ambientOcclusion]. Pass [orthographic] for a parallel one,
   /// [orthographicSize] 5 unless given.
   Camera({
@@ -285,8 +285,8 @@ final class Camera extends Component {
     this._orthographicSize = 5,
     this._cullingMask = LayerMask.all,
     this._showSky = true,
-    this._bloom = const Bloom(),
-    this._ambientOcclusion = const AmbientOcclusion(),
+    this._bloom,
+    this._ambientOcclusion,
   }) : super._();
 
   double _fovY, _near, _far, _orthographicSize;
@@ -405,8 +405,9 @@ final class Camera extends Component {
   }
 
   /// Whether light brighter than white glows into what's around it, and
-  /// how: `const Bloom()` unless set; null, it doesn't (a minimap's, say).
-  /// Drawn at medium and high [Quality]: low has none.
+  /// how: null unless set, for none; `const Bloom()` for about as much
+  /// glow as light. Drawn where the world's [Quality.bloom] is on (the
+  /// medium and high levels); a debug build says once if it isn't.
   Bloom? get bloom => _bloom;
   set bloom(Bloom? value) {
     _checkChangeable();
@@ -418,9 +419,10 @@ final class Camera extends Component {
     }
   }
 
-  /// Whether surfaces darken where they meet, and how:
-  /// `const AmbientOcclusion()` unless set; null, they don't. Drawn at
-  /// high [Quality] only.
+  /// Whether surfaces darken where they meet, and how: null unless set,
+  /// for not; `const AmbientOcclusion()` for corners as dark as they're
+  /// closed in. Drawn where the world's [Quality.ambientOcclusion] is on
+  /// (the high level); a debug build says once if it isn't.
   AmbientOcclusion? get ambientOcclusion => _ambientOcclusion;
   set ambientOcclusion(AmbientOcclusion? value) {
     _checkChangeable();
@@ -516,8 +518,8 @@ final class Camera extends Component {
       'Camera(${orthographic ? 'orthographic, orthographicSize: $orthographicSize' : 'fovY: $fovY'}, near: $near, far: $far, '
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'}'
       '${showSky ? '' : ', showSky: false'}'
-      '${bloom == const Bloom() ? '' : ', bloom: $bloom'}'
-      '${ambientOcclusion == const AmbientOcclusion() ? '' : ', ambientOcclusion: $ambientOcclusion'})';
+      '${bloom == null ? '' : ', bloom: $bloom'}'
+      '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'})';
 }
 
 /// What kind of light a [Light] is.
@@ -701,11 +703,12 @@ final class Light extends Component {
     }
   }
 
-  /// Whether what it shines on casts shadows: false unless set. A sun's
-  /// reach [Quality]'s shadow distance from the camera (40, 60 or 100 m)
-  /// and fade out there; only the first sun made with shadows casts them.
-  /// A spot light's reach its [range]; each level gives a few spot lights
-  /// shadows (1, 2 or 4), the ones nearest the camera, if they're at most
+  /// Whether what it shines on casts shadows: false unless set, and only
+  /// where the world's [Quality.shadows] is on. A sun's reach
+  /// [Quality.shadowDistance] from the camera and fade out there; only
+  /// the first sun made with shadows casts them. A spot light's reach its
+  /// [range]; [Quality.spotShadows] of them cast shadows, the ones nearest
+  /// the camera, if they're at most
   /// 150° across ([angle]). A point light's
   /// shadows aren't drawn yet. A [MeshRenderer] can choose not to cast
   /// them, or not to receive them.

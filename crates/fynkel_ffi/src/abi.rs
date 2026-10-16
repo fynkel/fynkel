@@ -15,7 +15,7 @@ use std::sync::{Arc, Mutex, MutexGuard, PoisonError, Weak};
 use std::time::Duration;
 
 use fynkel_present::{Headless, HeadlessFrames, ReadError};
-use fynkel_render::{Fog, Gpu, Quality, Renderer, Sky, SkyImage, SkyKind};
+use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind};
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 27;
+pub const FY_ABI_VERSION: u32 = 28;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -120,13 +120,14 @@ pub struct FyCamera {
     /// Shows the world's sky (`fy_world_sky_set`) behind everything;
     /// without it, `clear_color`.
     pub show_sky: bool,
-    /// Light brighter than white glows into what's around it, at medium
-    /// and high quality: how much (0 none, 1 about what it gives off) and
+    /// Light brighter than white glows into what's around it, where the
+    /// world's quality draws bloom: how much (0 none, 1 about what it gives off) and
     /// from how bright (1: only what's brighter than white).
     pub bloom: bool,
     pub bloom_strength: f32,
     pub bloom_threshold: f32,
-    /// Surfaces darken where they meet, at high quality: how dark (0 to 4)
+    /// Surfaces darken where they meet, where the world's quality draws
+    /// ambient occlusion: how dark (0 to 4)
     /// and how far, in metres.
     pub ambient_occlusion: bool,
     pub ambient_occlusion_intensity: f32,
@@ -151,21 +152,111 @@ pub const FY_QUALITY_MEDIUM: u32 = 2;
 /// A quality level: Apple's GPUs and desktops'.
 pub const FY_QUALITY_HIGH: u32 = 3;
 
-fn quality_of(level: u32) -> Option<Option<Quality>> {
+/// `FyQuality::shadow_softness`: one sample, sharp.
+pub const FY_SHADOWS_HARD: u32 = 0;
+/// `FyQuality::shadow_softness`: 4 samples, across about 2 texels.
+pub const FY_SHADOWS_SOFT: u32 = 1;
+/// `FyQuality::shadow_softness`: 9 samples, across about 3 texels.
+pub const FY_SHADOWS_SOFTER: u32 = 2;
+
+/// What a world's views draw, and how finely (`fy_world_quality_set`). A
+/// level's, to start from: `fy_quality_preset`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyQuality {
+    /// The scene drawn into a half-float image, with a last pass after it,
+    /// rather than straight to the screen. Bloom draws into it either way.
+    pub hdr: bool,
+    /// Cameras' bloom is drawn.
+    pub bloom: bool,
+    /// Cameras' ambient occlusion is drawn.
+    pub ambient_occlusion: bool,
+    /// Point and spot lights give shiny surfaces a highlight.
+    pub lamp_highlights: bool,
+    /// Lights' shadows are drawn; without, none are, and the rest is
+    /// unused.
+    pub shadows: bool,
+    /// The sun's shadow maps, nearest the camera first: 1 to 3.
+    pub shadow_cascades: u32,
+    /// Each of the sun's maps' side, in texels: a power of two, 256 to 4096.
+    pub shadow_resolution: u32,
+    /// `FY_SHADOWS_*`.
+    pub shadow_softness: u32,
+    /// How far from the camera the sun's shadows reach, in metres.
+    pub shadow_distance: f32,
+    /// The most spot lights casting shadows in a frame, the nearest the
+    /// camera: 0 to 4.
+    pub spot_shadows: u32,
+    /// Each spot light's map's side, as `shadow_resolution`.
+    pub spot_shadow_resolution: u32,
+}
+
+impl FyQuality {
+    fn from_quality(q: Quality) -> Self {
+        let s = q.shadows.or(Quality::LOW.shadows).expect("low has shadows");
+        Self {
+            hdr: q.hdr,
+            bloom: q.bloom,
+            ambient_occlusion: q.ambient_occlusion,
+            lamp_highlights: q.lamp_highlights,
+            shadows: q.shadows.is_some(),
+            shadow_cascades: s.cascades as u32,
+            shadow_resolution: s.map_size,
+            shadow_softness: match s.filter {
+                ShadowFilter::Hard => FY_SHADOWS_HARD,
+                ShadowFilter::Soft => FY_SHADOWS_SOFT,
+                ShadowFilter::Softer => FY_SHADOWS_SOFTER,
+            },
+            shadow_distance: s.distance,
+            spot_shadows: s.spot_maps as u32,
+            spot_shadow_resolution: s.spot_map_size,
+        }
+    }
+
+    fn to_quality(self) -> Result<Quality, Error> {
+        let filter = match self.shadow_softness {
+            FY_SHADOWS_HARD => ShadowFilter::Hard,
+            FY_SHADOWS_SOFT => ShadowFilter::Soft,
+            FY_SHADOWS_SOFTER => ShadowFilter::Softer,
+            other => {
+                return Err(Error::new(FyStatus::InvalidValue, format!("{other} isn't a shadow softness")));
+            }
+        };
+        let quality = Quality {
+            hdr: self.hdr,
+            bloom: self.bloom,
+            ambient_occlusion: self.ambient_occlusion,
+            lamp_highlights: self.lamp_highlights,
+            shadows: self.shadows.then_some(ShadowLevel {
+                cascades: self.shadow_cascades as usize,
+                map_size: self.shadow_resolution,
+                filter,
+                spot_maps: self.spot_shadows as usize,
+                spot_map_size: self.spot_shadow_resolution,
+                distance: self.shadow_distance,
+            }),
+        };
+        match quality.invalid() {
+            Some(why) => Err(Error::new(FyStatus::InvalidValue, format!("quality: {why}"))),
+            None => Ok(quality),
+        }
+    }
+}
+
+fn level_named(level: u32) -> Option<QualityLevel> {
     match level {
-        FY_QUALITY_AUTO => Some(None),
-        FY_QUALITY_LOW => Some(Some(Quality::Low)),
-        FY_QUALITY_MEDIUM => Some(Some(Quality::Medium)),
-        FY_QUALITY_HIGH => Some(Some(Quality::High)),
+        FY_QUALITY_LOW => Some(QualityLevel::Low),
+        FY_QUALITY_MEDIUM => Some(QualityLevel::Medium),
+        FY_QUALITY_HIGH => Some(QualityLevel::High),
         _ => None,
     }
 }
 
-fn level_of(quality: Quality) -> u32 {
-    match quality {
-        Quality::Low => FY_QUALITY_LOW,
-        Quality::Medium => FY_QUALITY_MEDIUM,
-        Quality::High => FY_QUALITY_HIGH,
+fn level_of(level: QualityLevel) -> u32 {
+    match level {
+        QualityLevel::Low => FY_QUALITY_LOW,
+        QualityLevel::Medium => FY_QUALITY_MEDIUM,
+        QualityLevel::High => FY_QUALITY_HIGH,
     }
 }
 
@@ -524,7 +615,7 @@ pub struct FyWorld {
     gpu: Mutex<Weak<WorldGpu>>,
     /// The camera shake: which camera, and how far it's moved when drawn.
     shake: Mutex<Option<(ObjectId, Vec3)>>,
-    /// The quality level its views draw at, or `None` for the device's.
+    /// The quality its views draw at, or `None` for the device's level's.
     quality: Mutex<Option<Quality>>,
     /// Its sky and fog, as its views draw them.
     sky: Mutex<Option<Sky>>,
@@ -986,28 +1077,44 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
     })
 }
 
-/// Sets the quality level the world's views draw at: a `FY_QUALITY_*`.
-/// `FY_QUALITY_AUTO`, as a new world has, is the device's own. Taken by
-/// each `fy_view_frame` after.
+/// Sets what the world's views draw, and how finely, or the device's
+/// level's (`fy_quality_auto`) when `quality` is null, as a new world has.
+/// Taken by each `fy_view_frame` after.
 ///
 /// # Safety
 ///
-/// `world` is null or live.
+/// `world` is null or live; `quality` is null or readable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_world_quality_set(world: *const FyWorld, level: u32) -> FyStatus {
+pub unsafe extern "C" fn fy_world_quality_set(world: *const FyWorld, quality: *const FyQuality) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        let quality = quality_of(level)
-            .ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("{level} isn't a quality level")))?;
+        // SAFETY: per this function's contract.
+        let quality = unsafe { quality.as_ref() }.map(|q| q.to_quality()).transpose()?;
         *world.quality.lock().unwrap_or_else(PoisonError::into_inner) = quality;
         Ok(())
     })
 }
 
-/// Writes the quality level this device picks for a world left at
-/// `FY_QUALITY_AUTO` to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`.
-/// Makes the device if there's none yet.
+/// Writes a level's quality to `out`: `level` is `FY_QUALITY_LOW`,
+/// `_MEDIUM` or `_HIGH`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_quality_preset(level: u32, out: *mut FyQuality) -> FyStatus {
+    guard(|| {
+        let level =
+            level_named(level).ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("{level} isn't a level")))?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, FyQuality::from_quality(level.quality()), "out") }
+    })
+}
+
+/// Writes the level this device picks for a world without a quality of
+/// its own to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`. Makes the
+/// device if there's none yet.
 ///
 /// # Safety
 ///
@@ -1017,7 +1124,7 @@ pub unsafe extern "C" fn fy_quality_auto(out: *mut u32) -> FyStatus {
     guard(|| {
         let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
         // SAFETY: per this function's contract.
-        unsafe { write(out, level_of(device.kit.quality()), "out") }
+        unsafe { write(out, level_of(device.kit.device_quality()), "out") }
     })
 }
 
