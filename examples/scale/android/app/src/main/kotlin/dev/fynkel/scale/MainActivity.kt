@@ -2,9 +2,9 @@ package dev.fynkel.scale
 
 import android.os.Bundle
 import android.view.WindowManager
-import io.flutter.embedding.android.FlutterActivity
+import dev.fynkel.fynkel_flutter.FynkelActivity
 
-class MainActivity : FlutterActivity() {
+class MainActivity : FynkelActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         // A measurement runs for minutes untouched: the screen must stay on.
