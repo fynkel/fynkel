@@ -219,6 +219,6 @@ What it found, all fixed in the guide (and one message):
 
 Phase 7 is done when you have read this.
 
-- [ ] Read
+- [x] Read (2026-10-16)
 
 Then **stage 8 is done**.

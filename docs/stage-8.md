@@ -709,4 +709,4 @@ say otherwise.
 - [x] Phase 4: the sky and what reflects it
 - [x] Phase 5: see-through (the Note10+ at medium left to phase 6)
 - [x] Phase 6: bloom, and a light AO (the Note10+ short at medium and high, accepted)
-- [ ] Phase 7: the look scene, Sheepdog, and the report
+- [x] Phase 7: the look scene, Sheepdog, quality as settings, and the report (2026-10-16): STAGE 8 DONE
