@@ -148,7 +148,13 @@ void main() {
       switch (call.method) {
         case 'register':
           if (debugAndroid ?? false) {
-            expect(args.keys, unorderedEquals(['view', 'width', 'height']));
+            // Asking to be on screen (FynkelView.androidSurface), with where
+            // it is; this stand-in answers with a texture, as the plugin
+            // does in an activity that isn't a FynkelActivity.
+            expect(
+              args.keys,
+              unorderedEquals(['view', 'width', 'height', 'onScreen', 'left', 'top', 'frameWidth', 'frameHeight']),
+            );
             calls.add('register ${args['width']}x${args['height']}');
           } else {
             expect(args['acquire'], isNot(0));
@@ -494,6 +500,143 @@ void main() {
       expect(tester.takeException().toString(), contains("couldn't draw to the new surface"));
       expect(calls, ['register 300x150', 'unregister 7', 'register 300x150']);
       expect(tester.widget<Texture>(find.byType(Texture)).textureId, 8);
+    });
+
+    group('on screen', () {
+      // The plugin in a FynkelActivity: each view a SurfaceView behind
+      // Flutter's, placed where the view is.
+      setUp(() {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (
+          call,
+        ) async {
+          final args = call.arguments as Map? ?? const {};
+          switch (call.method) {
+            case 'register':
+              calls.add(
+                'register ${args['width']}x${args['height']} at ${args['left']},${args['top']} '
+                '${args['frameWidth']}x${args['frameHeight']}${args['onScreen'] == true ? '' : ' as a texture'}',
+              );
+              return args['onScreen'] == true ? {'id': nextTexture++, 'onScreen': true} : nextTexture++;
+            case 'place':
+              calls.add(
+                'place ${args['texture']} at ${args['left']},${args['top']} ${args['width']}x${args['height']}',
+              );
+            case 'over':
+              calls.add('over ${args['texture']} ${args['over']}');
+            case 'resize':
+              calls.add('resize ${args['texture']} ${args['width']}x${args['height']}');
+            case 'unregister':
+              calls.add('unregister ${args['texture']}');
+          }
+          return null;
+        });
+      });
+
+      Future<void> frames(WidgetTester tester, [int n = 3]) async {
+        for (var i = 0; i < n; i++) {
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+      }
+
+      testWidgets('a view on screen clears its place for the surface behind, and moves it with the widget', (
+        tester,
+      ) async {
+        // 100 × 50 in the middle of 800 × 600, 3 pixels a point.
+        await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5)));
+        await frames(tester);
+        expect(calls, ['register 150x75 at 1050,825 300x150']);
+        expect(find.byType(Texture), findsNothing, reason: 'the frames are not a texture');
+        final clear = find.descendant(of: find.byType(FynkelView), matching: find.byType(CustomPaint));
+        expect(clear, findsWidgets);
+
+        // A page sliding in moves it; the drawn size stays.
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: Align(
+              alignment: Alignment.topLeft,
+              child: Padding(
+                padding: const EdgeInsets.only(left: 10, top: 20),
+                child: SizedBox(width: 100, height: 50, child: FynkelView.world(world, resolutionScale: 0.5)),
+              ),
+            ),
+          ),
+        );
+        await frames(tester);
+        expect(calls, ['register 150x75 at 1050,825 300x150', 'unregister 7', 'register 150x75 at 30,60 300x150']);
+        calls.clear();
+
+        await tester.pumpWidget(sized(const SizedBox()));
+        await tester.pump();
+        expect(calls, ['unregister 8']);
+      });
+
+      testWidgets('a view that moves is placed again, once a move', (tester) async {
+        final offset = ValueNotifier(0.0);
+        addTearDown(offset.dispose);
+        await tester.pumpWidget(
+          Directionality(
+            textDirection: TextDirection.ltr,
+            child: ValueListenableBuilder<double>(
+              valueListenable: offset,
+              builder: (_, x, child) => Padding(
+                padding: EdgeInsets.only(left: x),
+                child: child,
+              ),
+              child: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(width: 100, height: 50, child: FynkelView.world(world)),
+              ),
+            ),
+          ),
+        );
+        await frames(tester);
+        offset.value = 20;
+        await frames(tester);
+        expect(calls, ['register 300x150 at 0,0 300x150', 'place 7 at 60,0 300x150']);
+        await frames(tester);
+        expect(calls, hasLength(2), reason: 'placed once a move, not once a frame');
+        await tester.pumpWidget(sized(const SizedBox()));
+        await tester.pump();
+      });
+
+      testWidgets('a view lying within another goes over it; one beside it does not', (tester) async {
+        Widget views({required double minimapLeft}) => Directionality(
+          textDirection: TextDirection.ltr,
+          child: Stack(
+            children: [
+              Positioned(left: 0, top: 0, width: 200, height: 200, child: FynkelView.world(world)),
+              Positioned(
+                left: minimapLeft,
+                top: 10,
+                width: 50,
+                height: 50,
+                child: FynkelView.world(world, input: false, worldWidgets: false),
+              ),
+            ],
+          ),
+        );
+        await tester.pumpWidget(views(minimapLeft: 140));
+        await frames(tester);
+        expect(calls, containsAll(['over 8 true']));
+        expect(calls.where((c) => c.startsWith('over 7')), isEmpty, reason: 'the game stays under');
+
+        calls.clear();
+        await tester.pumpWidget(views(minimapLeft: 300));
+        await frames(tester);
+        expect(calls, contains('over 8 false'));
+        await tester.pumpWidget(sized(const SizedBox()));
+        await tester.pump();
+      });
+
+      testWidgets('androidSurface: false keeps the texture', (tester) async {
+        await tester.pumpWidget(sized(FynkelView.world(world, androidSurface: false)));
+        await frames(tester);
+        expect(calls, ['register 300x150 at null,null nullxnull as a texture']);
+        expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
+        await tester.pumpWidget(sized(const SizedBox()));
+        await tester.pump();
+      });
     });
   });
 

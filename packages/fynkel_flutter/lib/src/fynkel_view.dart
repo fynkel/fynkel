@@ -212,6 +212,7 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
+    this.androidSurface = true,
   }) : world = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
@@ -230,6 +231,7 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
+    this.androidSurface = true,
   }) : root = null,
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -303,6 +305,19 @@ class FynkelView extends StatefulWidget {
   /// minimap.
   final bool worldWidgets;
 
+  /// Android: whether the view draws straight to the screen, behind
+  /// Flutter's own view, when the app's activity is a `FynkelActivity`
+  /// (the guide, §1). There Flutter never waits for the game's frames,
+  /// which on a slower phone is the difference between 40 and 60 fps
+  /// (docs/android-surface-report.md). Widgets over the view draw over it;
+  /// whatever is painted under it doesn't show. What it can't do: follow a
+  /// transform, a clip or an opacity from the widgets above it (a page
+  /// that fades or zooms in shows the game unfaded; one that slides is
+  /// followed), and stack more than two views on one another (a minimap
+  /// over the game is two). Off, or with another activity, the view is a
+  /// texture Flutter draws, as on the other platforms, with no such limits.
+  final bool androidSurface;
+
   @override
   State<FynkelView> createState() => FynkelViewState();
 }
@@ -345,6 +360,17 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   /// Android: the size the plugin was last given.
   int _sentWidth = 0, _sentHeight = 0;
+
+  /// Android: the view draws straight to the screen, to a surface behind
+  /// Flutter's view ([FynkelView.androidSurface]), not to a texture. The
+  /// plugin says so when the view registers.
+  bool _onScreen = false;
+
+  /// Android, on screen: where the surface was last put, in physical
+  /// pixels from the top left of Flutter's view, and whether it was put
+  /// over the other views.
+  Rect? _sentPlace;
+  bool _sentOver = false;
   Object? _error;
 
   /// Whether the frames go on without a picture: there is no plugin (a
@@ -623,6 +649,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       final texture = _texture;
       if (texture == null) return;
       if (_android) _sendSize(view, texture);
+      if (_onScreen) _sendPlace(texture);
       view.frame();
     } on FynkelException catch (error, stack) {
       if (error.status != FynkelStatus.deviceLost && error.status != FynkelStatus.workerFailed) rethrow;
@@ -696,7 +723,19 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (_android) {
         _sentWidth = view.width;
         _sentHeight = view.height;
-        arguments = {'view': view.address, 'width': view.width, 'height': view.height};
+        final place = widget.androidSurface ? _place() : null;
+        arguments = {
+          'view': view.address,
+          'width': view.width,
+          'height': view.height,
+          if (place != null) ...{
+            'onScreen': true,
+            'left': place.left.round(),
+            'top': place.top.round(),
+            'frameWidth': place.width.round(),
+            'frameHeight': place.height.round(),
+          },
+        };
       } else {
         arguments = {
           'view': view.address,
@@ -706,10 +745,27 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         };
       }
       if (_android) _listenToPlugin();
-      final texture = await channel.invokeMethod<int>('register', arguments);
+      // A texture's id, or for a surface on screen {id, onScreen}.
+      final answer = await channel.invokeMethod<Object>('register', arguments);
+      final onScreen = answer is Map && answer['onScreen'] == true;
+      final texture = answer is Map ? answer['id'] as int? : answer as int?;
       if (mounted && _view == view) {
         if (texture != null) _byTexture[texture] = this;
-        setState(() => _texture = texture);
+        if (onScreen) {
+          _sentPlace = arguments.containsKey('left')
+              ? Rect.fromLTWH(
+                  (arguments['left']! as int).toDouble(),
+                  (arguments['top']! as int).toDouble(),
+                  (arguments['frameWidth']! as int).toDouble(),
+                  (arguments['frameHeight']! as int).toDouble(),
+                )
+              : null;
+          _sentOver = false;
+        }
+        setState(() {
+          _texture = texture;
+          _onScreen = onScreen;
+        });
       }
       return texture;
     } on MissingPluginException {
@@ -736,6 +792,53 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         if (mounted && _view == view) _replace(error, stack);
       }),
     );
+  }
+
+  /// Android, on screen: where the view is, in physical pixels from the
+  /// top left of Flutter's view, rounded as the plugin places it.
+  Rect _place() {
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize || !box.attached) return Rect.zero;
+    final ratio = MediaQuery.devicePixelRatioOf(context);
+    final topLeft = box.localToGlobal(Offset.zero) * ratio;
+    final size = box.size * ratio;
+    return Rect.fromLTWH(
+      topLeft.dx.roundToDouble(),
+      topLeft.dy.roundToDouble(),
+      size.width.roundToDouble(),
+      size.height.roundToDouble(),
+    );
+  }
+
+  /// Android, on screen: moves the surface to where the view now is (a
+  /// page sliding in, a resize), and over the other views when it lies
+  /// within one of them (a minimap over the game).
+  void _sendPlace(int texture) {
+    final place = _place();
+    if (place != _sentPlace) {
+      _sentPlace = place;
+      unawaited(
+        channel.invokeMethod<void>('place', {
+          'texture': texture,
+          'left': place.left.round(),
+          'top': place.top.round(),
+          'width': place.width.round(),
+          'height': place.height.round(),
+        }),
+      );
+    }
+    final over = _byTexture.values.any(
+      (other) =>
+          other != this &&
+          other._onScreen &&
+          other._sentPlace != null &&
+          other._sentPlace != place &&
+          other._sentPlace!.expandToInclude(place) == other._sentPlace,
+    );
+    if (over != _sentOver) {
+      _sentOver = over;
+      unawaited(channel.invokeMethod<void>('over', {'texture': texture, 'over': over}));
+    }
   }
 
   /// The view can't go on (the plugin couldn't give it a new surface): a
@@ -800,6 +903,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     _view = null;
     _registration = null;
     _texture = null;
+    _onScreen = false;
+    _sentPlace = null;
     _windowStartMicros = 0;
     if (view == null || registration == null) return;
     unawaited(() async {
@@ -849,7 +954,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         _layoutWidth = width;
         _layoutHeight = height;
         final texture = _texture;
-        return texture == null ? const SizedBox.expand() : Texture(textureId: texture);
+        if (texture == null) return const SizedBox.expand();
+        // On screen: the surface is behind Flutter's view, so the view
+        // clears whatever was painted under it, and the game shows through.
+        if (_onScreen) return const SizedBox.expand(child: CustomPaint(painter: _Window()));
+        return Texture(textureId: texture);
       },
     );
     // Without input it keeps the taps on it from what's under it.
@@ -913,6 +1022,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       ],
     );
   }
+}
+
+/// Clears its rectangle, whatever was painted under it, so the surface
+/// behind Flutter's view shows through.
+class _Window extends CustomPainter {
+  const _Window();
+
+  @override
+  void paint(Canvas canvas, Size size) => canvas.drawRect(Offset.zero & size, Paint()..blendMode = BlendMode.clear);
+
+  @override
+  bool shouldRepaint(_Window oldDelegate) => false;
 }
 
 /// A world's frames, shared by the views that show it: the first of them

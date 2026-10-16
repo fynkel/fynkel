@@ -12,7 +12,7 @@ use std::panic::{self, AssertUnwindSafe};
 use std::ptr;
 
 use fynkel_present::AndroidPresenter;
-use jni_sys::{JNIEnv, jclass, jint, jlong, jobject, jstring};
+use jni_sys::{JNIEnv, jboolean, jclass, jint, jlong, jobject, jstring};
 
 use crate::abi::{FyView, fy_view_free};
 use crate::worker::panic_message;
@@ -34,8 +34,10 @@ fn catch(body: impl FnOnce() -> Result<(), String>) -> Result<(), String> {
         .unwrap_or_else(|payload| Err(format!("panicked: {}", panic_message(&*payload))))
 }
 
-/// `FynkelNative.attach(view, surface, width, height)`: the view's next
-/// frames go to `surface`, at the size its `SurfaceProducer` was given.
+/// `FynkelNative.attach(view, surface, width, height, onScreen)`: the
+/// view's next frames go to `surface`, at the size its `SurfaceProducer`
+/// or `SurfaceView` was given. `onScreen`: a `SurfaceView`'s, which
+/// Android shows itself, not a texture Flutter shows.
 /// Waits for a frame in progress. Returns null, or why it failed.
 ///
 /// # Safety
@@ -50,6 +52,7 @@ pub unsafe extern "system" fn Java_dev_fynkel_fynkel_1flutter_FynkelNative_attac
     surface: jobject,
     width: jint,
     height: jint,
+    on_screen: jboolean,
 ) -> jstring {
     let result = catch(|| {
         // SAFETY: per this function's contract.
@@ -58,7 +61,7 @@ pub unsafe extern "system" fn Java_dev_fynkel_fynkel_1flutter_FynkelNative_attac
             return Err(format!("a surface can't be {width} × {height}"));
         };
         // SAFETY: per this function's contract.
-        unsafe { presenter.attach(env.cast(), surface.cast(), w, h) }.map_err(|e| e.to_string())
+        unsafe { presenter.attach(env.cast(), surface.cast(), w, h, on_screen != 0) }.map_err(|e| e.to_string())
     });
     match result {
         Ok(()) => ptr::null_mut(),

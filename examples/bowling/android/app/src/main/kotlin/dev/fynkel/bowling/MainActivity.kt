@@ -1,5 +1,5 @@
 package dev.fynkel.bowling
 
-import io.flutter.embedding.android.FlutterActivity
+import dev.fynkel.fynkel_flutter.FynkelActivity
 
-class MainActivity : FlutterActivity()
+class MainActivity : FynkelActivity()

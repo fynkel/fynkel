@@ -66,7 +66,7 @@ for them.
 | 2. Unmerge Flutter's threads | **Not possible.** Flutter 3.47 stops at start with `DisableMergedPlatformUIThread` "is disabled and no longer allowed". Dart runs on Android's main thread, and there's no way out. | — |
 | 3. Let the GPU work ahead | The slots and the presenter thread above | Yes |
 | 4. The performance hint API | **Not on this phone**: the Note10+ has no performance hint HAL, so no session can be opened. It wasn't built. | — |
-| 5. Draw straight to the screen | Written up below, not built | — |
+| 5. Draw straight to the screen | Built afterwards: [its report](android-surface-report.md) | Yes |
 
 What else was tried on the way, and dropped:
 
@@ -97,7 +97,11 @@ So the frames still pass through Flutter, on one thread Dart shares,
 and on one GPU queue. Pacing within that can't take Flutter's wait out
 of Dart's frame. Step 5 can.
 
-## Step 5: drawing straight to the screen (not built)
+## Step 5: drawing straight to the screen
+
+Built afterwards, on your call: Sheepdog holds 60 at low, and the look
+scene 59 at medium ([its report](android-surface-report.md)). What was
+written here before it:
 
 What it would be: on Android, the game's view becomes a `SurfaceView`
 of its own, under or over Flutter's, and the render thread presents to
