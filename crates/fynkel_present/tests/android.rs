@@ -134,7 +134,7 @@ fn frames_reach_the_surface_and_stop_when_it_is_taken_away() {
 
     let reader = Reader::new(64, 32);
     // SAFETY: the reader's window is live until the reader goes.
-    unsafe { presenter.attach_window(reader.window(), 64, 32) }.expect("attach");
+    unsafe { presenter.attach_window(reader.window(), 64, 32, false) }.expect("attach");
     let mut consumed = 0;
     for _ in 0..10 {
         assert!(draw(&device, &mut target));
@@ -157,6 +157,35 @@ fn frames_reach_the_surface_and_stop_when_it_is_taken_away() {
     assert_eq!(presenter.presented(), 10);
 }
 
+// A surface Android shows itself (a SurfaceView's) is presented without
+// waiting for the GPU (docs/android-surface.md): every frame still gets
+// there, in order, and taking it away still waits for the frames out.
+#[test]
+fn frames_reach_a_surface_on_screen_without_waiting_for_the_gpu() {
+    let (mut target, presenter, device) = target();
+    let reader = Reader::new(64, 32);
+    // SAFETY: the reader's window is live until the reader goes.
+    unsafe { presenter.attach_window(reader.window(), 64, 32, true) }.expect("attach");
+    let mut consumed = 0;
+    for _ in 0..10 {
+        assert!(draw(&device, &mut target));
+        consumed += usize::from(reader.consume());
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while presenter.presented() < 10 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        consumed += usize::from(reader.consume());
+    }
+    assert_eq!(presenter.presented(), 10);
+    device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+    consumed += usize::from(reader.consume());
+    assert!(consumed > 0, "the reader got frames");
+
+    presenter.detach();
+    assert!(!draw(&device, &mut target), "taken away");
+    assert_eq!(presenter.presented(), 10);
+}
+
 // What a Galaxy Note10+ did once (docs/stage-1.md §3.5): Flutter closed
 // the reader behind a surface the engine still held. Configuring that
 // surface again is a validation error, which used to panic the render
@@ -167,7 +196,7 @@ fn a_surface_whose_reader_is_closed_is_skipped_until_a_new_one_comes() {
     let reader = Reader::new(64, 64);
     // SAFETY: the window is live until the reader goes, and the presenter
     // holds a reference of its own.
-    unsafe { presenter.attach_window(reader.window(), 64, 64) }.expect("attach");
+    unsafe { presenter.attach_window(reader.window(), 64, 64, false) }.expect("attach");
     assert!(draw(&device, &mut target));
     reader.consume();
 
@@ -179,7 +208,7 @@ fn a_surface_whose_reader_is_closed_is_skipped_until_a_new_one_comes() {
 
     let reader = Reader::new(48, 48);
     // SAFETY: as above.
-    unsafe { presenter.attach_window(reader.window(), 48, 48) }.expect("a new surface after a dead one");
+    unsafe { presenter.attach_window(reader.window(), 48, 48, false) }.expect("a new surface after a dead one");
     assert!(draw(&device, &mut target), "drawing again");
     assert_eq!(target.size(), (48, 48));
 }
@@ -210,7 +239,7 @@ fn probe_graphics_memory_over_many_surfaces() {
     for _ in 0..20 {
         let reader = Reader::like_flutter(1080, 2241);
         // SAFETY: the window is live until the reader goes.
-        unsafe { presenter.attach_window(reader.window(), 1080, 2241) }.expect("attach");
+        unsafe { presenter.attach_window(reader.window(), 1080, 2241, false) }.expect("attach");
         for _ in 0..10 {
             assert!(draw(&device, &mut target));
             device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");

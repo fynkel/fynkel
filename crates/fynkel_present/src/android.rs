@@ -90,6 +90,9 @@ impl Drop for Window {
 struct Live {
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
+    /// Android shows it on screen itself (a `SurfaceView`), not Flutter (a
+    /// texture): see [`AndroidPresenter::attach`].
+    on_screen: bool,
     /// It couldn't be configured again: frames to it are skipped.
     dead: AtomicBool,
     _window: Window,
@@ -262,13 +265,20 @@ fn present(shared: &Shared, queue: &wgpu::Queue, frames: &std::sync::mpsc::Recei
 }
 
 /// Copies `frame` to the surface's next image, then waits for the GPU and
-/// presents it.
+/// presents it, or presents it at once to a surface Android shows itself.
 ///
-/// Flutter takes each frame on the main thread, where Dart runs, and waits
-/// there for the GPU to finish it (Android 12's ImageReader in acquiring
-/// it, Flutter itself from 13). Waiting here first keeps the game's next
-/// update from waiting behind the GPU: on the Note10+, 10,000 objects went
-/// from 12.7 to 27–36 fps (docs/stage-6-scale.md). A GPU that takes over a
+/// A surface Android shows itself (a `SurfaceView`) is presented with the
+/// frame's fence, which Android's compositor waits on: no one else waits.
+/// Waiting here would leave the GPU idle between frames, so its governor
+/// keeps it slow: on the Note10+, Sheepdog at low went from 40 to 59 fps
+/// without the wait (docs/android-surface.md).
+///
+/// For Flutter's texture, Flutter takes each frame on the main thread,
+/// where Dart runs, and waits there for the GPU to finish it (Android 12's
+/// ImageReader in acquiring it, Flutter itself from 13). Waiting here
+/// first keeps the game's next update from waiting behind the GPU: on the
+/// Note10+, 10,000 objects went from 12.7 to 27–36 fps
+/// (docs/stage-6-scale.md). A GPU that takes over a
 /// second is presented all the same, and that wait falls on Flutter as
 /// before. If the platform thread already waits for the surface (a resize,
 /// the app going to the background), the frame is presented at once and
@@ -319,7 +329,7 @@ fn present_one(shared: &Shared, queue: &wgpu::Queue, frame: Submitted) {
     encoder.copy_texture_to_texture(texture.as_image_copy(), image.texture.as_image_copy(), texture.size());
     let index = queue.submit([encoder.finish()]);
     shared.free.release(slot);
-    if !live.wanted() {
+    if !live.on_screen && !live.wanted() {
         let _ = shared.device.poll(wgpu::PollType::Wait {
             submission_index: Some(index),
             timeout: Some(std::time::Duration::from_secs(1)),
@@ -469,6 +479,9 @@ impl AndroidPresenter {
     /// Draws the next frames into `surface` (an `android.view.Surface`) at
     /// `width` × `height`, the size its producer was given. Waits for a
     /// frame in progress on the old surface, which is then let go.
+    /// `on_screen`: Android shows the surface itself (a `SurfaceView`),
+    /// rather than Flutter as a texture, so frames are presented without
+    /// waiting for the GPU.
     ///
     /// # Safety
     ///
@@ -480,6 +493,7 @@ impl AndroidPresenter {
         surface: *mut c_void,
         width: u32,
         height: u32,
+        on_screen: bool,
     ) -> Result<(), AndroidError> {
         // SAFETY: per this function's contract. The window holds its own
         // reference from here on.
@@ -496,7 +510,7 @@ impl AndroidPresenter {
                 let _ = shared.jvm.set(Jvm(vm));
             }
         }
-        self.attach_owned(window, width, height)
+        self.attach_owned(window, width, height, on_screen)
     }
 
     /// [`AndroidPresenter::attach`] for a caller that has the
@@ -506,13 +520,19 @@ impl AndroidPresenter {
     /// # Safety
     ///
     /// `window` is a live `ANativeWindow`.
-    pub unsafe fn attach_window(&self, window: NonNull<c_void>, width: u32, height: u32) -> Result<(), AndroidError> {
+    pub unsafe fn attach_window(
+        &self,
+        window: NonNull<c_void>,
+        width: u32,
+        height: u32,
+        on_screen: bool,
+    ) -> Result<(), AndroidError> {
         // SAFETY: a live window, per this function's contract.
         unsafe { ANativeWindow_acquire(window.as_ptr()) };
-        self.attach_owned(Window(window), width, height)
+        self.attach_owned(Window(window), width, height, on_screen)
     }
 
-    fn attach_owned(&self, window: Window, width: u32, height: u32) -> Result<(), AndroidError> {
+    fn attach_owned(&self, window: Window, width: u32, height: u32, on_screen: bool) -> Result<(), AndroidError> {
         let shared = &self.shared;
         let target = wgpu::SurfaceTargetUnsafe::RawHandle {
             raw_display_handle: Some(rwh::RawDisplayHandle::Android(rwh::AndroidDisplayHandle::new())),
@@ -543,7 +563,12 @@ impl AndroidPresenter {
             height: height.max(1),
             // Fifo: the OS paces the frames, and every device has it.
             present_mode: wgpu::PresentMode::Fifo,
-            desired_maximum_frame_latency: 2,
+            // A third image on screen: Android holds the one shown and waits
+            // for the one before it in presenting the next, and one view's
+            // wait holds every view's presents (one GPU queue). With two,
+            // Sheepdog at low went from 60 to 37–41 fps on the Note10+ when
+            // its minimap showed over the field (docs/android-surface-report.md).
+            desired_maximum_frame_latency: if on_screen { 3 } else { 2 },
             alpha_mode,
             // sRGB for an RGBA8 format, and valid for every format offered.
             color_space: wgpu::SurfaceColorSpace::Auto,
@@ -554,7 +579,7 @@ impl AndroidPresenter {
 
         // The old surface and its window go here, after the frame in
         // progress.
-        drop(shared.surface.put(Live { surface, config, dead: AtomicBool::new(false), _window: window }));
+        drop(shared.surface.put(Live { surface, config, on_screen, dead: AtomicBool::new(false), _window: window }));
         Ok(())
     }
 
