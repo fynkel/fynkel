@@ -1,6 +1,6 @@
 # Android frame pacing
 
-Status: proposed 2026-10-16. Scope and rules:
+Status: done 2026-10-16 ([the report](android-pacing-report.md)). Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). This runs after stage
 8 and before stage 9 (animation). It is time-boxed: **four working
 days**, then a decision either way.
