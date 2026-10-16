@@ -291,8 +291,8 @@ impl Quality {
         }),
     };
 
-    /// Phones' (Mali, Adreno): the scene image, bloom, soft shadows in two
-    /// cascades.
+    /// Between: the scene image, bloom, soft shadows in two cascades. For
+    /// a phone that keeps up with it; no device picks it itself.
     pub const MEDIUM: Self = Self {
         hdr: true,
         bloom: true,
@@ -370,25 +370,26 @@ impl QualityLevel {
         }
     }
 
-    /// The level for a GPU: high on Apple's and on desktops', medium on
-    /// phones' (Mali, Adreno), low on a software one or one not known.
+    /// The level for a GPU: high on Apple's and on desktops', low on
+    /// phones' (Mali, Adreno), on a software one, and on one not known.
+    /// Phones were medium until the Android frame pacing work found a
+    /// Galaxy Note10+ couldn't hold 60 at it (docs/android-pacing-report.md).
     pub fn for_adapter(info: &wgpu::AdapterInfo) -> Self {
         Self::for_adapter_on(info, cfg!(target_os = "android"))
     }
 
     /// [`QualityLevel::for_adapter`], on Android or not. On Android every
-    /// real GPU is a phone's, medium whoever makes it: one isn't high
-    /// because its maker isn't known.
+    /// GPU is a phone's, low whoever makes it: one isn't high because its
+    /// maker isn't known.
     pub fn for_adapter_on(info: &wgpu::AdapterInfo, android: bool) -> Self {
         const APPLE: u32 = 0x106B;
         const ARM: u32 = 0x13B5;
         const QUALCOMM: u32 = 0x5143;
-        use wgpu::DeviceType::{Cpu, Other, VirtualGpu};
+        use wgpu::DeviceType::Cpu;
         match (info.device_type, info.vendor) {
             (Cpu, _) => Self::Low,
-            (Other | VirtualGpu, _) if android => Self::Low,
-            _ if android => Self::Medium,
-            (_, ARM | QUALCOMM) => Self::Medium,
+            _ if android => Self::Low,
+            (_, ARM | QUALCOMM) => Self::Low,
             (_, APPLE) => Self::High,
             (_, _) if info.backend == wgpu::Backend::Metal => Self::High,
             (wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu, _) => Self::High,

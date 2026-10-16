@@ -42,7 +42,7 @@ fn every_quality_level_draws_the_same_cube() {
 }
 
 /// The device's level: Apple's GPUs and desktops high, Mali and Adreno
-/// medium, a software GPU low.
+/// low (docs/android-pacing-report.md), a software GPU low.
 #[test]
 fn each_gpu_gets_its_quality_level() {
     let this = gpu().adapter.get_info();
@@ -55,8 +55,8 @@ fn each_gpu_gets_its_quality_level() {
     use wgpu::{Backend::*, DeviceType::*};
     let cases = [
         (gpu(0x106B, IntegratedGpu, Metal), QualityLevel::High),
-        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Medium),
+        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Low),
         (gpu(0x10DE, DiscreteGpu, Vulkan), QualityLevel::High),
         (gpu(0x8086, IntegratedGpu, Dx12), QualityLevel::High),
         (gpu(0x10005, Cpu, Vulkan), QualityLevel::Low),
@@ -68,18 +68,18 @@ fn each_gpu_gets_its_quality_level() {
     #[cfg(target_os = "macos")]
     assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::High, "this Mac");
     #[cfg(target_os = "android")]
-    assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::Medium, "this phone");
+    assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::Low, "this phone");
 
-    // On Android (hardening R4), a phone's GPU is medium whoever makes it,
+    // On Android (hardening R4), a phone's GPU is low whoever makes it,
     // not high because its maker isn't known: PowerVR, Samsung's Xclipse
-    // (AMD's id), NVIDIA's Tegra. One that isn't a real GPU is low.
+    // (AMD's id), NVIDIA's Tegra. One that isn't a real GPU is low too.
     let android = [
-        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x1010, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x1002, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x10DE, IntegratedGpu, Vulkan), QualityLevel::Medium),
-        (gpu(0x10DE, DiscreteGpu, Gl), QualityLevel::Medium),
+        (gpu(0x13B5, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x5143, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x1010, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x1002, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x10DE, IntegratedGpu, Vulkan), QualityLevel::Low),
+        (gpu(0x10DE, DiscreteGpu, Gl), QualityLevel::Low),
         (gpu(0x1234, Other, Vulkan), QualityLevel::Low),
         (gpu(0x1AE0, VirtualGpu, Vulkan), QualityLevel::Low),
         (gpu(0x10005, Cpu, Vulkan), QualityLevel::Low),

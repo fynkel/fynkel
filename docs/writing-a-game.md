@@ -501,8 +501,12 @@ from:
 | `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
 
 When the game doesn't choose, the device picks a level: high on Apple's
-GPUs and desktops', medium on phones' Mali and Adreno, low on a software
-GPU or one it doesn't know. `Quality.device` says which. Most games set
+GPUs and desktops', low on Android phones (Mali, Adreno and the rest), on a
+software GPU and on one it doesn't know. `Quality.device` says which.
+Phones get low because a Galaxy Note10+ (2019) doesn't hold 60 fps at
+medium: about 40–50 in a scene with everything
+([the report](android-pacing-report.md)). A newer phone may: a game can
+offer medium on its settings page and let the player choose. Most games set
 one quality and keep it; a game with a settings page can switch at any
 time, and every view draws the new one from its next frame:
 
@@ -777,7 +781,8 @@ void dreamy(Camera camera) {
   both on and off, at each level.
 - **What they cost:** little on an iPhone 16 Pro Max (120 fps at every
   level with both) or a Mac. On an older Android phone they cost a lot:
-  a Galaxy Note10+ at medium goes from 58 to 40 fps with bloom. If your
+  a Galaxy Note10+ at medium went from 58 to 40 fps with bloom (stage 8,
+  before the Android frame pacing work). If your
   game runs on phones like it, use a quality without bloom there
   (`Quality.medium.copyWith(bloom: false)`), or `low`.
 
