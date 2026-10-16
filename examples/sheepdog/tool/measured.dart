@@ -17,7 +17,10 @@ const _quality = String.fromEnvironment('SHEEPDOG_QUALITY');
 const _probe = String.fromEnvironment('SHEEPDOG_PROBE');
 
 SheepdogGame _make() {
-  final game = SheepdogGame(level: 3, quality: ValueNotifier(Quality.levels.where((q) => q.name == _quality).firstOrNull));
+  final game = SheepdogGame(
+    level: 3,
+    quality: ValueNotifier(Quality.levels.where((q) => q.name == _quality).firstOrNull),
+  );
   game.loaded.then((_) {
     final camera = game.camera.camera;
     if (_probe.contains('noao')) camera.ambientOcclusion = null;

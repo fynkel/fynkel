@@ -204,8 +204,18 @@ void main() {
       ),
     );
     final grey = Material(color: Color.rgb(0.7, 0.7, 0.7), roughness: 1);
-    world.add(GameObject(transform: Transform(scale: Vec3.one * 12), components: [MeshRenderer(Mesh.plane(), grey)]));
-    world.add(GameObject(transform: Transform(position: Vec3(0, 1.5, 0)), components: [MeshRenderer(Mesh.cube(), grey)]));
+    world.add(
+      GameObject(
+        transform: Transform(scale: Vec3.one * 12),
+        components: [MeshRenderer(Mesh.plane(), grey)],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), grey)],
+      ),
+    );
     world.add(
       GameObject(
         transform: Transform(rotation: Quat.lookRotation(Vec3(1, -2, 0))),

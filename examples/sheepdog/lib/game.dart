@@ -109,11 +109,7 @@ class SheepdogGame extends GameObject {
 
   /// The minimap's camera, high above the field and looking straight down:
   /// no glow and no darkened corners, which it's too small to show.
-  final map = Camera(
-    orthographic: true,
-    orthographicSize: size + 0.5,
-    cullingMask: LayerMask.except([effects]),
-  );
+  final map = Camera(orthographic: true, orthographicSize: size + 0.5, cullingMask: LayerMask.except([effects]));
 
   late final Light _sun, _ambient;
 
