@@ -38,6 +38,15 @@ dependencies:
     path: <the repository>/packages/fynkel_flutter
 ```
 
+`--empty` also leaves out Material's icons, so every `Icon` shows as a
+box. If the game's Flutter side uses them, add the line back:
+
+```yaml
+# my_game/pubspec.yaml
+flutter:
+  uses-material-design: true
+```
+
 Then run it as any Flutter app: `flutter run -d macos`, or on a phone
 (`flutter devices` lists them). `flutter build apk`, `ipa` and `macos`
 make the app to ship. On Android, Fynkel runs on 64-bit devices, which is
@@ -2372,6 +2381,14 @@ void main() {
 `closeTo(other)`, so `expect(a.position.closeTo(Vec3(1, 0, 0)), isTrue)`.
 An object with a rigidbody needs it most: physics keeps poses in 32-bit
 floats, so after a step its position reads `0.20000000298`, not `0.2`.
+
+**Is it fair? A test can say.** Play whole rounds in a test with a
+scripted player that only does the obvious thing, and one that does
+nothing: the first should win, the second lose. Move the player as the
+game would (`walk(...)`, `world.update(1 / 60)`), and loop until the round
+is over. Sheepdog's (`examples/sheepdog/test/game_test.dart`, "is fun")
+found the wolves herding the flock home better than no dog at all, which
+reading the code hadn't.
 
 **The whole app works in a widget test too**: the real `FynkelApp`, its
 view and its overlay, real taps. With no GPU plugin in a test, the game
