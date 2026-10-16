@@ -47,6 +47,25 @@ fn the_newest_scene_wins_and_every_scene_is_accounted_for() {
     assert!(stats.coalesced > 0, "posting is far faster than drawing: {stats:?}");
 }
 
+/// The time spent drawing is counted, and is never more than the time
+/// that passed.
+#[test]
+fn the_time_spent_drawing_is_counted() {
+    let gpu = gpu();
+    let (target, frames) = headless(&gpu);
+    let worker = start(&gpu, target);
+    let clock = std::time::Instant::now();
+    assert_eq!(worker.stats().busy_micros, 0);
+    for number in 1..=20 {
+        let scene = worker.scene();
+        worker.post(number, scene, &mut Vec::new()).unwrap();
+        frames.read(number, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]).unwrap();
+    }
+    let stats = wait_for(&worker, |s| s.rendered == 20);
+    assert!(stats.busy_micros > 0);
+    assert!(u128::from(stats.busy_micros) <= clock.elapsed().as_micros(), "{stats:?}");
+}
+
 #[test]
 fn scene_buffers_are_reused() {
     let gpu = gpu();

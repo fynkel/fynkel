@@ -142,6 +142,13 @@ fn frames_reach_the_surface_and_stop_when_it_is_taken_away() {
         consumed += usize::from(reader.consume());
     }
     assert_eq!(target.size(), (64, 32));
+    // The presenter thread presents each frame after the GPU is done with
+    // it, a frame or two behind the drawing.
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while presenter.presented() < 10 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        consumed += usize::from(reader.consume());
+    }
     assert_eq!(presenter.presented(), 10);
     assert!(consumed > 0, "the reader got frames");
 

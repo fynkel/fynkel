@@ -864,8 +864,9 @@ final class Quality {
     spotShadowResolution: 512,
   );
 
-  /// Phones' (Mali, Adreno): bloom, and soft shadows in two cascades; no
-  /// ambient occlusion.
+  /// Between: bloom, and soft shadows in two cascades; no ambient
+  /// occlusion. For a phone that keeps up with it; no device picks it
+  /// itself.
   static const medium = Quality(name: 'medium');
 
   /// Apple's GPUs, and desktops': everything, with softer shadows in three
@@ -883,9 +884,9 @@ final class Quality {
   static const levels = [low, medium, high];
 
   /// The level this device picks for a world without a quality of its own
-  /// ([World.quality] null): [high] on Apple's GPUs and desktops',
-  /// [medium] on Mali and Adreno, [low] on a software GPU or one not
-  /// known. Starts the GPU if no view has yet.
+  /// ([World.quality] null): [high] on Apple's GPUs and desktops', [low]
+  /// on phones' (Mali, Adreno), on a software GPU and on one not known.
+  /// Starts the GPU if no view has yet.
   static Quality get device {
     final out = malloc<Uint32>();
     try {

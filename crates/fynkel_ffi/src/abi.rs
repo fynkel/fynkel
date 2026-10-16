@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 28;
+pub const FY_ABI_VERSION: u32 = 29;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -145,9 +145,10 @@ pub const FY_LIGHT_SPOT: u32 = 3;
 
 /// A quality level: the device's own (`fy_quality_auto`).
 pub const FY_QUALITY_AUTO: u32 = 0;
-/// A quality level: the cheapest, for slow or unknown GPUs.
+/// A quality level: the cheapest, for phones (Mali, Adreno) and slow or
+/// unknown GPUs.
 pub const FY_QUALITY_LOW: u32 = 1;
-/// A quality level: phones' (Mali, Adreno).
+/// A quality level: between, for a phone that keeps up with it.
 pub const FY_QUALITY_MEDIUM: u32 = 2;
 /// A quality level: Apple's GPUs and desktops'.
 pub const FY_QUALITY_HIGH: u32 = 3;
@@ -2887,6 +2888,10 @@ pub struct FyViewStats {
     /// GPU memory the sky's light holds for this view, in bytes: 0 for no
     /// sky or a plain one.
     pub sky_bytes: u64,
+    /// Microseconds the view's render thread spent on scenes, from taking
+    /// one to being done with it: busy, against waiting for the next. On
+    /// Android it includes waiting for the GPU to finish each frame.
+    pub busy_micros: u64,
 }
 
 /// # Safety
@@ -2906,6 +2911,7 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             texture_bytes: w.texture_bytes,
             mesh_bytes: w.mesh_bytes,
             sky_bytes: w.sky_bytes,
+            busy_micros: w.busy_micros,
             ..Default::default()
         };
         #[cfg(target_vendor = "apple")]

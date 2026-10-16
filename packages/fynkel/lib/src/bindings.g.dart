@@ -410,7 +410,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 28;
+const int FY_ABI_VERSION = 29;
 
 const int FY_APPLE_MORE = 2;
 
@@ -930,6 +930,9 @@ final class FyViewStats extends ffi.Struct {
   @ffi.Uint64()
   external int sky_bytes;
 
+  @ffi.Uint64()
+  external int busy_micros;
+
   static ffi.Pointer<FyViewStats> $allocate(
     ffi.Allocator $allocator, {
     required int posted,
@@ -941,6 +944,7 @@ final class FyViewStats extends ffi.Struct {
     required int texture_bytes,
     required int mesh_bytes,
     required int sky_bytes,
+    required int busy_micros,
   }) => $allocator<FyViewStats>()
     ..ref.posted = posted
     ..ref.rendered = rendered
@@ -950,7 +954,8 @@ final class FyViewStats extends ffi.Struct {
     ..ref.dropped = dropped
     ..ref.texture_bytes = texture_bytes
     ..ref.mesh_bytes = mesh_bytes
-    ..ref.sky_bytes = sky_bytes;
+    ..ref.sky_bytes = sky_bytes
+    ..ref.busy_micros = busy_micros;
 }
 
 final class FyWorld extends ffi.Opaque {}

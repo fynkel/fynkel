@@ -1,9 +1,11 @@
 //! Something one thread draws with while another may take it away: the
-//! Android surface. The render worker borrows it for one frame at a time;
-//! the platform thread replaces it (a resize makes a new surface) or takes
-//! it away (the app went to the background), and either waits until no
-//! frame is using it, because the window under it may be released as soon
-//! as it returns.
+//! Android surface. The render worker borrows it for each frame, and a
+//! frame keeps it until it is presented, so two frames may hold it at once
+//! (one being drawn, one waiting for the GPU); the platform thread replaces
+//! it (a resize makes a new surface) or takes it away (the app went to the
+//! background), and either waits until no frame is using it, because the
+//! window under it may be released as soon as it returns. While it waits,
+//! no new frame may borrow it.
 
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError};
 
@@ -15,8 +17,8 @@ pub(crate) struct Handoff<T> {
 
 struct State<T> {
     current: Option<Arc<T>>,
-    /// A [`Lease`] is out.
-    leased: bool,
+    /// [`Lease`]s out.
+    leases: usize,
     /// Threads in [`Handoff::put`] or [`Handoff::take`] waiting for it.
     waiting: usize,
 }
@@ -30,7 +32,7 @@ pub(crate) struct Lease<T> {
 
 impl<T> Handoff<T> {
     pub(crate) fn new() -> Self {
-        Self { state: Mutex::new(State { current: None, leased: false, waiting: 0 }), idle: Condvar::new() }
+        Self { state: Mutex::new(State { current: None, leases: 0, waiting: 0 }), idle: Condvar::new() }
     }
 
     fn state(&self) -> MutexGuard<'_, State<T>> {
@@ -42,7 +44,7 @@ impl<T> Handoff<T> {
     fn idle(&self) -> MutexGuard<'_, State<T>> {
         let mut state = self.state();
         state.waiting += 1;
-        while state.leased {
+        while state.leases > 0 {
             state = self.idle.wait(state).unwrap_or_else(PoisonError::into_inner);
         }
         state.waiting -= 1;
@@ -60,14 +62,16 @@ impl<T> Handoff<T> {
         self.idle().current.take()
     }
 
-    /// The current value for one frame, or `None` when there is none.
-    /// Only one lease may be out at a time: the render worker is the only
-    /// borrower.
+    /// The current value for one frame, or `None` when there is none, or
+    /// when another thread waits to put or take it: the leases out end,
+    /// and no new one keeps it waiting.
     pub(crate) fn lease(self: &Arc<Self>) -> Option<Lease<T>> {
         let mut state = self.state();
-        debug_assert!(!state.leased, "one lease at a time");
+        if state.waiting > 0 {
+            return None;
+        }
         let value = state.current.clone()?;
-        state.leased = true;
+        state.leases += 1;
         Some(Lease { handoff: self.clone(), value })
     }
 }
@@ -90,7 +94,7 @@ impl<T> std::ops::Deref for Lease<T> {
 
 impl<T> Drop for Lease<T> {
     fn drop(&mut self) {
-        self.handoff.state().leased = false;
+        self.handoff.state().leases -= 1;
         self.handoff.idle.notify_all();
     }
 }
@@ -144,6 +148,27 @@ mod tests {
             });
             assert_eq!(handoff.lease().map(|lease| *lease), replace.then_some(2));
         }
+    }
+
+    /// Two frames may hold it, and taking it waits for both; meanwhile no
+    /// new frame gets it.
+    #[test]
+    fn take_waits_for_every_frame_and_lends_no_more_meanwhile() {
+        let handoff = Arc::new(Handoff::new());
+        handoff.put(1);
+        let (done, finished) = mpsc::channel();
+        thread::scope(|scope| {
+            let (first, second) = (handoff.lease().unwrap(), handoff.lease().unwrap());
+            scope.spawn(|| done.send(handoff.take().map(|old| *old)).unwrap());
+            while !first.wanted() {
+                thread::yield_now();
+            }
+            assert!(handoff.lease().is_none(), "no new frame while it's waited for");
+            drop(first);
+            assert!(finished.recv_timeout(Duration::from_millis(200)).is_err(), "didn't wait for the second");
+            drop(second);
+            assert_eq!(finished.recv_timeout(Duration::from_secs(5)).unwrap(), Some(1));
+        });
     }
 
     #[test]

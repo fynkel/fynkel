@@ -166,6 +166,13 @@ governor raises the clock. Until then, a game for that class of phone
 uses `Quality.low`, or turns bloom off. Sheepdog's settings page lets
 the player choose.
 
+**Since then** ([the Android frame pacing report](android-pacing-report.md),
+2026-10-16): frames are presented by a thread of their own, so the GPU
+stays fed and its clock rises. Sheepdog went from about 35 to 51 fps at
+low and from 13–26 to 40 at medium, and the look scene at medium from 34
+to 43–50. That is still short of 60, so `Quality.device` now picks low on
+Android phones.
+
 ## The fresh agent
 
 A fresh agent, given only the guide, wrote "Night Market": a square at
