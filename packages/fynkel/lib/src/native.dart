@@ -98,6 +98,8 @@ final class Scratch {
   final rayHit = malloc<FyRayHit>();
   final vec3 = malloc<FyVec3>();
   final number = malloc<Float>();
+  // Two numbers for a call that takes them through a pointer.
+  final numbers = malloc<Float>(2);
   final animatorState = malloc<FyAnimatorState>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
@@ -115,7 +117,7 @@ final class Scratch {
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
-    all.addAll([number, animatorState, _events]);
+    all.addAll([number, numbers, animatorState, _events]);
     all.forEach(malloc.free);
   }
 
