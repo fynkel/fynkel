@@ -196,8 +196,8 @@ say otherwise.
 
 ## 5. Checklist
 
-- [x] Phase 1: clips, and models whose parts move (PR pending)
-- [x] Phase 2: skinned models (PR pending)
-- [ ] Phase 3: blending
+- [x] Phase 1: clips, and models whose parts move (#120)
+- [x] Phase 2: skinned models (#121)
+- [x] Phase 3: blending (PR pending)
 - [ ] Phase 4: many characters, and the measure
 - [ ] Phase 5: games, the guide, and the report
