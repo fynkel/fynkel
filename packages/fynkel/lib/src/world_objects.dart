@@ -468,6 +468,7 @@ extension _Objects on World {
           .._transform = null
           .._unsent = false;
         _objects.remove(object._id);
+        if (object._animator != null) _animators.remove(object._id);
         _unregister(object);
         for (final c in object._components ?? const <Component>[]) {
           if (c._takenOff) continue;

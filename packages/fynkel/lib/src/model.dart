@@ -6,8 +6,9 @@ part of 'world.dart';
 /// many copies as you like ([instantiate]); every copy shares the same
 /// data.
 ///
-/// What the engine can't draw yet (animations, skins, see-through
-/// materials, ...) is skipped, and [warnings] says what. [dispose] frees
+/// Its animations are [clips], which a copy's [GameObject.animator]
+/// plays. What the engine can't draw yet (skins, morph targets, ...) is
+/// skipped, and [warnings] says what. [dispose] frees
 /// the model; otherwise it's freed when it's garbage collected. Its
 /// meshes, textures and materials live on in the worlds that have copies.
 final class Model implements Finalizable {
@@ -15,11 +16,12 @@ final class Model implements Finalizable {
     _finalizer.attach(this, _pointer.cast(), detach: this);
     check(fy_model_counts(_pointer, scratch.modelCounts));
     final counts = scratch.modelCounts.ref;
-    final (meshCount, textureCount, materialCount, warningCount) = (
+    final (meshCount, textureCount, materialCount, warningCount, clipCount) = (
       counts.meshes,
       counts.textures,
       counts.materials,
       counts.warnings,
+      counts.clips,
     );
     meshes = List.unmodifiable([
       for (var i = 0; i < meshCount; i++)
@@ -30,6 +32,13 @@ final class Model implements Finalizable {
         Texture2D._sized(_take(fy_model_texture(_pointer, i, scratch.texture), scratch.texture)),
     ]);
     materials = List.unmodifiable([for (var i = 0; i < materialCount; i++) _material(i)]);
+    clips = List.unmodifiable([
+      for (var i = 0; i < clipCount; i++)
+        AnimationClip._(
+          _string((buf, cap, len) => fy_model_clip(_pointer, i, buf, cap, len, scratch.number)),
+          scratch.number.value,
+        ),
+    ]);
     warnings = List.unmodifiable([
       for (var i = 0; i < warningCount; i++) _string((buf, cap, len) => fy_model_warning(_pointer, i, buf, cap, len)),
     ]);
@@ -87,6 +96,10 @@ final class Model implements Finalizable {
   /// The model's materials, named as in the file. Changing one changes
   /// every copy of the model that uses it, in every world.
   late final List<Material> materials;
+
+  /// The model's animations, in the file's order: what a copy's
+  /// [GameObject.animator] plays.
+  late final List<AnimationClip> clips;
 
   /// What was skipped or changed, one line for each kind of thing: empty
   /// when the model is drawn exactly as the file says.

@@ -140,6 +140,7 @@ class GameObject with _Moving {
   // ignore: unused_field
   Model? _model;
   Assets? _assets;
+  Animator? _animator;
 
   @override
   GameObject get _self => this;
@@ -689,6 +690,19 @@ class GameObject with _Moving {
     _worldLocal = local;
     _worldAbove = above;
     return _worldTransform = above._then(local);
+  }
+
+  /// What plays the model's clips on this copy of it ([Animator]): for an
+  /// object made by [Model.instantiate] (or [Assets.instantiate]) from a
+  /// model with clips, once it's added; null for any other object, and
+  /// for a model's parts.
+  Animator? get animator {
+    if (_animator case final a?) return a;
+    if (_described != null) throw _notAdded('animator');
+    _engine('its animator can\'t be used');
+    final model = _model;
+    if (model == null || model.clips.isEmpty) return null;
+    return _animator = world._addAnimator(this, model);
   }
 
   // --- Components ---
