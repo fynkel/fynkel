@@ -360,6 +360,21 @@ final class World implements Finalizable {
 
   var _applicationPaused = false;
 
+  /// The most frames a second the world runs and its views draw, as
+  /// Unity's `Application.targetFrameRate`: 60 unless set, and 0 for every
+  /// frame the display shows (120 on a ProMotion iPhone or Mac). A game can
+  /// change it at any time, from its settings page for example. The display
+  /// sets the frames it can be, so on a 120 Hz screen 90 runs at 60; above
+  /// the display's rate it runs at the display's. Fewer frames keep a phone
+  /// cool and its battery longer. Throws an ArgumentError below 0.
+  int get targetFrameRate => _targetFrameRate;
+  set targetFrameRate(int value) {
+    if (value < 0) throw ArgumentError.value(value, 'targetFrameRate', 'is below 0');
+    _targetFrameRate = value;
+  }
+
+  var _targetFrameRate = 60;
+
   /// What the world's views draw, and how finely ([Quality]), from their
   /// next frame: null, as a new world has, for the level the device picks
   /// ([Quality.device]). A game can change it at any time, from its
@@ -367,6 +382,9 @@ final class World implements Finalizable {
   /// drawn. Throws an ArgumentError for settings out of range.
   Quality? get quality => _quality;
   set quality(Quality? value) {
+    if (value != null && !(value.renderScale > 0 && value.renderScale <= 2)) {
+      throw ArgumentError.value(value.renderScale, 'renderScale', 'is not above 0 and at most 2');
+    }
     using((arena) {
       Pointer<FyQuality> q = nullptr;
       if (value != null) value._write((q = arena<FyQuality>()).ref);
@@ -846,6 +864,7 @@ final class Quality {
     this.shadowDistance = 60,
     this.spotShadows = 2,
     this.spotShadowResolution = 1024,
+    this.renderScale = 1,
   });
 
   /// The cheapest, for slow GPUs and ones not known: drawn straight to the
@@ -945,6 +964,13 @@ final class Quality {
   /// Each spot light's map's side, as [shadowResolution].
   final int spotShadowResolution;
 
+  /// Pixels drawn per pixel of the screen, as Unity's render scale: above
+  /// 0 and at most 2, and 1 at every level. Below 1 draws fewer pixels,
+  /// which is faster and keeps a phone cooler, and the picture is a little
+  /// softer: at 0.75, about half the pixels. Each view's own
+  /// `resolutionScale` multiplies it.
+  final double renderScale;
+
   /// A copy with the values given changed.
   Quality copyWith({
     String? name,
@@ -959,6 +985,7 @@ final class Quality {
     double? shadowDistance,
     int? spotShadows,
     int? spotShadowResolution,
+    double? renderScale,
   }) => Quality(
     name: name ?? this.name,
     hdr: hdr ?? this.hdr,
@@ -972,6 +999,7 @@ final class Quality {
     shadowDistance: shadowDistance ?? this.shadowDistance,
     spotShadows: spotShadows ?? this.spotShadows,
     spotShadowResolution: spotShadowResolution ?? this.spotShadowResolution,
+    renderScale: renderScale ?? this.renderScale,
   );
 
   void _write(FyQuality q) {
@@ -1002,6 +1030,7 @@ final class Quality {
     shadowDistance,
     spotShadows,
     spotShadowResolution,
+    renderScale,
   ];
 
   @override
@@ -1021,7 +1050,7 @@ final class Quality {
   String toString() =>
       'Quality($name: hdr $hdr, bloom $bloom, ambientOcclusion $ambientOcclusion, lampHighlights $lampHighlights, '
       'shadows ${shadows ? '$shadowCascades × $shadowResolution ${shadowSoftness.name} to ${shadowDistance}m, '
-                'spot $spotShadows × $spotShadowResolution' : 'off'})';
+                'spot $spotShadows × $spotShadowResolution' : 'off'}, renderScale $renderScale)';
 }
 
 /// How a shadow's edge is drawn ([Quality.shadowSoftness]).

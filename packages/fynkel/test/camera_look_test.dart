@@ -87,6 +87,8 @@ void main() {
       Quality.high.copyWith(shadowResolution: 1000),
       Quality.high.copyWith(spotShadows: 5),
       Quality.high.copyWith(shadowDistance: 0),
+      Quality.high.copyWith(renderScale: 0),
+      Quality.high.copyWith(renderScale: 2.5),
     ]) {
       expect(() => world.quality = bad, throwsArgumentError, reason: '$bad');
       expect(world.quality, Quality.high);
@@ -100,6 +102,8 @@ void main() {
     expect(const Quality(name: 'medium'), Quality.medium, reason: 'the default is medium');
     expect(Quality.low.copyWith(), Quality.low);
     expect(Quality.low.copyWith(bloom: true), isNot(Quality.low));
+    expect(Quality.low.copyWith(renderScale: 0.75), isNot(Quality.low));
+    expect(Quality.levels.map((q) => q.renderScale), everyElement(1));
     expect(Quality.low.copyWith(bloom: true).hashCode, Quality.low.copyWith(bloom: true).hashCode);
     expect(
       (Quality.low.ambientOcclusion, Quality.medium.ambientOcclusion, Quality.high.ambientOcclusion),
