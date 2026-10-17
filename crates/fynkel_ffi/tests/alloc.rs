@@ -146,7 +146,7 @@ fn knights_change_their_minds(world: &World, knights: &Knights, frame: u32) {
                 let at = [(frame as f32 * 0.1).sin() * 1.5 + 1.5, 0.2];
                 ok(fy_animator_blend(world.0, root, 0, blend, at.as_ptr()));
             }
-            if frame % 3 == 0 {
+            if frame.is_multiple_of(3) {
                 ok(fy_animator_play(world.0, root, 1, knights.cheer, &0.2, true));
             } else if frame % 3 == 1 {
                 ok(fy_animator_stop(world.0, root, 1, &0.2));
