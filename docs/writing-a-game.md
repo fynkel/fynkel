@@ -6,7 +6,7 @@ it). If you know Unity, most of it will look familiar: Fynkel works the
 way Unity works, in Dart, and §20 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
-`garden` (models and an orbit camera), `coins` (triggers and a HUD),
+`garden` (models, an animated character and an orbit camera), `coins` (triggers and a HUD),
 `arena` (a small game using most of what's here), `bowling` (a game on
 physics) and `sheepdog` (a game that feels like an app: a title screen,
 settings, pause, a HUD, labels in the world, a minimap and the app's
@@ -1310,11 +1310,72 @@ the app, and loading it fails with its name.
 `.glb` (File → Export → glTF 2.0, glTF Binary, +Y Up). Every Blender
 object comes in as an object of the same name, placed as it was, empties
 too: name the places the code needs (`start`, `gate`) and `find` them
-(§16 has a level that does). The meshes and their materials come in; the
-file's lights, cameras and animations are skipped (`Model.warnings` says
-what was), so light the level from code (§5). To walk on it, give it
+(§16 has a level that does). The meshes, their materials and the
+animations come in; the file's lights and cameras are skipped
+(`Model.warnings` says what was), so light the level from code (§5). To walk on it, give it
 colliders: `MeshCollider.addToParts(level)` (§14) gives every part its
 own shape.
+
+### Animating a model
+
+A model's animations come with it: `model.clips` lists them, and each
+copy's `animator` plays them, as Unity gives a model its Animator. Which
+clip plays when is the game's code, not a state-machine file:
+
+```dart
+class Hero extends GameObject {
+  late final Animator _animator;
+  Vec3 _velocity = Vec3.zero;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final model = add(await assets.instantiate('character.glb'));
+    _animator = model.animator!..play('idle');
+    _animator.at('walk', 0.3, () => print('step')); // a footstep
+  }
+
+  void jump() {
+    _animator
+      ..crossFade('jump', duration: 0.1, loop: false)
+      ..onEnd = (clip) => _animator.crossFade('idle');
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    position += _velocity * time.delta;
+    if (_animator.current != 'jump') {
+      _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', duration: 0.2);
+    }
+  }
+}
+```
+
+- `play(name)` starts a clip at once; `crossFade(name, duration:)` fades
+  to it from what plays. Asking for the clip that's already playing
+  changes nothing, so an update can say what it wants every frame.
+- `loop: false` holds a clip's last pose at its end (a jump, a fall) and
+  calls `onEnd`; clips loop unless told not to.
+- `speed` (1 as made, 0 paused, negative backwards), `time`, `length`,
+  `current`, `isPlaying(name)` and `weight(name)` are there too, and
+  `stop()` keeps the pose it's in. Game time scales it: a paused world
+  pauses its clips.
+- `at(clip, seconds, callback)` calls back each time a clip passes that
+  time: footsteps, the moment a sword hits.
+- The clips play in the engine, once a frame after `onUpdate` and the
+  tweens and before `onLateUpdate`. Each moves only the parts it moves.
+  To turn a part a clip moves (a head that looks at you), set it in
+  `onLateUpdate`, after the clip; examples/garden does.
+- A clip moves the model's parts in place. Moving the character
+  through the world is the game's code, so physics stays in charge of
+  where it is; match the speed to the walk's pace so the feet don't
+  slide.
+- The parts a clip moves are the model's objects: a sword added to the
+  hand (`model.find('hand')!.add(sword)`) follows it.
+
+Models whose parts move whole (Kenney's characters, a truck's wheels)
+play now; a mesh that bends with a skeleton is next (§19).
 
 ## 13. Cameras, layers and debug drawing
 
@@ -2645,8 +2706,10 @@ What keeps a game fast:
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), particles, sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows, and glass doesn't bend light.
-- **Models:** animation, skinned meshes and morph targets (a model shows
-  its rest pose).
+- **Models:** skinned meshes (a character's mesh bending with its
+  skeleton: it shows its bind pose, though its clips play on the joints),
+  morph targets, blending clips by layer or by speed, root motion, and
+  IK.
 - **Sound:** none yet.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
@@ -2703,6 +2766,8 @@ What keeps a game fast:
 | `Input.mouseScrollDelta` | `input.scroll`: +y with the wheel turned away, as Unity's |
 | `Plane`, `Plane.distance`, `GetDistanceToPoint` | `Plane`, `distance`, `distanceTo` |
 | `Instantiate(prefab)` of a model | `await assets.instantiate('model.glb')` |
+| `Animator.Play`, `CrossFade`, `speed`, an Animator Controller | `model.animator!.play`, `crossFade`, `speed`; the game's code is the state machine |
+| Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |

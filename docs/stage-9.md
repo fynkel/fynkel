@@ -37,9 +37,12 @@ after skinning, on the bent vertices.
 
 - **Models** (`crates/fynkel_load`): glTF read into shared meshes,
   materials and textures, and a node tree. `spawn_model` makes every node
-  an object, in Rust, under the model's root; Dart makes a `GameObject`
-  for one only when the game asks (`find`, `children`). So a skeleton's
-  65 joints cost Dart nothing until it looks one up.
+  an object, in Rust, under the model's root, and Dart wraps each in a
+  `GameObject` as the copy is added (`_readParts`). (This plan first said
+  Dart wrapped them only when asked; it doesn't. So that a skeleton's 65
+  joints cost Dart little each frame, a frame's clips make Dart forget
+  only the kept transforms of the parts they move, and Dart reads one
+  again only if the game asks.)
 - **Skipped with a warning**: animations, skins, morph targets, cameras.
 - **The renderer** (`forward.wgsl`): per vertex, locations 0–3; per
   instance, 4–10. Locations 11–15 are free (the hardening plan freed them
@@ -193,7 +196,7 @@ say otherwise.
 
 ## 5. Checklist
 
-- [ ] Phase 1: clips, and models whose parts move
+- [x] Phase 1: clips, and models whose parts move (PR pending)
 - [ ] Phase 2: skinned models
 - [ ] Phase 3: blending
 - [ ] Phase 4: many characters, and the measure
