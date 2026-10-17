@@ -90,9 +90,11 @@ final class Animator {
     _moving = true;
   }
 
-  /// Fades from what plays to clip [name] over [duration] seconds: [name]
-  /// from its start, unless it's already playing or fading in, when it
-  /// goes on from where it is. [loop] as [play].
+  /// Fades from what plays to clip [name] over [duration] seconds, [name]
+  /// from its start. Fading to the [current] clip changes nothing (a fade
+  /// to it that runs goes on), so an update can ask each frame; to one
+  /// still fading out, it fades back in from where it is. [loop] as
+  /// [play].
   void crossFade(String name, {double duration = 0.25, bool loop = true}) {
     if (duration.isNaN || duration < 0) throw ArgumentError.value(duration, 'duration', 'must be 0 or more');
     check(fy_animator_play(_world, gameObject.id, _clip(name), duration, loop));

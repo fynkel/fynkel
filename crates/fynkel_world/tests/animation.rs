@@ -300,3 +300,18 @@ fn an_animator_lives_and_goes_with_its_model() {
     let x = |root| toy.world.get::<Transform>(toy.world.find(root, "body").unwrap().unwrap()).unwrap().position.x;
     assert!(((x(a) - 2.0).abs() < 1e-4) && ((x(b) - 1.0).abs() < 1e-4), "{} {}", x(a), x(b));
 }
+
+#[test]
+fn crossfading_to_the_clip_already_fading_in_every_frame_ends_the_fade_on_time() {
+    // As a game's update does: say what it wants each frame.
+    let mut toy = Toy::new();
+    toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();
+    for _ in 0..10 {
+        toy.world.play(toy.root, HOP, 0.5, true).unwrap();
+        toy.step(0.05);
+    }
+    assert_eq!(toy.world.clip_weight(toy.root, HOP).unwrap(), 1.0);
+    assert_eq!(toy.world.clip_weight(toy.root, SLIDE).unwrap(), 0.0);
+    // Its time went on all along.
+    assert!((toy.world.animator_state(toy.root).unwrap().time - 0.5).abs() < 1e-5);
+}

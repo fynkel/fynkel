@@ -241,8 +241,9 @@ impl World {
 
     /// Plays clip `clip` of `root`'s from its start. With `fade` 0, at once,
     /// in place of everything playing; otherwise it fades in over `fade`
-    /// seconds as everything else fades out. A clip already fading in or
-    /// playing keeps its time.
+    /// seconds as everything else fades out. Fading to the current clip
+    /// (the one last played or faded to) changes nothing; to one fading
+    /// out, it fades back in from where it is.
     pub fn play(&mut self, root: ObjectId, clip: u32, fade: f32, looping: bool) -> Result<()> {
         let animator = self.animator(root)?;
         let clip = clip as usize;
@@ -256,8 +257,16 @@ impl World {
             animator.playing.push(fresh);
             return Ok(());
         }
-        // The one asked for again keeps its time; the rest fade out
-        // together, reaching 0 when it reaches 1.
+        // The current clip asked for again: its fade, if one runs, goes
+        // on as it was, so a game can ask each frame.
+        if let Some(current) = animator.playing.last_mut()
+            && current.clip == clip
+        {
+            current.looping = looping;
+            return Ok(());
+        }
+        // One fading out keeps its time; the rest fade out together,
+        // reaching 0 when it reaches 1.
         let kept = animator.playing.iter().position(|p| p.clip == clip);
         let mut play = match kept {
             Some(i) => animator.playing.remove(i),

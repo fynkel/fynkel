@@ -2577,8 +2577,9 @@ pub struct FyAnimationEvent {
 
 /// Plays clip `clip` of the model copy `root` (a model's index, as
 /// `fy_model_clip`) from its start: at once in place of what plays, with
-/// `fade` 0, or fading in over `fade` seconds as the rest fade out. A clip
-/// already playing or fading keeps its time. An object that isn't a model
+/// `fade` 0, or fading in over `fade` seconds as the rest fade out. Fading
+/// to the clip last played or faded to changes nothing; to one fading out,
+/// it fades back in from where it is. An object that isn't a model
 /// copy with clips is `FY_STATUS_NO_COMPONENT`.
 ///
 /// # Safety
