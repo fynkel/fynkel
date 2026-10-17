@@ -146,4 +146,3 @@ pub fn turn_z(degrees: f32) -> Quat {
 pub fn same_turn(a: Quat, b: Quat) -> bool {
     a.dot(b).abs() > 1.0 - 1e-6
 }
-

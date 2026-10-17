@@ -11,7 +11,10 @@ use toy::*;
 fn a_model_with_clips_gets_an_animator_that_knows_them() {
     let toy = Toy::new();
     assert!(toy.world.has_animator(toy.root));
-    assert_eq!(toy.world.clips(toy.root).unwrap(), [("slide", 2.0), ("hop", 1.0), ("grow", 2.0), ("sway", 2.0), ("swing", 1.0)]);
+    assert_eq!(
+        toy.world.clips(toy.root).unwrap(),
+        [("slide", 2.0), ("hop", 1.0), ("grow", 2.0), ("sway", 2.0), ("swing", 1.0)]
+    );
     assert_eq!(toy.world.animated_parts(toy.root).unwrap(), [toy.body, toy.arm]);
     let state = toy.world.animator_state(toy.root).unwrap();
     assert_eq!((state.motion, state.time, state.speed), (None, 0.0, 1.0));

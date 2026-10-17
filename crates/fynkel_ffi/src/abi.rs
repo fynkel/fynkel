@@ -2781,13 +2781,7 @@ pub unsafe extern "C" fn fy_animator_get(
             Some(fynkel_world::Motion::Blend(b)) => (-1, b as i32),
             None => (-1, -1),
         };
-        let state = FyAnimatorState {
-            clip,
-            blend,
-            time: state.time,
-            length: state.length,
-            speed: state.speed,
-        };
+        let state = FyAnimatorState { clip, blend, time: state.time, length: state.length, speed: state.speed };
         // SAFETY: per this function's contract.
         unsafe { write(out, state, "out") }
     })
