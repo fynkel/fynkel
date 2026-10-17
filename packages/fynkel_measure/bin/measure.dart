@@ -62,6 +62,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
+import 'package:fynkel_measure/src/thermal.dart' show thermalStates;
+
 /// The app's name, from the pubspec.yaml here.
 final String _name = () {
   final pubspec = File('pubspec.yaml');
@@ -85,7 +87,9 @@ final String _target = [
 ].firstWhere((path) => File(path).existsSync(), orElse: () => 'lib/main.dart');
 
 /// Seconds of a run that aren't measured: startup and the first frames.
-const _warmUp = 5;
+/// `--warmup N` for more, such as to let a profiler attach first: attaching
+/// Xcode's Power Profiler stops an iPhone app for several seconds.
+var _warmUp = 5;
 
 /// The iPhone to measure on, or null.
 String? _ios;
@@ -125,6 +129,8 @@ Future<void> main(List<String> args) async {
   final fullscreen = args.contains('--fullscreen');
   final secondsAt = args.indexOf('--seconds');
   final seconds = secondsAt < 0 ? 60 : int.parse(args[secondsAt + 1]);
+  final warmUpAt = args.indexOf('--warmup');
+  if (warmUpAt >= 0) _warmUp = int.parse(args[warmUpAt + 1]);
   switch (mode) {
     case 'rate':
       await _rate(seconds, fullscreen: fullscreen);
@@ -135,7 +141,7 @@ Future<void> main(List<String> args) async {
       await _bench();
     default:
       stderr.writeln(
-        'usage: dart run fynkel_measure:measure rate [--seconds N] [--fullscreen] | lifecycle [--cycles N] | bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]',
+        'usage: dart run fynkel_measure:measure rate [--seconds N] [--warmup N] [--fullscreen] | lifecycle [--cycles N] | bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
   }
@@ -165,7 +171,7 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     if (_baseline) 'FYNKEL_BASELINE': '1',
   });
   try {
-    await Future<void>.delayed(const Duration(seconds: _warmUp));
+    await Future<void>.delayed(Duration(seconds: _warmUp));
     final heap = await _Heap.connect(app.service!);
     final from = app.windows.length;
     final gpu = _android != null ? _GpuClock.sample() : null;
@@ -195,6 +201,15 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
         'fresh fps       median ${fresh[fresh.length ~/ 2].toStringAsFixed(1)}, '
         'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
       );
+      // Over a long run, each minute's median: whether the rate holds as
+      // the device warms (docs/iphone-heat.md).
+      if (windows.length >= 120) {
+        final minutes = [
+          for (var at = 0; at + 60 <= windows.length; at += 60)
+            (windows.sublist(at, at + 60).map((w) => w['fresh'] as double).toList()..sort())[30],
+        ];
+        print('by minute       ${minutes.map((m) => m.toStringAsFixed(0)).join(', ')}');
+      }
       print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented $presented');
       final ticks = windows.map((w) => w['ticks'] as num).toList()..sort();
       print(
@@ -214,6 +229,18 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     final longest = windows.fold(0, (most, w) => max(most, ((w['longestRaster'] ?? 0) as num).toInt()));
     print('longest raster  ${(longest / 1000).toStringAsFixed(2)} ms');
     if (clocks != null) print('gpu             $clocks');
+    // The device's thermal state, where it says (iOS, macOS): each change,
+    // by the window it was first seen in.
+    if (windows.first['thermal'] != null) {
+      final changes = <String>[];
+      Object? last;
+      for (final (i, w) in windows.indexed) {
+        if (w['thermal'] == last) continue;
+        last = w['thermal'];
+        changes.add('${thermalStates[(last! as num).toInt()]} from ${i}s');
+      }
+      print('thermal         ${changes.join(', ')}');
+    }
     print('mouse in view   ${sum('mouse')} of ${windows.length} windows (Flutter hit-tests it after every frame)');
     print(
       'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
@@ -808,7 +835,8 @@ class _Heap {
     final id = _nextId++;
     final reply = _pending[id] = Completer();
     _socket.add(jsonEncode({'jsonrpc': '2.0', 'id': '$id', 'method': method, 'params': params}));
-    return reply.future.timeout(const Duration(seconds: 10)).catchError((Object e) => throw StateError('$method: $e'));
+    // Long enough for an app a profiler stopped while attaching.
+    return reply.future.timeout(const Duration(seconds: 60)).catchError((Object e) => throw StateError('$method: $e'));
   }
 
   void _onMessage(Object? data) {

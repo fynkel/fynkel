@@ -13,3 +13,4 @@ export 'src/footprint.dart' show footprint, physicalFootprint;
 export 'src/measured_app.dart' show MeasuredApp;
 export 'src/measurement.dart';
 export 'src/on_screen.dart' show OnScreenClock;
+export 'src/thermal.dart' show thermalState, thermalStates;

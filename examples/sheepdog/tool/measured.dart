@@ -31,6 +31,9 @@ SheepdogGame _make() {
         l.shadows = false;
       }
     }
+    // Paused, as behind the pause menu: what a still scene costs
+    // (docs/iphone-heat.md).
+    if (_probe.contains('paused')) game.world.paused = true;
     if (_probe.contains('nolamps')) {
       for (final l in game.world.all<Light>().where((l) => l.kind == LightKind.point)) {
         l.enabled = false;

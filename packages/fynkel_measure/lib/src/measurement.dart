@@ -10,6 +10,7 @@ import 'package:flutter/scheduler.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'footprint.dart';
+import 'thermal.dart';
 
 /// What bin/measure.dart asked the app for. Set by the tool, never by
 /// hand: as environment variables on the Mac, and as `--dart-define`s on a
@@ -41,6 +42,12 @@ abstract final class MeasureSettings {
   /// see what drawing fewer pixels gives.
   static final resolution =
       double.tryParse(_setting('FYNKEL_RESOLUTION', const String.fromEnvironment('FYNKEL_RESOLUTION'))) ?? 1.0;
+
+  /// The world's `targetFrameRate` (`--define FYNKEL_FRAME_RATE=120`, or 0
+  /// for every display frame); the engine's own (60) when not given.
+  static final frameRate = int.tryParse(
+    _setting('FYNKEL_FRAME_RATE', const String.fromEnvironment('FYNKEL_FRAME_RATE')),
+  );
 }
 
 /// The app's side of a measurement: the stats line, once a second, and
@@ -97,6 +104,12 @@ class Measurement {
     return _lastFootprint ?? 0;
   }
 
+  /// The thermal state, where the system says (` thermal=0`), else nothing.
+  String _thermal() {
+    final state = thermalState();
+    return state == null ? '' : ' thermal=$state';
+  }
+
   void dispose() {
     _baselineStats?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
@@ -128,7 +141,8 @@ class Measurement {
     final text =
         '$view flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
         'slow=$_slowFrames slowBuild=$_slowBuilds slowRaster=$_slowRasters '
-        'longestRaster=${_longestRaster.inMicroseconds} budget=${_budget.inMicroseconds} footprint=${_footprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}';
+        'longestRaster=${_longestRaster.inMicroseconds} budget=${_budget.inMicroseconds} footprint=${_footprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}'
+        '${_thermal()}';
     _flutterFrames = 0;
     _slowFrames = _slowBuilds = _slowRasters = 0;
     _longestRaster = Duration.zero;
