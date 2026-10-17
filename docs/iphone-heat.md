@@ -1,6 +1,6 @@
 # iPhone: running cool
 
-Status: proposed 2026-10-17, for your call. A report follows it:
+Status: done 2026-10-17 (your call: "let's go"). The report:
 `docs/iphone-heat-report.md`. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 
@@ -49,21 +49,20 @@ hand on the phone, before and after: you have the final say.
 - **The thermal state**, in the measure tool: the plugin reports iOS's
   thermal state and each change to it. `fynkel_measure rate --ios` prints
   when each change happened, and `--seconds 600` runs 10 minutes.
-- **Power**: Xcode's Power Profiler (`xctrace`, template "Power
-  Profiler"), recorded alongside. It splits the power by CPU, GPU and
-  display.
-- **Runs**, 10 minutes each, over the cable (not Wi-Fi), at the same
-  brightness, starting cool (nominal for 5 minutes first):
+- **Runs**, 10 minutes each, over Wi-Fi (your call: the phone off the
+  charger), at the same brightness, starting cool:
   - Hello: one cube, nothing moving.
   - Sheepdog at high (today's default), playing.
   - Sheepdog paused, with the pause menu open.
-  - The lab's look scene at high.
-- **What each costs**, in Sheepdog, a minute or two each with the power
-  profile: 60 instead of 120 fps; medium and low instead of high; each
-  effect off on its own (shadows, bloom, AO); resolution 0.75.
 
-The day ends with a table: what heats the phone, and how much each of
-these saves.
+The day ends with a table: what heats the phone.
+
+Changed on the way (2026-10-17): Xcode's Power Profiler is dropped. Over
+Wi-Fi it hung or saved nothing about half the time. The thermal state and
+the fps minute by minute say what we need. The costs of each option one by
+one (60 fps, medium, 0.75) are dropped too, your call ("can't we do this
+in shorter time?"): the baseline already showed what to change, so the
+changes are built and measured instead.
 
 ### 2. Change what the numbers say (1–2 days)
 
@@ -71,13 +70,16 @@ These are the likely changes. Each one is built only if step 1 shows it
 matters, and measured again after:
 
 - **A frame rate a game chooses**, like Unity's
-  `Application.targetFrameRate`: 60 by default on phones, and 120 when a
-  game asks for it. The engine already draws less often than Flutter
-  ticks when frames back up. This makes it a setting. Whether Flutter
-  3.47 lets the plugin lower the display's own rate while running (a
-  `CADisplayLink` frame-rate range) is checked on the first morning. If
-  it doesn't, only the game's frames are halved, and Flutter's ticks are
-  measured to see what they cost on their own.
+  `Application.targetFrameRate`: `world.targetFrameRate`, 60 by default
+  everywhere, and 120 (or 0, every display frame) when a game asks for it
+  (your call). Flutter 3.47 has no way to lower the display's rate while
+  running on iOS: `CADisableMinimumFrameDurationOnPhone` in Info.plist
+  is the only switch. So the examples keep it, which lets a game ask for
+  120, and the engine runs and draws only every other display frame at 60.
+- **The resolution a game chooses**: `Quality.renderScale`, like Unity's
+  render scale, 1 at every level, which a game can change at any time
+  from its settings page. A view's own `resolutionScale` stays, for one
+  view (a minimap).
 - **Nothing drawn when nothing changed**: a paused game, a still scene
   behind a menu. The frame is drawn again when something moves, the
   camera changes or the view resizes. Unity's equivalent is
