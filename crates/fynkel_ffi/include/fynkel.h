@@ -1232,6 +1232,20 @@ FyStatus fy_animator_get(const struct FyWorld *world, uint64_t root, struct FyAn
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_animator_weight(const struct FyWorld *world, uint64_t root, uint32_t clip, float *out);
 
+// The ids of `root`'s parts some clip moves, each once, as
+// `fy_children_get` writes them: all when they fit in `cap`, and their
+// number to `out_count`.
+//
+// # Safety
+//
+// `world` is null or live; `buf` is null or valid for `cap` writes;
+// `out_count` is null or writable.
+FyStatus fy_animator_parts(const struct FyWorld *world,
+                           uint64_t root,
+                           uint64_t *buf,
+                           size_t cap,
+                           size_t *out_count);
+
 // Advances every animator by `dt` seconds and poses its model's parts,
 // once a frame before it's drawn. Writes how many events the reporting
 // animators gave to `out_count`; `fy_animation_events_get` reads them.

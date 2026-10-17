@@ -2694,6 +2694,31 @@ pub unsafe extern "C" fn fy_animator_weight(world: *const FyWorld, root: u64, cl
     })
 }
 
+/// The ids of `root`'s parts some clip moves, each once, as
+/// `fy_children_get` writes them: all when they fit in `cap`, and their
+/// number to `out_count`.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_parts(
+    world: *const FyWorld,
+    root: u64,
+    buf: *mut u64,
+    cap: usize,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let parts = world.lock()?.animated_parts(object(root)?)?;
+        // SAFETY: per this function's contract.
+        unsafe { write_all(parts.iter().map(|p| p.raw()), buf, cap, out_count) }
+    })
+}
+
 /// Advances every animator by `dt` seconds and poses its model's parts,
 /// once a frame before it's drawn. Writes how many events the reporting
 /// animators gave to `out_count`; `fy_animation_events_get` reads them.

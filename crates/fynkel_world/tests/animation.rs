@@ -132,6 +132,7 @@ fn a_model_with_clips_gets_an_animator_that_knows_them() {
     let toy = Toy::new();
     assert!(toy.world.has_animator(toy.root));
     assert_eq!(toy.world.clips(toy.root).unwrap(), [("slide", 2.0), ("hop", 1.0), ("grow", 2.0)]);
+    assert_eq!(toy.world.animated_parts(toy.root).unwrap(), [toy.body, toy.arm]);
     let state = toy.world.animator_state(toy.root).unwrap();
     assert_eq!((state.clip, state.time, state.speed), (None, 0.0, 1.0));
     // Nothing plays until asked: the rest pose.
@@ -278,6 +279,7 @@ fn an_animator_lives_and_goes_with_its_model() {
     assert!(near(toy.body(), Vec3::new(2.0, 0.0, 0.0)));
     // A node the game destroyed is skipped; the rest still moves.
     toy.world.despawn(toy.arm).unwrap();
+    assert_eq!(toy.world.animated_parts(toy.root).unwrap(), [toy.body]);
     toy.step(0.5);
     assert!(near(toy.body(), Vec3::new(3.0, 0.0, 0.0)));
     // The model destroyed, its animator goes too.

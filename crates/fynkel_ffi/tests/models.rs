@@ -414,6 +414,10 @@ fn a_model_copys_clips_play_through_the_c_interface() {
     let mut state = FyAnimatorState::default();
     // SAFETY: a live world, ids from it, pointers to locals.
     unsafe {
+        // The two wheels turn.
+        let mut parts = [0u64; 4];
+        ok(fy_animator_parts(w, root, parts.as_mut_ptr(), parts.len(), &mut count));
+        assert_eq!(count, 2);
         ok(fy_animator_report_set(w, root, true));
         ok(fy_animator_play(w, root, 0, 0.0, true));
         ok(fy_world_animate(w, 0.5, &mut count));

@@ -34,6 +34,17 @@ external int fy_animation_events_get(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyAnimatorState>)>(isLeaf: true)
 external int fy_animator_get(ffi.Pointer<FyWorld> world, int root, ffi.Pointer<FyAnimatorState> out);
 
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_animator_parts(
+  ffi.Pointer<FyWorld> world,
+  int root,
+  ffi.Pointer<ffi.Uint64> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Float, ffi.Bool)>(isLeaf: true)
 external int fy_animator_play(ffi.Pointer<FyWorld> world, int root, int clip, double fade, bool looping);
 

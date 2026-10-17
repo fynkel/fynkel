@@ -331,6 +331,27 @@ impl World {
         Ok(animator.playing.iter().filter(|p| p.clip == clip as usize).map(|p| p.weight).sum())
     }
 
+    /// The parts of `root` some clip moves, each once, in the model's node
+    /// order: what a frame's [`animate`](Self::animate) may change. Parts
+    /// the game destroyed are left out.
+    pub fn animated_parts(&self, root: ObjectId) -> Result<Vec<ObjectId>> {
+        self.entity(root)?;
+        let animator =
+            self.animators.get(&root).ok_or(WorldError::NoComponent { object: root, component: "Animator" })?;
+        let mut moved = vec![false; animator.nodes.len()];
+        for clip in &animator.clips {
+            for channel in &clip.channels {
+                moved[channel.node] = true;
+            }
+        }
+        Ok(moved
+            .iter()
+            .zip(&animator.nodes)
+            .filter(|(moved, _)| **moved)
+            .filter_map(|(_, &entity)| self.ecs.get::<&ObjectId>(entity).ok().map(|id| *id))
+            .collect())
+    }
+
     /// The number of animators: models spawned with clips, still here.
     pub fn animator_count(&self) -> usize {
         self.animators.len()
