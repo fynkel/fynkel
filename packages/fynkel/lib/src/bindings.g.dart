@@ -31,8 +31,55 @@ external int fy_animation_events_get(
   ffi.Pointer<ffi.Size> out_count,
 );
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyAnimatorState>)>(isLeaf: true)
-external int fy_animator_get(ffi.Pointer<FyWorld> world, int root, ffi.Pointer<FyAnimatorState> out);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Float>)>(
+  isLeaf: true,
+)
+external int fy_animator_blend(ffi.Pointer<FyWorld> world, int root, int layer, int blend, ffi.Pointer<ffi.Float> at);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyWorld>,
+    ffi.Uint64,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+  )
+>(isLeaf: true)
+external int fy_animator_blend_define(
+  ffi.Pointer<FyWorld> world,
+  int root,
+  ffi.Pointer<ffi.Uint32> clips,
+  ffi.Pointer<ffi.Float> thresholds,
+  int count,
+  ffi.Pointer<ffi.Uint32> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Pointer<FyAnimatorState>)>(
+  isLeaf: true,
+)
+external int fy_animator_get(ffi.Pointer<FyWorld> world, int root, int layer, ffi.Pointer<FyAnimatorState> out);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyWorld>,
+    ffi.Uint64,
+    ffi.Uint32,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Bool,
+    ffi.Float,
+  )
+>(isLeaf: true)
+external int fy_animator_layer_set(
+  ffi.Pointer<FyWorld> world,
+  int root,
+  int layer,
+  ffi.Pointer<ffi.Uint8> mask,
+  int mask_len,
+  bool additive,
+  double weight,
+);
 
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size, ffi.Pointer<ffi.Size>)
@@ -45,23 +92,34 @@ external int fy_animator_parts(
   ffi.Pointer<ffi.Size> out_count,
 );
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Float, ffi.Bool)>(isLeaf: true)
-external int fy_animator_play(ffi.Pointer<FyWorld> world, int root, int clip, double fade, bool looping);
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Float>, ffi.Bool)
+>(isLeaf: true)
+external int fy_animator_play(
+  ffi.Pointer<FyWorld> world,
+  int root,
+  int layer,
+  int clip,
+  ffi.Pointer<ffi.Float> fade,
+  bool looping,
+);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Bool)>(isLeaf: true)
 external int fy_animator_report_set(ffi.Pointer<FyWorld> world, int root, bool on);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Float)>(isLeaf: true)
-external int fy_animator_speed_set(ffi.Pointer<FyWorld> world, int root, double speed);
-
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
-external int fy_animator_stop(ffi.Pointer<FyWorld> world, int root);
-
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Float)>(isLeaf: true)
-external int fy_animator_time_set(ffi.Pointer<FyWorld> world, int root, double time);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Float>)>(isLeaf: true)
+external int fy_animator_speed_set(ffi.Pointer<FyWorld> world, int root, ffi.Pointer<ffi.Float> speed);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Pointer<ffi.Float>)>(isLeaf: true)
-external int fy_animator_weight(ffi.Pointer<FyWorld> world, int root, int clip, ffi.Pointer<ffi.Float> out);
+external int fy_animator_stop(ffi.Pointer<FyWorld> world, int root, int layer, ffi.Pointer<ffi.Float> fade);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Float)>(isLeaf: true)
+external int fy_animator_time_set(ffi.Pointer<FyWorld> world, int root, int layer, double time);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Float>)>(
+  isLeaf: true,
+)
+external int fy_animator_weight(ffi.Pointer<FyWorld> world, int root, int layer, int clip, ffi.Pointer<ffi.Float> out);
 
 @ffi.Native<ffi.Uint32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Pointer<ffi.Void>>)>(isLeaf: true)
 external int fy_apple_acquire(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Pointer<ffi.Void>> out_surface);
@@ -488,7 +546,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 31;
+const int FY_ABI_VERSION = 32;
 
 const int FY_APPLE_MORE = 2;
 
@@ -582,6 +640,9 @@ final class FyAnimatorState extends ffi.Struct {
   @ffi.Int32()
   external int clip;
 
+  @ffi.Int32()
+  external int blend;
+
   @ffi.Float()
   external double time;
 
@@ -594,11 +655,13 @@ final class FyAnimatorState extends ffi.Struct {
   static ffi.Pointer<FyAnimatorState> $allocate(
     ffi.Allocator $allocator, {
     required int clip,
+    required int blend,
     required double time,
     required double length,
     required double speed,
   }) => $allocator<FyAnimatorState>()
     ..ref.clip = clip
+    ..ref.blend = blend
     ..ref.time = time
     ..ref.length = length
     ..ref.speed = speed;

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 31
+#define FY_ABI_VERSION 32
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -427,13 +427,15 @@ typedef struct FyModelCounts {
   size_t clips;
 } FyModelCounts;
 
-// What an animator plays, from `fy_animator_get`.
+// What an animator's layer plays, from `fy_animator_get`.
 typedef struct FyAnimatorState {
-  // The clip last played or faded to, or -1 for none.
+  // The clip last played or faded to, or -1 for none or a blend.
   int32_t clip;
-  // Seconds into it.
+  // The blend last played or faded to, or -1 for none or a clip.
+  int32_t blend;
+  // Seconds into it; for a blend, into a round of it.
   float time;
-  // Its length in seconds.
+  // Its length in seconds; for a blend, a round's at its number now.
   float length;
   float speed;
 } FyAnimatorState;
@@ -1175,41 +1177,101 @@ FyStatus fy_model_spawn(const struct FyWorld *world,
                         uint64_t *out);
 
 // Plays clip `clip` of the model copy `root` (a model's index, as
-// `fy_model_clip`) from its start: at once in place of what plays, with
-// `fade` 0, or fading in over `fade` seconds as the rest fade out. Fading
-// to the clip last played or faded to changes nothing; to one fading out,
-// it fades back in from where it is. An object that isn't a model
-// copy with clips is `FY_STATUS_NO_COMPONENT`.
+// `fy_model_clip`) on its layer `layer` (0 the base, up to 7) from its
+// start: at once in place of what the layer plays, with `fade` 0, or
+// fading in over `fade` seconds as the rest fade out, from the pose
+// shown. Fading to the motion last played or faded to changes nothing;
+// to one fading out, it fades back in from where it is. An object that
+// isn't a model copy with clips is `FY_STATUS_NO_COMPONENT`. `fade` is
+// read through a pointer, as `fy_world_animate`'s `dt`: a game may call
+// it each frame.
 //
 // # Safety
 //
-// `world` is null or live.
+// `world` is null or live; `fade` is null or readable.
 FyStatus fy_animator_play(const struct FyWorld *world,
                           uint64_t root,
+                          uint32_t layer,
                           uint32_t clip,
-                          float fade,
+                          const float *fade,
                           bool looping);
 
-// Stops every clip of `root`'s; its parts keep the pose they're in.
+// Makes a blend of `root`'s clips: `count` clips, each at its threshold
+// (any order), mixed by the number `fy_animator_blend` gives, their pace
+// kept together. Writes its number to `out`; an animator keeps up to 64.
 //
 // # Safety
 //
-// `world` is null or live.
-FyStatus fy_animator_stop(const struct FyWorld *world, uint64_t root);
+// `world` is null or live; `clips` and `thresholds` are null or valid for
+// `count` reads; `out` is null or writable.
+FyStatus fy_animator_blend_define(const struct FyWorld *world,
+                                  uint64_t root,
+                                  const uint32_t *clips,
+                                  const float *thresholds,
+                                  size_t count,
+                                  uint32_t *out);
+
+// Sets the number blend `blend` mixes its clips by, `at[0]`, and plays
+// it on `root`'s layer `layer` as `fy_animator_play` plays a clip, with
+// the fade `at[1]` (always looping): a game calls it each frame with the
+// speed, and a fade only starts when the layer played something else.
+//
+// # Safety
+//
+// `world` is null or live; `at` is null or valid for 2 reads.
+FyStatus fy_animator_blend(const struct FyWorld *world,
+                           uint64_t root,
+                           uint32_t layer,
+                           uint32_t blend,
+                           const float *at);
+
+// Stops what `root`'s layer `layer` plays: at once with `fade` 0, its
+// parts keeping the pose they're in, or fading out over `fade` seconds
+// to what's underneath. `fade` is read through a pointer.
+//
+// # Safety
+//
+// `world` is null or live; `fade` is null or readable.
+FyStatus fy_animator_stop(const struct FyWorld *world,
+                          uint64_t root,
+                          uint32_t layer,
+                          const float *fade);
+
+// Sets `root`'s layer `layer`: the part it moves from, with everything
+// below it (`mask`, `mask_len` UTF-8 bytes; empty for the whole model),
+// whether it adds to what's underneath rather than replacing it, and how
+// much of it shows, 0 to 1. The base layer, 0, takes the whole model, in
+// place, at 1.
+//
+// # Safety
+//
+// `world` is null or live; `mask` is null or valid for `mask_len` reads.
+FyStatus fy_animator_layer_set(const struct FyWorld *world,
+                               uint64_t root,
+                               uint32_t layer,
+                               const uint8_t *mask,
+                               size_t mask_len,
+                               bool additive,
+                               float weight);
 
 // How fast `root`'s clips play: 1 as made, 0 paused, negative backwards.
+// Read through a pointer: a game may set it each frame.
 //
 // # Safety
 //
-// `world` is null or live.
-FyStatus fy_animator_speed_set(const struct FyWorld *world, uint64_t root, float speed);
+// `world` is null or live; `speed` is null or readable.
+FyStatus fy_animator_speed_set(const struct FyWorld *world, uint64_t root, const float *speed);
 
-// Moves `root`'s current clip to `time` seconds, kept within its length.
+// Moves the current motion of `root`'s layer `layer` to `time` seconds,
+// kept within its length.
 //
 // # Safety
 //
 // `world` is null or live.
-FyStatus fy_animator_time_set(const struct FyWorld *world, uint64_t root, float time);
+FyStatus fy_animator_time_set(const struct FyWorld *world,
+                              uint64_t root,
+                              uint32_t layer,
+                              float time);
 
 // Whether `fy_world_animate` reports what `root`'s clips do.
 //
@@ -1218,20 +1280,28 @@ FyStatus fy_animator_time_set(const struct FyWorld *world, uint64_t root, float 
 // `world` is null or live.
 FyStatus fy_animator_report_set(const struct FyWorld *world, uint64_t root, bool on);
 
-// Writes what `root` plays to `out`.
+// Writes what `root`'s layer `layer` plays to `out`.
 //
 // # Safety
 //
 // `world` is null or live; `out` is null or writable.
-FyStatus fy_animator_get(const struct FyWorld *world, uint64_t root, struct FyAnimatorState *out);
+FyStatus fy_animator_get(const struct FyWorld *world,
+                         uint64_t root,
+                         uint32_t layer,
+                         struct FyAnimatorState *out);
 
-// Writes clip `clip`'s weight in `root`'s pose to `out`: 1 alone, 0 not
-// playing, between while it fades.
+// Writes clip `clip`'s weight in the mix of `root`'s layer `layer` to
+// `out`: 1 alone, 0 not playing, between while it fades or shares a
+// blend.
 //
 // # Safety
 //
 // `world` is null or live; `out` is null or writable.
-FyStatus fy_animator_weight(const struct FyWorld *world, uint64_t root, uint32_t clip, float *out);
+FyStatus fy_animator_weight(const struct FyWorld *world,
+                            uint64_t root,
+                            uint32_t layer,
+                            uint32_t clip,
+                            float *out);
 
 // The ids of `root`'s parts some clip moves, each once, as
 // `fy_children_get` writes them: all when they fit in `cap`, and their

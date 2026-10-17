@@ -515,43 +515,60 @@ void main() {
     expect(scene.rock.convex, isTrue);
   });
 
-  test('Animation: skinned: both play the clip asked for, the sword stays in the hand, and they walk round', () async {
-    final world = World(source: files);
-    addTearDown(world.dispose);
-    final scene = world.add(SkinnedScene());
-    await scene.loaded;
-    final [knight, rogue] = scene.people;
-    final sword = scene.sword!;
-    final slot = rogue.find('handslot.r')!;
-    expect(sword.parent, same(slot));
-    expect([knight.animator!.current, rogue.animator!.current], ['Idle', 'Idle']);
+  test(
+    'Animation: skinned: the speed blends their clips, the arm waves on a layer, the sword stays in the hand',
+    () async {
+      final world = World(source: files);
+      addTearDown(world.dispose);
+      final scene = world.add(SkinnedScene());
+      await scene.loaded;
+      final [knight, rogue] = scene.people;
+      final sword = scene.sword!;
+      final slot = rogue.find('handslot.r')!;
+      expect(sword.parent, same(slot));
+      void frames(int n) {
+        for (var i = 0; i < n; i++) {
+          world.update(1 / 60);
+        }
+      }
 
-    scene.controls.whereType<Button>().firstWhere((b) => b.label == '1H_Melee_Attack_Chop').onPressed();
-    final hand = rogue.find('hand.r')!;
-    final rest = hand.worldTransform.position;
-    for (var i = 0; i < 20; i++) {
       world.update(1 / 60);
-    }
-    expect(rogue.animator!.current, '1H_Melee_Attack_Chop');
-    expect((hand.worldTransform.position - rest).length, greaterThan(0.05), reason: 'the arm swings');
-    expect(
-      (sword.worldTransform.position - slot.worldTransform.position).length,
-      lessThan(1e-4),
-      reason: 'the sword is where the hand holds it',
-    );
-    for (var i = 0; i < 120; i++) {
-      world.update(1 / 60);
-    }
-    expect(rogue.animator!.current, 'Idle', reason: 'back to idle when the chop ends');
+      final animator = rogue.animator!;
+      expect((animator.current, animator.weight('Idle')), ('move', 1));
 
-    scene.controls.whereType<Toggle>().firstWhere((t) => t.label == 'walk round').onChanged(true);
-    final from = knight.position;
-    for (var i = 0; i < 30; i++) {
-      world.update(1 / 60);
-    }
-    expect(knight.animator!.current, 'Walking_A');
-    expect((knight.position - from).length, greaterThan(0.3));
-  });
+      scene.controls.whereType<Button>().firstWhere((b) => b.label == '1H_Melee_Attack_Chop').onPressed();
+      final hand = rogue.find('hand.r')!;
+      final rest = hand.worldTransform.position;
+      frames(20);
+      expect(animator.current, '1H_Melee_Attack_Chop');
+      expect((hand.worldTransform.position - rest).length, greaterThan(0.05), reason: 'the arm swings');
+      expect(
+        (sword.worldTransform.position - slot.worldTransform.position).length,
+        lessThan(1e-4),
+        reason: 'the sword is where the hand holds it',
+      );
+      frames(120);
+      expect(animator.current, 'move', reason: 'back to the blend when the chop ends');
+
+      // Halfway from a walk to a run, going round.
+      final speed = scene.controls.whereType<Slider>().single;
+      speed.onChanged((1.1 + 3.4) / 2);
+      final from = knight.position;
+      frames(30);
+      expect(animator.weight('Walking_A'), closeTo(0.5, 1e-4));
+      expect(animator.weight('Running_A'), closeTo(0.5, 1e-4));
+      expect((knight.position - from).length, greaterThan(0.5));
+
+      // The wave: on the right arm only.
+      scene.controls.whereType<Toggle>().firstWhere((t) => t.label == 'wave with the right arm').onChanged(true);
+      frames(30);
+      expect(animator.layer(1).current, 'Cheer');
+      expect(animator.layer(1).weight('Cheer'), 1);
+      speed.onChanged(0);
+      frames(30);
+      expect(animator.weight('Idle'), 1);
+    },
+  );
 
   test('Character controller: the basics: up the low step, not the high one, and the crate is pushed', () async {
     final world = World(source: files);

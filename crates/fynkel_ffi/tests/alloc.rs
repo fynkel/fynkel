@@ -60,8 +60,10 @@ fn count(f: impl FnOnce()) -> u64 {
 
 /// Five copies of the skinned KayKit Knight, each walking: their parts
 /// are bent by joints the extract works out every frame. The model's
-/// textures are left out; its materials are plain.
-fn walking_knights(world: &World) -> Vec<u64> {
+/// textures are left out; its materials are plain. Three go by a blend
+/// of idle, walk and run, and all cheer with the right arm on a layer
+/// above ([`knights_change_their_minds`]).
+fn walking_knights(world: &World) -> Knights {
     let bytes = include_bytes!("../../../tests/assets/gltf/Knight.glb");
     let w = world.0;
     // SAFETY: a slice, a live world, and pointers to locals.
@@ -86,14 +88,17 @@ fn walking_knights(world: &World) -> Vec<u64> {
                 id
             })
             .collect();
-        let walk = (0..counts.clips)
-            .find(|&i| {
-                let mut buf = [0u8; 64];
-                let (mut len, mut length) = (0, 0.0);
-                ok(fy_model_clip(model, i, buf.as_mut_ptr(), buf.len(), &mut len, &mut length));
-                &buf[..len] == b"Walking_A"
-            })
-            .expect("a walk") as u32;
+        let clip = |name: &[u8]| {
+            (0..counts.clips)
+                .find(|&i| {
+                    let mut buf = [0u8; 64];
+                    let (mut len, mut length) = (0, 0.0);
+                    ok(fy_model_clip(model, i, buf.as_mut_ptr(), buf.len(), &mut len, &mut length));
+                    &buf[..len] == name
+                })
+                .expect("a clip") as u32
+        };
+        let (idle, walk, run, cheer) = (clip(b"Idle"), clip(b"Walking_A"), clip(b"Running_A"), clip(b"Cheer"));
         let roots = (0..5)
             .map(|i| {
                 let mut root = 0;
@@ -108,12 +113,45 @@ fn walking_knights(world: &World) -> Vec<u64> {
                     &transform(at),
                     &mut root,
                 ));
-                ok(fy_animator_play(w, root, walk, 0.0, true));
-                root
+                ok(fy_animator_play(w, root, 0, walk, &0.0, true));
+                let mask = b"upperarm.r";
+                ok(fy_animator_layer_set(w, root, 1, mask.as_ptr(), mask.len(), false, 0.8));
+                let blend = (i >= 2).then(|| {
+                    let mut blend = 0;
+                    let (clips, thresholds) = ([idle, walk, run], [0.0, 1.1, 3.0]);
+                    ok(fy_animator_blend_define(w, root, clips.as_ptr(), thresholds.as_ptr(), 3, &mut blend));
+                    blend
+                });
+                (root, blend)
             })
             .collect();
         fy_model_free(model);
-        roots
+        Knights { roots, cheer }
+    }
+}
+
+struct Knights {
+    /// Each knight, and its blend, if it goes by one.
+    roots: Vec<(u64, Option<u32>)>,
+    cheer: u32,
+}
+
+/// A frame of a game that changes its mind: the blended knights' speed
+/// swings, and every knight starts or stops its cheer, fading.
+fn knights_change_their_minds(world: &World, knights: &Knights, frame: u32) {
+    for &(root, blend) in &knights.roots {
+        // SAFETY: a live world.
+        unsafe {
+            if let Some(blend) = blend {
+                let at = [(frame as f32 * 0.1).sin() * 1.5 + 1.5, 0.2];
+                ok(fy_animator_blend(world.0, root, 0, blend, at.as_ptr()));
+            }
+            if frame.is_multiple_of(3) {
+                ok(fy_animator_play(world.0, root, 1, knights.cheer, &0.2, true));
+            } else if frame % 3 == 1 {
+                ok(fy_animator_stop(world.0, root, 1, &0.2));
+            }
+        }
     }
 }
 
@@ -164,8 +202,9 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
         // SAFETY: a live world.
         ok(unsafe { fy_parent_set(world.0, id, cubes[i - 1]) });
     }
-    walking_knights(&world);
+    let knights = walking_knights(&world);
     let view = View::headless(&world, 64, 64);
+    let mut ticks = 0;
 
     // Half the cubes are moved one call each, half in one call for all
     // (`fy_transform_set_many`, as package:fynkel sends a frame's moves),
@@ -195,6 +234,8 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
             // SAFETY: a live world.
             ok(unsafe { fy_active_set(world.0, id, !hide) });
         }
+        knights_change_their_minds(&world, &knights, ticks);
+        ticks += 1;
         let mut events = 0;
         // SAFETY: a live world and pointers to locals.
         ok(unsafe { fy_world_animate(world.0, &(1.0 / 60.0), &mut events) });
@@ -219,7 +260,7 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     assert_eq!(
         allocations, 0,
         "allocations in 100 frames of 1,000 transform writes and 143 flags each, under a sky in fog, with five \
-         walking skinned knights"
+         walking skinned knights, blending and cheering on a layer"
     );
 }
 
