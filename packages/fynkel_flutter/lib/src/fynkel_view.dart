@@ -17,6 +17,7 @@ import 'package:fynkel/fynkel.dart'
         HeadlessView,
         Input,
         ObjectError,
+        Quality,
         ViewStats,
         WorldView,
         World;
@@ -250,14 +251,17 @@ class FynkelView extends StatefulWidget {
   /// [root]'s own.
   final World? world;
 
-  /// Called once per display frame, before the world's [World.update],
-  /// with the seconds since the previous call (0 the first time). For
+  /// Called once per frame of the world's ([World.targetFrameRate]),
+  /// before its [World.update], with the seconds since the previous call
+  /// (0 the first time). For
   /// code that drives the world from outside; a game's own code goes in
   /// its objects.
   final void Function(double dt)? onFrame;
 
   /// Pixels drawn per physical pixel: above 0 and at most 4, 1 unless
-  /// given. Below 1 is faster and softer.
+  /// given. Below 1 is faster and softer. It multiplies the world's
+  /// [Quality.renderScale], which a game sets for all its views (a
+  /// settings page); this is for one view of its own, a minimap say.
   final double resolutionScale;
 
   /// Called about once a second with what the view did since the last call.
@@ -285,7 +289,9 @@ class FynkelView extends StatefulWidget {
   /// Whether a page or dialog over the view pauses the game
   /// ([World.paused]): a pause menu, a settings page, a pop-up. Closing
   /// the last one goes on, unless the game was paused already, or paused
-  /// itself meanwhile. Covered, the view gets no taps or keys either.
+  /// itself meanwhile. Covered, the view gets no taps or keys either, and,
+  /// as nothing in it moves, it's drawn only 10 times a second, which keeps
+  /// a phone cool behind a menu.
   final bool pauseWhenCovered;
 
   /// The camera the view draws from, read each frame; the world's main
@@ -343,7 +349,13 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   FocusNode? _ownFocus;
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
-  /// The size the last layout gave, in pixels; 0 while it is empty.
+  /// The size the last layout gave, in logical pixels, and the physical
+  /// pixels per logical one times [FynkelView.resolutionScale].
+  Size _logical = Size.zero;
+  double _ratio = 1;
+
+  /// The size to draw at, in pixels, from the layout's and the quality's
+  /// [Quality.renderScale]; 0 while it is empty.
   int _layoutWidth = 0, _layoutHeight = 0;
 
   /// The size the next frame is drawn at: the layout's once it has held
@@ -434,6 +446,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   // Whether a route is over the view's, and whether that paused the world.
   bool _covered = false, _pausedIt = false;
+
+  /// The frames a second of a world the view paused when a route covered
+  /// it ([FynkelView.pauseWhenCovered]): enough for a resize to show.
+  static const _coveredFrameRate = 10;
 
   /// Pauses the world when a route covers the view's, and goes on when
   /// it's uncovered.
@@ -623,19 +639,30 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   }
 
   void _frame(int micros) {
+    final world = this.world;
+    final clock = _WorldClock.of(world);
+    // Not one of the world's frames ([World.targetFrameRate]): nothing runs
+    // or is drawn, and the last picture stays. Paused under a menu, the
+    // picture doesn't change, so it's drawn only [_coveredFrameRate] times
+    // a second.
+    if (!world.isDisposed) {
+      final rate = world.targetFrameRate;
+      final covered = _pausedIt && world.paused && (rate == 0 || rate > _coveredFrameRate);
+      if (!clock.due(covered ? _coveredFrameRate : rate)) return;
+    }
     final last = _lastMicros;
     _lastMicros = micros;
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
     widget.onFrame?.call(dt);
-    final world = this.world;
     if (!world.isDisposed) {
       // A pause let go of every key: those still down are held again.
       final paused = world.paused;
       if (_wasPaused && !paused && _focus.hasFocus) _input.holdKeys();
       _wasPaused = paused;
-      _WorldClock.of(world).update(world);
+      clock.update(world);
     }
     _ticks.tick();
+    _sizeFromLayout();
     _settle();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
@@ -676,6 +703,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       _windowTicks = 0;
       _windowStart = now;
     }
+  }
+
+  /// Works out [_layoutWidth] and [_layoutHeight]: each frame, so a new
+  /// [World.quality] draws at its own scale without a new layout.
+  void _sizeFromLayout() {
+    final world = this.world;
+    final scale = world.isDisposed ? 1.0 : (world.quality ?? (_deviceQuality ??= Quality.device)).renderScale;
+    final width = (_logical.width * _ratio * scale).round().clamp(0, 16384);
+    final height = (_logical.height * _ratio * scale).round().clamp(0, 16384);
+    if (width != _layoutWidth || height != _layoutHeight) _steadyFrames = 0;
+    _layoutWidth = width;
+    _layoutHeight = height;
   }
 
   void _settle() {
@@ -948,11 +987,9 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           _input.resize(size);
           world.input.camera = widget.camera;
         }
-        final width = (size.width * ratio).round().clamp(0, 16384);
-        final height = (size.height * ratio).round().clamp(0, 16384);
-        if (width != _layoutWidth || height != _layoutHeight) _steadyFrames = 0;
-        _layoutWidth = width;
-        _layoutHeight = height;
+        _logical = size;
+        _ratio = ratio;
+        _sizeFromLayout();
         final texture = _texture;
         if (texture == null) return const SizedBox.expand();
         // On screen: the surface is behind Flutter's view, so the view
@@ -1040,6 +1077,10 @@ class _Window extends CustomPainter {
 /// to tick in a display frame updates the world, the rest draw what that
 /// made. The seconds between updates start from 0 when its first view
 /// comes, as they did for a view alone.
+// The device's quality level, for a world without its own: looked up
+// once, the first time a view is laid out.
+Quality? _deviceQuality;
+
 class _WorldClock {
   static final _clocks = Expando<_WorldClock>('FynkelView clock');
 
@@ -1053,7 +1094,27 @@ class _WorldClock {
   int get views => _views;
   set views(int value) {
     _views = value;
-    if (value == 0) _updated = null;
+    if (value == 0) _updated = _asked = null;
+  }
+
+  // The display frame [_due] was worked out in, so every view showing the
+  // world gets the same answer in it.
+  Duration? _asked;
+  bool _due = true;
+
+  /// Whether this display frame is one of the world's, at [rate] a second
+  /// (0 for every one): its [World.targetFrameRate], or fewer. One that
+  /// comes up to half a display frame early counts, as they come a little
+  /// unevenly: at 60 on a 120 Hz screen, every other one.
+  bool due(int rate) {
+    final now = SchedulerBinding.instance.currentFrameTimeStamp;
+    if (now != _asked) {
+      final display = _asked == null ? Duration.zero : now - _asked!;
+      _asked = now;
+      final last = _updated;
+      _due = last == null || rate == 0 || (now - last + display ~/ 2).inMicroseconds >= 1000000 / rate;
+    }
+    return _due;
   }
 
   void update(World world) {

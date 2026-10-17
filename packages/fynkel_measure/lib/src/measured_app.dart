@@ -178,6 +178,8 @@ class _MeasuredState extends State<_Measured> {
   var _ticks = 0;
 
   void _onFrame(double dt) {
+    final rate = MeasureSettings.frameRate;
+    if (rate != null) _view.currentState?.world.targetFrameRate = rate;
     if (++_ticks > 2) return;
     if (_ticks == 1) _firstTick = _clock.elapsed;
     if (_ticks == 2) {

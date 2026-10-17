@@ -130,7 +130,8 @@ void main() {
   late bool unregisterFails;
 
   setUp(() {
-    world = World();
+    // Every pump a frame of the world's: the frame rate has tests of its own.
+    world = World()..targetFrameRate = 0;
     world.add(
       GameObject(
         transform: Transform(position: Vec3(0, 0, 4)),
@@ -245,6 +246,92 @@ void main() {
     }
     expect(stats.last.size, const Size(120, 60), reason: 'resized, at scale 1 now');
     expect(calls, hasLength(1), reason: 'a resize keeps the texture');
+  });
+
+  testWidgets("the world's quality's renderScale sets the size drawn at, from the next frames, without a new layout", (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 2;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final stats = <FynkelViewStats>[];
+    await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5, onStats: stats.add)));
+    for (var i = 0; i < 300; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(stats.last.size, const Size(100, 50));
+    world.quality = Quality.high.copyWith(renderScale: 0.75);
+    for (var i = 0; i < 300; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    expect(stats.last.size, const Size(75, 38), reason: "100 × 50 at the view's 0.5, × 0.75");
+    expect(calls, hasLength(1), reason: 'the same texture');
+    expect(() => world.quality = Quality.low.copyWith(renderScale: 0), throwsArgumentError);
+    expect(world.quality?.renderScale, 0.75);
+  });
+
+  group('the frame rate', () {
+    // A 120 Hz display's frames.
+    const display = Duration(microseconds: 8333);
+
+    testWidgets('is 60 unless set: on a 120 Hz display, every other frame runs the world and is drawn', (tester) async {
+      final own = World();
+      addTearDown(own.dispose);
+      expect(own.targetFrameRate, 60);
+      final dts = <double>[];
+      final stats = <FynkelViewStats>[];
+      await tester.pumpWidget(sized(FynkelView.world(own, onFrame: dts.add, onStats: stats.add)));
+      for (var i = 0; i < 360; i++) {
+        await tester.pump(display);
+      }
+      expect(dts, hasLength(180), reason: 'every other of 360, from the first');
+      expect(dts.skip(1), everyElement(closeTo(1 / 60, 1e-5)));
+      expect(own.time.sinceStart, closeTo(358 * 0.008333, 1e-6), reason: "the world's clock is the display's");
+      expect(stats.last.tickFps, closeTo(60, 1));
+      expect(stats.last.view.posted, stats.last.ticks, reason: 'one engine frame per frame of the world');
+    });
+
+    testWidgets('0 runs every display frame, and a game can change it at any time', (tester) async {
+      final dts = <double>[];
+      world.targetFrameRate = 60;
+      await tester.pumpWidget(sized(FynkelView.world(world, onFrame: dts.add)));
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(display);
+      }
+      expect(dts, hasLength(60));
+      world.targetFrameRate = 0;
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(display);
+      }
+      expect(dts, hasLength(180));
+      world.targetFrameRate = 30;
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(display);
+      }
+      expect(dts, hasLength(210), reason: 'every fourth');
+      expect(() => world.targetFrameRate = -1, throwsArgumentError);
+      expect(world.targetFrameRate, 30);
+    });
+
+    testWidgets("every view of a world draws in the world's frames, and only then", (tester) async {
+      world.targetFrameRate = 60;
+      final left = <double>[], right = <double>[];
+      await tester.pumpWidget(
+        sized(
+          Row(
+            children: [
+              Expanded(child: FynkelView.world(world, onFrame: left.add)),
+              Expanded(child: FynkelView.world(world, onFrame: right.add)),
+            ],
+          ),
+        ),
+      );
+      for (var i = 0; i < 240; i++) {
+        await tester.pump(display);
+        expect(right, hasLength(left.length), reason: 'display frame $i');
+      }
+      expect(left, hasLength(120));
+      expect(world.time.sinceStart, closeTo(238 * 0.008333, 1e-6), reason: 'updated once a frame, not once a view');
+    });
   });
 
   testWidgets("after each frame it posts, onViewStats has the view's counts so far, so a load can be timed", (
@@ -1391,11 +1478,13 @@ void main() {
   group('covered', () {
     late BuildContext page;
 
-    Widget app({bool pauseWhenCovered = true}) => MaterialApp(
+    Widget app({bool pauseWhenCovered = true, void Function(double)? onFrame}) => MaterialApp(
       home: Builder(
         builder: (context) {
           page = context;
-          return Center(child: sized(FynkelView.world(world, pauseWhenCovered: pauseWhenCovered)));
+          return Center(
+            child: sized(FynkelView.world(world, pauseWhenCovered: pauseWhenCovered, onFrame: onFrame)),
+          );
         },
       ),
     );
@@ -1421,6 +1510,29 @@ void main() {
       Navigator.of(page).pop();
       await settle(tester);
       expect(world.paused, isFalse);
+    });
+
+    testWidgets('covered and paused, it draws 10 frames a second; a game paused by itself keeps its rate', (
+      tester,
+    ) async {
+      final dts = <double>[];
+      await tester.pumpWidget(app(onFrame: dts.add));
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      dts.clear();
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(inInclusiveRange(9, 11)), reason: 'about 10 in a second');
+      Navigator.of(page).pop();
+      await settle(tester);
+      dts.clear();
+      world.paused = true;
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(120), reason: "paused by the game, at its rate (every frame, here)");
     });
 
     testWidgets('a page over a dialog over the view: the game goes on once both are closed', (tester) async {

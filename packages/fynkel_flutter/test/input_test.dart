@@ -45,8 +45,9 @@ void main() {
 
   Input input() => world.input;
 
-  /// One frame, which runs the world's input step.
-  Future<void> frame(WidgetTester tester) => tester.pump(const Duration(milliseconds: 8));
+  /// One frame of the world's, at its 60 a second, which runs its input
+  /// step.
+  Future<void> frame(WidgetTester tester) => tester.pump(const Duration(milliseconds: 17));
 
   ViewPoint at(double x, double y) => ViewPoint(x, y, width: 200, height: 100);
 
@@ -89,6 +90,18 @@ void main() {
     expect(taps.single.kind, FingerKind.touch);
     expect(heard, ['down touch', 'tap left x1', 'up']);
     expect(input().fingers, isEmpty);
+  });
+
+  testWidgets("a tap in a display frame that isn't the world's reaches the input in its next one", (tester) async {
+    await tester.pumpWidget(app(view()));
+    listen();
+    await frame(tester);
+    await tester.tapAt(corner + const Offset(50, 20));
+    // On a 120 Hz display, at the world's 60: this frame isn't one of its.
+    await tester.pump(const Duration(microseconds: 8333));
+    expect(heard, isEmpty, reason: 'not yet');
+    await tester.pump(const Duration(microseconds: 8333));
+    expect(heard, ['down touch', 'tap left x1', 'up'], reason: 'once, in the next frame of the world');
   });
 
   testWidgets('a drag past the slop, across frames; touches are fingers of their own', (tester) async {

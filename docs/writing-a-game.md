@@ -516,6 +516,7 @@ from:
 | `shadowSoftness` | hard | soft | softer |
 | `shadowDistance` | 40 m | 60 m | 100 m |
 | `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
+| `renderScale`: pixels drawn per pixel of the screen | 1 | 1 | 1 |
 
 When the game doesn't choose, the device picks a level: high on Apple's
 GPUs and desktops', low on Android phones (Mali, Adreno and the rest), on a
@@ -547,6 +548,12 @@ Quality chooseQuality(World world, Quality? chosen) {
 }
 ```
 
+- **Fewer pixels: `renderScale`**, as Unity's render scale. At 0.75 the
+  views draw about half the pixels and stretch the picture to fit: a
+  little softer, and much cheaper on a big screen (an iPhone 16 Pro Max is
+  1320 × 2868). Put it on the settings page beside the levels:
+  `world.quality = Quality.high.copyWith(renderScale: 0.75)`. A view's own
+  `FynkelView(resolutionScale:)` multiplies it, for one view (a minimap).
 - **A camera asks, the quality decides.** A camera's bloom and ambient
   occlusion (below) are drawn only where the quality has them on, so a
   cheaper quality for older phones can turn bloom off without touching
@@ -822,6 +829,31 @@ Each object and behaviour gets these calls, in the order they were added:
 A frame goes: input → starts → fixed steps → updates → routines and
 tweens → late updates → cameras → drawing. This order is fixed and
 tested.
+
+**The frame rate** is at most `world.targetFrameRate` frames a second, as
+Unity's `Application.targetFrameRate`: 60 unless the game sets it, on
+every device. A game that wants more sets 120 (or 0, for every frame the
+display shows); one that wants less, 30. On a 120 Hz screen, 60 is every
+other display frame: the world isn't updated and nothing is drawn in the
+others, and taps and keys wait for the next frame of the world's. Change
+it at any time, from a settings page for example:
+
+```dart
+/// The settings page's choice: smoother (the most a ProMotion screen
+/// shows), or the default, which keeps the phone cool.
+void chooseFrameRate(World world, {required bool smoother}) {
+  world.targetFrameRate = smoother ? 120 : 60;
+}
+```
+
+60 is the default because more costs the phone heat: Sheepdog at 120 on
+an iPhone 16 Pro Max made it hot enough within a minute that iOS slowed it
+to about 80; at 60 it holds 60 for 10 minutes and more
+([the report](iphone-heat-report.md)). For 120 on an iPhone, the app's
+`ios/Runner/Info.plist` needs `CADisableMinimumFrameDurationOnPhone`
+(`true`), as every example has (`flutter create` leaves it out): without
+it, iOS keeps the app's screen at 60, whatever the game asks. Behind a menu, a paused game draws less still
+(`pauseWhenCovered`, §15).
 
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A
@@ -2072,7 +2104,9 @@ saving there run, and then the engine's memory is freed.
 `Navigator.push`, `PopScope`. Whatever covers the view's page pauses the
 game (`world.paused`), so it hears no taps or keys, and closing the last
 one goes on. The game stays alive behind it: its objects, routines and
-score wait where they were. A game that was paused already stays paused.
+score wait where they were, and, as nothing in it moves, it's drawn only
+10 times a second, which keeps a phone cool behind a menu. A game that was
+paused already stays paused.
 For a game that runs on under a see-through pop-up, give
 `FynkelView(pauseWhenCovered: false)`.
 
@@ -2555,6 +2589,9 @@ What keeps a game fast:
 
 - **Every speed times `time.delta`.** Then the game is the same at 60 and
   120 fps.
+- **60 frames a second is plenty** for most games, and keeps a phone cool
+  (§6). Ask for 120 only where it shows, a fast game, and measure it for
+  10 minutes, not one: a phone slows itself down when it's hot.
 - **Many alike things, one manager.** coins moves its 300 motes from one
   object's `onUpdate` (`Swarm`): one call a frame, not 300.
 - **What the camera can't see costs the GPU nothing.** An object wholly
@@ -2587,12 +2624,15 @@ What keeps a game fast:
   the game's frames.
 - **A cheaper quality for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
-  screen; or take from a level only what costs most there, bloom first
-  (§5).
+  screen; or take from a level only what costs most there, bloom first,
+  or draw fewer pixels (`renderScale`) (§5).
 - **Measure** on the slowest phone you support. Each example has a
   `tool/measured.dart` for package:fynkel_measure's tool (a
   dev_dependency, so the game itself doesn't carry it), which gives the
-  frame rate and memory: `dart run fynkel_measure:measure rate`.
+  frame rate and memory: `dart run fynkel_measure:measure rate`, at the
+  game's own frame rate (`--define FYNKEL_FRAME_RATE=0` for as fast as it
+  goes). On an iPhone or a Mac it gives the thermal state too, and each
+  minute's frame rate with `--seconds 600`.
 
 ## 19. What isn't there yet
 
@@ -2622,6 +2662,8 @@ What keeps a game fast:
 | `FixedUpdate`, `Time.fixedDeltaTime` | `onFixedUpdate`, `time.fixedDelta` |
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
 | `Time.timeScale = 0` for a pause menu | `world.paused = true`: time and input stop |
+| `Application.targetFrameRate` | `world.targetFrameRate` (60 unless set) |
+| The render scale (URP), `QualitySettings` | `Quality.renderScale`, `world.quality` |
 | On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | a Flutter widget calling `input.setAxis2` and `action.press()`/`release()` |
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `StopAllCoroutines`, `yield return new WaitForSeconds(1)` | `startRoutine(() async {...})`, `stopAllRoutines()`, `await wait(1)` |
@@ -2701,6 +2743,16 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **60 frames a second unless the game asks for more** (2026-10-17):
+  - The world runs and draws at most `world.targetFrameRate` (60) frames
+    a second; it ran at the display's rate, 120 on a ProMotion iPhone or
+    Mac. Set `world.targetFrameRate = 120` (or 0) for that (§6).
+  - `FynkelView.onFrame` comes once a frame of the world's, not once a
+    display frame. A widget test that pumps 8 ms frames sees every other
+    one: pump 17 ms, or set the world's `targetFrameRate = 0`.
+  - A view covered by a page or a dialog that paused the game draws 10
+    frames a second (§15).
 
 - **Android draws straight to the screen** (2026-10-16):
   - With the activity a `FynkelActivity` (§1), a view draws to the
