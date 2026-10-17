@@ -1247,14 +1247,17 @@ FyStatus fy_animator_parts(const struct FyWorld *world,
                            size_t cap,
                            size_t *out_count);
 
-// Advances every animator by `dt` seconds and poses its model's parts,
-// once a frame before it's drawn. Writes how many events the reporting
-// animators gave to `out_count`; `fy_animation_events_get` reads them.
+// Advances every animator by the seconds at `dt` and poses its model's
+// parts, once a frame before it's drawn. Writes how many events the
+// reporting animators gave to `out_count`; `fy_animation_events_get`
+// reads them. `dt` is read through a pointer: a double passed to a call
+// is boxed, each frame, by Dart's JIT.
 //
 // # Safety
 //
-// `world` is null or live; `out_count` is null or writable.
-FyStatus fy_world_animate(const struct FyWorld *world, float dt, size_t *out_count);
+// `world` is null or live; `dt` is null or readable; `out_count` is null
+// or writable.
+FyStatus fy_world_animate(const struct FyWorld *world, const float *dt, size_t *out_count);
 
 // The last `fy_world_animate`'s events, as `fy_children_get` writes ids:
 // all of them when they fit in `cap`, and their number to `out_count`.

@@ -420,7 +420,7 @@ fn a_model_copys_clips_play_through_the_c_interface() {
         assert_eq!(count, 2);
         ok(fy_animator_report_set(w, root, true));
         ok(fy_animator_play(w, root, 0, 0.0, true));
-        ok(fy_world_animate(w, 0.5, &mut count));
+        ok(fy_world_animate(w, &0.5, &mut count));
         assert_eq!(count, 1);
         // Too small a buffer: just the count.
         let mut seen = 0;

@@ -165,6 +165,7 @@ final class World implements Finalizable {
     _reparented.clear();
     _unsent.clear();
     _animators.clear();
+    _animatorList.clear();
     _assets.clear();
     _free(owned, null);
     // What a disposed world reports from here goes to the zone.
@@ -259,8 +260,10 @@ final class World implements Finalizable {
   final _compact = <GameObject>[];
 
   // The animators the game has asked for ([GameObject.animator]), by
-  // their model copies' ids.
+  // their model copies' ids, and in a list, which a frame goes through
+  // without making an iterator.
   final _animators = <int, Animator>{};
+  final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
   // given a new parent (systems.dart).

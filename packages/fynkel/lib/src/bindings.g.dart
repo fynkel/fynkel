@@ -457,8 +457,8 @@ external int fy_view_resize(ffi.Pointer<FyView> view, int width, int height);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<FyViewStats>)>(isLeaf: true)
 external int fy_view_stats(ffi.Pointer<FyView> view, ffi.Pointer<FyViewStats> out);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Float, ffi.Pointer<ffi.Size>)>(isLeaf: true)
-external int fy_world_animate(ffi.Pointer<FyWorld> world, double dt, ffi.Pointer<ffi.Size> out_count);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_world_animate(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Float> dt, ffi.Pointer<ffi.Size> out_count);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyFog>)>(isLeaf: true)
 external int fy_world_fog_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyFog> fog);

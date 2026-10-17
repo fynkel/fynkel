@@ -2720,18 +2720,21 @@ pub unsafe extern "C" fn fy_animator_parts(
     })
 }
 
-/// Advances every animator by `dt` seconds and poses its model's parts,
-/// once a frame before it's drawn. Writes how many events the reporting
-/// animators gave to `out_count`; `fy_animation_events_get` reads them.
+/// Advances every animator by the seconds at `dt` and poses its model's
+/// parts, once a frame before it's drawn. Writes how many events the
+/// reporting animators gave to `out_count`; `fy_animation_events_get`
+/// reads them. `dt` is read through a pointer: a double passed to a call
+/// is boxed, each frame, by Dart's JIT.
 ///
 /// # Safety
 ///
-/// `world` is null or live; `out_count` is null or writable.
+/// `world` is null or live; `dt` is null or readable; `out_count` is null
+/// or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_world_animate(world: *const FyWorld, dt: f32, out_count: *mut usize) -> FyStatus {
+pub unsafe extern "C" fn fy_world_animate(world: *const FyWorld, dt: *const f32, out_count: *mut usize) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
-        let world = unsafe { handle(world, "world") }?;
+        let (world, dt) = unsafe { (handle(world, "world")?, read(dt, "dt")?) };
         let mut inner = world.lock()?;
         let mut events = world.events.lock().unwrap_or_else(PoisonError::into_inner);
         events.clear();

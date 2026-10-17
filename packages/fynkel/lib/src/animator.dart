@@ -205,6 +205,7 @@ extension _Animate on World {
   Animator _addAnimator(GameObject object, Model model) {
     final animator = Animator._(object, model);
     _animators[object.id] = animator;
+    _animatorList.add(animator);
     return animator;
   }
 
@@ -214,12 +215,18 @@ extension _Animate on World {
   void _animate() {
     if (_animators.isEmpty) return;
     _sendTransforms();
-    check(fy_world_animate(pointer, time.delta, scratch.count));
+    // The field, through native memory: the getter's double and one passed
+    // to a call are each boxed, every frame, in the JIT.
+    scratch.number.value = time._delta;
+    check(fy_world_animate(pointer, scratch.number, scratch.count));
     final events = scratch.count.value;
     final version = ++_transformVersion;
-    for (final animator in _animators.values) {
+    for (var i = 0; i < _animatorList.length; i++) {
+      final animator = _animatorList[i];
       if (!animator._moving) continue;
-      for (final part in animator._parts) {
+      final parts = animator._parts;
+      for (var j = 0; j < parts.length; j++) {
+        final part = parts[j];
         if (part._gone) continue;
         part
           .._transform = null
