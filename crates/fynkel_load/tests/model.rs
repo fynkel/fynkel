@@ -3,7 +3,7 @@
 
 use std::path::PathBuf;
 
-use fynkel_load::{ModelData, ModelError, Part};
+use fynkel_load::{Interpolation, ModelData, ModelError, Part, Property};
 use serde_json::{Value, json};
 
 fn sample(name: &str) -> Vec<u8> {
@@ -136,7 +136,7 @@ fn a_node_with_several_primitives_has_several_parts_and_shared_meshes_are_read_o
     // Both wheel nodes use the one "Wheels" mesh.
     assert_eq!(node("Wheels").parts, node("Wheels.001").parts);
     assert_eq!(model.meshes().len(), 4);
-    assert_eq!(model.warnings(), ["animations are skipped; the model shows its rest pose"]);
+    assert!(model.warnings().is_empty(), "{:?}", model.warnings());
 }
 
 #[test]
@@ -165,13 +165,7 @@ fn a_hundred_node_model_keeps_its_tree_and_reads_each_mesh_once() {
 #[test]
 fn what_the_engine_cant_draw_is_skipped_with_one_warning_per_kind() {
     let fox = load("Fox.glb");
-    assert_eq!(
-        fox.warnings(),
-        [
-            "animations are skipped; the model shows its rest pose",
-            "skins are skipped; skinned meshes show their bind pose"
-        ]
-    );
+    assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
     // The skinned mesh is still there, in its bind pose.
     assert_eq!(fox.nodes().iter().filter(|n| !n.parts.is_empty()).count(), 1);
     assert_eq!(
@@ -387,4 +381,84 @@ fn a_quantized_mesh_reads_as_floats() {
     let first = corners.iter().find(|(p, ..)| p[0] < 0.0 && p[2] < 0.0).expect("the (-1, -1) corner");
     assert_eq!(first.2, [0.0, 0.0]);
     assert!(model.warnings().is_empty(), "{:?}", model.warnings());
+}
+
+#[test]
+fn animations_become_clips_on_the_models_nodes() {
+    let truck = load("CesiumMilkTruck.glb");
+    let [wheels] = truck.clips() else { panic!("{:?}", truck.clips().len()) };
+    assert_eq!((wheels.name.as_str(), wheels.length), ("Wheels", 1.25));
+    let moved: Vec<&str> = wheels.channels.iter().map(|c| truck.nodes()[c.node].name.as_str()).collect();
+    assert_eq!(moved, ["Wheels", "Wheels.001"]);
+    let turn = &wheels.channels[0];
+    assert_eq!((turn.property, turn.interpolation, turn.times.len()), (Property::Rotation, Interpolation::Linear, 31));
+    // The file's second key, at 1/24 s, read as it is.
+    assert!((turn.times[1] - 1.0 / 24.0).abs() < 1e-6);
+    let key = turn.sample(turn.times[1]);
+    assert!((key[1] + 0.189_215_38).abs() < 1e-5 && (key[3] - 0.981_935_6).abs() < 1e-5, "{key:?}");
+
+    let fox = load("Fox.glb");
+    let names: Vec<&str> = fox.clips().iter().map(|c| c.name.as_str()).collect();
+    assert_eq!(names, ["Survey", "Walk", "Run"]);
+}
+
+#[test]
+fn the_garden_characters_clips_move_its_parts() {
+    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../examples/garden/assets/character.glb");
+    let model = ModelData::from_glb(&std::fs::read(path).unwrap()).unwrap();
+    assert_eq!(model.clips().len(), 27);
+    let clip = |name: &str| model.clips().iter().find(|c| c.name == name).unwrap();
+    let parts = |name: &str| {
+        let mut parts: Vec<(&str, Property)> =
+            clip(name).channels.iter().map(|c| (model.nodes()[c.node].name.as_str(), c.property)).collect();
+        parts.sort_by_key(|p| p.0);
+        parts
+    };
+    assert_eq!(
+        parts("idle"),
+        [
+            ("arm-left", Property::Rotation),
+            ("arm-right", Property::Rotation),
+            ("head", Property::Rotation),
+            ("torso", Property::Rotation)
+        ]
+    );
+    assert!((clip("idle").length - 4.0 / 3.0).abs() < 1e-3, "{}", clip("idle").length);
+    assert!(parts("walk").contains(&("root", Property::Translation)));
+    assert_eq!(model.warnings(), ["unlit materials are drawn lit"]);
+}
+
+#[test]
+fn a_clips_unusable_channels_are_skipped_with_a_warning() {
+    // Morph weights, and keys that don't match their times (cubic needs
+    // three values a key): the clip keeps the other channel.
+    let model = edited("CesiumMilkTruck.glb", |json| {
+        json["animations"][0]["channels"][0]["target"]["path"] = json!("weights");
+        json["animations"][0]["samplers"][1]["interpolation"] = json!("CUBICSPLINE");
+        json["animations"][0]["channels"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"sampler": 0, "target": {"node": 0, "path": "scale"}}));
+    })
+    .unwrap();
+    let clip = &model.clips()[0];
+    assert_eq!(clip.channels.len(), 0);
+    assert_eq!(
+        model.warnings(),
+        [
+            "animated morph target weights are skipped",
+            "animation 'Wheels' has a channel with broken keys; it's skipped"
+        ]
+    );
+    // A STEP clip holds each key.
+    let step = edited("CesiumMilkTruck.glb", |json| {
+        json["animations"][0]["samplers"][0]["interpolation"] = json!("STEP");
+        json["animations"][0]["name"] = json!("");
+    })
+    .unwrap();
+    let clip = &step.clips()[0];
+    assert_eq!(clip.name, "animation 0");
+    let turn = &clip.channels[0];
+    assert_eq!(turn.interpolation, Interpolation::Step);
+    assert_eq!(turn.sample(turn.times[1] * 0.99), turn.sample(0.0));
 }

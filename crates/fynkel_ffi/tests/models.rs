@@ -277,8 +277,9 @@ fn tower_matches_its_golden() {
 #[test]
 fn a_model_reports_what_it_has_and_what_was_skipped() {
     let model = Model::load(sample("CesiumMilkTruck.glb")).unwrap();
-    assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 1 });
-    assert_eq!(model.warnings(), ["animations are skipped; the model shows its rest pose"]);
+    assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 0 });
+    let fox = Model::load(sample("Fox.glb")).unwrap();
+    assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
     let name = |i| {
         let mut buf = [0u8; 32];
         let mut len = 0;

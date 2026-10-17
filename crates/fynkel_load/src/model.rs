@@ -1,7 +1,9 @@
 //! `.glb` files (binary glTF 2.0) into [`ModelData`]: meshes, images,
 //! materials and the node tree, as plain values (`docs/stage-2.md` §3.3).
 //!
-//! What the engine can't draw yet (skins, animations, morph targets,
+//! Animations come as [`ClipData`], one per glTF animation.
+//!
+//! What the engine can't draw yet (skins, morph targets,
 //! cameras, lights, see-through materials, ...) is skipped with one
 //! readable warning per kind, never an error. A file is refused only when
 //! it can't be read at all, or needs an extension this reader doesn't
@@ -12,10 +14,11 @@ use std::fmt;
 use std::sync::Arc;
 
 use fynkel_mesh::{MeshData, MeshError, MeshParts};
-use gltf::accessor::{self, DataType, Item};
+use gltf::accessor::{self, DataType, Dimensions, Item};
 use gltf::mesh::Mode;
 use gltf::texture::{MagFilter, MinFilter, WrappingMode};
 
+use crate::clip::{ChannelData, ClipData, Interpolation, Property};
 use crate::{ImageData, ImageError};
 
 /// Extensions this reader understands, so a file may require them.
@@ -36,6 +39,7 @@ pub struct ModelData {
     materials: Vec<MaterialData>,
     nodes: Vec<NodeData>,
     roots: Vec<usize>,
+    clips: Vec<Arc<ClipData>>,
     warnings: Vec<String>,
 }
 
@@ -154,6 +158,12 @@ impl ModelData {
     /// The scene's top-level nodes.
     pub fn roots(&self) -> &[usize] {
         &self.roots
+    }
+
+    /// The model's animations, in the file's order. Shared: every copy of
+    /// the model plays the same ones.
+    pub fn clips(&self) -> &[Arc<ClipData>] {
+        &self.clips
     }
 
     /// What was skipped, one line per kind, in the order met.
@@ -284,9 +294,6 @@ impl<'a> Reader<'a> {
                 other => self.warn(format!("the glTF extension {other} isn't supported; the model is read without it")),
             }
         }
-        if document.animations().len() > 0 {
-            self.warn("animations are skipped; the model shows its rest pose");
-        }
         if document.skins().len() > 0 {
             self.warn("skins are skipped; skinned meshes show their bind pose");
         }
@@ -334,7 +341,83 @@ impl<'a> Reader<'a> {
             let children: Vec<_> = node.children().collect();
             stack.extend(children.into_iter().rev().map(|c| (c, Some(index))));
         }
+        for animation in document.animations() {
+            let clip = self.clip(&animation, &ours);
+            self.model.clips.push(Arc::new(clip));
+        }
         Ok(())
+    }
+
+    /// A glTF animation as a clip. A channel that can't be used (morph
+    /// weights, a node outside the tree, broken keys) is left out with a
+    /// warning; the rest of the clip plays.
+    fn clip(&mut self, animation: &gltf::Animation, ours: &HashMap<usize, usize>) -> ClipData {
+        use gltf::animation::{Interpolation as Gltf, Property as Target};
+        let name = match animation.name() {
+            Some(name) if !name.is_empty() => name.to_owned(),
+            _ => format!("animation {}", animation.index()),
+        };
+        let mut channels = Vec::new();
+        for channel in animation.channels() {
+            let target = channel.target();
+            let property = match target.property() {
+                Target::Translation => Property::Translation,
+                Target::Rotation => Property::Rotation,
+                Target::Scale => Property::Scale,
+                Target::MorphTargetWeights => {
+                    self.warn("animated morph target weights are skipped");
+                    continue;
+                }
+            };
+            let Some(&node) = ours.get(&target.node().index()) else {
+                self.warn("an animation moves a node that isn't in the scene; that channel is skipped");
+                continue;
+            };
+            let sampler = channel.sampler();
+            let interpolation = match sampler.interpolation() {
+                Gltf::Step => Interpolation::Step,
+                Gltf::Linear => Interpolation::Linear,
+                Gltf::CubicSpline => Interpolation::Cubic,
+            };
+            // Times are plain floats. Each read checks the accessor's shape
+            // first: gltf panics on a VEC4 read as a VEC3.
+            let (input, output) = (sampler.input(), sampler.output());
+            let shape = if property == Property::Rotation { Dimensions::Vec4 } else { Dimensions::Vec3 };
+            let times: Option<Vec<f32>> = match (input.data_type(), input.dimensions()) {
+                (DataType::F32, Dimensions::Scalar) => {
+                    accessor::Iter::<f32>::new(input, |b: gltf::Buffer<'_>| match b.source() {
+                        gltf::buffer::Source::Bin => Some(self.blob),
+                        gltf::buffer::Source::Uri(_) => None,
+                    })
+                    .map(|t| t.collect())
+                }
+                _ => None,
+            };
+            let values: Option<Vec<[f32; 4]>> = match property {
+                _ if output.dimensions() != shape => None,
+                Property::Rotation => floats::<4>(output, self.blob),
+                _ => floats::<3>(output, self.blob).map(|v| v.into_iter().map(|[x, y, z]| [x, y, z, 0.0]).collect()),
+            };
+            let per_key = if interpolation == Interpolation::Cubic { 3 } else { 1 };
+            let usable = |times: &[f32], values: &[[f32; 4]]| {
+                !times.is_empty()
+                    && values.len() == times.len() * per_key
+                    && times.iter().all(|t| t.is_finite() && *t >= 0.0)
+                    && times.windows(2).all(|w| w[0] <= w[1])
+                    && values.iter().flatten().all(|v| v.is_finite())
+            };
+            match (times, values) {
+                (Some(times), Some(mut values)) if usable(&times, &values) => {
+                    if property == Property::Rotation && interpolation != Interpolation::Cubic {
+                        values.iter_mut().for_each(|q| *q = crate::clip::normalize(*q));
+                    }
+                    channels.push(ChannelData { node, property, interpolation, times, values });
+                }
+                _ => self.warn(format!("animation '{name}' has a channel with broken keys; it's skipped")),
+            }
+        }
+        let length = channels.iter().filter_map(|c| c.times.last().copied()).fold(0.0, f32::max);
+        ClipData { name, length, channels }
     }
 
     fn image_bytes(&self, image: &gltf::Image) -> Result<&'a [u8], ModelError> {
