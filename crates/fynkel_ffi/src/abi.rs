@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 31;
+pub const FY_ABI_VERSION: u32 = 32;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -2549,15 +2549,17 @@ pub unsafe extern "C" fn fy_model_spawn(
 
 // --- Animation ---------------------------------------------------------------
 
-/// What an animator plays, from `fy_animator_get`.
+/// What an animator's layer plays, from `fy_animator_get`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FyAnimatorState {
-    /// The clip last played or faded to, or -1 for none.
+    /// The clip last played or faded to, or -1 for none or a blend.
     pub clip: i32,
-    /// Seconds into it.
+    /// The blend last played or faded to, or -1 for none or a clip.
+    pub blend: i32,
+    /// Seconds into it; for a blend, into a round of it.
     pub time: f32,
-    /// Its length in seconds.
+    /// Its length in seconds; for a blend, a round's at its number now.
     pub length: f32,
     pub speed: f32,
 }
@@ -2577,11 +2579,12 @@ pub struct FyAnimationEvent {
 }
 
 /// Plays clip `clip` of the model copy `root` (a model's index, as
-/// `fy_model_clip`) from its start: at once in place of what plays, with
-/// `fade` 0, or fading in over `fade` seconds as the rest fade out. Fading
-/// to the clip last played or faded to changes nothing; to one fading out,
-/// it fades back in from where it is. An object that isn't a model
-/// copy with clips is `FY_STATUS_NO_COMPONENT`.
+/// `fy_model_clip`) on its layer `layer` (0 the base, up to 7) from its
+/// start: at once in place of what the layer plays, with `fade` 0, or
+/// fading in over `fade` seconds as the rest fade out, from the pose
+/// shown. Fading to the motion last played or faded to changes nothing;
+/// to one fading out, it fades back in from where it is. An object that
+/// isn't a model copy with clips is `FY_STATUS_NO_COMPONENT`.
 ///
 /// # Safety
 ///
@@ -2590,6 +2593,7 @@ pub struct FyAnimationEvent {
 pub unsafe extern "C" fn fy_animator_play(
     world: *const FyWorld,
     root: u64,
+    layer: u32,
     clip: u32,
     fade: f32,
     looping: bool,
@@ -2597,21 +2601,115 @@ pub unsafe extern "C" fn fy_animator_play(
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        Ok(world.lock()?.play(object(root)?, clip, fade, looping)?)
+        Ok(world.lock()?.play_on(object(root)?, layer, fynkel_world::Motion::Clip(clip), fade, looping)?)
     })
 }
 
-/// Stops every clip of `root`'s; its parts keep the pose they're in.
+/// Makes a blend of `root`'s clips: `count` clips, each at its threshold
+/// (any order), mixed by the number `fy_animator_blend` gives, their pace
+/// kept together. Writes its number to `out`; an animator keeps up to 64.
+///
+/// # Safety
+///
+/// `world` is null or live; `clips` and `thresholds` are null or valid for
+/// `count` reads; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_blend_define(
+    world: *const FyWorld,
+    root: u64,
+    clips: *const u32,
+    thresholds: *const f32,
+    count: usize,
+    out: *mut u32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let pairs: Vec<(u32, f32)> = if count == 0 {
+            Vec::new()
+        } else {
+            // SAFETY: per this function's contract.
+            let (clips, thresholds) = unsafe {
+                (
+                    std::slice::from_raw_parts(handle(clips, "clips")?, count),
+                    std::slice::from_raw_parts(handle(thresholds, "thresholds")?, count),
+                )
+            };
+            clips.iter().copied().zip(thresholds.iter().copied()).collect()
+        };
+        let blend = world.lock()?.define_blend(object(root)?, &pairs)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, blend, "out") }
+    })
+}
+
+/// Sets the number blend `blend` mixes its clips by, and plays it on
+/// `root`'s layer `layer` as `fy_animator_play` plays a clip (always
+/// looping): a game calls it each frame with the speed, and a fade only
+/// starts when the layer played something else.
 ///
 /// # Safety
 ///
 /// `world` is null or live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_stop(world: *const FyWorld, root: u64) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_blend(
+    world: *const FyWorld,
+    root: u64,
+    layer: u32,
+    blend: u32,
+    at: f32,
+    fade: f32,
+) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        Ok(world.lock()?.stop(object(root)?)?)
+        let mut world = world.lock()?;
+        let root = object(root)?;
+        world.set_blend(root, blend, at)?;
+        Ok(world.play_on(root, layer, fynkel_world::Motion::Blend(blend), fade, true)?)
+    })
+}
+
+/// Stops what `root`'s layer `layer` plays: at once with `fade` 0, its
+/// parts keeping the pose they're in, or fading out over `fade` seconds
+/// to what's underneath.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_stop(world: *const FyWorld, root: u64, layer: u32, fade: f32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.stop_on(object(root)?, layer, fade)?)
+    })
+}
+
+/// Sets `root`'s layer `layer`: the part it moves from, with everything
+/// below it (`mask`, `mask_len` UTF-8 bytes; empty for the whole model),
+/// whether it adds to what's underneath rather than replacing it, and how
+/// much of it shows, 0 to 1. The base layer, 0, takes the whole model, in
+/// place, at 1.
+///
+/// # Safety
+///
+/// `world` is null or live; `mask` is null or valid for `mask_len` reads.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_layer_set(
+    world: *const FyWorld,
+    root: u64,
+    layer: u32,
+    mask: *const u8,
+    mask_len: usize,
+    additive: bool,
+    weight: f32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, mask) = unsafe { (handle(world, "world")?, utf8(mask, mask_len, "mask")?) };
+        let mask = if mask.is_empty() { None } else { Some(mask) };
+        Ok(world.lock()?.set_animation_layer(object(root)?, layer, mask, additive, weight)?)
     })
 }
 
@@ -2629,17 +2727,18 @@ pub unsafe extern "C" fn fy_animator_speed_set(world: *const FyWorld, root: u64,
     })
 }
 
-/// Moves `root`'s current clip to `time` seconds, kept within its length.
+/// Moves the current motion of `root`'s layer `layer` to `time` seconds,
+/// kept within its length.
 ///
 /// # Safety
 ///
 /// `world` is null or live.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_time_set(world: *const FyWorld, root: u64, time: f32) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_time_set(world: *const FyWorld, root: u64, layer: u32, time: f32) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        Ok(world.lock()?.set_animation_time(object(root)?, time)?)
+        Ok(world.lock()?.set_animation_time_on(object(root)?, layer, time)?)
     })
 }
 
@@ -2657,19 +2756,30 @@ pub unsafe extern "C" fn fy_animator_report_set(world: *const FyWorld, root: u64
     })
 }
 
-/// Writes what `root` plays to `out`.
+/// Writes what `root`'s layer `layer` plays to `out`.
 ///
 /// # Safety
 ///
 /// `world` is null or live; `out` is null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_get(world: *const FyWorld, root: u64, out: *mut FyAnimatorState) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_get(
+    world: *const FyWorld,
+    root: u64,
+    layer: u32,
+    out: *mut FyAnimatorState,
+) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        let state = world.lock()?.animator_state(object(root)?)?;
+        let state = world.lock()?.animator_state_on(object(root)?, layer)?;
+        let (clip, blend) = match state.motion {
+            Some(fynkel_world::Motion::Clip(c)) => (c as i32, -1),
+            Some(fynkel_world::Motion::Blend(b)) => (-1, b as i32),
+            None => (-1, -1),
+        };
         let state = FyAnimatorState {
-            clip: state.clip.map_or(-1, |c| c as i32),
+            clip,
+            blend,
             time: state.time,
             length: state.length,
             speed: state.speed,
@@ -2679,18 +2789,25 @@ pub unsafe extern "C" fn fy_animator_get(world: *const FyWorld, root: u64, out: 
     })
 }
 
-/// Writes clip `clip`'s weight in `root`'s pose to `out`: 1 alone, 0 not
-/// playing, between while it fades.
+/// Writes clip `clip`'s weight in the mix of `root`'s layer `layer` to
+/// `out`: 1 alone, 0 not playing, between while it fades or shares a
+/// blend.
 ///
 /// # Safety
 ///
 /// `world` is null or live; `out` is null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_weight(world: *const FyWorld, root: u64, clip: u32, out: *mut f32) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_weight(
+    world: *const FyWorld,
+    root: u64,
+    layer: u32,
+    clip: u32,
+    out: *mut f32,
+) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
-        let weight = world.lock()?.clip_weight(object(root)?, clip)?;
+        let weight = world.lock()?.clip_weight_on(object(root)?, layer, clip)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, weight, "out") }
     })

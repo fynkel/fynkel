@@ -295,7 +295,7 @@ fn render_knight(pose: Option<(&str, f32)>, level: u32) -> fynkel_golden::Image 
                 })
                 .expect("the clip");
             let mut events = 0;
-            ok(fy_animator_play(w, root, clip as u32, 0.0, false));
+            ok(fy_animator_play(w, root, 0, clip as u32, 0.0, false));
             ok(fy_world_animate(w, &time, &mut events));
         }
 
@@ -500,7 +500,7 @@ fn a_model_copys_clips_play_through_the_c_interface() {
         ok(fy_animator_parts(w, root, parts.as_mut_ptr(), parts.len(), &mut count));
         assert_eq!(count, 2);
         ok(fy_animator_report_set(w, root, true));
-        ok(fy_animator_play(w, root, 0, 0.0, true));
+        ok(fy_animator_play(w, root, 0, 0, 0.0, true));
         ok(fy_world_animate(w, &0.5, &mut count));
         assert_eq!(count, 1);
         // Too small a buffer: just the count.
@@ -511,19 +511,44 @@ fn a_model_copys_clips_play_through_the_c_interface() {
         ok(fy_animation_events_get(w, events.as_mut_ptr(), events.len(), &mut seen));
         assert_eq!(events[0], FyAnimationEvent { root, clip: 0, loops: 0, from: 0.0, to: 0.5, ended: false });
         ok(fy_animator_speed_set(w, root, 2.0));
-        ok(fy_animator_get(w, root, &mut state));
-        assert_eq!(state, FyAnimatorState { clip: 0, time: 0.5, length: 1.25, speed: 2.0 });
+        ok(fy_animator_get(w, root, 0, &mut state));
+        assert_eq!(state, FyAnimatorState { clip: 0, blend: -1, time: 0.5, length: 1.25, speed: 2.0 });
         let mut weight = 0.0;
-        ok(fy_animator_weight(w, root, 0, &mut weight));
+        ok(fy_animator_weight(w, root, 0, 0, &mut weight));
         assert_eq!(weight, 1.0);
-        ok(fy_animator_stop(w, root));
-        ok(fy_animator_get(w, root, &mut state));
+        ok(fy_animator_stop(w, root, 0, 0.0));
+        ok(fy_animator_get(w, root, 0, &mut state));
         assert_eq!(state.clip, -1);
-        // Clips the model doesn't have, and objects that aren't a copy.
-        assert_eq!(fy_animator_play(w, root, 1, 0.0, true), FyStatus::InvalidValue);
+
+        // A blend of the one clip with itself, on a layer from a wheel.
+        let mut blend = 0;
+        ok(fy_animator_blend_define(w, root, [0, 0].as_ptr(), [1.0, 0.0].as_ptr(), 2, &mut blend));
+        assert_eq!(blend, 0);
+        let mut part_name = [0u8; 64];
+        let mut part_len = 0;
+        ok(fy_name_get(w, parts[0], part_name.as_mut_ptr(), part_name.len(), &mut part_len));
+        ok(fy_animator_layer_set(w, root, 2, part_name.as_ptr(), part_len, true, 0.5));
+        ok(fy_animator_blend(w, root, 2, blend, 0.5, 0.0));
+        ok(fy_animator_get(w, root, 2, &mut state));
+        assert_eq!((state.clip, state.blend, state.length), (-1, 0, 1.25));
+        ok(fy_animator_weight(w, root, 2, 0, &mut weight));
+        assert_eq!(weight, 1.0);
+        ok(fy_animator_time_set(w, root, 2, 0.25));
+        ok(fy_animator_get(w, root, 2, &mut state));
+        assert!((state.time - 0.25).abs() < 1e-6);
+        ok(fy_animator_stop(w, root, 2, 0.5));
+
+        // Clips, layers, masks and blends the model doesn't have, and
+        // objects that aren't a copy.
+        assert_eq!(fy_animator_play(w, root, 0, 1, 0.0, true), FyStatus::InvalidValue);
+        assert_eq!(fy_animator_play(w, root, 8, 0, 0.0, true), FyStatus::InvalidValue);
+        assert_eq!(fy_animator_layer_set(w, root, 1, b"tail".as_ptr(), 4, false, 1.0), FyStatus::InvalidValue);
+        assert_eq!(fy_animator_layer_set(w, root, 0, ptr::null(), 0, true, 1.0), FyStatus::InvalidValue);
+        assert_eq!(fy_animator_blend(w, root, 0, 3, 0.0, 0.0), FyStatus::InvalidValue);
+        assert_eq!(fy_animator_blend_define(w, root, ptr::null(), ptr::null(), 0, &mut blend), FyStatus::InvalidValue);
         let mut plain = 0;
         ok(fy_spawn(w, &mut plain));
-        assert_eq!(fy_animator_play(w, plain, 0, 0.0, true), FyStatus::NoComponent);
+        assert_eq!(fy_animator_play(w, plain, 0, 0, 0.0, true), FyStatus::NoComponent);
         assert_eq!(fy_animator_speed_set(w, root, f32::NAN), FyStatus::InvalidValue);
     }
 }
