@@ -221,5 +221,5 @@ say otherwise.
 - [x] Phase 1: clips, and models whose parts move (#120)
 - [x] Phase 2: skinned models (#121)
 - [x] Phase 3: blending (#122)
-- [x] Phase 4: many characters, and the measure (PR pending)
+- [x] Phase 4: many characters, and the measure (#124)
 - [ ] Phase 5: games, the guide, and the report
