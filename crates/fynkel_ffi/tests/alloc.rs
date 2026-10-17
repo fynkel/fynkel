@@ -113,7 +113,7 @@ fn walking_knights(world: &World) -> Knights {
                     &transform(at),
                     &mut root,
                 ));
-                ok(fy_animator_play(w, root, 0, walk, 0.0, true));
+                ok(fy_animator_play(w, root, 0, walk, &0.0, true));
                 let mask = b"upperarm.r";
                 ok(fy_animator_layer_set(w, root, 1, mask.as_ptr(), mask.len(), false, 0.8));
                 let blend = (i >= 2).then(|| {
@@ -143,12 +143,13 @@ fn knights_change_their_minds(world: &World, knights: &Knights, frame: u32) {
         // SAFETY: a live world.
         unsafe {
             if let Some(blend) = blend {
-                ok(fy_animator_blend(world.0, root, 0, blend, (frame as f32 * 0.1).sin() * 1.5 + 1.5, 0.2));
+                let at = [(frame as f32 * 0.1).sin() * 1.5 + 1.5, 0.2];
+                ok(fy_animator_blend(world.0, root, 0, blend, at.as_ptr()));
             }
             if frame % 3 == 0 {
-                ok(fy_animator_play(world.0, root, 1, knights.cheer, 0.2, true));
+                ok(fy_animator_play(world.0, root, 1, knights.cheer, &0.2, true));
             } else if frame % 3 == 1 {
-                ok(fy_animator_stop(world.0, root, 1, 0.2));
+                ok(fy_animator_stop(world.0, root, 1, &0.2));
             }
         }
     }

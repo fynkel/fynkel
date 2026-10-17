@@ -2584,23 +2584,25 @@ pub struct FyAnimationEvent {
 /// fading in over `fade` seconds as the rest fade out, from the pose
 /// shown. Fading to the motion last played or faded to changes nothing;
 /// to one fading out, it fades back in from where it is. An object that
-/// isn't a model copy with clips is `FY_STATUS_NO_COMPONENT`.
+/// isn't a model copy with clips is `FY_STATUS_NO_COMPONENT`. `fade` is
+/// read through a pointer, as `fy_world_animate`'s `dt`: a game may call
+/// it each frame.
 ///
 /// # Safety
 ///
-/// `world` is null or live.
+/// `world` is null or live; `fade` is null or readable.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_animator_play(
     world: *const FyWorld,
     root: u64,
     layer: u32,
     clip: u32,
-    fade: f32,
+    fade: *const f32,
     looping: bool,
 ) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
-        let world = unsafe { handle(world, "world") }?;
+        let (world, fade) = unsafe { (handle(world, "world")?, read(fade, "fade")?) };
         Ok(world.lock()?.play_on(object(root)?, layer, fynkel_world::Motion::Clip(clip), fade, looping)?)
     })
 }
@@ -2643,26 +2645,27 @@ pub unsafe extern "C" fn fy_animator_blend_define(
     })
 }
 
-/// Sets the number blend `blend` mixes its clips by, and plays it on
-/// `root`'s layer `layer` as `fy_animator_play` plays a clip (always
-/// looping): a game calls it each frame with the speed, and a fade only
-/// starts when the layer played something else.
+/// Sets the number blend `blend` mixes its clips by, `at[0]`, and plays
+/// it on `root`'s layer `layer` as `fy_animator_play` plays a clip, with
+/// the fade `at[1]` (always looping): a game calls it each frame with the
+/// speed, and a fade only starts when the layer played something else.
 ///
 /// # Safety
 ///
-/// `world` is null or live.
+/// `world` is null or live; `at` is null or valid for 2 reads.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn fy_animator_blend(
     world: *const FyWorld,
     root: u64,
     layer: u32,
     blend: u32,
-    at: f32,
-    fade: f32,
+    at: *const f32,
 ) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
+        // SAFETY: per this function's contract: two floats.
+        let [at, fade] = unsafe { read(at.cast::<[f32; 2]>(), "at") }?;
         let mut world = world.lock()?;
         let root = object(root)?;
         world.set_blend(root, blend, at)?;
@@ -2672,16 +2675,16 @@ pub unsafe extern "C" fn fy_animator_blend(
 
 /// Stops what `root`'s layer `layer` plays: at once with `fade` 0, its
 /// parts keeping the pose they're in, or fading out over `fade` seconds
-/// to what's underneath.
+/// to what's underneath. `fade` is read through a pointer.
 ///
 /// # Safety
 ///
-/// `world` is null or live.
+/// `world` is null or live; `fade` is null or readable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_stop(world: *const FyWorld, root: u64, layer: u32, fade: f32) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_stop(world: *const FyWorld, root: u64, layer: u32, fade: *const f32) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
-        let world = unsafe { handle(world, "world") }?;
+        let (world, fade) = unsafe { (handle(world, "world")?, read(fade, "fade")?) };
         Ok(world.lock()?.stop_on(object(root)?, layer, fade)?)
     })
 }
@@ -2714,15 +2717,16 @@ pub unsafe extern "C" fn fy_animator_layer_set(
 }
 
 /// How fast `root`'s clips play: 1 as made, 0 paused, negative backwards.
+/// Read through a pointer: a game may set it each frame.
 ///
 /// # Safety
 ///
-/// `world` is null or live.
+/// `world` is null or live; `speed` is null or readable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fy_animator_speed_set(world: *const FyWorld, root: u64, speed: f32) -> FyStatus {
+pub unsafe extern "C" fn fy_animator_speed_set(world: *const FyWorld, root: u64, speed: *const f32) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
-        let world = unsafe { handle(world, "world") }?;
+        let (world, speed) = unsafe { (handle(world, "world")?, read(speed, "speed")?) };
         Ok(world.lock()?.set_animation_speed(object(root)?, speed)?)
     })
 }
