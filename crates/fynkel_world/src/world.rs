@@ -60,6 +60,8 @@ pub enum WorldError {
         clip: u32,
         count: u32,
     },
+    /// An animator's layer, blend or mask that can't be.
+    Animator(&'static str),
 }
 
 impl std::fmt::Display for WorldError {
@@ -84,6 +86,7 @@ impl std::fmt::Display for WorldError {
             WorldError::NoClip { object, clip, count } => {
                 write!(f, "{object}'s model has {count} clips; there's no clip {clip}")
             }
+            WorldError::Animator(message) => f.write_str(message),
         }
     }
 }

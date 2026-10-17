@@ -17,7 +17,7 @@ mod resources;
 mod skin;
 mod world;
 
-pub use animation::{AnimationEvent, AnimatorState};
+pub use animation::{AnimationEvent, AnimatorState, MAX_BLENDS, MAX_LAYERS, Motion};
 pub use color::Color;
 pub use components::{Camera, Component, Light, LightKind, MeshRenderer, Transform};
 pub use debug::DebugLine;

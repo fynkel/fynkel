@@ -2,139 +2,19 @@
 //! out by hand, for each kind of key, looping and the end, a crossfade
 //! halfway, and an animator's life with its model.
 
-use std::f32::consts::FRAC_PI_2;
+mod toy;
 
 use fynkel_world::*;
-
-/// A `.glb` with two nodes, `body` (rest at z 5) and its child `arm`, and
-/// three clips:
-///
-/// - `slide` (2 s, linear): the body from x 0 to 4, the arm from no turn
-///   to 90° about z;
-/// - `hop` (1 s, step): the body at y 1, then from 1 s at y 3;
-/// - `grow` (2 s, cubic, flat tangents): the arm's scale from 1 to 3.
-fn glb() -> Vec<u8> {
-    let (s, c) = (FRAC_PI_2 / 2.0).sin_cos();
-    let accessors: [(&str, Vec<f32>); 7] = [
-        ("SCALAR", vec![0.0, 2.0]),
-        ("VEC3", vec![0.0, 0.0, 0.0, 4.0, 0.0, 0.0]),
-        ("VEC4", vec![0.0, 0.0, 0.0, 1.0, 0.0, 0.0, s, c]),
-        ("SCALAR", vec![0.0, 1.0]),
-        ("VEC3", vec![0.0, 1.0, 0.0, 0.0, 3.0, 0.0]),
-        ("SCALAR", vec![0.0, 2.0]),
-        ("VEC3", [[0.0; 3], [1.0; 3], [0.0; 3], [0.0; 3], [3.0; 3], [0.0; 3]].concat()),
-    ];
-    let mut bin = Vec::new();
-    let mut views = Vec::new();
-    let mut access = Vec::new();
-    for (i, (kind, values)) in accessors.iter().enumerate() {
-        let size = match *kind {
-            "SCALAR" => 1,
-            "VEC3" => 3,
-            _ => 4,
-        };
-        views.push(format!(r#"{{"buffer":0,"byteOffset":{},"byteLength":{}}}"#, bin.len(), values.len() * 4));
-        let bounds = if *kind == "SCALAR" {
-            let (min, max) = values.iter().fold((f32::MAX, f32::MIN), |(a, b), &v| (a.min(v), b.max(v)));
-            format!(r#","min":[{min}],"max":[{max}]"#)
-        } else {
-            String::new()
-        };
-        access.push(format!(
-            r#"{{"bufferView":{i},"componentType":5126,"count":{},"type":"{kind}"{bounds}}}"#,
-            values.len() / size
-        ));
-        bin.extend(values.iter().flat_map(|v| v.to_le_bytes()));
-    }
-    let json = format!(
-        r#"{{"asset":{{"version":"2.0"}},"scene":0,"scenes":[{{"name":"toy","nodes":[0]}}],
-        "nodes":[{{"name":"body","translation":[0,0,5],"children":[1]}},{{"name":"arm"}}],
-        "buffers":[{{"byteLength":{}}}],"bufferViews":[{}],"accessors":[{}],
-        "animations":[
-          {{"name":"slide","samplers":[{{"input":0,"output":1}},{{"input":0,"output":2}}],
-            "channels":[{{"sampler":0,"target":{{"node":0,"path":"translation"}}}},{{"sampler":1,"target":{{"node":1,"path":"rotation"}}}}]}},
-          {{"name":"hop","samplers":[{{"input":3,"output":4,"interpolation":"STEP"}}],
-            "channels":[{{"sampler":0,"target":{{"node":0,"path":"translation"}}}}]}},
-          {{"name":"grow","samplers":[{{"input":5,"output":6,"interpolation":"CUBICSPLINE"}}],
-            "channels":[{{"sampler":0,"target":{{"node":1,"path":"scale"}}}}]}}
-        ]}}"#,
-        bin.len(),
-        views.join(","),
-        access.join(",")
-    );
-    let mut text = json.into_bytes();
-    text.resize(text.len().next_multiple_of(4), b' ');
-    bin.resize(bin.len().next_multiple_of(4), 0);
-    let mut out = Vec::new();
-    let total = 12 + 8 + text.len() + 8 + bin.len();
-    for word in [0x4654_6C67, 2, total as u32, text.len() as u32, 0x4E4F_534A] {
-        out.extend(u32::to_le_bytes(word));
-    }
-    out.extend(&text);
-    out.extend(u32::to_le_bytes(bin.len() as u32));
-    out.extend(u32::to_le_bytes(0x004E_4942));
-    out.extend(&bin);
-    out
-}
-
-const SLIDE: u32 = 0;
-const HOP: u32 = 1;
-const GROW: u32 = 2;
-
-struct Toy {
-    world: World,
-    root: ObjectId,
-    body: ObjectId,
-    arm: ObjectId,
-    events: Vec<AnimationEvent>,
-}
-
-impl Toy {
-    fn new() -> Self {
-        let model = ModelData::from_glb(&glb()).unwrap();
-        assert!(model.warnings().is_empty(), "{:?}", model.warnings());
-        let mut world = World::new();
-        let ids = world.add_model(&model).unwrap();
-        let root = world.spawn_model(&model, &ids.meshes, &ids.materials, Transform::default()).unwrap();
-        let body = world.find(root, "body").unwrap().unwrap();
-        let arm = world.find(root, "arm").unwrap().unwrap();
-        Self { world, root, body, arm, events: Vec::new() }
-    }
-
-    fn step(&mut self, dt: f32) {
-        self.events.clear();
-        self.world.animate(dt, &mut self.events);
-    }
-
-    fn body(&self) -> Vec3 {
-        self.world.get::<Transform>(self.body).unwrap().position
-    }
-
-    fn arm(&self) -> Transform {
-        self.world.get::<Transform>(self.arm).unwrap()
-    }
-}
-
-fn near(a: Vec3, b: Vec3) -> bool {
-    (a - b).length() < 1e-4
-}
-
-fn turn_z(degrees: f32) -> Quat {
-    Quat::from_rotation_z(degrees.to_radians())
-}
-
-fn same_turn(a: Quat, b: Quat) -> bool {
-    a.dot(b).abs() > 1.0 - 1e-6
-}
+use toy::*;
 
 #[test]
 fn a_model_with_clips_gets_an_animator_that_knows_them() {
     let toy = Toy::new();
     assert!(toy.world.has_animator(toy.root));
-    assert_eq!(toy.world.clips(toy.root).unwrap(), [("slide", 2.0), ("hop", 1.0), ("grow", 2.0)]);
+    assert_eq!(toy.world.clips(toy.root).unwrap(), [("slide", 2.0), ("hop", 1.0), ("grow", 2.0), ("sway", 2.0), ("swing", 1.0)]);
     assert_eq!(toy.world.animated_parts(toy.root).unwrap(), [toy.body, toy.arm]);
     let state = toy.world.animator_state(toy.root).unwrap();
-    assert_eq!((state.clip, state.time, state.speed), (None, 0.0, 1.0));
+    assert_eq!((state.motion, state.time, state.speed), (None, 0.0, 1.0));
     // Nothing plays until asked: the rest pose.
     let mut toy = toy;
     toy.step(0.5);
@@ -145,7 +25,7 @@ fn a_model_with_clips_gets_an_animator_that_knows_them() {
     let plain = toy.world.spawn_model(&truck, &ids.meshes, &ids.materials, Transform::default()).unwrap();
     assert!(!toy.world.has_animator(plain));
     assert!(matches!(toy.world.play(plain, 0, 0.0, true), Err(WorldError::NoComponent { .. })));
-    assert!(matches!(toy.world.play(toy.root, 3, 0.0, true), Err(WorldError::NoClip { count: 3, .. })));
+    assert!(matches!(toy.world.play(toy.root, 5, 0.0, true), Err(WorldError::NoClip { count: 5, .. })));
 }
 
 fn box_glb() -> Vec<u8> {
@@ -231,7 +111,7 @@ fn a_crossfade_halfway_is_halfway_and_what_the_new_clip_doesnt_move_goes_to_rest
     // 67.5° is 33.75°.
     assert!(same_turn(toy.arm().rotation, turn_z(33.75)), "{}", toy.arm().rotation);
     assert_eq!(toy.world.clip_weight(toy.root, SLIDE).unwrap(), 0.5);
-    assert_eq!(toy.world.animator_state(toy.root).unwrap().clip, Some(HOP));
+    assert_eq!(toy.world.animator_state(toy.root).unwrap().motion, Some(Motion::Clip(HOP)));
     // Faded: hop alone (at 1 s, y 3), and the arm back at rest.
     toy.step(0.5);
     assert!(near(toy.body(), Vec3::new(0.0, 3.0, 0.0)), "{}", toy.body());
@@ -263,7 +143,7 @@ fn speed_time_and_stop() {
     toy.world.stop(toy.root).unwrap();
     toy.step(1.0);
     assert!(near(toy.body(), Vec3::new(2.0, 0.0, 0.0)));
-    assert_eq!(toy.world.animator_state(toy.root).unwrap().clip, None);
+    assert_eq!(toy.world.animator_state(toy.root).unwrap().motion, None);
 }
 
 #[test]

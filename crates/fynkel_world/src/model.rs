@@ -203,7 +203,14 @@ impl World {
                     scale: Vec3::from_array(n.scale),
                 })
                 .collect();
-            self.add_animator(root, Animator::new(model.clips().to_vec(), entities, rest));
+            let names = model.nodes().iter().map(|n| n.name.clone()).collect();
+            let mut parents = vec![None; model.nodes().len()];
+            for (i, node) in model.nodes().iter().enumerate() {
+                for &child in &node.children {
+                    parents[child] = Some(i);
+                }
+            }
+            self.add_animator(root, Animator::new(model.clips().to_vec(), entities, names, parents, rest));
         }
         Ok(())
     }
