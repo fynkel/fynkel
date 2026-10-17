@@ -22,6 +22,8 @@ const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Bgra8UnormSrgb;
 
 /// A layer the worker draws to.
 struct Live {
+    /// The `CAMetalLayer`, to know it again on a resize.
+    layer: usize,
     surface: wgpu::Surface<'static>,
     config: wgpu::SurfaceConfiguration,
     /// It couldn't be configured again: frames to it are skipped.
@@ -129,10 +131,8 @@ impl Target for Layer {
             }
             _ => return None,
         };
-        let view = image.texture.create_view(&wgpu::TextureViewDescriptor {
-            format: Some(FORMAT),
-            ..Default::default()
-        });
+        let view =
+            image.texture.create_view(&wgpu::TextureViewDescriptor { format: Some(FORMAT), ..Default::default() });
         self.size = (live.config.width, live.config.height);
         Some(LayerFrame { image, view, _layer: live })
     }
@@ -157,7 +157,8 @@ impl Target for Layer {
 
 impl LayerPresenter {
     /// Draws the next frames to `layer` (a `CAMetalLayer`) at `width` ×
-    /// `height` pixels. Waits for a frame in progress on the old one.
+    /// `height` pixels. Waits for a frame in progress on the old one. The
+    /// layer drawn to already, at a new size, keeps its surface.
     ///
     /// # Safety
     ///
@@ -167,6 +168,18 @@ impl LayerPresenter {
     /// [`detach`]: LayerPresenter::detach
     pub unsafe fn attach(&self, layer: NonNull<c_void>, width: u32, height: u32) -> Result<(), String> {
         let shared = &self.shared;
+        let (width, height) = (width.max(1), height.max(1));
+        // Taken, no frame holds it: it's ours alone.
+        if let Some(mut live) = shared.layer.take().and_then(Arc::into_inner)
+            && live.layer == layer.as_ptr() as usize
+        {
+            live.config.width = width;
+            live.config.height = height;
+            let configured = configure(&shared.device, &live.surface, &live.config);
+            live.dead.store(configured.is_err(), Ordering::Relaxed);
+            drop(shared.layer.put(live));
+            return configured.map_err(|e| format!("couldn't configure the layer at its new size: {e}"));
+        }
         // SAFETY: a live CAMetalLayer, per this function's contract; wgpu
         // retains it for the surface's life.
         let surface = unsafe {
@@ -181,8 +194,8 @@ impl LayerPresenter {
         let config = wgpu::SurfaceConfiguration {
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
             format,
-            width: width.max(1),
-            height: height.max(1),
+            width,
+            height,
             present_mode: wgpu::PresentMode::Fifo,
             desired_maximum_frame_latency: 2,
             alpha_mode: wgpu::CompositeAlphaMode::Opaque,
@@ -190,7 +203,7 @@ impl LayerPresenter {
             view_formats: if format == FORMAT { vec![] } else { vec![FORMAT] },
         };
         configure(&shared.device, &surface, &config).map_err(|e| format!("couldn't configure the layer: {e}"))?;
-        drop(shared.layer.put(Live { surface, config, dead: AtomicBool::new(false) }));
+        drop(shared.layer.put(Live { layer: layer.as_ptr() as usize, surface, config, dead: AtomicBool::new(false) }));
         Ok(())
     }
 
