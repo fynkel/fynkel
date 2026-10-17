@@ -92,8 +92,10 @@ class CrowdScene extends LabScene {
         continue;
       }
       final knight = i.isEven;
-      final person = add(await assets.instantiate(knight ? 'kaykit/knight.glb' : 'kaykit/rogue.glb'))..position = at;
+      final made = await assets.instantiate(knight ? 'kaykit/knight.glb' : 'kaykit/rogue.glb');
+      // Closed while it loaded.
       if (isDestroyed) return;
+      final person = add(made)..position = at;
       // The files carry every weapon the pack has: a sword and a shield
       // for the Knights, nothing for the Rogues.
       for (final extra in knight ? _knightExtras : _rogueExtras) {
