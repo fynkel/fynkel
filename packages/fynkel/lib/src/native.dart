@@ -97,6 +97,8 @@ final class Scratch {
   final ray = malloc<FyRay>();
   final rayHit = malloc<FyRayHit>();
   final vec3 = malloc<FyVec3>();
+  final number = malloc<Float>();
+  final animatorState = malloc<FyAnimatorState>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -113,6 +115,7 @@ final class Scratch {
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
+    all.addAll([number, animatorState, _events]);
     all.forEach(malloc.free);
   }
 
@@ -145,6 +148,19 @@ final class Scratch {
   Pointer<Float> transformFloats([int count = 0]) {
     transforms(count);
     return _transformFloats;
+  }
+
+  var _events = malloc<FyAnimationEvent>(_initial);
+  var _eventCapacity = _initial;
+
+  /// At least [count] animation events.
+  Pointer<FyAnimationEvent> animationEvents([int count = 0]) {
+    if (count > _eventCapacity) {
+      malloc.free(_events);
+      _events = malloc<FyAnimationEvent>(count);
+      _eventCapacity = count;
+    }
+    return _events;
   }
 
   /// At least [count] bytes.

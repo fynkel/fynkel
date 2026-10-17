@@ -14,6 +14,7 @@ import 'frame_list.dart';
 import 'math.dart';
 import 'native.dart';
 
+part 'animator.dart';
 part 'assets.dart';
 part 'cameras.dart';
 part 'components.dart';
@@ -163,6 +164,8 @@ final class World implements Finalizable {
     _motions.clear();
     _reparented.clear();
     _unsent.clear();
+    _animators.clear();
+    _animatorList.clear();
     _assets.clear();
     _free(owned, null);
     // What a disposed world reports from here goes to the zone.
@@ -255,6 +258,12 @@ final class World implements Finalizable {
   // Objects with removed components still in their lists: taken out at the
   // start of the next update, so a removal never shifts a list being run.
   final _compact = <GameObject>[];
+
+  // The animators the game has asked for ([GameObject.animator]), by
+  // their model copies' ids, and in a list, which a frame goes through
+  // without making an iterator.
+  final _animators = <int, Animator>{};
+  final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
   // given a new parent (systems.dart).
@@ -526,7 +535,8 @@ final class World implements Finalizable {
   ///    were made, then the routines' waits end ([GameObject.start]),
   ///    then the objects whose `destroy(after:)` or `release(after:)` is
   ///    due go.
-  ///    Then the systems' `afterUpdate` (where an animator poses).
+  ///    Then the models' clips pose their parts ([Animator]), and the
+  ///    systems' `afterUpdate`.
   /// 6. **Late updates.** Then each object updated this frame, and its
   ///    behaviours, get [GameObject.onLateUpdate] in the same order: for
   ///    what follows where the others went. Then the systems'
@@ -623,6 +633,8 @@ final class World implements Finalizable {
     _runRoutines();
     if (_disposeAsked) return;
     if (_dueObjects.isNotEmpty) _runDue();
+    if (_disposeAsked) return;
+    _animate();
     if (_disposeAsked) return;
     _runSystems(_SystemHook.afterUpdate);
     if (_disposeAsked) return;

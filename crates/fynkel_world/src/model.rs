@@ -7,6 +7,7 @@
 
 use glam::{Quat, Vec2, Vec3};
 
+use crate::animation::Animator;
 use crate::components::{MeshRenderer, Transform};
 use crate::resources::{Blend, Material};
 use crate::world::{Result, World, WorldError};
@@ -121,9 +122,16 @@ impl World {
         self.insert(root, transform)?;
         self.set_name(root, Some(model.name()))?;
         let mut stack: Vec<(usize, ObjectId)> = model.roots().iter().rev().map(|&n| (n, root)).collect();
+        // Each node's object, for the animator; the root's entity until
+        // the node's is made (every node is reached once).
+        let animated = !model.clips().is_empty();
+        let mut entities = if animated { vec![self.entity(root)?; model.nodes().len()] } else { Vec::new() };
         while let Some((index, parent)) = stack.pop() {
             let node = &model.nodes()[index];
             let object = self.spawn();
+            if animated {
+                entities[index] = self.entity(object)?;
+            }
             self.set_parent(object, Some(parent))?;
             self.set_name(object, Some(&node.name))?;
             self.insert(
@@ -152,6 +160,18 @@ impl World {
                 }
             }
             stack.extend(node.children.iter().rev().map(|&c| (c, object)));
+        }
+        if animated {
+            let rest = model
+                .nodes()
+                .iter()
+                .map(|n| Transform {
+                    position: Vec3::from_array(n.translation),
+                    rotation: Quat::from_array(n.rotation),
+                    scale: Vec3::from_array(n.scale),
+                })
+                .collect();
+            self.add_animator(root, Animator::new(model.clips().to_vec(), entities, rest));
         }
         Ok(())
     }

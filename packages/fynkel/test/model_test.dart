@@ -73,7 +73,9 @@ void main() {
     expect(truck.meshes, hasLength(4));
     expect(truck.textures, hasLength(1));
     expect(truck.materials.map((m) => m.name), ['truck', 'glass', 'window_trim', 'wheels']);
-    expect(truck.warnings, ['animations are skipped; the model shows its rest pose']);
+    expect(truck.warnings, isEmpty);
+    final fox = await Model.load(glb('Fox.glb'));
+    expect(fox.warnings, ['skins are skipped; skinned meshes show their bind pose']);
     // One image, used by the body's and the wheels' materials.
     final [body, glass, _, wheels] = truck.materials;
     expect(body.baseColorTexture, same(truck.textures.single));
