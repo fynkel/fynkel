@@ -17,6 +17,8 @@ dependencies:
     path: ../../packages/fynkel_physics
 
 dev_dependencies:
+  fynkel_measure:
+    path: ../../packages/fynkel_measure
   flutter_test:
     sdk: flutter
   integration_test:
