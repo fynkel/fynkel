@@ -155,7 +155,7 @@ jobs:
       #   present stress test (a few hundred frames), and the physics C
       #   layer's quick tests, on x86_64 as Miri can't run Rapier's ARM
       #   vector code (all of them pass too, but take 33 minutes);
-      # - the lab's every scene for 40 rounds in one world each, the
+      # - the lab's every scene for 120 rounds in one world each, the
       #   memory flat (examples/lab/test/soak_test.dart).
       - name: long runs
         run: |
@@ -167,7 +167,7 @@ jobs:
           cargo +nightly miri test -p fynkel_present --test stress
           cargo +nightly miri test -p fynkel_physics_ffi --target x86_64-unknown-linux-gnu --test abi -- null_pointers reading_the_moves a_step_is_as_long removed_and_unknown
           cd examples/lab
-          FYNKEL_SOAK_ROUNDS=40 flutter test --enable-vmservice test/soak_test.dart
+          FYNKEL_SOAK_ROUNDS=120 flutter test --enable-vmservice test/soak_test.dart
       # The same GPU tests inside the iOS Simulator and the Android
       # emulator: fast testing in simulators is how Flutter developers
       # work, so it must never silently break.
