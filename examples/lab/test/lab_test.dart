@@ -45,6 +45,17 @@ import 'package:lab/scenes/world_widgets_basics.dart';
 Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
 
 void main() {
+  // The tests read assets from disk, but the app gets only what the
+  // pubspec lists, and a listed folder brings its own files, not its
+  // subfolders'.
+  test('every folder of assets is in the app', () {
+    final listed = File('pubspec.yaml').readAsLinesSync().map((l) => l.trim()).toSet();
+    final folders = [Directory('assets'), ...Directory('assets').listSync(recursive: true).whereType<Directory>()];
+    for (final folder in folders) {
+      expect(listed, contains('- ${folder.path}/'), reason: 'pubspec.yaml should list ${folder.path}/');
+    }
+  });
+
   for (final make in scenes) {
     final title = make().title;
     test('$title runs, and every control works', () async {
