@@ -84,7 +84,10 @@ which. The unplugged runs say the same thing, so the result stands.
 
 - The Mac: Sheepdog at 60 by default (the render thread busy 4 % of the
   time), and 120 with `targetFrameRate = 0` (12 %), as before.
-- The Note10+: [to run]. Its screen is 60 Hz, so nothing should change.
+- The Note10+ (60 Hz screen), Sheepdog at low, 60 s: 58.9 fps (slowest
+  second 41) at 60, and 57.9 (46) with no limit (`FYNKEL_FRAME_RATE=0`),
+  against 59.9 (50) at the end of #117. The limit costs nothing there:
+  the phone is a little slower today, with or without it.
 
 ## Tests
 
