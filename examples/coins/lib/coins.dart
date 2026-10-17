@@ -1,6 +1,9 @@
 // The game: walk where you tap and pick up the coins. The last coin of a
 // level takes you to the next; your score and you go with you. Kenney's
 // models (assets/CREDITS.md). A coin is a trigger the player walks into.
+// The player moves with its own clips: idle, walk and sprint blended by
+// its speed, its arm holding what it carries on a layer, and a bend to
+// pick each coin up on another, from the torso up, while its legs walk.
 
 import 'dart:math' as math;
 
@@ -178,17 +181,42 @@ class Player extends GameObject {
   /// The coins picked up, for the HUD.
   final score = ValueNotifier(0);
   late final GameObject _hand;
+  late final Animator _animator;
   GameObject? _carried;
   Vec3 _goal = Vec3.zero;
+  // How fast it goes, in m/s: it speeds up and slows down, and the blend
+  // follows.
+  var _speed = 0.0;
+
+  /// Its fastest, in m/s: a sprint, for a goal far away.
+  static const sprint = 5.0;
+
+  /// How fast it walks, in m/s, near its goal.
+  static const walk = 2.0;
+
+  /// How fast it goes now, in m/s.
+  double get speed => _speed;
+
+  /// What plays its model's clips.
+  Animator get moves => _animator;
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    _hand = add(await assets.instantiate('character.glb')).find('arm-right')!;
+    final model = add(await assets.instantiate('character.glb'));
+    _hand = model.find('arm-right')!;
     // Kinematic: it walks where it's told, and meets the coins' triggers.
     addComponent(CapsuleCollider(radius: 0.4, height: 1.6, center: Vec3(0, 0.8, 0)));
     addComponent(Rigidbody(isKinematic: true));
     addComponent(Collector());
+    _animator = model.animator!
+      ..blend('move', _moves, thresholds: _paces, at: 0, duration: 0)
+      // A gesture (on layer 2) fades out when it's done.
+      ..onEnd = (_) => _animator.layer(2).stop(duration: 0.15);
+    // The right arm holds what it carries, over the walk's swing.
+    _animator.layer(1, mask: 'arm-right').play('holding-right');
+    // Gestures from the torso up, the legs walking on.
+    _animator.layer(2, mask: 'torso');
   }
 
   void walkTo(Vec3 point) => _goal = point.flat;
@@ -199,18 +227,34 @@ class Player extends GameObject {
     _carried = _hand.add(item)..localPosition += Vec3(0, -0.7, 0.45);
   }
 
+  /// Plays [clip] once from the torso up, the legs going on as they were.
+  void gesture(String clip) => _animator.layer(2).crossFade(clip, duration: 0.08, loop: false);
+
   @override
   void onUpdate() {
     super.onUpdate();
     final to = _goal - transform.position;
-    if (to.length < 0.05) return;
-    final step = math.min(to.length, 5 * time.delta);
-    transform = Transform(
-      position: transform.position + to.normalized * step,
-      rotation: Quat.axisAngle(Vec3.up, math.atan2(to.x, to.z)),
-    );
+    final distance = to.length;
+    // Sprints to a goal far away, slows to a walk near it, and stops.
+    final wanted = distance < 0.05 ? 0.0 : (distance > 3 ? sprint : walk);
+    _speed += (wanted - _speed) * math.min(1, 6 * time.delta);
+    if (distance < 0.05) {
+      if (_speed < 0.05) _speed = 0;
+    } else {
+      final step = math.min(distance, math.max(_speed, 0.5) * time.delta);
+      transform = Transform(
+        position: transform.position + to.normalized * step,
+        rotation: Quat.axisAngle(Vec3.up, math.atan2(to.x, to.z)),
+      );
+    }
+    _animator.blend('move', _moves, thresholds: _paces, at: _speed);
   }
 }
+
+/// The player's speed blend: standing, walking and sprinting, at the
+/// speeds (m/s) their feet go.
+const _moves = ['idle', 'walk', 'sprint'];
+const _paces = [0.0, Player.walk, Player.sprint];
 
 /// Picks up the coins the player walks into. A behaviour of its own,
 /// kept apart from the walking.
@@ -219,8 +263,14 @@ class Collector extends Behaviour with Triggers {
   void onTriggerEnter(Collider other) {
     if (other.gameObject case final Coin coin when !coin.isDestroyed) {
       coin.destroy();
-      (gameObject as Player).score.value++;
-      if (world.all<Coin>().isEmpty) gameObject.ancestor<CoinsGame>()!.nextLevel();
+      final player = gameObject as Player;
+      player.score.value++;
+      if (world.all<Coin>().isEmpty) {
+        player.gesture('emote-yes');
+        gameObject.ancestor<CoinsGame>()!.nextLevel();
+      } else {
+        player.gesture('pick-up');
+      }
     }
   }
 }
