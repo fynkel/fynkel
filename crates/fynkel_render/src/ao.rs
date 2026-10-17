@@ -64,7 +64,8 @@ pub(crate) struct AoKit {
 }
 
 struct Pipelines {
-    depth: wgpu::RenderPipeline,
+    /// The depth's, unbent then skinned.
+    depth: [wgpu::RenderPipeline; 2],
     ao: wgpu::RenderPipeline,
     blur: wgpu::RenderPipeline,
 }
@@ -138,54 +139,72 @@ impl AoKit {
         }
     }
 
+    /// The depth pass's pipeline for unbent or skinned draws.
+    pub(crate) fn depth_pipeline(&self, skinned: bool) -> &wgpu::RenderPipeline {
+        &self.pipelines().depth[usize::from(skinned)]
+    }
+
     fn pipelines(&self) -> &Pipelines {
         self.pipelines.get_or_init(|| {
             let device = &self.device;
-            let depth_shader = device.create_shader_module(wgpu::include_wgsl!("ao_depth.wgsl"));
+            let depth_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("ambient occlusion depth"),
+                source: wgpu::ShaderSource::Wgsl(
+                    concat!(include_str!("skin.wgsl"), include_str!("ao_depth.wgsl")).into(),
+                ),
+            });
             let depth_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("ambient occlusion depth"),
                 bind_group_layouts: &[Some(&self.frame_layout)],
                 immediate_size: 0,
             });
-            // The forward pass's buffers; only the position and the model
-            // matrix are read.
+            // The forward pass's buffers; only the position, the model
+            // matrix and where a skinned draw's joints start are read.
             let vertex_attributes =
                 wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
-            let instance_attributes = wgpu::vertex_attr_array![4 => Float32x4, 5 => Float32x4, 6 => Float32x4];
-            let depth = self.maker.make(wgpu::RenderPipelineDescriptor {
-                label: Some("ambient occlusion depth"),
-                layout: Some(&depth_layout),
-                vertex: wgpu::VertexState {
-                    module: &depth_shader,
-                    entry_point: Some("vs_depth"),
-                    compilation_options: Default::default(),
-                    buffers: &[
-                        Some(wgpu::VertexBufferLayout {
-                            array_stride: std::mem::size_of::<Vertex>() as u64,
-                            step_mode: wgpu::VertexStepMode::Vertex,
-                            attributes: &vertex_attributes,
-                        }),
-                        Some(wgpu::VertexBufferLayout {
-                            array_stride: self.instance_stride,
-                            step_mode: wgpu::VertexStepMode::Instance,
-                            attributes: &instance_attributes,
-                        }),
-                    ],
-                },
-                // Both sides: a mirrored object's front is clockwise, and
-                // the nearer surface wins either way.
-                primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
-                depth_stencil: Some(wgpu::DepthStencilState {
-                    format: DEPTH_FORMAT,
-                    depth_write_enabled: Some(true),
-                    depth_compare: Some(wgpu::CompareFunction::Greater),
-                    stencil: Default::default(),
-                    bias: Default::default(),
+            // The model rows, then (after the base colour) the params.
+            let instance_attributes = [(4, 0), (5, 16), (6, 32), (8, 64)].map(|(shader_location, offset)| {
+                wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset, shader_location }
+            });
+            let skin_attributes = crate::renderer::SKIN_ATTRIBUTES;
+            let buffers = [
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<Vertex>() as u64,
+                    step_mode: wgpu::VertexStepMode::Vertex,
+                    attributes: &vertex_attributes,
                 }),
-                multisample: Default::default(),
-                fragment: None,
-                multiview_mask: None,
-                cache: None,
+                Some(wgpu::VertexBufferLayout {
+                    array_stride: self.instance_stride,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &instance_attributes,
+                }),
+                Some(crate::renderer::skin_buffer(&skin_attributes)),
+            ];
+            let depth = [false, true].map(|skinned| {
+                self.maker.make(wgpu::RenderPipelineDescriptor {
+                    label: Some("ambient occlusion depth"),
+                    layout: Some(&depth_layout),
+                    vertex: wgpu::VertexState {
+                        module: &depth_shader,
+                        entry_point: Some(if skinned { "vs_depth_skinned" } else { "vs_depth" }),
+                        compilation_options: Default::default(),
+                        buffers: if skinned { &buffers } else { &buffers[..2] },
+                    },
+                    // Both sides: a mirrored object's front is clockwise, and
+                    // the nearer surface wins either way.
+                    primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+                    depth_stencil: Some(wgpu::DepthStencilState {
+                        format: DEPTH_FORMAT,
+                        depth_write_enabled: Some(true),
+                        depth_compare: Some(wgpu::CompareFunction::Greater),
+                        stencil: Default::default(),
+                        bias: Default::default(),
+                    }),
+                    multisample: Default::default(),
+                    fragment: None,
+                    multiview_mask: None,
+                    cache: None,
+                })
             });
 
             let shader = device.create_shader_module(wgpu::include_wgsl!("ao.wgsl"));
@@ -320,7 +339,7 @@ impl AoImages {
             occlusion_query_set: None,
             multiview_mask: None,
         });
-        pass.set_pipeline(&kit.pipelines().depth);
+        pass.set_pipeline(kit.depth_pipeline(false));
         pass
     }
 

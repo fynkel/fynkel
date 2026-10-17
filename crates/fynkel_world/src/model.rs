@@ -5,11 +5,12 @@
 //! ([`World::add_model`], or one by one from Dart), and every spawn uses
 //! those ids, so ten copies of a model share one set of GPU data.
 
-use glam::{Quat, Vec2, Vec3};
+use glam::{Mat4, Quat, Vec2, Vec3};
 
 use crate::animation::Animator;
 use crate::components::{MeshRenderer, Transform};
 use crate::resources::{Blend, Material};
+use crate::skin::Skin;
 use crate::world::{Result, World, WorldError};
 use crate::{Color, MaterialData, MaterialId, MeshId, ModelData, ObjectId, TextureId};
 
@@ -126,9 +127,17 @@ impl World {
         // the node's is made (every node is reached once).
         let animated = !model.clips().is_empty();
         let mut entities = if animated { vec![self.entity(root)?; model.nodes().len()] } else { Vec::new() };
+        // Each node's object, for the skins' joints, and each skinned
+        // part's object with its skin.
+        let skinned = !model.skins().is_empty();
+        let mut objects = if skinned { vec![root; model.nodes().len()] } else { Vec::new() };
+        let mut bent: Vec<(ObjectId, usize)> = Vec::new();
         while let Some((index, parent)) = stack.pop() {
             let node = &model.nodes()[index];
             let object = self.spawn();
+            if skinned {
+                objects[index] = object;
+            }
             if animated {
                 entities[index] = self.entity(object)?;
             }
@@ -149,17 +158,40 @@ impl World {
             };
             match node.parts.as_slice() {
                 [] => {}
-                [part] => self.insert(object, renderer(part))?,
+                [part] => {
+                    self.insert(object, renderer(part))?;
+                    if let Some(skin) = node.skin {
+                        bent.push((object, skin));
+                    }
+                }
                 parts => {
                     for part in parts {
                         let child = self.spawn();
                         self.set_parent(child, Some(object))?;
                         self.insert(child, Transform::default())?;
                         self.insert(child, renderer(part))?;
+                        if let Some(skin) = node.skin {
+                            bent.push((child, skin));
+                        }
                     }
                 }
             }
             stack.extend(node.children.iter().rev().map(|&c| (c, object)));
+        }
+        if !bent.is_empty() {
+            let skins: Vec<Skin> = model
+                .skins()
+                .iter()
+                .map(|s| {
+                    Skin::new(
+                        s.joints.iter().map(|&j| objects[j]).collect(),
+                        s.inverse_binds.iter().map(Mat4::from_cols_array).collect(),
+                    )
+                })
+                .collect();
+            for (object, skin) in bent {
+                self.add_skin(object, skins[skin].clone());
+            }
         }
         if animated {
             let rest = model

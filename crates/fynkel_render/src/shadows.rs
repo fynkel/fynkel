@@ -262,8 +262,8 @@ pub(crate) struct ShadowKit {
     /// The 1×1 maps that stand in for none, of each kind.
     stand_ins: [OnceLock<Arc<MapArray>>; 2],
     /// The cascades' opaque and cut-out pipelines, then the spot maps',
-    /// each made when first drawn with.
-    pipelines: [OnceLock<wgpu::RenderPipeline>; 4],
+    /// each unbent then skinned, each made when first drawn with.
+    pipelines: [OnceLock<wgpu::RenderPipeline>; 8],
 }
 
 impl ShadowKit {
@@ -286,16 +286,19 @@ impl ShadowKit {
     pub(crate) fn new(device: &wgpu::Device, textures_layout: &wgpu::BindGroupLayout, maker: &PipelineMaker) -> Self {
         let view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow view"),
-            entries: &[wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
-                ty: wgpu::BindingType::Buffer {
-                    ty: wgpu::BufferBindingType::Uniform,
-                    has_dynamic_offset: true,
-                    min_binding_size: wgpu::BufferSize::new(64),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::VERTEX,
+                    ty: wgpu::BindingType::Buffer {
+                        ty: wgpu::BufferBindingType::Uniform,
+                        has_dynamic_offset: true,
+                        min_binding_size: wgpu::BufferSize::new(64),
+                    },
+                    count: None,
                 },
-                count: None,
-            }],
+                crate::assets::joints_entry(),
+            ],
         });
         let map_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -348,7 +351,10 @@ impl ShadowKit {
             ..Default::default()
         });
 
-        let shader = device.create_shader_module(wgpu::include_wgsl!("shadow.wgsl"));
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("shadow"),
+            source: wgpu::ShaderSource::Wgsl(concat!(include_str!("skin.wgsl"), include_str!("shadow.wgsl")).into()),
+        });
         let opaque_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("shadow"),
             bind_group_layouts: &[Some(&view_layout)],
@@ -376,13 +382,13 @@ impl ShadowKit {
     }
 
     /// The pipeline that draws casters into a spot map or a cascade,
-    /// opaque or cut out.
-    pub(crate) fn pipeline(&self, spot: bool, cutout: bool) -> &wgpu::RenderPipeline {
-        self.pipelines[usize::from(spot) * 2 + usize::from(cutout)]
-            .get_or_init(|| self.make(if spot { SPOT_FORMAT } else { CASCADE_FORMAT }, cutout))
+    /// opaque or cut out, bent by skeletons or not.
+    pub(crate) fn pipeline(&self, spot: bool, cutout: bool, skinned: bool) -> &wgpu::RenderPipeline {
+        self.pipelines[(usize::from(spot) * 2 + usize::from(cutout)) * 2 + usize::from(skinned)]
+            .get_or_init(|| self.make(if spot { SPOT_FORMAT } else { CASCADE_FORMAT }, cutout, skinned))
     }
 
-    fn make(&self, format: wgpu::TextureFormat, cutout: bool) -> wgpu::RenderPipeline {
+    fn make(&self, format: wgpu::TextureFormat, cutout: bool, skinned: bool) -> wgpu::RenderPipeline {
         // From the mesh, the position and the UV; from the caster, the rest.
         let vertex_attributes = [
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
@@ -395,6 +401,7 @@ impl ShadowKit {
         let caster_attributes = wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4, 7 => Float32x4, 8 => Float32x4, 9 => Float32x4,
         ];
+        let skin_attributes = crate::renderer::SKIN_ATTRIBUTES;
         let buffers = [
             Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<fynkel_mesh::Vertex>() as u64,
@@ -406,6 +413,7 @@ impl ShadowKit {
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &caster_attributes,
             }),
+            Some(crate::renderer::skin_buffer(&skin_attributes)),
         ];
         // Both sides of every caster: a thin wall or a leaf shadows from
         // either side. The bias keeps a surface from shadowing itself where
@@ -422,9 +430,14 @@ impl ShadowKit {
                 module: &self.shader,
                 // The cascades' casters past the depth range are flattened
                 // onto its near end ([`MAX_STRETCH`]).
-                entry_point: Some(if format == CASCADE_FORMAT { "vs_cascade" } else { "vs_main" }),
+                entry_point: Some(match (format == CASCADE_FORMAT, skinned) {
+                    (true, false) => "vs_cascade",
+                    (true, true) => "vs_cascade_skinned",
+                    (false, false) => "vs_main",
+                    (false, true) => "vs_main_skinned",
+                }),
                 compilation_options: Default::default(),
-                buffers: &buffers,
+                buffers: if skinned { &buffers } else { &buffers[..2] },
             },
             primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
             depth_stencil: Some(wgpu::DepthStencilState {

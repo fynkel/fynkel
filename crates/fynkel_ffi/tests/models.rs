@@ -31,7 +31,8 @@ fn sample(name: &str) -> &'static [u8] {
         "OrientationTest.glb",
         "CesiumMilkTruck.glb",
         "Fox.glb",
-        "tower.glb"
+        "tower.glb",
+        "Knight.glb"
     )
 }
 
@@ -261,7 +262,7 @@ fn cesium_milk_truck_matches_its_golden() {
     assert_golden("gltf_milk_truck", &render("CesiumMilkTruck.glb", Vec3::new(1.0, 0.6, 1.3), 1.0));
 }
 
-/// Skinned and animated, drawn in its bind pose.
+/// Skinned and animated, drawn in its rest pose.
 #[test]
 fn fox_matches_its_golden() {
     assert_golden("gltf_fox", &render("Fox.glb", Vec3::new(1.0, 0.5, 1.0), 1.0));
@@ -274,12 +275,92 @@ fn tower_matches_its_golden() {
     assert_golden("gltf_tower", &render("tower.glb", Vec3::new(0.3, 0.5, 1.0), 1.0));
 }
 
+/// The KayKit Knight standing on a floor, posed at `time` seconds into
+/// clip `clip` (or at rest), under a sun that casts shadows.
+fn render_knight(pose: Option<(&str, f32)>, level: u32) -> fynkel_golden::Image {
+    let world = World::new();
+    let model = Model::load(sample("Knight.glb")).unwrap();
+    let ids = model.add_to(&world);
+    let root = model.spawn(&world, &ids, Transform::default()).unwrap();
+    let w = world.0;
+    // SAFETY: a live world and model, ids from them, pointers to locals.
+    unsafe {
+        if let Some((name, time)) = pose {
+            let mut buf = [0u8; 64];
+            let (mut len, mut length) = (0, 0.0);
+            let clip = (0..model.counts().clips)
+                .find(|&i| {
+                    ok(fy_model_clip(model.0, i, buf.as_mut_ptr(), buf.len(), &mut len, &mut length));
+                    &buf[..len] == name.as_bytes()
+                })
+                .expect("the clip");
+            let mut events = 0;
+            ok(fy_animator_play(w, root, clip as u32, 0.0, false));
+            ok(fy_world_animate(w, &time, &mut events));
+        }
+
+        let (floor, mut grey) = (world.spawn(), 0);
+        let plane = add_shape(&world, FY_MESH_PLANE);
+        let material = FyMaterial { base_color: srgb(0.55, 0.57, 0.6), roughness: 0.9, ..FyMaterial::default() };
+        ok(fy_material_add(w, &material, &mut grey));
+        ok(fy_transform_set(w, floor, &transform(Transform { scale: Vec3::splat(6.0), ..Transform::default() })));
+        ok(fy_mesh_renderer_set(w, floor, &FyMeshRenderer { mesh: plane, material: grey, ..Default::default() }));
+
+        let camera = world.spawn();
+        let fy_camera = FyCamera {
+            fov_y: 35.0,
+            near_clip: 0.1,
+            far_clip: 50.0,
+            clear_color: srgb(0.16, 0.17, 0.2),
+            orthographic: false,
+            size: 5.0,
+            culling_mask: u32::MAX,
+            show_sky: true,
+            ..Default::default()
+        };
+        ok(fy_camera_set(w, camera, &fy_camera));
+        let at = Transform::from_position(Vec3::new(2.4, 2.4, 5.2)).looking_at(Vec3::new(0.0, 1.1, 0.0));
+        ok(fy_transform_set(w, camera, &transform(at)));
+
+        let (sun, ambient, white) = (world.spawn(), world.spawn(), srgb(1.0, 1.0, 1.0));
+        let light =
+            FyLight { kind: FY_LIGHT_DIRECTIONAL, color: white, intensity: 1.0, shadows: true, ..Default::default() };
+        ok(fy_light_set(w, sun, &light));
+        let facing = Transform::default().looking_at(Vec3::new(0.6, -1.0, -0.5));
+        ok(fy_transform_set(w, sun, &transform(facing)));
+        let light = FyLight { kind: FY_LIGHT_AMBIENT, color: white, intensity: 0.25, ..Default::default() };
+        ok(fy_light_set(w, ambient, &light));
+    }
+    set_level(w, level);
+    let view = View::headless(&world, 256, 256);
+    view.read(view.frame(), 256, 256)
+}
+
+/// Stage 9 phase 2: the skinned Knight at rest, mid-stride and mid-chop,
+/// lit and shadowed, at every level. Bent wrong, a limb tears from the
+/// body or points the wrong way; bent in one pass but not another, its
+/// shadow doesn't match it.
+#[test]
+fn a_skinned_knight_matches_its_goldens_in_each_pose() {
+    let levels = [(FY_QUALITY_LOW, "low"), (FY_QUALITY_MEDIUM, "medium"), (FY_QUALITY_HIGH, "high")];
+    for (pose, name) in
+        [(None, "rest"), (Some(("Walking_A", 0.5)), "walk"), (Some(("1H_Melee_Attack_Chop", 0.45)), "chop")]
+    {
+        for (level, level_name) in levels {
+            fynkel_golden::assert_golden_within(&format!("knight_{name}_{level_name}"), &render_knight(pose, level), 8);
+        }
+    }
+}
+
 #[test]
 fn a_model_reports_what_it_has_and_what_was_skipped() {
     let model = Model::load(sample("CesiumMilkTruck.glb")).unwrap();
     assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 0, clips: 1 });
-    let fox = Model::load(sample("Fox.glb")).unwrap();
-    assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
+    let boxed = Model::load(sample("BoxTextured.glb")).unwrap();
+    assert_eq!(
+        boxed.warnings(),
+        ["nearest-neighbour texture filtering isn't supported; textures are filtered smoothly"]
+    );
     let name = |i| {
         let mut buf = [0u8; 32];
         let mut len = 0;

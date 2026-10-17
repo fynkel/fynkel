@@ -37,6 +37,7 @@ import 'package:lab/scenes/pooling_basics.dart';
 import 'package:lab/scenes/riding_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
+import 'package:lab/scenes/skinned.dart';
 import 'package:lab/scenes/theme_basics.dart';
 import 'package:lab/scenes/world_widgets_basics.dart';
 
@@ -512,6 +513,44 @@ void main() {
     expect(z, inInclusiveRange(3, 6), reason: 'down the slope towards the camera, and stopped');
     scene.controls.whereType<Toggle>().first.onChanged(true);
     expect(scene.rock.convex, isTrue);
+  });
+
+  test('Animation: skinned: both play the clip asked for, the sword stays in the hand, and they walk round', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(SkinnedScene());
+    await scene.loaded;
+    final [knight, rogue] = scene.people;
+    final sword = scene.sword!;
+    final slot = rogue.find('handslot.r')!;
+    expect(sword.parent, same(slot));
+    expect([knight.animator!.current, rogue.animator!.current], ['Idle', 'Idle']);
+
+    scene.controls.whereType<Button>().firstWhere((b) => b.label == '1H_Melee_Attack_Chop').onPressed();
+    final hand = rogue.find('hand.r')!;
+    final rest = hand.worldTransform.position;
+    for (var i = 0; i < 20; i++) {
+      world.update(1 / 60);
+    }
+    expect(rogue.animator!.current, '1H_Melee_Attack_Chop');
+    expect((hand.worldTransform.position - rest).length, greaterThan(0.05), reason: 'the arm swings');
+    expect(
+      (sword.worldTransform.position - slot.worldTransform.position).length,
+      lessThan(1e-4),
+      reason: 'the sword is where the hand holds it',
+    );
+    for (var i = 0; i < 120; i++) {
+      world.update(1 / 60);
+    }
+    expect(rogue.animator!.current, 'Idle', reason: 'back to idle when the chop ends');
+
+    scene.controls.whereType<Toggle>().firstWhere((t) => t.label == 'walk round').onChanged(true);
+    final from = knight.position;
+    for (var i = 0; i < 30; i++) {
+      world.update(1 / 60);
+    }
+    expect(knight.animator!.current, 'Walking_A');
+    expect((knight.position - from).length, greaterThan(0.3));
   });
 
   test('Character controller: the basics: up the low step, not the high one, and the crate is pushed', () async {

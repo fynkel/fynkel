@@ -357,6 +357,16 @@ impl WorldMatrices {
         }
     }
 
+    /// `id`'s model-to-world matrix as of the last [`update`](Self::update),
+    /// shown or not (a skin's joint bends its mesh either way), or `None`
+    /// when it's gone.
+    pub fn matrix(&self, world: &World, id: ObjectId) -> Option<Mat4> {
+        match self.index.get(&id) {
+            Some(&i) => Some(self.matrices[i as usize]),
+            None => world.world_matrix(id).ok(),
+        }
+    }
+
     /// Whether `id` is shown, as of the last [`update`](Self::update).
     pub fn shown(&self, world: &World, id: ObjectId) -> bool {
         match self.index.get(&id) {

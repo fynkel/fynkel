@@ -14,6 +14,7 @@ const SRGB: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
     let albedo = linear(0.5);
     RenderScene {
+        joints: Vec::new(),
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
         lights,
         quality: Some(quality.quality()),
@@ -22,6 +23,7 @@ fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
         sky: None,
         fog: None,
         draws: vec![Draw {
+            skin: None,
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(size)),
             material: PbrMaterial {

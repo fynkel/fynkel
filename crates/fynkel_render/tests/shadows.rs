@@ -27,6 +27,7 @@ fn material(grey: f32) -> PbrMaterial {
 /// origin; seen from above and in front.
 fn stage(lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
     RenderScene {
+        joints: Vec::new(),
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 7.0, 5.0), Vec3::ZERO)),
         lights,
         quality: Some(quality.quality()),
@@ -253,6 +254,7 @@ fn picture_the_cascades_meet() {
             ));
         }
         let scene = RenderScene {
+            joints: Vec::new(),
             camera: Some(CameraView::looking_at(Vec3::new(1.5, 2.5, 4.0), Vec3::new(-1.0, 0.0, -20.0))),
             lights: vec![Light::sun(Vec3::new(1.0, -0.8, -0.2), Vec3::ONE).with_shadows(true)],
             quality: Some(quality.quality()),

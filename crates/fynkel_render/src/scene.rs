@@ -510,12 +510,17 @@ pub struct Draw {
     pub cast_shadows: bool,
     /// Whether shadows fall on it.
     pub receive_shadows: bool,
+    /// For a mesh a skeleton bends: where its joints start in
+    /// [`RenderScene::joints`]. Its vertices then go where their joints
+    /// take them, and `model` doesn't move them (glTF's rule). `None`, or
+    /// a mesh with no joints, draws it unbent, placed by `model`.
+    pub skin: Option<u32>,
 }
 
 impl Draw {
     /// `mesh` placed by `model`, casting and receiving shadows.
     pub fn new(mesh: MeshKey, model: Mat4, material: PbrMaterial) -> Self {
-        Self { mesh, model, material, cast_shadows: true, receive_shadows: true }
+        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None }
     }
 }
 
@@ -702,6 +707,12 @@ pub struct RenderScene {
     /// shows a rough surface at its albedo.
     pub ambient: Vec3,
     pub draws: Vec<Draw>,
+    /// The joints of the skeletons that bend skinned draws
+    /// ([`Draw::skin`]), each where it takes its meshes' vertices: its
+    /// world matrix times its inverse bind matrix. A draw's mesh says how
+    /// many it uses from where its skin starts; draws bent by the same
+    /// skeleton share them.
+    pub joints: Vec<Mat4>,
     /// Drawn after the draws, over them, one pixel wide.
     pub lines: Vec<Line>,
     /// Behind everything, and lighting it, as well as [`Self::ambient`].
@@ -729,6 +740,7 @@ impl RenderScene {
         self.lights.clear();
         self.ambient = Vec3::ZERO;
         self.draws.clear();
+        self.joints.clear();
         self.lines.clear();
         self.sky = None;
         self.fog = None;

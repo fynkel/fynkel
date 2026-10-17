@@ -96,6 +96,9 @@ pub(crate) struct Extract {
     /// Each material as the renderer takes it, worked out once a frame:
     /// objects are many, materials few.
     materials: HashMap<MaterialId, PbrMaterial>,
+    /// Where each skeleton's joints start in the scene's, found this frame
+    /// ([`fynkel_world::Skin::key`]), or `None` for one missing a joint.
+    skins: HashMap<usize, Option<u32>>,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -282,6 +285,9 @@ impl Extract {
         // Objects next to each other often share a material: the last one
         // found is kept.
         let mut last: Option<(MaterialId, PbrMaterial)> = None;
+        let skins = &mut self.skins;
+        skins.clear();
+        let has_skins = world.has_skins();
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
             if !world.in_mask(id, mask) {
@@ -302,7 +308,25 @@ impl Extract {
             if r.own_color {
                 material.base_color = r.color.to_linear();
             }
+            // A skinned mesh's joints, each skeleton's once: their world
+            // matrices times their inverse binds.
+            let skin = match if has_skins { world.skin(id) } else { None } {
+                None => None,
+                Some(skin) => *skins.entry(skin.key()).or_insert_with(|| {
+                    let first = scene.joints.len();
+                    for (&joint, &inverse_bind) in skin.joints().iter().zip(skin.inverse_binds()) {
+                        let Some(m) = matrices.matrix(world, joint) else {
+                            // A joint destroyed: drawn as bound.
+                            scene.joints.truncate(first);
+                            return None;
+                        };
+                        scene.joints.push(m * inverse_bind);
+                    }
+                    Some(first as u32)
+                }),
+            };
             scene.draws.push(Draw {
+                skin,
                 mesh: mesh_key(mesh),
                 model,
                 material,

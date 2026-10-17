@@ -16,7 +16,7 @@ mod sky;
 mod texture;
 
 pub use assets::{Assets, Kit, MadeMesh, MadeTexture, SharedAssets, lock as lock_assets, set_pipeline_cache_dir};
-pub use fynkel_mesh::{MeshData, Vertex};
+pub use fynkel_mesh::{MeshData, MeshParts, SkinVertex, Vertex};
 pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};

@@ -168,6 +168,52 @@ fn a_mirrored_texture_splits_the_vertices_on_the_mirror_line() {
     assert_eq!(signs, [-1.0, -1.0, 1.0, 1.0], "pointing right on the left square, left on the right one");
 }
 
+// --- Skins -------------------------------------------------------------------
+
+#[test]
+fn skin_weights_are_scaled_to_add_up_exactly_and_a_vertex_with_none_follows_its_first_joint() {
+    let joints = [[3, 1, 2, 7], [4, 5, 0, 0], [6, 2, 9, 9]];
+    // Each third: rounding alone would make 65535 ± 1. Then 2 to 1, and
+    // nothing at all.
+    let weights = [[1.0, 1.0, 1.0, 0.0], [2.0, 1.0, 0.0, 0.0], [0.0; 4]];
+    let mesh = MeshData::new(MeshParts { skin: Some((&joints, &weights)), ..parts(&TRIANGLE, &[0, 1, 2]) }).unwrap();
+    let skin = mesh.skin().expect("skinned");
+    for v in skin {
+        assert_eq!(v.weights.iter().map(|&w| u32::from(w)).sum::<u32>(), 65535);
+    }
+    assert_eq!(skin[0].joints, [3, 1, 2, 0], "a joint that moves nothing is 0");
+    assert_eq!(skin[1].weights, [43690, 21845, 0, 0]);
+    assert_eq!(skin[2], SkinVertex { joints: [6, 2, 9, 9], weights: [65535, 0, 0, 0] });
+    assert!(MeshData::new(parts(&TRIANGLE, &[0, 1, 2])).unwrap().skin().is_none());
+
+    let negative = [[1.0, -0.5, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0], [1.0, 0.0, 0.0, 0.0]];
+    let refused = MeshParts { skin: Some((&joints, &negative)), ..parts(&TRIANGLE, &[0, 1, 2]) };
+    assert_eq!(error(refused), "vertex 0 has a skin weight below 0");
+    let short = MeshParts { skin: Some((&joints[..2], &weights[..2])), ..parts(&TRIANGLE, &[0, 1, 2]) };
+    assert_eq!(error(short), "joints has 2 items, but there are 3 positions");
+}
+
+#[test]
+fn a_vertex_split_for_its_tangents_keeps_its_joints() {
+    // As the mirrored squares above: vertices 1 and 4 split in two.
+    let positions =
+        [[-1.0, 1.0, 0.0], [0.0, 1.0, 0.0], [1.0, 1.0, 0.0], [-1.0, 0.0, 0.0], [0.0, 0.0, 0.0], [1.0, 0.0, 0.0]];
+    let uvs = [[0.0, 0.0], [1.0, 0.0], [0.0, 0.0], [0.0, 1.0], [1.0, 1.0], [0.0, 1.0]];
+    let indices = [3, 4, 1, 3, 1, 0, 4, 5, 2, 4, 2, 1];
+    // Each vertex follows the joint of its own number.
+    let joints: Vec<[u16; 4]> = (0..6).map(|i| [i, 0, 0, 0]).collect();
+    let weights = [[1.0, 0.0, 0.0, 0.0]; 6];
+    let skin = Some((&joints[..], &weights[..]));
+    let mesh = MeshData::new(MeshParts { uvs: Some(&uvs), skin, ..parts(&positions, &indices) }).unwrap();
+    assert_eq!(mesh.vertices().len(), 8);
+    let skin = mesh.skin().unwrap();
+    assert_eq!(skin.len(), 8);
+    for (v, s) in mesh.vertices().iter().zip(skin) {
+        let original = positions.iter().position(|p| *p == v.position).unwrap() as u16;
+        assert_eq!(s.joints[0], original);
+    }
+}
+
 #[test]
 fn without_uvs_any_tangent_at_right_angles_to_the_normal_is_used() {
     let mesh = shared_cube(true);

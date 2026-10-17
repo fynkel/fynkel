@@ -228,6 +228,7 @@ impl Shape {
             tangents: Some(&self.tangents),
             uvs: Some(&self.uvs),
             indices: &self.indices,
+            skin: None,
         })
         .expect("the built-in shapes are valid")
     }

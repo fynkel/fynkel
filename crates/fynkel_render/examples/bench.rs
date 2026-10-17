@@ -29,6 +29,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         ..PbrMaterial::DEFAULT
     };
     RenderScene {
+        joints: Vec::new(),
         camera: Some(CameraView::looking_at(Vec3::new(0.0, extent * 0.6, extent * 0.9), Vec3::ZERO)),
         lights: std::iter::once(Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(shadows))
             .chain((0..lamps).map(|i| {
@@ -47,6 +48,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         lines: Vec::new(),
         draws: (0..n)
             .map(|i| Draw {
+                skin: None,
                 mesh: MeshKey(1),
                 model: Mat4::from_rotation_translation(
                     Quat::from_rotation_y(t + i as f32 * 0.1),

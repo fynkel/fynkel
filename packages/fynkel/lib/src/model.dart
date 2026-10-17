@@ -7,8 +7,10 @@ part of 'world.dart';
 /// data.
 ///
 /// Its animations are [clips], which a copy's [GameObject.animator]
-/// plays. What the engine can't draw yet (skins, morph targets, ...) is
-/// skipped, and [warnings] says what. [dispose] frees
+/// plays, and a skinned mesh bends with its copy's joints. What the
+/// engine can't draw yet (morph targets, a skin of over 256 joints, ...)
+/// is skipped, and [warnings] says what; a debug build prints them as the
+/// model loads. [dispose] frees
 /// the model; otherwise it's freed when it's garbage collected. Its
 /// meshes, textures and materials live on in the worlds that have copies.
 final class Model implements Finalizable {
@@ -62,7 +64,10 @@ final class Model implements Finalizable {
   /// be read: a `.gltf` (JSON) file, a
   /// broken one, one that refers to other files, or one that needs a glTF
   /// extension the engine doesn't know. [bytes] is copied.
-  static Future<Model> load(Uint8List bytes) async {
+  static Future<Model> load(Uint8List bytes) => _load(bytes, null);
+
+  /// [load], its warnings printed in a debug build as [name]'s.
+  static Future<Model> _load(Uint8List bytes, String? name) async {
     ensureEngine();
     // As Texture2D.load: native memory, and only its address to the
     // helper.
@@ -70,7 +75,7 @@ final class Model implements Finalizable {
     copy.asTypedList(bytes.length).setAll(0, bytes);
     try {
       final address = await inHelper(_loadAt(copy.address, bytes.length));
-      return Model._(Pointer<FyModel>.fromAddress(address));
+      return Model._(Pointer<FyModel>.fromAddress(address)).._warn(name);
     } finally {
       malloc.free(copy);
     }
@@ -85,6 +90,13 @@ final class Model implements Finalizable {
   };
 
   Pointer<FyModel> _pointer;
+
+  void _warn(String? name) {
+    if (const bool.fromEnvironment('dart.vm.product')) return;
+    for (final warning in warnings) {
+      print('Fynkel: ${name ?? 'a model'}: $warning.');
+    }
+  }
 
   /// Every mesh, each drawn by one or more of the model's nodes.
   /// Primitives that share their vertices share a mesh.

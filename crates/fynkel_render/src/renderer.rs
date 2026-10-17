@@ -74,6 +74,8 @@ pub struct FrameStats {
     pub shadow_maps: u32,
     /// Draws into shadow maps: one per caster per map it falls in.
     pub shadow_casters: u32,
+    /// Joints bending skinned meshes: every skeleton's in the scene.
+    pub joints: u32,
     /// GPU memory of the shadow maps the view holds, shared with the kit's
     /// other views or not.
     pub shadow_bytes: u64,
@@ -298,29 +300,35 @@ struct Variant {
     sky_lit: bool,
     /// Ambient occlusion darkens it.
     ao: bool,
+    /// A skeleton bends the mesh.
+    skinned: bool,
 }
 
 impl Variant {
-    const COUNT: usize = Cover::COUNT * Faces::ALL.len() * 2 * 2 * 2 * 2;
+    const COUNT: usize = Cover::COUNT * Faces::ALL.len() * 2 * 2 * 2 * 2 * 2;
 
     /// Its index in `Pipelines::forward`.
     fn index(self) -> usize {
-        ((((self.cover as usize * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
+        (((((self.cover as usize * Faces::ALL.len() + self.faces as usize) * 2 + usize::from(self.shadowed)) * 2
             + usize::from(self.textured))
             * 2
             + usize::from(self.sky_lit))
             * 2
-            + usize::from(self.ao)
+            + usize::from(self.ao))
+            * 2
+            + usize::from(self.skinned)
     }
 }
 
 /// One instanced draw call, as `prepare` left it for `encode`: `count`
 /// instances of `mesh` starting at instance `first`, with one set of
-/// textures, covering what's behind one way, facing one way.
+/// textures, covering what's behind one way, facing one way, bent by
+/// skeletons or not.
 #[derive(Clone, Copy)]
 struct Batch {
     cover: Cover,
     faces: Faces,
+    skinned: bool,
     textures: MaterialTextures,
     mesh: MeshKey,
     first: u32,
@@ -334,15 +342,16 @@ struct Batch {
 struct CasterBatch {
     map: u8,
     cutout: bool,
+    skinned: bool,
     textures: MaterialTextures,
     mesh: MeshKey,
     first: u32,
     count: u32,
 }
 
-/// A caster's sort key: its map, cut out or not, its textures (a cut-out's
-/// only) and its mesh.
-type CasterKey = (u8, bool, MaterialTextures, u64);
+/// A caster's sort key: its map, cut out or not, skinned or not, its
+/// textures (a cut-out's only) and its mesh.
+type CasterKey = (u8, bool, bool, MaterialTextures, u64);
 
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
@@ -390,6 +399,11 @@ pub struct Renderer {
 
     // Built by `prepare`, consumed by `encode`. Reused every frame.
     uniforms: FrameUniforms,
+    /// The scene's joints, as the shaders read them (`skin.wgsl`).
+    joints: Vec<[[f32; 4]; 3]>,
+    /// Whether each draw is drawn bent: its mesh has joints and its skin
+    /// is in the scene's.
+    skinned: Vec<bool>,
     instances: Vec<Instance>,
     /// The solid draws' batches, then the blended ones' from `blended_from`.
     batches: Vec<Batch>,
@@ -503,6 +517,8 @@ impl Renderer {
             assets,
             targets: None,
             uniforms: FrameUniforms::zeroed(),
+            joints: Vec::new(),
+            skinned: Vec::new(),
             instances: Vec::new(),
             batches: Vec::new(),
             blended_from: 0,
@@ -594,6 +610,8 @@ impl Renderer {
     pub fn prepare(&mut self, scene: &RenderScene, width: u32, height: u32) -> FrameStats {
         self.size = (width.max(1), height.max(1));
         self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
+        self.joints.clear();
+        self.skinned.clear();
         self.instances.clear();
         self.batches.clear();
         self.blended_from = 0;
@@ -777,13 +795,30 @@ impl Renderer {
         // allocates nothing.
         self.order.clear();
         self.blended.clear();
+        self.joints.extend(scene.joints.iter().map(|m| {
+            let rows = m.transpose();
+            [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
+        }));
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
                 stats.missing_meshes += 1;
+                self.skinned.push(false);
                 continue;
             };
-            let (at, radius) = bounds(draw.model, mesh.centre, mesh.radius);
+            // Bent only by a skin the scene has all of: a joint number past
+            // its end would read another skeleton's, or past the buffer.
+            let skin = match (draw.skin, &mesh.skin) {
+                (Some(first), Some(skin)) if first as usize + skin.joints.len() <= scene.joints.len() => {
+                    Some((first as usize, skin))
+                }
+                _ => None,
+            };
+            self.skinned.push(skin.is_some());
+            let (at, radius) = match skin {
+                Some((first, skin)) => skinned_bounds(&scene.joints[first..], &skin.joints),
+                None => bounds(draw.model, mesh.centre, mesh.radius),
+            };
             // Out of view, it can still shadow what's in it. Blended
             // surfaces cast none.
             let cover = Cover::of(&draw.material);
@@ -796,7 +831,7 @@ impl Renderer {
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
             let m = &draw.material;
-            let key = (cover, Faces::of(m, mirrored), m.textures, draw.mesh.0);
+            let key = (cover, Faces::of(m, mirrored), skin.is_some(), m.textures, draw.mesh.0);
             if cover.blended() {
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
             } else {
@@ -815,6 +850,7 @@ impl Renderer {
         for &(_, key, i) in &self.blended {
             batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize]);
         }
+        stats.joints = self.joints.len() as u32;
         for line in &scene.lines {
             for end in [line.a, line.b] {
                 self.line_vertices.push(LineVertex { position: end.into(), color: line.color });
@@ -877,7 +913,8 @@ impl Renderer {
             for &(at, r, i) in &self.shadow_candidates {
                 for (c, cascade) in cascades[..count].iter_mut().enumerate() {
                     if cascade.reach(&basis, at, r) {
-                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize]), i));
+                        let skinned = self.skinned[i as usize];
+                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize], skinned), i));
                     }
                 }
             }
@@ -928,7 +965,8 @@ impl Renderer {
             let planes = frustum_planes(matrix);
             for &(at, r, d) in &self.shadow_candidates {
                 if in_view(&planes, at, r) {
-                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize]), d));
+                    let skinned = self.skinned[d as usize];
+                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize], skinned), d));
                 }
             }
             spots += 1;
@@ -939,19 +977,28 @@ impl Renderer {
         }
 
         self.caster_order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for &(key @ (map, cutout, textures, _), i) in &self.caster_order {
+        for &(key @ (map, cutout, skinned, textures, _), i) in &self.caster_order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
             let first = self.casters.len() as u32;
             match self.caster_batches.last_mut() {
-                Some(b) if (b.map, b.cutout, b.textures, b.mesh.0) == key => b.count += 1,
-                _ => self.caster_batches.push(CasterBatch { map, cutout, textures, mesh: draw.mesh, first, count: 1 }),
+                Some(b) if (b.map, b.cutout, b.skinned, b.textures, b.mesh.0) == key => b.count += 1,
+                _ => self.caster_batches.push(CasterBatch {
+                    map,
+                    cutout,
+                    skinned,
+                    textures,
+                    mesh: draw.mesh,
+                    first,
+                    count: 1,
+                }),
             }
             let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
+            let joints = if skinned { draw.skin.unwrap_or(0) as f32 } else { 0.0 };
             self.casters.push(Caster {
                 model: draw.model.to_cols_array_2d(),
                 uv: [su, sv, ou, ov],
-                alpha: [m.base_color[3], m.alpha_cutoff, 0.0, 0.0],
+                alpha: [m.base_color[3], m.alpha_cutoff, joints, 0.0],
             });
         }
         stats.shadow_maps = u32::from(self.shadow_maps_drawn.0) + u32::from(self.shadow_maps_drawn.1);
@@ -1036,6 +1083,7 @@ impl Renderer {
             Parts {
                 uniforms: bytemuck::bytes_of(&self.uniforms),
                 views: &self.shadow_views,
+                joints: bytemuck::cast_slice(&self.joints),
                 instances: bytemuck::cast_slice(&self.instances),
                 lines: bytemuck::cast_slice(&self.line_vertices),
                 casters: bytemuck::cast_slice(&self.casters),
@@ -1071,10 +1119,17 @@ impl Renderer {
                         pass.set_bind_group(1, bind_group, &[]);
                     }
                 }
-                if last.is_none_or(|l| l.cutout != batch.cutout) {
-                    pass.set_pipeline(kit.shadows.pipeline(spot, batch.cutout));
+                let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
+                if batch.skinned && skin.is_none() {
+                    continue;
+                }
+                if last.is_none_or(|l| (l.cutout, l.skinned) != (batch.cutout, batch.skinned)) {
+                    pass.set_pipeline(kit.shadows.pipeline(spot, batch.cutout, batch.skinned));
                 }
                 last = Some(batch);
+                if let Some(skin) = skin {
+                    pass.set_vertex_buffer(2, skin.buffer.slice(..));
+                }
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
@@ -1092,8 +1147,20 @@ impl Renderer {
                     pass.set_bind_group(0, frame.bind_group, &[]);
                     pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
                 }
+                let mut skinned = false;
                 for batch in solid {
                     let Some(mesh) = meshes.get(&batch.mesh) else { continue };
+                    let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
+                    if batch.skinned && skin.is_none() {
+                        continue;
+                    }
+                    if batch.skinned != skinned {
+                        skinned = batch.skinned;
+                        pass.set_pipeline(kit.ao.depth_pipeline(skinned));
+                    }
+                    if let Some(skin) = skin {
+                        pass.set_vertex_buffer(2, skin.buffer.slice(..));
+                    }
                     pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
@@ -1158,10 +1225,13 @@ impl Renderer {
                     else {
                         continue;
                     };
+                    // Its mesh put back without joints since prepare.
+                    if batch.skinned && mesh.skin.is_none() {
+                        continue;
+                    }
                     let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
-                    if last
-                        .is_none_or(|l| (l.cover, l.faces, textured(l)) != (batch.cover, batch.faces, textured(batch)))
-                    {
+                    let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned);
+                    if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
                         let (cover, faces) = (batch.cover, batch.faces);
                         pass.set_pipeline(scene_pipelines.forward(Variant {
                             cover,
@@ -1171,7 +1241,13 @@ impl Renderer {
                             sky_lit,
                             // Blended surfaces aren't in its depth.
                             ao: ao && !cover.blended(),
+                            skinned: batch.skinned,
                         }));
+                    }
+                    if batch.skinned
+                        && let Some(skin) = &mesh.skin
+                    {
+                        pass.set_vertex_buffer(2, skin.buffer.slice(..));
                     }
                     if last.is_none_or(|l| l.textures != batch.textures) {
                         pass.set_bind_group(1, bind_group, &[]);
@@ -1326,10 +1402,15 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let Variant { cover, faces, shadowed, textured, sky_lit, ao } = variant;
+        let Variant { cover, faces, shadowed, textured, sky_lit, ao, skinned } = variant;
         let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
-            let shader = device.create_shader_module(wgpu::include_wgsl!("forward.wgsl"));
+            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("forward"),
+                source: wgpu::ShaderSource::Wgsl(
+                    concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl")).into(),
+                ),
+            });
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("forward"),
                 bind_group_layouts: &[
@@ -1349,6 +1430,7 @@ impl Pipelines {
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
             7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
         ];
+        let skin_attributes = SKIN_ATTRIBUTES;
         let buffers = [
             Some(wgpu::VertexBufferLayout {
                 array_stride: std::mem::size_of::<Vertex>() as u64,
@@ -1360,6 +1442,7 @@ impl Pipelines {
                 step_mode: wgpu::VertexStepMode::Instance,
                 attributes: &instance_attributes,
             }),
+            Some(skin_buffer(&skin_attributes)),
         ];
         // Cut-outs get their own pipelines: a shader that can drop pixels
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
@@ -1416,9 +1499,9 @@ impl Pipelines {
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
-                entry_point: Some("vs_main"),
+                entry_point: Some(if skinned { "vs_skinned" } else { "vs_main" }),
                 compilation_options: Default::default(),
-                buffers: &buffers,
+                buffers: if skinned { &buffers } else { &buffers[..2] },
             },
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
@@ -1607,23 +1690,39 @@ impl Pipelines {
 
 /// Where a draw goes among `map`'s casters: opaque ones need no textures,
 /// so they group by mesh alone.
-fn caster_key(map: u8, draw: &crate::Draw) -> CasterKey {
+fn caster_key(map: u8, draw: &crate::Draw, skinned: bool) -> CasterKey {
     let m = &draw.material;
     let cutout = m.alpha_cutoff > 0.0;
-    (map, cutout, if cutout { m.textures } else { MaterialTextures::default() }, draw.mesh.0)
+    (map, cutout, skinned, if cutout { m.textures } else { MaterialTextures::default() }, draw.mesh.0)
 }
 
-/// A draw's sort key: how it covers what's behind, which faces, its
-/// textures and its mesh, in the order draws are grouped.
-type SortKey = (Cover, Faces, MaterialTextures, u64);
+/// A draw's sort key: how it covers what's behind, which faces, whether
+/// it's bent, its textures and its mesh, in the order draws are grouped.
+type SortKey = (Cover, Faces, bool, MaterialTextures, u64);
+
+/// A skinned mesh's joints and weights (`fynkel_mesh::SkinVertex`), as
+/// skin.wgsl reads them.
+pub(crate) const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+    wgpu::vertex_attr_array![14 => Uint16x4, 15 => Unorm16x4];
+
+/// The vertex buffer of a skinned mesh's joints and weights: slot 2.
+pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexBufferLayout<'_> {
+    wgpu::VertexBufferLayout {
+        array_stride: std::mem::size_of::<fynkel_mesh::SkinVertex>() as u64,
+        step_mode: wgpu::VertexStepMode::Vertex,
+        attributes,
+    }
+}
 
 /// Adds `draw` to the last of `batches` if it has `key`, or starts another.
 fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw) {
-    let (cover, faces, textures, mesh) = key;
+    let (cover, faces, skinned, textures, mesh) = key;
     let instance = instances.len() as u32;
     match batches.last_mut() {
-        Some(b) if (b.cover, b.faces, b.textures, b.mesh.0) == (cover, faces, textures, mesh) => b.count += 1,
-        _ => batches.push(Batch { cover, faces, textures, mesh: draw.mesh, first: instance, count: 1 }),
+        Some(b) if (b.cover, b.faces, b.skinned, b.textures, b.mesh.0) == (cover, faces, skinned, textures, mesh) => {
+            b.count += 1
+        }
+        _ => batches.push(Batch { cover, faces, skinned, textures, mesh: draw.mesh, first: instance, count: 1 }),
     }
     let m = &draw.material;
     let [er, eg, eb] = m.emissive;
@@ -1634,7 +1733,7 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
             [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
         },
         base_color: m.base_color,
-        params: [m.metallic, m.roughness, m.alpha_cutoff, 0.0],
+        params: [m.metallic, m.roughness, m.alpha_cutoff, if skinned { draw.skin.unwrap_or(0) as f32 } else { 0.0 }],
         emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
         uv: [su, sv, ou, ov],
     });
@@ -1657,6 +1756,24 @@ fn bounds(model: Mat4, centre: Vec3, radius: f32) -> (Vec3, f32) {
     let stretch =
         model.x_axis.truncate().length().max(model.y_axis.truncate().length()).max(model.z_axis.truncate().length());
     (model.transform_point3(centre), radius * stretch)
+}
+
+/// The world-space bounding sphere of a skinned mesh bent by `joints`
+/// (from its skin's first): the box around each joint's sphere (`spheres`,
+/// in the mesh's space as bound) where that joint takes it, and the sphere
+/// around that box. So an arm swung out stays in it.
+fn skinned_bounds(joints: &[Mat4], spheres: &[Option<(Vec3, f32)>]) -> (Vec3, f32) {
+    let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for (joint, sphere) in joints.iter().zip(spheres) {
+        let Some((centre, radius)) = *sphere else { continue };
+        let (at, r) = bounds(*joint, centre, radius);
+        lo = lo.min(at - r);
+        hi = hi.max(at + r);
+    }
+    if lo.x > hi.x {
+        return (Vec3::ZERO, 0.0);
+    }
+    ((lo + hi) * 0.5, (hi - lo).length() * 0.5)
 }
 
 /// Whether a sphere at `at` with radius `r` can be seen at all: false only

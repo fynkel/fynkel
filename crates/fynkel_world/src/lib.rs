@@ -14,6 +14,7 @@ mod id;
 mod model;
 pub mod raycast;
 mod resources;
+mod skin;
 mod world;
 
 pub use animation::{AnimationEvent, AnimatorState};
@@ -29,4 +30,5 @@ pub use id::{MaterialId, MeshId, ObjectId, TextureId};
 pub use model::ModelIds;
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, Material};
+pub use skin::Skin;
 pub use world::{Result, World, WorldError};

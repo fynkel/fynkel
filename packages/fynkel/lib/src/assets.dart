@@ -163,7 +163,7 @@ final class _ModelKind extends _BuiltInKind<Model> {
   List<String> get extensions => const ['.glb'];
 
   @override
-  Future<Model> load(World world, String name, Uint8List bytes) => Model.load(bytes);
+  Future<Model> load(World world, String name, Uint8List bytes) => Model._load(bytes, name);
 }
 
 final class _TextureKind extends _BuiltInKind<Texture2D> {
