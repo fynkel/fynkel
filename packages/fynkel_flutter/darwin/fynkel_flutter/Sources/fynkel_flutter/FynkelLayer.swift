@@ -58,24 +58,23 @@ final class FynkelLayers {
   private var live: [Int64: FynkelLayerView] = [:]
   // Ids apart from Flutter's texture ids, which count from 0.
   private var nextId: Int64 = 1 << 40
+  /// The view controller showing Flutter's view, the registrar's.
+  private let controller: () -> UIViewController?
 
-  /// Flutter's view, made see-through, the window it's in, and the view
-  /// that holds it (the window, or a view of UIKit's inside it): the
-  /// layers go in there, under Flutter's view.
-  private func flutter() -> (UIWindow, UIView, UIView)? {
-    let windows = UIApplication.shared.connectedScenes
-      .compactMap { $0 as? UIWindowScene }
-      .flatMap { $0.windows }
-    for window in windows {
-      if let controller = window.rootViewController as? FlutterViewController, let view = controller.view,
-        let holder = view.superview
-      {
-        if controller.isViewOpaque { controller.isViewOpaque = false }
-        window.backgroundColor = .black
-        return (window, view, holder)
-      }
-    }
-    return nil
+  init(controller: @escaping () -> UIViewController?) {
+    self.controller = controller
+  }
+
+  /// Flutter's view, made see-through, and the view that holds it: the
+  /// layers go in there, under Flutter's view. Nil with no Flutter view on
+  /// screen yet, or one in a view controller of the app's own (add to
+  /// app): there the views stay textures.
+  private func flutter() -> (UIView, UIView)? {
+    guard let controller = controller() as? FlutterViewController, let view = controller.viewIfLoaded,
+      let holder = view.superview
+    else { return nil }
+    if controller.isViewOpaque { controller.isViewOpaque = false }
+    return (view, holder)
   }
 
   func register(_ args: [String: Any], result: FlutterResult) {
@@ -88,23 +87,22 @@ final class FynkelLayers {
       result(FlutterError(code: "arguments", message: "a layer needs view, attach, detach, free and a size", details: nil))
       return
     }
-    guard let (window, flutterView, holder) = flutter() else {
-      result(FlutterError(code: "layer", message: "no Flutter view in a window to put the layer under", details: nil))
+    guard let (flutterView, holder) = flutter() else {
+      result(FlutterError(code: "nolayer", message: "no Flutter view on screen to put a layer under", details: nil))
       return
     }
     let view = FynkelLayerView(
       engine: engine, attach: unsafeBitCast(attach, to: FyLayerAttach.self),
       detach: unsafeBitCast(detach, to: FyLayerDetach.self), free: unsafeBitCast(free, to: FyViewFree.self))
-    let scale = window.screen.scale
+    let scale = flutterView.contentScaleFactor
     view.layer.contentsScale = scale
     view.place(
       left: args["left"] as? Int ?? 0, top: args["top"] as? Int ?? 0,
       width: args["frameWidth"] as? Int ?? width, height: args["frameHeight"] as? Int ?? height, scale: scale)
     holder.insertSubview(view, belowSubview: flutterView)
-    NSLog("fynkel: layer under %@ in %@ (window %@)", "\(type(of: flutterView))", "\(type(of: holder))", "\(holder === window)")
     guard view.attach(width: width, height: height) else {
       view.removeFromSuperview()
-      result(FlutterError(code: "layer", message: "the engine couldn't draw to the layer", details: nil))
+      result(FlutterError(code: "nolayer", message: "the engine couldn't draw to a layer", details: nil))
       return
     }
     let id = nextId
@@ -129,15 +127,15 @@ final class FynkelLayers {
   }
 
   func place(_ id: Int64, _ args: [String: Any]) {
-    guard let view = live[id], let window = view.window else { return }
+    guard let view = live[id] else { return }
     view.place(
       left: args["left"] as? Int ?? 0, top: args["top"] as? Int ?? 0,
-      width: args["width"] as? Int ?? 0, height: args["height"] as? Int ?? 0, scale: window.screen.scale)
+      width: args["width"] as? Int ?? 0, height: args["height"] as? Int ?? 0, scale: view.layer.contentsScale)
   }
 
   /// Over the other layers (a minimap over the field), or under them.
   func over(_ id: Int64, _ over: Bool) {
-    guard let view = live[id], let holder = view.superview, let (_, flutterView, _) = flutter(),
+    guard let view = live[id], let holder = view.superview, let (flutterView, _) = flutter(),
       flutterView.superview === holder
     else { return }
     if over {

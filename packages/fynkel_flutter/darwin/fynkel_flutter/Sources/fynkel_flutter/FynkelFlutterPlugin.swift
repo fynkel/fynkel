@@ -27,23 +27,31 @@ public final class FynkelFlutterPlugin: NSObject, FlutterPlugin {
   private var live: [Int64: Entry] = [:]
   #if os(iOS)
   // The views drawn straight to the screen (docs/ios-surface.md).
-  private let layers = FynkelLayers()
-  #endif
+  private let layers: FynkelLayers
+
+  init(registry: FlutterTextureRegistry, controller: @escaping () -> UIViewController?) {
+    self.registry = registry
+    self.layers = FynkelLayers(controller: controller)
+  }
+  #else
 
   init(registry: FlutterTextureRegistry) {
     self.registry = registry
   }
+  #endif
 
   public static func register(with registrar: FlutterPluginRegistrar) {
     #if os(iOS)
     let messenger = registrar.messenger()
     let registry = registrar.textures()
+    let plugin = FynkelFlutterPlugin(registry: registry) { [weak registrar] in registrar?.viewController }
     #else
     let messenger = registrar.messenger
     let registry = registrar.textures
+    let plugin = FynkelFlutterPlugin(registry: registry)
     #endif
     let channel = FlutterMethodChannel(name: "fynkel_flutter", binaryMessenger: messenger)
-    registrar.addMethodCallDelegate(FynkelFlutterPlugin(registry: registry), channel: channel)
+    registrar.addMethodCallDelegate(plugin, channel: channel)
   }
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
