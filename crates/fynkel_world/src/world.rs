@@ -120,6 +120,8 @@ pub struct World {
     pub(crate) debug_lines: Vec<crate::DebugLine>,
     /// Each model copy's animator, by its root.
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
+    /// The skin of each model copy's skinned part, by the part.
+    pub(crate) skins: IdMap<ObjectId, crate::skin::Skin>,
 }
 
 impl std::fmt::Debug for World {
@@ -155,6 +157,7 @@ impl World {
             batch: Vec::new(),
             debug_lines: Vec::new(),
             animators: IdMap::default(),
+            skins: IdMap::default(),
         }
     }
 
@@ -178,6 +181,9 @@ impl World {
             let entity = self.entities.remove(&id).expect("the hierarchy only holds live objects");
             if !self.animators.is_empty() {
                 self.animators.remove(&id);
+            }
+            if !self.skins.is_empty() {
+                self.skins.remove(&id);
             }
             self.ecs.despawn(entity).expect("the id map only holds live entities");
         }

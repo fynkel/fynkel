@@ -17,6 +17,7 @@ use std::cell::Cell;
 
 use common::*;
 use fynkel_ffi::*;
+use fynkel_world::{Transform, Vec3};
 
 /// Counts allocations made on this thread while counting is switched on.
 struct Counting;
@@ -55,6 +56,65 @@ fn count(f: impl FnOnce()) -> u64 {
     f();
     COUNTING.with(|c| c.set(false));
     COUNT.with(Cell::get)
+}
+
+/// Five copies of the skinned KayKit Knight, each walking: their parts
+/// are bent by joints the extract works out every frame. The model's
+/// textures are left out; its materials are plain.
+fn walking_knights(world: &World) -> Vec<u64> {
+    let bytes = include_bytes!("../../../tests/assets/gltf/Knight.glb");
+    let w = world.0;
+    // SAFETY: a slice, a live world, and pointers to locals.
+    unsafe {
+        let mut model = std::ptr::null_mut();
+        ok(fy_model_load(bytes.as_ptr(), bytes.len(), &mut model));
+        let mut counts = FyModelCounts::default();
+        ok(fy_model_counts(model, &mut counts));
+        let meshes: Vec<u64> = (0..counts.meshes)
+            .map(|i| {
+                let (mut mesh, mut id) = (std::ptr::null_mut(), 0);
+                ok(fy_model_mesh(model, i, &mut mesh));
+                ok(fy_mesh_add(w, mesh, &mut id));
+                fy_mesh_free(mesh);
+                id
+            })
+            .collect();
+        let materials: Vec<u64> = (0..counts.materials)
+            .map(|_| {
+                let mut id = 0;
+                ok(fy_material_add(w, &FyMaterial::default(), &mut id));
+                id
+            })
+            .collect();
+        let walk = (0..counts.clips)
+            .find(|&i| {
+                let mut buf = [0u8; 64];
+                let (mut len, mut length) = (0, 0.0);
+                ok(fy_model_clip(model, i, buf.as_mut_ptr(), buf.len(), &mut len, &mut length));
+                &buf[..len] == b"Walking_A"
+            })
+            .expect("a walk") as u32;
+        let roots = (0..5)
+            .map(|i| {
+                let mut root = 0;
+                let at = Transform::from_position(Vec3::new(i as f32 * 1.5, 0.0, -3.0));
+                ok(fy_model_spawn(
+                    w,
+                    model,
+                    meshes.as_ptr(),
+                    meshes.len(),
+                    materials.as_ptr(),
+                    materials.len(),
+                    &transform(at),
+                    &mut root,
+                ));
+                ok(fy_animator_play(w, root, walk, 0.0, true));
+                root
+            })
+            .collect();
+        fy_model_free(model);
+        roots
+    }
 }
 
 #[test]
@@ -104,6 +164,7 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
         // SAFETY: a live world.
         ok(unsafe { fy_parent_set(world.0, id, cubes[i - 1]) });
     }
+    walking_knights(&world);
     let view = View::headless(&world, 64, 64);
 
     // Half the cubes are moved one call each, half in one call for all
@@ -134,6 +195,9 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
             // SAFETY: a live world.
             ok(unsafe { fy_active_set(world.0, id, !hide) });
         }
+        let mut events = 0;
+        // SAFETY: a live world and pointers to locals.
+        ok(unsafe { fy_world_animate(world.0, &(1.0 / 60.0), &mut events) });
         view.frame()
     };
     // Warm up the way the frame clock runs: without waiting for the GPU,
@@ -154,7 +218,8 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     view.read(*numbers.last().unwrap(), 64, 64);
     assert_eq!(
         allocations, 0,
-        "allocations in 100 frames of 1,000 transform writes and 143 flags each, under a sky in fog"
+        "allocations in 100 frames of 1,000 transform writes and 143 flags each, under a sky in fog, with five \
+         walking skinned knights"
     );
 }
 
