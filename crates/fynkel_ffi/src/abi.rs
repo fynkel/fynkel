@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 29;
+pub const FY_ABI_VERSION: u32 = 30;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -654,6 +654,8 @@ enum Output {
     Headless(HeadlessFrames),
     #[cfg(target_vendor = "apple")]
     Apple(fynkel_present::ApplePresenter),
+    #[cfg(target_vendor = "apple")]
+    AppleLayer(fynkel_present::LayerPresenter),
     #[cfg(target_os = "android")]
     Android(fynkel_present::AndroidPresenter),
 }
@@ -2625,6 +2627,41 @@ pub unsafe extern "C" fn fy_view_new_apple(
     })
 }
 
+/// A view of `world` that draws straight to a `CAMetalLayer` the Flutter
+/// plugin puts under Flutter's view (iOS and macOS;
+/// `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing until the plugin
+/// gives it a layer (`fy_apple_layer_attach`), and each layer brings its
+/// own size: `fy_view_resize` changes nothing. Free it with
+/// `fy_view_free`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_new_apple_layer(
+    world: *const FyWorld,
+    width: u32,
+    height: u32,
+    out: *mut *mut FyView,
+) -> FyStatus {
+    guard(|| {
+        #[cfg(target_vendor = "apple")]
+        // SAFETY: per this function's contract.
+        return fynkel_present::autorelease_pool(|| unsafe {
+            new_view(world, width, height, out, |gpu, width, height| {
+                let (target, presenter) =
+                    fynkel_present::Layer::new(&gpu.instance, &gpu.adapter, &gpu.device, &gpu.queue, width, height);
+                Ok((target, Output::AppleLayer(presenter)))
+            })
+        });
+        #[cfg(not(target_vendor = "apple"))]
+        {
+            let _ = (world, width, height, out);
+            Err(Error::new(FyStatus::Unsupported, "Apple views exist only on macOS and iOS"))
+        }
+    })
+}
+
 /// A view of `world` that draws into an Android `Surface` for Flutter to
 /// show (Android only; `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing
 /// until the Flutter plugin gives it a surface, and each new surface brings
@@ -2919,6 +2956,10 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             let ring = presenter.stats();
             (stats.presented, stats.dropped) = (ring.presented, ring.dropped);
         }
+        #[cfg(target_vendor = "apple")]
+        if let Output::AppleLayer(presenter) = &view.output {
+            stats.presented = presenter.presented();
+        }
         #[cfg(target_os = "android")]
         if let Some(presenter) = view.android() {
             stats.presented = presenter.presented();
@@ -3001,5 +3042,57 @@ pub unsafe extern "C" fn fy_apple_set_frame_ready(
         }
         let _ = (view, function, userdata);
         Err(Error::new(FyStatus::Unsupported, "not an Apple view"))
+    })
+}
+
+/// Draws an Apple layer view's next frames to `layer` (a `CAMetalLayer`)
+/// at `width` × `height` pixels, after a frame in progress on the old one.
+/// For the Flutter plugin, on the main thread.
+///
+/// # Safety
+///
+/// `view` is null or live; `layer` is null or a live `CAMetalLayer`, kept
+/// alive until `fy_apple_layer_detach` or the next attach returns.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_apple_layer_attach(
+    view: *const FyView,
+    layer: *mut c_void,
+    width: u32,
+    height: u32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        #[cfg(target_vendor = "apple")]
+        if let Output::AppleLayer(presenter) = &view.output {
+            let layer = std::ptr::NonNull::new(layer).ok_or_else(|| Error::null("layer"))?;
+            // SAFETY: promised by this function's caller.
+            return fynkel_present::autorelease_pool(|| unsafe { presenter.attach(layer, width, height) })
+                .map_err(|e| Error::new(FyStatus::NoGpu, e));
+        }
+        let _ = (view, layer, width, height);
+        Err(Error::new(FyStatus::Unsupported, "not an Apple layer view"))
+    })
+}
+
+/// Stops an Apple layer view drawing to its layer, after a frame in
+/// progress: the layer may then go. Frames are skipped until the next
+/// `fy_apple_layer_attach`.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_apple_layer_detach(view: *const FyView) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        #[cfg(target_vendor = "apple")]
+        if let Output::AppleLayer(presenter) = &view.output {
+            presenter.detach();
+            return Ok(());
+        }
+        let _ = view;
+        Err(Error::new(FyStatus::Unsupported, "not an Apple layer view"))
     })
 }

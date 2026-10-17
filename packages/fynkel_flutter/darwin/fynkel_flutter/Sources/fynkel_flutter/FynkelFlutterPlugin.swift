@@ -25,6 +25,10 @@ public final class FynkelFlutterPlugin: NSObject, FlutterPlugin {
 
   private let registry: FlutterTextureRegistry
   private var live: [Int64: Entry] = [:]
+  #if os(iOS)
+  // The views drawn straight to the screen (docs/ios-surface.md).
+  private let layers = FynkelLayers()
+  #endif
 
   init(registry: FlutterTextureRegistry) {
     self.registry = registry
@@ -44,6 +48,35 @@ public final class FynkelFlutterPlugin: NSObject, FlutterPlugin {
 
   public func handle(_ call: FlutterMethodCall, result: @escaping FlutterResult) {
     let args = call.arguments as? [String: Any] ?? [:]
+    #if os(iOS)
+    let id = (args["texture"] as? Int).map(Int64.init)
+    switch call.method {
+    case "register" where args["layer"] as? Bool == true:
+      layers.register(args, result: result)
+      return
+    case "resize":
+      if let id, layers.owns(id) {
+        layers.resize(id, width: args["width"] as? Int ?? 1, height: args["height"] as? Int ?? 1, result: result)
+      } else {
+        result(nil)
+      }
+      return
+    case "place":
+      if let id { layers.place(id, args) }
+      result(nil)
+      return
+    case "over":
+      if let id { layers.over(id, args["over"] as? Bool ?? false) }
+      result(nil)
+      return
+    case "unregister" where id.map(layers.owns) == true:
+      layers.unregister(id!)
+      result(nil)
+      return
+    default:
+      break
+    }
+    #endif
     switch call.method {
     case "register":
       guard let view = (args["view"] as? Int).flatMap(UnsafeRawPointer.init(bitPattern:)),
@@ -93,6 +126,9 @@ public final class FynkelFlutterPlugin: NSObject, FlutterPlugin {
   /// Releases and frees every view: their isolate is gone, so no Dart code
   /// will.
   private func releaseOrphans() {
+    #if os(iOS)
+    layers.releaseOrphans()
+    #endif
     for (id, entry) in live {
       release(id, entry)
       entry.free(entry.view)

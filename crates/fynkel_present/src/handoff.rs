@@ -79,6 +79,8 @@ impl<T> Handoff<T> {
 impl<T> Lease<T> {
     /// Whether another thread waits to put or take the value: the lease
     /// should end soon.
+    // Only the Android target asks.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
     pub(crate) fn wanted(&self) -> bool {
         self.handoff.state().waiting > 0
     }

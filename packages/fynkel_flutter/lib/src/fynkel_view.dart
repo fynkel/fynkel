@@ -44,6 +44,15 @@ bool? debugAndroid;
 
 bool get _android => debugAndroid ?? Platform.isAndroid;
 
+/// iOS: the game draws straight to a layer of its own under Flutter's view,
+/// as Android's surface (docs/ios-surface.md); a spike behind
+/// `--define FYNKEL_IOS_LAYER=true` for now.
+bool get _iosLayer => Platform.isIOS && const bool.fromEnvironment('FYNKEL_IOS_LAYER');
+
+/// Whether the plugin gives the view where it draws, and with it the size
+/// (Android's surface, iOS's layer), rather than the engine making it.
+bool get _surfaced => _android || _iosLayer;
+
 /// Whether this isolate has told the plugin to free the views an earlier
 /// isolate left (a hot restart disposes nothing). It does so before its
 /// first view registers. The plugin handles a channel's calls in the order
@@ -672,10 +681,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     if (view == null) return;
     try {
       view.camera = widget.camera;
-      if (!_android) view.resize(_width, _height);
+      if (!_surfaced) view.resize(_width, _height);
       final texture = _texture;
       if (texture == null) return;
-      if (_android) _sendSize(view, texture);
+      if (_surfaced) _sendSize(view, texture);
       if (_onScreen) _sendPlace(texture);
       view.frame();
     } on FynkelException catch (error, stack) {
@@ -737,6 +746,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         view = Platform.isAndroid
             ? AndroidSurfaceView(world, width: _width, height: _height)
             : HeadlessView(world, width: _width, height: _height);
+      } else if (_iosLayer) {
+        view = AppleLayerView(world, width: _width, height: _height);
       } else if (Platform.isMacOS || Platform.isIOS) {
         view = AppleView(world, width: _width, height: _height);
       } else {
@@ -759,7 +770,25 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         await channel.invokeMethod<void>('reset');
       }
       final Map<String, Object> arguments;
-      if (_android) {
+      if (_iosLayer) {
+        _sentWidth = view.width;
+        _sentHeight = view.height;
+        final place = _place();
+        arguments = {
+          'view': view.address,
+          'width': view.width,
+          'height': view.height,
+          'layer': true,
+          'attach': AppleLayerView.attachAddress,
+          'detach': AppleLayerView.detachAddress,
+          'free': AppleView.freeAddress,
+          'onScreen': true,
+          'left': place.left.round(),
+          'top': place.top.round(),
+          'frameWidth': place.width.round(),
+          'frameHeight': place.height.round(),
+        };
+      } else if (_android) {
         _sentWidth = view.width;
         _sentHeight = view.height;
         final place = widget.androidSurface ? _place() : null;
@@ -783,7 +812,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           'free': AppleView.freeAddress,
         };
       }
-      if (_android) _listenToPlugin();
+      if (_surfaced) _listenToPlugin();
       // A texture's id, or for a surface on screen {id, onScreen}.
       final answer = await channel.invokeMethod<Object>('register', arguments);
       final onScreen = answer is Map && answer['onScreen'] == true;

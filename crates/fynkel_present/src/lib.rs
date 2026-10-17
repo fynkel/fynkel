@@ -10,8 +10,11 @@ mod android;
 #[cfg(target_vendor = "apple")]
 #[allow(unsafe_code)]
 mod apple;
-// Used by the Android target; tested everywhere.
-#[cfg_attr(not(target_os = "android"), allow(dead_code))]
+#[cfg(target_vendor = "apple")]
+#[allow(unsafe_code)]
+mod layer;
+// Used by the Android and Apple layer targets; tested everywhere.
+#[cfg_attr(not(any(target_os = "android", target_vendor = "apple")), allow(dead_code))]
 mod handoff;
 mod headless;
 mod ring;
@@ -21,6 +24,8 @@ mod target;
 pub use android::{Android, AndroidError, AndroidPresenter};
 #[cfg(target_vendor = "apple")]
 pub use apple::{Apple, AppleError, ApplePresenter, FrameReady, Presented};
+#[cfg(target_vendor = "apple")]
+pub use layer::{Layer, LayerFrame, LayerPresenter};
 pub use headless::{Headless, HeadlessFrames, ReadError};
 pub use ring::{MAX_IN_FLIGHT, MAX_QUEUED, Ring, RingError, RingStats, SLOTS, Shown, SlotState, Ticket};
 pub use target::{Target, Wake};

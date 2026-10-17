@@ -297,6 +297,34 @@ final class AppleView extends WorldView {
           .address;
 }
 
+/// A view that draws a [World] straight to a `CAMetalLayer` the Flutter
+/// plugin puts under Flutter's view (iOS). package:fynkel_flutter's
+/// `FynkelView` makes one and hands [address] to its Swift plugin, which
+/// gives it a layer (and with it the size) through [attachAddress]; [resize]
+/// changes nothing here. A game never uses it directly. It must be
+/// disposed: it's never freed by the garbage collector.
+final class AppleLayerView extends WorldView {
+  /// Throws a [FynkelException] with [FynkelStatus.unsupported] off Apple.
+  AppleLayerView(World world, {required int width, required int height})
+    : super._(
+        world,
+        width,
+        height,
+        WorldView._create((out) => fy_view_new_apple_layer(world.pointer, width, height, out)),
+        finalize: false,
+      );
+
+  /// `fy_apple_layer_attach`, for the plugin to give the view its layer.
+  static int get attachAddress =>
+      Native.addressOf<NativeFunction<Int32 Function(Pointer<FyView>, Pointer<Void>, Uint32, Uint32)>>(
+        fy_apple_layer_attach,
+      ).address;
+
+  /// `fy_apple_layer_detach`, for the plugin to take it away.
+  static int get detachAddress =>
+      Native.addressOf<NativeFunction<Int32 Function(Pointer<FyView>)>>(fy_apple_layer_detach).address;
+}
+
 /// A view that draws a [World] into an Android `Surface` for Flutter to
 /// show. package:fynkel_flutter's `FynkelView` makes one and hands
 /// [address] to its Kotlin plugin, which gives it a surface (and with it
