@@ -839,7 +839,11 @@ others, and taps and keys wait for the next frame of the world's. Change
 it at any time, from a settings page for example:
 
 ```dart
-world.targetFrameRate = 120; // The display's most, on a ProMotion screen.
+/// The settings page's choice: smoother (the most a ProMotion screen
+/// shows), or the default, which keeps the phone cool.
+void chooseFrameRate(World world, {required bool smoother}) {
+  world.targetFrameRate = smoother ? 120 : 60;
+}
 ```
 
 60 is the default because more costs the phone heat: Sheepdog at 120 on
