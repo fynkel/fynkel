@@ -1,6 +1,6 @@
 # Stage 9 plan: animation
 
-Status: proposed 2026-10-17. Scope and rules:
+Status: accepted 2026-10-17 ("let's go"), with the recommended answers to §4. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 8 is done
 ([report](stage-8-report.md)), and both phones draw straight to the
 screen ([Android](android-surface-report.md), [iPhone](ios-surface-report.md)).
