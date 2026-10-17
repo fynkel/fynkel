@@ -24,29 +24,43 @@ void main() {
     return (view.stats.textureBytes, view.stats.meshBytes);
   }
 
-  test('the garden loads, and a tap on the character turns its head; elsewhere it does nothing', () async {
+  test('the garden loads; the character idles, walks where the ground is tapped, and picks up when tapped', () async {
     await garden.loaded;
     final character = world.first<Character>()!;
-    final head = character.find('head')!;
-    final facing = head.transform.rotation;
+    final animator = character.children.single.animator!;
     world.update(0);
+    expect(animator.current, 'idle');
+    final start = character.position;
 
-    // The sky, top left: nothing turns.
+    // The sky, top left: nothing happens.
     world.tap(5, 5);
-    world.update(1);
-    expect(head.transform.rotation, facing);
+    world.update(1 / 60);
+    expect((animator.current, character.position), ('idle', start));
 
-    // The character stands in the middle of the view.
-    world.tap(width / 2, height / 2);
-    world.update(0);
-    world.run(1);
-    // A quarter turn about its own up: the forward goes from -Z to -X.
-    expect(
-      head.transform.rotation
-          .rotate(Vec3.forward)
-          .closeTo(Transform(rotation: facing).rotated(Vec3.up, 1.5708).rotation.rotate(Vec3.forward), 1e-3),
-      isTrue,
-    );
+    // The ground below the character, near the bottom of the view.
+    world.tap(width / 2, height - 10);
+    world.update(1 / 60);
+    final goal = character.position;
+    world.run(0.5);
+    expect(animator.current, 'walk');
+    expect(animator.weight('walk'), 1, reason: 'faded in from the idle');
+    final walked = character.position;
+    expect((walked - start).length, greaterThan(0.5));
+    expect(goal, isNot(walked));
+    world.run(10);
+    expect(animator.current, 'idle', reason: 'there');
+    expect((character.position - walked).length, lessThan(Character.speed * 10));
+
+    // The character itself, in the middle of the view's bottom half now.
+    final there = character.position;
+    final camera = world.first<OrbitCamera>()!.get<Camera>()!;
+    final middle = camera.worldToScreenPoint(character.position + Vec3(0, 1, 0))!;
+    world.tap(middle.x, middle.y);
+    world.update(1 / 60);
+    expect(animator.current, 'pick-up');
+    world.run(animator.length + 0.5);
+    expect(animator.current, 'idle', reason: 'back to the idle when the pick-up ended');
+    expect(character.position, there, reason: 'a pick-up stays where it is');
 
     final view = HeadlessView(world, width: width, height: height);
     addTearDown(view.dispose);

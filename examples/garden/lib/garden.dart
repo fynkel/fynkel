@@ -1,5 +1,5 @@
 // The game: the stage 2 scene (docs/stage-2.md), a character in a garden
-// you can go around, tap and zoom. Kenney's Nature Kit models
+// you can go around and zoom; it walks where you tap (stage 9). Kenney's Nature Kit models
 // (assets/CREDITS.md).
 
 import 'dart:math' as math;
@@ -63,8 +63,17 @@ class OrbitCamera extends GameObject {
   static const target = Vec3(0, 1.3, 0);
 }
 
+/// Tapped, it sends the character there.
 class Ground extends GameObject {
   Ground() : super(transform: Transform(scale: Vec3(30, 1, 30)));
+
+  @override
+  bool onClick(Finger finger) {
+    final hit = finger.over;
+    if (hit == null) return false;
+    world.first<Character>()?.walkTo(hit.point);
+    return true;
+  }
 
   @override
   Future<void> onLoad() async {
@@ -101,31 +110,73 @@ class Props extends GameObject {
   }
 }
 
-/// Turns its head a quarter turn each time it's tapped.
+/// Kenney's character, with its own clips: it idles, walks where the
+/// ground is tapped, and picks something up when it's tapped itself. Its
+/// head turns to the camera after the clip, in onLateUpdate.
 class Character extends GameObject {
   Character() : super(transform: Transform(rotation: Quat.axisAngle(Vec3.up, 0.4)));
 
+  /// Metres a second: the walk clip's pace, so its feet don't slide.
+  static const speed = 1.6;
+
+  /// How far the head turns to the camera at most, either way.
+  static const lookLimit = 1.0;
+
   late final GameObject _head;
-  double _target = 0, _turned = 0;
+  late final Animator _animator;
+  Vec3? _goal;
+  bool _pickingUp = false;
+  double _look = 0;
 
   @override
   Future<void> onLoad() async {
     await super.onLoad();
-    _head = add(await assets.instantiate('character.glb')).find('head')!;
+    final model = add(await assets.instantiate('character.glb'));
+    _head = model.find('head')!;
+    _animator = model.animator!
+      ..play('idle')
+      ..onEnd = (_) => _pickingUp = false;
+  }
+
+  /// Walks to [point] on the ground, unless it's busy picking up.
+  void walkTo(Vec3 point) {
+    if (!_pickingUp) _goal = Vec3(point.x, 0, point.z);
   }
 
   @override
   bool onClick(Finger finger) {
-    _target += math.pi / 2;
+    _goal = null;
+    _pickingUp = true;
+    _animator.crossFade('pick-up', duration: 0.15, loop: false);
     return true;
   }
 
   @override
   void onUpdate() {
     super.onUpdate();
-    final step = (_target - _turned).clamp(-6 * time.delta, 6 * time.delta);
-    if (step == 0) return;
-    _head.rotate(Vec3.up, step);
-    _turned += step;
+    if (_goal case final goal?) {
+      final to = goal - position;
+      final distance = to.length;
+      if (distance < 0.05) {
+        _goal = null;
+      } else {
+        position += to * (math.min(distance, speed * time.delta) / distance);
+        // The model faces +Z; lookRotation turns -Z to the way given.
+        final facing = Quat.lookRotation(-to);
+        rotation = Quat.slerp(rotation, facing, math.min(1, 10 * time.delta));
+      }
+    }
+    if (!_pickingUp) _animator.crossFade(_goal == null ? 'idle' : 'walk', duration: 0.2);
+  }
+
+  @override
+  void onLateUpdate() {
+    super.onLateUpdate();
+    // The camera's way from the character, round its up: the head turns
+    // that much, within its limit, eased, on top of the clip's pose.
+    final camera = inverseTransformPoint(world.first<OrbitCamera>()!.position);
+    final want = (math.atan2(camera.x, camera.z)).clamp(-lookLimit, lookLimit);
+    _look += (want - _look) * math.min(1, 6 * time.delta);
+    _head.localRotation = Quat.axisAngle(Vec3.up, _look) * _head.localRotation;
   }
 }
