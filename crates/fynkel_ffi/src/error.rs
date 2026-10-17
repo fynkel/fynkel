@@ -77,9 +77,7 @@ impl From<WorldError> for Error {
             | WorldError::Cycle { .. }
             | WorldError::ModelIds { .. }
             | WorldError::Layer(_)
-            | WorldError::NoClip { .. } => {
-                FyStatus::InvalidValue
-            }
+            | WorldError::NoClip { .. } => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
     }

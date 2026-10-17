@@ -21,6 +21,37 @@ external int fy_active_in_hierarchy_get(ffi.Pointer<FyWorld> world, int id, ffi.
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Bool)>(isLeaf: true)
 external int fy_active_set(ffi.Pointer<FyWorld> world, int id, bool active);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyAnimationEvent>, ffi.Size, ffi.Pointer<ffi.Size>)>(
+  isLeaf: true,
+)
+external int fy_animation_events_get(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<FyAnimationEvent> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyAnimatorState>)>(isLeaf: true)
+external int fy_animator_get(ffi.Pointer<FyWorld> world, int root, ffi.Pointer<FyAnimatorState> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Float, ffi.Bool)>(isLeaf: true)
+external int fy_animator_play(ffi.Pointer<FyWorld> world, int root, int clip, double fade, bool looping);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Bool)>(isLeaf: true)
+external int fy_animator_report_set(ffi.Pointer<FyWorld> world, int root, bool on);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Float)>(isLeaf: true)
+external int fy_animator_speed_set(ffi.Pointer<FyWorld> world, int root, double speed);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_animator_stop(ffi.Pointer<FyWorld> world, int root);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Float)>(isLeaf: true)
+external int fy_animator_time_set(ffi.Pointer<FyWorld> world, int root, double time);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Pointer<ffi.Float>)>(isLeaf: true)
+external int fy_animator_weight(ffi.Pointer<FyWorld> world, int root, int clip, ffi.Pointer<ffi.Float> out);
+
 @ffi.Native<ffi.Uint32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Pointer<ffi.Void>>)>(isLeaf: true)
 external int fy_apple_acquire(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Pointer<ffi.Void>> out_surface);
 
@@ -163,6 +194,25 @@ external int fy_mesh_renderer_remove(ffi.Pointer<FyWorld> world, int id);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMeshRenderer>)>(isLeaf: true)
 external int fy_mesh_renderer_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMeshRenderer> value);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyModel>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Size>,
+    ffi.Pointer<ffi.Float>,
+  )
+>(isLeaf: true)
+external int fy_model_clip(
+  ffi.Pointer<FyModel> model,
+  int index,
+  ffi.Pointer<ffi.Uint8> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_len,
+  ffi.Pointer<ffi.Float> out_length,
+);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyModel>, ffi.Pointer<FyModelCounts>)>(isLeaf: true)
 external int fy_model_counts(ffi.Pointer<FyModel> model, ffi.Pointer<FyModelCounts> out);
@@ -396,6 +446,9 @@ external int fy_view_resize(ffi.Pointer<FyView> view, int width, int height);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<FyViewStats>)>(isLeaf: true)
 external int fy_view_stats(ffi.Pointer<FyView> view, ffi.Pointer<FyViewStats> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Float, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_world_animate(ffi.Pointer<FyWorld> world, double dt, ffi.Pointer<ffi.Size> out_count);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyFog>)>(isLeaf: true)
 external int fy_world_fog_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyFog> fog);
 
@@ -424,7 +477,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 30;
+const int FY_ABI_VERSION = 31;
 
 const int FY_APPLE_MORE = 2;
 
@@ -477,6 +530,68 @@ const int FY_SKY_GRADIENT = 2;
 const int FY_SKY_IMAGE = 3;
 
 const int FY_SKY_NONE = 0;
+
+final class FyAnimationEvent extends ffi.Struct {
+  @ffi.Uint64()
+  external int root;
+
+  @ffi.Uint32()
+  external int clip;
+
+  @ffi.Uint32()
+  external int loops;
+
+  @ffi.Float()
+  external double from;
+
+  @ffi.Float()
+  external double to;
+
+  @ffi.Bool()
+  external bool ended;
+
+  static ffi.Pointer<FyAnimationEvent> $allocate(
+    ffi.Allocator $allocator, {
+    required int root,
+    required int clip,
+    required int loops,
+    required double from,
+    required double to,
+    required bool ended,
+  }) => $allocator<FyAnimationEvent>()
+    ..ref.root = root
+    ..ref.clip = clip
+    ..ref.loops = loops
+    ..ref.from = from
+    ..ref.to = to
+    ..ref.ended = ended;
+}
+
+final class FyAnimatorState extends ffi.Struct {
+  @ffi.Int32()
+  external int clip;
+
+  @ffi.Float()
+  external double time;
+
+  @ffi.Float()
+  external double length;
+
+  @ffi.Float()
+  external double speed;
+
+  static ffi.Pointer<FyAnimatorState> $allocate(
+    ffi.Allocator $allocator, {
+    required int clip,
+    required double time,
+    required double length,
+    required double speed,
+  }) => $allocator<FyAnimatorState>()
+    ..ref.clip = clip
+    ..ref.time = time
+    ..ref.length = length
+    ..ref.speed = speed;
+}
 
 final class FyCamera extends ffi.Struct {
   @ffi.Float()
@@ -708,17 +823,22 @@ final class FyModelCounts extends ffi.Struct {
   @ffi.Size()
   external int warnings;
 
+  @ffi.Size()
+  external int clips;
+
   static ffi.Pointer<FyModelCounts> $allocate(
     ffi.Allocator $allocator, {
     required int meshes,
     required int textures,
     required int materials,
     required int warnings,
+    required int clips,
   }) => $allocator<FyModelCounts>()
     ..ref.meshes = meshes
     ..ref.textures = textures
     ..ref.materials = materials
-    ..ref.warnings = warnings;
+    ..ref.warnings = warnings
+    ..ref.clips = clips;
 }
 
 final class FyQuality extends ffi.Struct {

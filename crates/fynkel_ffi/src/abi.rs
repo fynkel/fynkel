@@ -19,9 +19,9 @@ use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, Sha
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material, MaterialId, MeshData,
-    MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId, Transform, Vec2, Vec3,
-    World,
+    AnimationEvent, Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material,
+    MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray, Raycaster, TextureId,
+    Transform, Vec2, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 30;
+pub const FY_ABI_VERSION: u32 = 31;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -621,6 +621,9 @@ pub struct FyWorld {
     /// Its sky and fog, as its views draw them.
     sky: Mutex<Option<Sky>>,
     fog: Mutex<Option<Fog>>,
+    /// What the last `fy_world_animate` reported, for
+    /// `fy_animation_events_get`. Locked only while `world` is.
+    events: Mutex<Vec<AnimationEvent>>,
 }
 
 impl FyWorld {
@@ -755,6 +758,7 @@ pub extern "C" fn fy_world_new() -> *mut FyWorld {
         quality: Mutex::default(),
         sky: Mutex::default(),
         fog: Mutex::default(),
+        events: Mutex::default(),
     };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
@@ -2272,13 +2276,15 @@ pub struct FyModelCounts {
     pub materials: usize,
     /// Lines saying what was skipped (`fy_model_warning`).
     pub warnings: usize,
+    /// Animations (`fy_model_clip`).
+    pub clips: usize,
 }
 
 /// Reads a `.glb` (binary glTF 2.0) of `len` bytes and writes the model to
 /// `out`. Its images are decoded and its meshes' tangents generated here,
 /// so a big model takes a while: call it off the UI thread.
 ///
-/// What can't be drawn yet (animations, skins, see-through materials, ...)
+/// What can't be drawn yet (skins, see-through materials, ...)
 /// is skipped with a warning (`fy_model_warning`). A file that can't be
 /// read at all, or needs a glTF extension the engine doesn't know, is
 /// refused (`FY_STATUS_INVALID_VALUE`) with a message saying why.
@@ -2338,6 +2344,7 @@ pub unsafe extern "C" fn fy_model_counts(model: *const FyModel, out: *mut FyMode
             textures: model.images().len(),
             materials: model.materials().len(),
             warnings: model.warnings().len(),
+            clips: model.clips().len(),
         };
         // SAFETY: per this function's contract.
         unsafe { write(out, counts, "out") }
@@ -2455,6 +2462,34 @@ pub unsafe extern "C" fn fy_model_warning(
     })
 }
 
+/// Clip `index`'s name, as UTF-8 like `fy_model_material_name`, and its
+/// length in seconds to `out_length`.
+///
+/// # Safety
+///
+/// `model` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_len` and `out_length` are null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_model_clip(
+    model: *const FyModel,
+    index: usize,
+    buf: *mut u8,
+    cap: usize,
+    out_len: *mut usize,
+    out_length: *mut f32,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let model = &unsafe { handle(model, "model") }?.0;
+        let clip = nth(model.clips(), index, "clips")?;
+        // SAFETY: per this function's contract.
+        unsafe {
+            write(out_length, clip.length, "out_length")?;
+            write_all(clip.name.bytes(), buf, cap, out_len)
+        }
+    })
+}
+
 /// `count` ids at `p`, each turned into a typed id by `id`.
 ///
 /// # Safety
@@ -2508,6 +2543,207 @@ pub unsafe extern "C" fn fy_model_spawn(
         let root = world.lock()?.spawn_model(model, &meshes, &materials, transform.to_component()?)?;
         // SAFETY: per this function's contract.
         unsafe { write(out, root.raw(), "out") }
+    })
+}
+
+// --- Animation ---------------------------------------------------------------
+
+/// What an animator plays, from `fy_animator_get`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyAnimatorState {
+    /// The clip last played or faded to, or -1 for none.
+    pub clip: i32,
+    /// Seconds into it.
+    pub time: f32,
+    /// Its length in seconds.
+    pub length: f32,
+    pub speed: f32,
+}
+
+/// What one of a reporting animator's clips did in `fy_world_animate`:
+/// its time went from `from` to `to`, passing its end `loops` times on
+/// the way (a looping clip), or reaching it (`ended`, one that doesn't).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyAnimationEvent {
+    pub root: u64,
+    pub clip: u32,
+    pub loops: u32,
+    pub from: f32,
+    pub to: f32,
+    pub ended: bool,
+}
+
+/// Plays clip `clip` of the model copy `root` (a model's index, as
+/// `fy_model_clip`) from its start: at once in place of what plays, with
+/// `fade` 0, or fading in over `fade` seconds as the rest fade out. A clip
+/// already playing or fading keeps its time. An object that isn't a model
+/// copy with clips is `FY_STATUS_NO_COMPONENT`.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_play(
+    world: *const FyWorld,
+    root: u64,
+    clip: u32,
+    fade: f32,
+    looping: bool,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.play(object(root)?, clip, fade, looping)?)
+    })
+}
+
+/// Stops every clip of `root`'s; its parts keep the pose they're in.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_stop(world: *const FyWorld, root: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.stop(object(root)?)?)
+    })
+}
+
+/// How fast `root`'s clips play: 1 as made, 0 paused, negative backwards.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_speed_set(world: *const FyWorld, root: u64, speed: f32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.set_animation_speed(object(root)?, speed)?)
+    })
+}
+
+/// Moves `root`'s current clip to `time` seconds, kept within its length.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_time_set(world: *const FyWorld, root: u64, time: f32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.set_animation_time(object(root)?, time)?)
+    })
+}
+
+/// Whether `fy_world_animate` reports what `root`'s clips do.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_report_set(world: *const FyWorld, root: u64, on: bool) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        Ok(world.lock()?.set_animation_reporting(object(root)?, on)?)
+    })
+}
+
+/// Writes what `root` plays to `out`.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_get(world: *const FyWorld, root: u64, out: *mut FyAnimatorState) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let state = world.lock()?.animator_state(object(root)?)?;
+        let state = FyAnimatorState {
+            clip: state.clip.map_or(-1, |c| c as i32),
+            time: state.time,
+            length: state.length,
+            speed: state.speed,
+        };
+        // SAFETY: per this function's contract.
+        unsafe { write(out, state, "out") }
+    })
+}
+
+/// Writes clip `clip`'s weight in `root`'s pose to `out`: 1 alone, 0 not
+/// playing, between while it fades.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animator_weight(world: *const FyWorld, root: u64, clip: u32, out: *mut f32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let weight = world.lock()?.clip_weight(object(root)?, clip)?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, weight, "out") }
+    })
+}
+
+/// Advances every animator by `dt` seconds and poses its model's parts,
+/// once a frame before it's drawn. Writes how many events the reporting
+/// animators gave to `out_count`; `fy_animation_events_get` reads them.
+///
+/// # Safety
+///
+/// `world` is null or live; `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_animate(world: *const FyWorld, dt: f32, out_count: *mut usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let mut inner = world.lock()?;
+        let mut events = world.events.lock().unwrap_or_else(PoisonError::into_inner);
+        events.clear();
+        inner.animate(dt, &mut events);
+        // SAFETY: per this function's contract.
+        unsafe { write(out_count, events.len(), "out_count") }
+    })
+}
+
+/// The last `fy_world_animate`'s events, as `fy_children_get` writes ids:
+/// all of them when they fit in `cap`, and their number to `out_count`.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_animation_events_get(
+    world: *const FyWorld,
+    buf: *mut FyAnimationEvent,
+    cap: usize,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let _inner = world.lock()?;
+        let events = world.events.lock().unwrap_or_else(PoisonError::into_inner);
+        let items = events.iter().map(|e| FyAnimationEvent {
+            root: e.root.raw(),
+            clip: e.clip,
+            loops: e.loops,
+            from: e.from,
+            to: e.to,
+            ended: e.ended,
+        });
+        // SAFETY: per this function's contract.
+        unsafe { write_all(items, buf, cap, out_count) }
     })
 }
 

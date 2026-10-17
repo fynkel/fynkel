@@ -277,7 +277,7 @@ fn tower_matches_its_golden() {
 #[test]
 fn a_model_reports_what_it_has_and_what_was_skipped() {
     let model = Model::load(sample("CesiumMilkTruck.glb")).unwrap();
-    assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 0 });
+    assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 0, clips: 1 });
     let fox = Model::load(sample("Fox.glb")).unwrap();
     assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
     let name = |i| {
@@ -392,4 +392,53 @@ fn a_ray_at_the_tower_hits_a_named_block_that_is_part_of_it() {
     // The block is turned to face the centre, so its 0.5 (X) is its depth
     // here; it stands 2.2 out from the centre at z = -10.
     assert!((hit.distance - (10.0 - 2.2 - 0.25)).abs() < 1e-4, "{}", hit.distance);
+}
+
+#[test]
+fn a_model_copys_clips_play_through_the_c_interface() {
+    let truck = Model::load(sample("CesiumMilkTruck.glb")).unwrap();
+    let mut buf = [0u8; 32];
+    let (mut len, mut length) = (0, 0.0);
+    // SAFETY: a live model, a buffer of the size passed, locals.
+    ok(unsafe { fy_model_clip(truck.0, 0, buf.as_mut_ptr(), buf.len(), &mut len, &mut length) });
+    assert_eq!((std::str::from_utf8(&buf[..len]).unwrap(), length), ("Wheels", 1.25));
+    // SAFETY: as above.
+    let none = unsafe { fy_model_clip(truck.0, 1, buf.as_mut_ptr(), buf.len(), &mut len, &mut length) };
+    assert_eq!(none, FyStatus::InvalidValue);
+
+    let world = World::new();
+    let ids = truck.add_to(&world);
+    let root = truck.spawn(&world, &ids, Transform::default()).unwrap();
+    let w = world.0;
+    let mut count = 0;
+    let mut state = FyAnimatorState::default();
+    // SAFETY: a live world, ids from it, pointers to locals.
+    unsafe {
+        ok(fy_animator_report_set(w, root, true));
+        ok(fy_animator_play(w, root, 0, 0.0, true));
+        ok(fy_world_animate(w, 0.5, &mut count));
+        assert_eq!(count, 1);
+        // Too small a buffer: just the count.
+        let mut seen = 0;
+        ok(fy_animation_events_get(w, ptr::null_mut(), 0, &mut seen));
+        assert_eq!(seen, 1);
+        let mut events = [FyAnimationEvent::default(); 4];
+        ok(fy_animation_events_get(w, events.as_mut_ptr(), events.len(), &mut seen));
+        assert_eq!(events[0], FyAnimationEvent { root, clip: 0, loops: 0, from: 0.0, to: 0.5, ended: false });
+        ok(fy_animator_speed_set(w, root, 2.0));
+        ok(fy_animator_get(w, root, &mut state));
+        assert_eq!(state, FyAnimatorState { clip: 0, time: 0.5, length: 1.25, speed: 2.0 });
+        let mut weight = 0.0;
+        ok(fy_animator_weight(w, root, 0, &mut weight));
+        assert_eq!(weight, 1.0);
+        ok(fy_animator_stop(w, root));
+        ok(fy_animator_get(w, root, &mut state));
+        assert_eq!(state.clip, -1);
+        // Clips the model doesn't have, and objects that aren't a copy.
+        assert_eq!(fy_animator_play(w, root, 1, 0.0, true), FyStatus::InvalidValue);
+        let mut plain = 0;
+        ok(fy_spawn(w, &mut plain));
+        assert_eq!(fy_animator_play(w, plain, 0, 0.0, true), FyStatus::NoComponent);
+        assert_eq!(fy_animator_speed_set(w, root, f32::NAN), FyStatus::InvalidValue);
+    }
 }
