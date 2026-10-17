@@ -37,6 +37,7 @@ import 'package:lab/scenes/pooling_basics.dart';
 import 'package:lab/scenes/riding_basics.dart';
 import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
+import 'package:lab/scenes/crowd.dart';
 import 'package:lab/scenes/skinned.dart';
 import 'package:lab/scenes/theme_basics.dart';
 import 'package:lab/scenes/world_widgets_basics.dart';
@@ -580,6 +581,47 @@ void main() {
       expect(animator.weight('Idle'), 1);
     },
   );
+
+  test('Animation: a crowd: as many as asked, no two alike, holding still when turned off', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(CrowdScene(count: 30));
+    await scene.loaded;
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    frames(2);
+    expect(scene.people, hasLength(30));
+    // Each has its own clip or time: the right hand is somewhere else on each.
+    Vec3 hand(GameObject person) => person.find('hand.r')!.worldTransform.position - person.position;
+    final hands = [for (final p in scene.people) hand(p)];
+    var alike = 0;
+    for (var i = 0; i < hands.length; i++) {
+      for (var j = i + 1; j < hands.length; j++) {
+        if ((hands[i] - hands[j]).length < 1e-3) alike++;
+      }
+    }
+    expect(alike, 0);
+    frames(60);
+    expect(scene.animationMs, greaterThan(0), reason: 'the readout times the posing');
+
+    await scene.setCount(10);
+    expect(scene.people, hasLength(10));
+    expect(scene.children.where((o) => o.animator != null), hasLength(10), reason: 'the rest destroyed');
+
+    // Turned off: each holds where it was.
+    scene.animated = false;
+    frames(2);
+    final still = hand(scene.people[0]);
+    frames(10);
+    expect((hand(scene.people[0]) - still).length, lessThan(1e-6));
+    scene.animated = true;
+    frames(10);
+    expect((hand(scene.people[0]) - still).length, greaterThan(1e-3));
+  });
 
   test('Character controller: the basics: up the low step, not the high one, and the crate is pushed', () async {
     final world = World(source: files);

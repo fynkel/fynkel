@@ -153,6 +153,28 @@ weights match numbers, and changing clips every frame never jumps.
 *Done when* the budget (§2) holds, or is accepted short with the cause
 found, as stage 8 did for the Note10+.
 
+**Measured** (2026-10-17; the lab's crowd, `examples/lab/tool/measured.dart`,
+fresh frames a second over 20–30 s; the animation's time is the updates
+and the posing, a frame):
+
+| Device | Characters | Quality | Asked | fps | Animation |
+|---|---|---|---|---|---|
+| Mac (120 Hz screen) | 100 | low, medium, high | 60 | 60 | 1.0–1.3 ms |
+| Mac | 100 | its own (high) | 120 | 120 | 0.9 ms |
+| iPhone | 100 | its own (high) | 60 | 60 | 2.8 ms |
+| iPhone | 100 | low, medium | 120 | 120 | 2.1 ms |
+| iPhone | 1, 30, 60 or 100 | high | 120 | 80 | – |
+| Note10+ | 30 | low | 60 | 59.9 | 2.4 ms |
+| Note10+ | 100 | low | 60 | 42 | 6–7 ms |
+
+The budget holds. The iPhone's 80 at high is high's own cost (ambient
+occlusion and three shadow cascades at the phone's full resolution): one
+character gives the same 80, and a crowd standing still too, so the
+characters add nothing there; a game that asks for 120 on the iPhone
+draws at medium. No fix was needed in this phase. Memory: about 160 KB
+of the engine's for each character (its objects and its animator), the
+meshes and textures shared.
+
 ### Phase 5: games, the guide, and the report
 
 - **The coins player** walks, runs, jumps and picks coins up with its
@@ -198,6 +220,6 @@ say otherwise.
 
 - [x] Phase 1: clips, and models whose parts move (#120)
 - [x] Phase 2: skinned models (#121)
-- [x] Phase 3: blending (PR pending)
-- [ ] Phase 4: many characters, and the measure
+- [x] Phase 3: blending (#122)
+- [x] Phase 4: many characters, and the measure (PR pending)
 - [ ] Phase 5: games, the guide, and the report

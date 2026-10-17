@@ -114,6 +114,8 @@ android() {
     # result line decides.
     "$adb" shell "cd $dir && FYNKEL_GOLDEN_DIR=$dir/golden ./${test#*:} --test-threads=1; echo exit=\$?" </dev/null |
       tee /dev/stderr | grep -q '^exit=0' || status=1
+    # Debug test binaries are big: left behind, they fill the emulator.
+    "$adb" shell "rm -f $dir/${test#*:}" </dev/null
   done <<<"$list"
   [ $started_here = 1 ] && "$adb" emu kill >/dev/null
   return $status

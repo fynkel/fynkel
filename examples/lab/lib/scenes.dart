@@ -11,6 +11,7 @@ import 'scenes/colour_basics.dart';
 import 'scenes/components.dart';
 import 'scenes/contacts_basics.dart';
 import 'scenes/controls_basics.dart';
+import 'scenes/crowd.dart';
 import 'scenes/eases.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/glow.dart';
@@ -102,4 +103,5 @@ final List<LabScene Function()> scenes = [
   SeeThroughScene.new,
   GlowScene.new,
   SkinnedScene.new,
+  CrowdScene.new,
 ];
