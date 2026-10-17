@@ -115,6 +115,7 @@ pub fn stage1_scene() -> RenderScene {
     let mut camera = CameraView::looking_at(Vec3::new(0.0, 1.5, 4.0), Vec3::ZERO);
     camera.clear_color = [linear(0.1), linear(0.1), linear(0.12)];
     RenderScene {
+        joints: Vec::new(),
         camera: Some(camera),
         lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE)],
         quality: None,
@@ -123,6 +124,7 @@ pub fn stage1_scene() -> RenderScene {
         sky: None,
         fog: None,
         draws: vec![Draw {
+            skin: None,
             mesh: CUBE,
             model: Mat4::from_rotation_y(30f32.to_radians()),
             material: PbrMaterial {

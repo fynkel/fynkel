@@ -13,11 +13,23 @@ struct In {
     @location(4) model_0: vec4<f32>,
     @location(5) model_1: vec4<f32>,
     @location(6) model_2: vec4<f32>,
+    // w: where a skinned draw's joints start.
+    @location(8) params: vec4<f32>,
 };
+
+fn depth(model: array<vec4<f32>, 3>, position: vec3<f32>) -> vec4<f32> {
+    let p = vec4<f32>(position, 1.0);
+    let world = vec4<f32>(dot(model[0], p), dot(model[1], p), dot(model[2], p), 1.0);
+    return frame.view_proj * world;
+}
 
 @vertex
 fn vs_depth(in: In) -> @builtin(position) vec4<f32> {
-    let p = vec4<f32>(in.position, 1.0);
-    let world = vec4<f32>(dot(in.model_0, p), dot(in.model_1, p), dot(in.model_2, p), 1.0);
-    return frame.view_proj * world;
+    return depth(array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2), in.position);
+}
+
+// A skinned mesh's (skin.wgsl).
+@vertex
+fn vs_depth_skinned(in: In, skin: SkinIn) -> @builtin(position) vec4<f32> {
+    return depth(skin_rows(skin, u32(in.params.w)), in.position);
 }

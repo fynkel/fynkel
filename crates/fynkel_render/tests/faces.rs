@@ -26,6 +26,7 @@ fn scene(draws: Vec<Draw>) -> RenderScene {
     let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 4.0), Vec3::ZERO);
     camera.clear_color = [0.0, 0.0, 0.2];
     RenderScene {
+        joints: Vec::new(),
         camera: Some(camera),
         lights: vec![Light::sun(Vec3::new(0.0, -0.5, -1.0), Vec3::ONE)],
         quality: None,
@@ -91,7 +92,7 @@ fn a_mirrored_object_draws_as_the_mirror_image() {
     let turned =
         Mat4::from_quat(Quat::from_euler(glam::EulerRot::YXZ, 0.6, 0.4, 0.0)) * Mat4::from_scale(Vec3::splat(1.4));
     let mirror = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0));
-    let draw = |model| Draw { mesh: CUBE, model, material, cast_shadows: true, receive_shadows: true };
+    let draw = |model| Draw { skin: None, mesh: CUBE, model, material, cast_shadows: true, receive_shadows: true };
 
     let (plain, _) = render(&gpu, &mut r, &scene(vec![draw(turned)]), SIZE, SIZE);
     let (mirrored, _) = render(&gpu, &mut r, &scene(vec![draw(mirror * turned)]), SIZE, SIZE);
@@ -121,6 +122,7 @@ fn a_double_sided_surface_shows_its_back_lit_like_its_front() {
     let mirror = Mat4::from_scale(Vec3::new(-1.0, 1.0, 1.0));
     let centre = |r: &mut Renderer, model, double_sided| {
         let draws = vec![Draw {
+            skin: None,
             mesh: PLANE,
             model,
             material: material(double_sided),
@@ -167,7 +169,8 @@ fn uv_scale_and_offset_pick_part_of_a_texture() {
             ..PbrMaterial::DEFAULT
         };
         // Unlit, so only the emission shows.
-        let mut unlit = scene(vec![Draw { mesh: PLANE, model, material, cast_shadows: true, receive_shadows: true }]);
+        let mut unlit =
+            scene(vec![Draw { skin: None, mesh: PLANE, model, material, cast_shadows: true, receive_shadows: true }]);
         (unlit.lights, unlit.ambient) = (Vec::new(), Vec3::ZERO);
         let (image, _) = render(&gpu, r, &unlit, SIZE, SIZE);
         // Two points across the plane's middle row, left and right.

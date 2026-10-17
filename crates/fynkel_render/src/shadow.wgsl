@@ -24,7 +24,8 @@ struct In {
     @location(7) model_3: vec4<f32>,
     // xy: UV scale, zw: UV offset.
     @location(8) uv_transform: vec4<f32>,
-    // x: the base colour's alpha, y: the alpha cutoff.
+    // x: the base colour's alpha, y: the alpha cutoff, z: where a skinned
+    // caster's joints start.
     @location(9) alpha: vec4<f32>,
 };
 
@@ -34,29 +35,54 @@ struct Out {
     @location(1) @interpolate(flat) alpha: vec2<f32>,
 };
 
-// A caster's vertex in the map.
-fn caster_vertex(in: In) -> Out {
-    let model = mat4x4<f32>(in.model_0, in.model_1, in.model_2, in.model_3);
+// A caster's vertex in the map, at `world`.
+fn caster_vertex(in: In, world: vec4<f32>) -> Out {
     var out: Out;
-    out.clip = view.matrix * model * vec4<f32>(in.position, 1.0);
+    out.clip = view.matrix * world;
     out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
     out.alpha = in.alpha.xy;
     return out;
 }
 
-@vertex
-fn vs_main(in: In) -> Out {
-    return caster_vertex(in);
+// Where the caster's model matrix puts the vertex.
+fn placed(in: In) -> vec4<f32> {
+    return mat4x4<f32>(in.model_0, in.model_1, in.model_2, in.model_3) * vec4<f32>(in.position, 1.0);
 }
 
-// A cascade's: as `vs_main`, but a caster nearer the sun than the map's
-// depth range reaches is flattened onto its near end, so it still casts
-// (pancaking; the map is orthographic, so w is 1).
+// Where a skinned caster's joints put it (skin.wgsl).
+fn bent(in: In, skin: SkinIn) -> vec4<f32> {
+    let m = skin_rows(skin, u32(in.alpha.z));
+    let p = vec4<f32>(in.position, 1.0);
+    return vec4<f32>(dot(m[0], p), dot(m[1], p), dot(m[2], p), 1.0);
+}
+
+// A cascade's casters nearer the sun than the map's depth range reaches
+// are flattened onto its near end, so they still cast (pancaking; the map
+// is orthographic, so w is 1).
+fn pancake(out: Out) -> Out {
+    var flat = out;
+    flat.clip.z = max(out.clip.z, 0.0);
+    return flat;
+}
+
+@vertex
+fn vs_main(in: In) -> Out {
+    return caster_vertex(in, placed(in));
+}
+
 @vertex
 fn vs_cascade(in: In) -> Out {
-    var out = caster_vertex(in);
-    out.clip.z = max(out.clip.z, 0.0);
-    return out;
+    return pancake(caster_vertex(in, placed(in)));
+}
+
+@vertex
+fn vs_main_skinned(in: In, skin: SkinIn) -> Out {
+    return caster_vertex(in, bent(in, skin));
+}
+
+@vertex
+fn vs_cascade_skinned(in: In, skin: SkinIn) -> Out {
+    return pancake(caster_vertex(in, bent(in, skin)));
 }
 
 @fragment

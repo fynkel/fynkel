@@ -22,14 +22,16 @@ pub(crate) const SLOTS: usize = 3;
 
 /// Where a buffer's parts start: the uniforms at 0, then the shadow maps'
 /// view matrices, each at its own dynamic offset, then the view's cells
-/// (`clusters`), then the instances.
+/// (`clusters`), then the skeletons' joints, then the instances. The room
+/// for joints is each buffer's own (`Slot::joints`), so where its
+/// instances start is too.
 #[derive(Clone, Copy)]
 struct Layout {
     uniforms: u64,
     views_at: u64,
     views: u64,
     cells_at: u64,
-    instances_at: u64,
+    joints_at: u64,
 }
 
 impl Layout {
@@ -37,10 +39,20 @@ impl Layout {
         let views_at = uniforms.next_multiple_of(view_stride);
         // Storage offsets need 256 at most.
         let cells_at = (views_at + views).next_multiple_of(256);
-        let instances_at = (cells_at + crate::clusters::BYTES).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
-        Self { uniforms, views_at, views, cells_at, instances_at }
+        let joints_at = (cells_at + crate::clusters::BYTES).next_multiple_of(256);
+        Self { uniforms, views_at, views, cells_at, joints_at }
+    }
+
+    /// Where the instances start after `joints` bytes of room for joints.
+    fn instances_at(&self, joints: u64) -> u64 {
+        (self.joints_at + joints).next_multiple_of(wgpu::VERTEX_ALIGNMENT)
     }
 }
+
+/// The room for joints a buffer starts with: 64, a few characters'.
+const JOINT_BYTES: u64 = 64 * JOINT_SIZE;
+/// A joint as the shaders read it: its matrix's three rows (`skin.wgsl`).
+pub(crate) const JOINT_SIZE: u64 = 48;
 
 // Where a slot's buffer is. wgpu's map callback sets MAPPED or FAILED.
 const MAPPED: u8 = 0;
@@ -52,13 +64,16 @@ struct Slot {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     views: wgpu::BindGroup,
+    /// The room it has for joints, in bytes.
+    joints: u64,
     /// Shared with the map callback; one per buffer, so a steady frame
     /// allocates nothing for it.
     state: Arc<AtomicU8>,
 }
 
 /// What a frame binds: the uniforms' bind group, the shadow views' (a
-/// map's at its index times the view stride), and the buffer holding the
+/// map's at its index times the view stride), both with the joints, and
+/// the buffer holding the
 /// instances from [`Written::instances`] on, the line vertices from
 /// [`Written::lines`] on and the shadow casters from [`Written::casters`]
 /// on.
@@ -73,10 +88,12 @@ pub(crate) struct Written<'a> {
 
 /// A frame's data, as [`FrameRing::write`] writes it: the `uniforms`,
 /// shadow `views`, `instances`, `lines` (vertices, straight after the
-/// instances), shadow `casters` (after the lines) and the view's `cells`.
+/// instances), shadow `casters` (after the lines), the view's `cells` and
+/// the skeletons' `joints`.
 pub(crate) struct Parts<'a> {
     pub(crate) uniforms: &'a [u8],
     pub(crate) views: &'a [u8],
+    pub(crate) joints: &'a [u8],
     pub(crate) instances: &'a [u8],
     pub(crate) lines: &'a [u8],
     pub(crate) casters: &'a [u8],
@@ -84,7 +101,8 @@ pub(crate) struct Parts<'a> {
 }
 
 /// The three buffers. The uniforms are bound with `layout`'s binding 0,
-/// the shadow views with `views_layout`'s.
+/// the shadow views with `views_layout`'s, and the joints with binding 2
+/// of both.
 pub(crate) struct FrameRing {
     layout: wgpu::BindGroupLayout,
     views_layout: wgpu::BindGroupLayout,
@@ -109,24 +127,33 @@ impl FrameRing {
         let parts = Layout::new(uniforms, view_stride, views);
         let mut ring = Self { layout, views_layout, parts, slots: Vec::with_capacity(SLOTS), next: 0, last: None };
         for _ in 0..SLOTS {
-            let slot = ring.create_slot(device, instance_bytes);
+            let slot = ring.create_slot(device, JOINT_BYTES, instance_bytes);
             ring.slots.push(slot);
         }
         ring
     }
 
-    /// A slot whose buffer is mapped and holds `instance_bytes` of
-    /// instances. Mapped at creation, so wgpu zeroes it on the CPU.
-    fn create_slot(&self, device: &wgpu::Device, instance_bytes: u64) -> Slot {
+    /// A slot whose buffer is mapped and holds `joint_bytes` of joints and
+    /// `instance_bytes` of instances. Mapped at creation, so wgpu zeroes it
+    /// on the CPU.
+    fn create_slot(&self, device: &wgpu::Device, joint_bytes: u64, instance_bytes: u64) -> Slot {
         let buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("frame data"),
-            size: self.parts.instances_at + instance_bytes.max(wgpu::COPY_BUFFER_ALIGNMENT),
+            size: self.parts.instances_at(joint_bytes) + instance_bytes.max(wgpu::COPY_BUFFER_ALIGNMENT),
             usage: wgpu::BufferUsages::MAP_WRITE
                 | wgpu::BufferUsages::UNIFORM
                 | wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::VERTEX,
             mapped_at_creation: true,
         });
+        let joints = || wgpu::BindGroupEntry {
+            binding: 2,
+            resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                buffer: &buffer,
+                offset: self.parts.joints_at,
+                size: wgpu::BufferSize::new(joint_bytes),
+            }),
+        };
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("frame"),
             layout: &self.layout,
@@ -147,21 +174,25 @@ impl FrameRing {
                         size: wgpu::BufferSize::new(crate::clusters::BYTES),
                     }),
                 },
+                joints(),
             ],
         });
         let views = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("shadow views"),
             layout: &self.views_layout,
-            entries: &[wgpu::BindGroupEntry {
-                binding: 0,
-                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
-                    buffer: &buffer,
-                    offset: self.parts.views_at,
-                    size: wgpu::BufferSize::new(64),
-                }),
-            }],
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                        buffer: &buffer,
+                        offset: self.parts.views_at,
+                        size: wgpu::BufferSize::new(64),
+                    }),
+                },
+                joints(),
+            ],
         });
-        Slot { buffer, bind_group, views, state: Arc::new(AtomicU8::new(MAPPED)) }
+        Slot { buffer, bind_group, views, joints: joint_bytes, state: Arc::new(AtomicU8::new(MAPPED)) }
     }
 
     /// Writes a frame's `parts` into the next buffer,
@@ -169,7 +200,7 @@ impl FrameRing {
     /// binds what this returns must be submitted before the next `write`,
     /// which maps its buffer again.
     pub(crate) fn write(&mut self, device: &wgpu::Device, parts: Parts<'_>) -> Written<'_> {
-        let Parts { uniforms, views, instances, lines, casters, cells } = parts;
+        let Parts { uniforms, views, joints, instances, lines, casters, cells } = parts;
         debug_assert_eq!(uniforms.len() as u64, self.parts.uniforms);
         debug_assert!(views.len() as u64 <= self.parts.views);
         debug_assert!(cells.len() as u64 <= crate::clusters::BYTES);
@@ -186,13 +217,15 @@ impl FrameRing {
         self.next = (index + 1) % SLOTS;
         self.wait_until_mapped(device, index);
 
-        let at = self.parts.instances_at;
+        // Room for the joints first: where the instances start follows.
+        let joint_room = self.slots[index].joints.max((joints.len() as u64).next_power_of_two());
+        let at = self.parts.instances_at(joint_room);
         let lines_at = at + instances.len() as u64;
         let casters_at = (lines_at + lines.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
         let data = casters_at - at + casters.len() as u64;
-        if self.slots[index].buffer.size() < at + data {
+        if self.slots[index].joints < joint_room || self.slots[index].buffer.size() < at + data {
             // Dropping the old buffer frees it once the GPU is done with it.
-            self.slots[index] = self.create_slot(device, data.next_power_of_two());
+            self.slots[index] = self.create_slot(device, joint_room, data.next_power_of_two());
         }
 
         let slot = &mut self.slots[index];
@@ -203,6 +236,8 @@ impl FrameRing {
             view.slice(views_at..views_at + views.len()).copy_from_slice(views);
             let cells_at = self.parts.cells_at as usize;
             view.slice(cells_at..cells_at + cells.len()).copy_from_slice(cells);
+            let joints_at = self.parts.joints_at as usize;
+            view.slice(joints_at..joints_at + joints.len()).copy_from_slice(joints);
             view.slice(at as usize..lines_at as usize).copy_from_slice(instances);
             view.slice(lines_at as usize..lines_at as usize + lines.len()).copy_from_slice(lines);
             view.slice(casters_at as usize..casters_at as usize + casters.len()).copy_from_slice(casters);
@@ -235,8 +270,9 @@ impl FrameRing {
             // Failed, or still pending after the GPU went idle; neither
             // happens unless the device is lost. A fresh buffer keeps the
             // ring going either way.
-            let instance_bytes = self.slots[index].buffer.size() - self.parts.instances_at;
-            self.slots[index] = self.create_slot(device, instance_bytes);
+            let joints = self.slots[index].joints;
+            let instance_bytes = self.slots[index].buffer.size() - self.parts.instances_at(joints);
+            self.slots[index] = self.create_slot(device, joints, instance_bytes);
         }
     }
 }

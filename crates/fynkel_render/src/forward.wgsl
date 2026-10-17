@@ -164,8 +164,9 @@ struct VertexIn {
     @location(5) model_1: vec4<f32>,
     @location(6) model_2: vec4<f32>,
     @location(7) base_color: vec4<f32>,
-    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: unused
-    // (the vertex shader puts the mirroring sign there).
+    // x: metallic, y: roughness, z: alpha cutoff (0 for opaque), w: where a
+    // skinned draw's joints start (the vertex shader then puts the
+    // mirroring sign there).
     @location(8) params: vec4<f32>,
     // rgb: linear emission. w: 1 if shadows fall on it.
     @location(9) emissive: vec4<f32>,
@@ -188,12 +189,24 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
+    return vertex(in, array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2));
+}
+
+// A skinned mesh's: placed by its joints (skin.wgsl) rather than its
+// model matrix.
+@vertex
+fn vs_skinned(in: VertexIn, skin: SkinIn) -> VertexOut {
+    return vertex(in, skin_rows(skin, u32(in.params.w)));
+}
+
+// A vertex placed by `model`, a matrix's three rows.
+fn vertex(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     let p = vec4<f32>(in.position, 1.0);
-    let world = vec4<f32>(dot(in.model_0, p), dot(in.model_1, p), dot(in.model_2, p), 1.0);
+    let world = vec4<f32>(dot(model[0], p), dot(model[1], p), dot(model[2], p), 1.0);
     // The upper 3×3's columns.
-    let c0 = vec3<f32>(in.model_0.x, in.model_1.x, in.model_2.x);
-    let c1 = vec3<f32>(in.model_0.y, in.model_1.y, in.model_2.y);
-    let c2 = vec3<f32>(in.model_0.z, in.model_1.z, in.model_2.z);
+    let c0 = vec3<f32>(model[0].x, model[1].x, model[2].x);
+    let c1 = vec3<f32>(model[0].y, model[1].y, model[2].y);
+    let c2 = vec3<f32>(model[0].z, model[1].z, model[2].z);
     // Normals turn by the inverse-transpose, so they stay perpendicular
     // under non-uniform scale. The cofactor matrix is that times the
     // determinant: its sign keeps a mirrored object's normals pointing

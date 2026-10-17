@@ -82,6 +82,7 @@ pub struct MeshParts<'a> {
     /// For a mesh a skeleton bends: each vertex's four joints, and how
     /// much each moves it. Weights are 0 or more; they're scaled to add up
     /// to 1, and a vertex with none follows its first joint alone.
+    #[allow(clippy::type_complexity)]
     pub skin: Option<(&'a [[u16; 4]], &'a [[f32; 4]])>,
 }
 

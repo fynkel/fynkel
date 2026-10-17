@@ -303,6 +303,7 @@ impl Extract {
                 material.base_color = r.color.to_linear();
             }
             scene.draws.push(Draw {
+                skin: None,
                 mesh: mesh_key(mesh),
                 model,
                 material,

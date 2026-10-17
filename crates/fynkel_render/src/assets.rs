@@ -168,6 +168,7 @@ impl Kit {
                     },
                     count: None,
                 },
+                joints_entry(),
             ],
         });
         let image_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -228,7 +229,11 @@ impl Kit {
         let (min, max) = data.bounds();
         let centre = (min + max) * 0.5;
         let radius = data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max);
-        MadeMesh(GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius })
+        let skin = data.skin().map(|skin| GpuSkin {
+            buffer: filled_buffer(device, "mesh joints", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(skin)),
+            joints: joint_bounds(data.vertices(), skin),
+        });
+        MadeMesh(GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius, skin })
     }
 
     /// A texture on the GPU, for [`Assets::insert_texture`]: its pixels
@@ -264,12 +269,44 @@ pub(crate) struct GpuMesh {
     /// and radius, for culling.
     pub(crate) centre: Vec3,
     pub(crate) radius: f32,
+    /// A skinned mesh's joints and weights.
+    pub(crate) skin: Option<GpuSkin>,
+}
+
+/// What a skeleton bends a mesh with: each vertex's joints and weights
+/// (`fynkel_mesh::SkinVertex`, at locations 14 and 15), and, for culling,
+/// a sphere around the vertices each joint moves, in the mesh's space as
+/// it was bound, index for index with the joints it uses.
+pub(crate) struct GpuSkin {
+    pub(crate) buffer: wgpu::Buffer,
+    /// `None` for a joint that moves no vertex.
+    pub(crate) joints: Vec<Option<(Vec3, f32)>>,
 }
 
 impl GpuMesh {
     fn bytes(&self) -> u64 {
-        self.vertices.size() + self.indices.size()
+        self.vertices.size() + self.indices.size() + self.skin.as_ref().map_or(0, |s| s.buffer.size())
     }
+}
+
+/// For each joint up to the last one used, a sphere around the vertices
+/// it moves at all: the box around them, and the sphere around that.
+fn joint_bounds(vertices: &[fynkel_mesh::Vertex], skin: &[fynkel_mesh::SkinVertex]) -> Vec<Option<(Vec3, f32)>> {
+    let mut boxes: Vec<Option<(Vec3, Vec3)>> = Vec::new();
+    for (vertex, s) in vertices.iter().zip(skin) {
+        let p = Vec3::from(vertex.position);
+        for (&joint, &weight) in s.joints.iter().zip(&s.weights) {
+            if weight == 0 {
+                continue;
+            }
+            let j = usize::from(joint);
+            if boxes.len() <= j {
+                boxes.resize(j + 1, None);
+            }
+            boxes[j] = Some(boxes[j].map_or((p, p), |(lo, hi)| (lo.min(p), hi.max(p))));
+        }
+    }
+    boxes.into_iter().map(|b| b.map(|(lo, hi)| ((lo + hi) * 0.5, (hi - lo).length() * 0.5))).collect()
 }
 
 /// One world's meshes and textures on a [`Kit`]'s device. Its views'
@@ -399,6 +436,21 @@ impl Assets {
 /// taken anyway.
 pub fn lock(assets: &SharedAssets) -> MutexGuard<'_, Assets> {
     assets.lock().unwrap_or_else(PoisonError::into_inner)
+}
+
+/// The skeletons' joints (`skin.wgsl`), binding 2 of the frame's group and
+/// of the shadow views': read by the vertex stage of skinned draws.
+pub(crate) fn joints_entry() -> wgpu::BindGroupLayoutEntry {
+    wgpu::BindGroupLayoutEntry {
+        binding: 2,
+        visibility: wgpu::ShaderStages::VERTEX,
+        ty: wgpu::BindingType::Buffer {
+            ty: wgpu::BufferBindingType::Storage { read_only: true },
+            has_dynamic_offset: false,
+            min_binding_size: wgpu::BufferSize::new(crate::frame_ring::JOINT_SIZE),
+        },
+        count: None,
+    }
 }
 
 /// A buffer holding `contents`, written by the CPU where the GPU reads it:

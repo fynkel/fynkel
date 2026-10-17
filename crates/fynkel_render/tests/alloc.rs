@@ -54,8 +54,25 @@ fn count<T>(f: impl FnOnce() -> T) -> (T, u64) {
     (out, COUNT.with(Cell::get))
 }
 
-/// 1,000 cubes moving every frame, some of them see-through, seen with
-/// bloom and ambient occlusion.
+/// A cube a skeleton of one joint moves.
+const SKINNED_CUBE: MeshKey = MeshKey(20);
+
+fn skinned_cube() -> MeshData {
+    let cube = MeshData::cube();
+    let positions: Vec<[f32; 3]> = cube.vertices().iter().map(|v| v.position).collect();
+    let joints = vec![[0u16; 4]; positions.len()];
+    let weights = vec![[1.0, 0.0, 0.0, 0.0]; positions.len()];
+    MeshData::new(MeshParts {
+        positions: &positions,
+        indices: cube.indices(),
+        skin: Some((&joints, &weights)),
+        ..Default::default()
+    })
+    .expect("a cube")
+}
+
+/// 1,000 cubes moving every frame, some of them see-through, every fifth
+/// moved by its own joint, seen with bloom and ambient occlusion.
 fn busy_scene(t: f32) -> RenderScene {
     let mut scene = stage1_scene();
     // High above the 40 × 25 grid, so every cube is seen.
@@ -77,6 +94,7 @@ fn busy_scene(t: f32) -> RenderScene {
     scene.fog = Some(Fog { color: None, start: 20.0, end: 80.0, height: Some(10.0) });
     scene.draws = (0..1000)
         .map(|i| Draw {
+            skin: None,
             mesh: CUBE,
             model: Mat4::from_translation(Vec3::new((i % 40) as f32, (t + i as f32).sin(), (i / 40) as f32)),
             // Every fourth see-through, every tenth glowing: sorted back
@@ -94,6 +112,11 @@ fn busy_scene(t: f32) -> RenderScene {
             receive_shadows: true,
         })
         .collect();
+    for (i, draw) in scene.draws.iter_mut().enumerate().filter(|(i, _)| i % 5 == 0) {
+        draw.skin = Some(scene.joints.len() as u32);
+        draw.mesh = SKINNED_CUBE;
+        scene.joints.push(draw.model * Mat4::from_rotation_y(t + i as f32));
+    }
     scene
 }
 
@@ -101,6 +124,7 @@ fn busy_scene(t: f32) -> RenderScene {
 fn a_steady_frame_allocates_nothing_in_prepare() {
     let gpu = gpu();
     let mut r = renderer(&gpu, wgpu::TextureFormat::Rgba8UnormSrgb);
+    r.upload_mesh(SKINNED_CUBE, &skinned_cube());
     let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
         label: None,
         size: wgpu::Extent3d { width: 256, height: 256, depth_or_array_layers: 1 },
