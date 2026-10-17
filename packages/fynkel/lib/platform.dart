@@ -2,5 +2,5 @@
 /// on screen. Games use `FynkelView` instead.
 library;
 
-export 'src/view.dart' show AndroidSurfaceView, AppleView;
+export 'src/view.dart' show AndroidSurfaceView, AppleLayerView, AppleView;
 export 'src/world.dart' show cameraObjectId;

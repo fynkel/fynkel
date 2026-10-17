@@ -24,6 +24,12 @@ external int fy_active_set(ffi.Pointer<FyWorld> world, int id, bool active);
 @ffi.Native<ffi.Uint32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Pointer<ffi.Void>>)>(isLeaf: true)
 external int fy_apple_acquire(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Pointer<ffi.Void>> out_surface);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Pointer<ffi.Void>, ffi.Uint32, ffi.Uint32)>()
+external int fy_apple_layer_attach(ffi.Pointer<FyView> view, ffi.Pointer<ffi.Void> layer, int width, int height);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>)>()
+external int fy_apple_layer_detach(ffi.Pointer<FyView> view);
+
 @ffi.Native<
   ffi.Int32 Function(
     ffi.Pointer<FyView>,
@@ -350,6 +356,14 @@ external int fy_view_new_android(
 external int fy_view_new_apple(ffi.Pointer<FyWorld> world, int width, int height, ffi.Pointer<ffi.Pointer<FyView>> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
+external int fy_view_new_apple_layer(
+  ffi.Pointer<FyWorld> world,
+  int width,
+  int height,
+  ffi.Pointer<ffi.Pointer<FyView>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyView>>)>()
 external int fy_view_new_headless(
   ffi.Pointer<FyWorld> world,
   int width,
@@ -410,7 +424,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 29;
+const int FY_ABI_VERSION = 30;
 
 const int FY_APPLE_MORE = 2;
 

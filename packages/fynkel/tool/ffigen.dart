@@ -15,6 +15,9 @@ const _blocking = {
   'fy_view_new_headless', // may create the GPU device, and starts a thread
   'fy_view_new_apple', // the same
   'fy_view_new_android', // the same
+  'fy_view_new_apple_layer', // the same
+  'fy_apple_layer_attach', // waits for a frame in progress
+  'fy_apple_layer_detach', // the same
   'fy_apple_set_frame_ready', // waits for a frame-ready call in progress
   'fy_view_free', // joins the render worker
   'fy_view_read', // waits for the GPU

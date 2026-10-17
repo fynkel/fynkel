@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, debugViewsOpen, forgetReset;
+import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, debugIos, debugViewsOpen, forgetReset;
 import 'package:fynkel_flutter/src/error_panel.dart' show ErrorPanel;
 import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer, worldWidgetsOf;
 
@@ -149,7 +149,7 @@ void main() {
       switch (call.method) {
         case 'register':
           if (debugAndroid ?? false) {
-            // Asking to be on screen (FynkelView.androidSurface), with where
+            // Asking to be on screen (FynkelView.onScreen), with where
             // it is; this stand-in answers with a texture, as the plugin
             // does in an activity that isn't a FynkelActivity.
             expect(
@@ -716,14 +716,150 @@ void main() {
         await tester.pump();
       });
 
-      testWidgets('androidSurface: false keeps the texture', (tester) async {
-        await tester.pumpWidget(sized(FynkelView.world(world, androidSurface: false)));
+      testWidgets('onScreen: false keeps the texture', (tester) async {
+        await tester.pumpWidget(sized(FynkelView.world(world, onScreen: false)));
         await frames(tester);
         expect(calls, ['register 300x150 at null,null nullxnull as a texture']);
         expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
         await tester.pumpWidget(sized(const SizedBox()));
         await tester.pump();
       });
+    });
+  });
+
+  group('the iOS way', () {
+    // The plugin on an iPhone: each view a layer of its own under
+    // Flutter's, placed where the view is; a texture where it can't be.
+    late bool layers;
+    setUp(() {
+      debugIos = true;
+      layers = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        final args = call.arguments as Map? ?? const {};
+        switch (call.method) {
+          case 'register':
+            if (args['layer'] != true) {
+              expect(args['acquire'], isNot(0));
+              calls.add('register a texture');
+              return nextTexture++;
+            }
+            expect(
+              args.keys,
+              unorderedEquals([
+                'view',
+                'width',
+                'height',
+                'layer',
+                'attach',
+                'detach',
+                'free',
+                'onScreen',
+                'left',
+                'top',
+                'frameWidth',
+                'frameHeight',
+              ]),
+            );
+            for (final address in ['view', 'attach', 'detach', 'free']) {
+              expect(args[address], isNot(0), reason: address);
+            }
+            calls.add(
+              'register a layer ${args['width']}x${args['height']} at ${args['left']},${args['top']} '
+              '${args['frameWidth']}x${args['frameHeight']}',
+            );
+            if (!layers) throw PlatformException(code: 'nolayer', message: 'no Flutter view on screen');
+            return {'id': nextTexture++, 'onScreen': true};
+          case 'place':
+            calls.add('place ${args['texture']} at ${args['left']},${args['top']} ${args['width']}x${args['height']}');
+          case 'resize':
+            calls.add('resize ${args['texture']} ${args['width']}x${args['height']}');
+          case 'unregister':
+            calls.add('unregister ${args['texture']}');
+        }
+        return null;
+      });
+    });
+    tearDown(() => debugIos = null);
+
+    Future<void> frames(WidgetTester tester, [int n = 3]) async {
+      for (var i = 0; i < n; i++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+    }
+
+    testWidgets('a view is a layer under Flutter\'s, sized, placed and resized, and goes with the view', (
+      tester,
+    ) async {
+      // 100 × 50 in the middle of 800 × 600, 3 pixels a point.
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await frames(tester);
+      expect(calls, ['register a layer 300x150 at 1050,825 300x150']);
+      expect(find.byType(Texture), findsNothing, reason: 'the frames are not a texture');
+      expect(find.descendant(of: find.byType(FynkelView), matching: find.byType(CustomPaint)), findsWidgets);
+
+      // A new size: the layer is drawn at it once it holds, and put where
+      // the view now is.
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
+      await frames(tester, 5);
+      expect(calls, [
+        'register a layer 300x150 at 1050,825 300x150',
+        'place 7 at 1110,840 180x120',
+        'resize 7 180x120',
+      ]);
+
+      calls.clear();
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+      expect(calls, ['unregister 7']);
+    });
+
+    testWidgets('onScreen: false keeps the texture', (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world, onScreen: false)));
+      await frames(tester);
+      expect(calls, ['register a texture']);
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
+    testWidgets('where the plugin has no layer to give (Flutter in an app\'s own views), a texture, quietly', (
+      tester,
+    ) async {
+      layers = false;
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await frames(tester);
+      expect(calls, ['register a layer 300x150 at 1050,825 300x150', 'register a texture']);
+      expect(tester.takeException(), isNull, reason: 'not an error');
+      expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
+      expect(debugViewsOpen, 1, reason: 'the layer\'s view was freed');
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
+    testWidgets('a failed resize brings a new layer at the new size', (tester) async {
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        final args = call.arguments as Map? ?? const {};
+        switch (call.method) {
+          case 'register':
+            calls.add('register ${args['width']}x${args['height']}');
+            return {'id': nextTexture++, 'onScreen': true};
+          case 'resize':
+            calls.add('resize ${args['texture']}');
+            throw PlatformException(code: 'layer', message: "couldn't configure the layer at its new size");
+          case 'unregister':
+            calls.add('unregister ${args['texture']}');
+        }
+        return null;
+      });
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await frames(tester, 1);
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 60, height: 40));
+      await frames(tester, 5);
+      expect(tester.takeException().toString(), contains("couldn't configure the layer"), reason: 'reported');
+      expect(calls, ['register 300x150', 'resize 7', 'unregister 7', 'register 180x120']);
+      expect(find.byType(ErrorWidget), findsNothing);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
     });
   });
 

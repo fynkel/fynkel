@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 29
+#define FY_ABI_VERSION 30
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1160,6 +1160,21 @@ FyStatus fy_view_new_apple(const struct FyWorld *world,
                            uint32_t height,
                            struct FyView **out);
 
+// A view of `world` that draws straight to a `CAMetalLayer` the Flutter
+// plugin puts under Flutter's view (iOS and macOS;
+// `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing until the plugin
+// gives it a layer (`fy_apple_layer_attach`), and each layer brings its
+// own size: `fy_view_resize` changes nothing. Free it with
+// `fy_view_free`.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_view_new_apple_layer(const struct FyWorld *world,
+                                 uint32_t width,
+                                 uint32_t height,
+                                 struct FyView **out);
+
 // A view of `world` that draws into an Android `Surface` for Flutter to
 // show (Android only; `FY_STATUS_UNSUPPORTED` elsewhere). It draws nothing
 // until the Flutter plugin gives it a surface, and each new surface brings
@@ -1276,6 +1291,28 @@ uint32_t fy_apple_acquire(const struct FyView *view, void **out_surface);
 // `view` is null or live; `function` must be safe to call with `userdata`
 // from any thread until it is replaced.
 FyStatus fy_apple_set_frame_ready(const struct FyView *view, FyFrameReady function, void *userdata);
+
+// Draws an Apple layer view's next frames to `layer` (a `CAMetalLayer`)
+// at `width` × `height` pixels, after a frame in progress on the old one.
+// For the Flutter plugin, on the main thread.
+//
+// # Safety
+//
+// `view` is null or live; `layer` is null or a live `CAMetalLayer`, kept
+// alive until `fy_apple_layer_detach` or the next attach returns.
+FyStatus fy_apple_layer_attach(const struct FyView *view,
+                               void *layer,
+                               uint32_t width,
+                               uint32_t height);
+
+// Stops an Apple layer view drawing to its layer, after a frame in
+// progress: the layer may then go. Frames are skipped until the next
+// `fy_apple_layer_attach`.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_apple_layer_detach(const struct FyView *view);
 
 #ifdef __cplusplus
 }  // extern "C"

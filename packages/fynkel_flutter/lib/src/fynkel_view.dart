@@ -44,6 +44,16 @@ bool? debugAndroid;
 
 bool get _android => debugAndroid ?? Platform.isAndroid;
 
+/// Whether views on screen ([FynkelView.onScreen]) talk to the plugin the
+/// iOS way: a layer of their own under Flutter's view, which the plugin
+/// makes, with a size and a place. Null for this platform's way. A test
+/// sets it to check iOS's way on a Mac, where the view is then a
+/// [HeadlessView] standing in for the [AppleLayerView].
+@visibleForTesting
+bool? debugIos;
+
+bool get _ios => debugIos ?? Platform.isIOS;
+
 /// Whether this isolate has told the plugin to free the views an earlier
 /// isolate left (a hot restart disposes nothing). It does so before its
 /// first view registers. The plugin handles a channel's calls in the order
@@ -213,7 +223,7 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
-    this.androidSurface = true,
+    this.onScreen = true,
   }) : world = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
@@ -232,7 +242,7 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
-    this.androidSurface = true,
+    this.onScreen = true,
   }) : root = null,
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -311,18 +321,24 @@ class FynkelView extends StatefulWidget {
   /// minimap.
   final bool worldWidgets;
 
-  /// Android: whether the view draws straight to the screen, behind
-  /// Flutter's own view, when the app's activity is a `FynkelActivity`
-  /// (the guide, §1). There Flutter never waits for the game's frames,
-  /// which on a slower phone is the difference between 40 and 60 fps
-  /// (docs/android-surface-report.md). Widgets over the view draw over it;
-  /// whatever is painted under it doesn't show. What it can't do: follow a
-  /// transform, a clip or an opacity from the widgets above it (a page
-  /// that fades or zooms in shows the game unfaded; one that slides is
-  /// followed), and stack more than two views on one another (a minimap
-  /// over the game is two). Off, or with another activity, the view is a
-  /// texture Flutter draws, as on the other platforms, with no such limits.
-  final bool androidSurface;
+  /// Phones: whether the view draws straight to the screen, on a layer of
+  /// its own behind Flutter's view, rather than into a texture Flutter
+  /// draws. On Android it needs the app's activity to be a
+  /// `FynkelActivity` (the guide, §1); on iOS nothing. Flutter then never
+  /// waits for the game's frames, which on a slower Android phone is the
+  /// difference between 40 and 60 fps (docs/android-surface-report.md),
+  /// and never copies them, which keeps an iPhone cool
+  /// (docs/ios-surface-report.md), while its own UI goes on at the
+  /// display's rate.
+  ///
+  /// Widgets over the view draw over it; whatever is painted under it
+  /// doesn't show. What it can't do: follow a transform, a clip or an
+  /// opacity from the widgets above it (a page that fades or zooms in
+  /// shows the game unfaded; one that slides is followed), and stack more
+  /// than two views on one another (a minimap over the game is two). Off,
+  /// or with another activity, and on the Mac, the view is a texture, with
+  /// no such limits.
+  final bool onScreen;
 
   @override
   State<FynkelView> createState() => FynkelViewState();
@@ -370,15 +386,25 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   Future<int?>? _registration;
   int? _texture;
 
-  /// Android: the size the plugin was last given.
+  /// Whether the plugin gives the view where it draws, and with it the
+  /// size (Android's surface, iOS's layer), rather than the engine making
+  /// it: set as the view is made.
+  bool _surfaced = false;
+
+  /// iOS: the plugin couldn't give the view a layer (no Flutter view of its
+  /// own on screen: an app that adds Flutter to its own view controllers),
+  /// so the view is a texture from then on.
+  bool _noLayer = false;
+
+  /// Android and iOS's layer: the size the plugin was last given.
   int _sentWidth = 0, _sentHeight = 0;
 
-  /// Android: the view draws straight to the screen, to a surface behind
-  /// Flutter's view ([FynkelView.androidSurface]), not to a texture. The
-  /// plugin says so when the view registers.
+  /// The view draws straight to the screen, to a surface or layer behind
+  /// Flutter's view ([FynkelView.onScreen]), not to a texture. The plugin
+  /// says so when the view registers.
   bool _onScreen = false;
 
-  /// Android, on screen: where the surface was last put, in physical
+  /// On screen: where the surface was last put, in physical
   /// pixels from the top left of Flutter's view, and whether it was put
   /// over the other views.
   Rect? _sentPlace;
@@ -672,10 +698,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     if (view == null) return;
     try {
       view.camera = widget.camera;
-      if (!_android) view.resize(_width, _height);
+      if (!_surfaced) view.resize(_width, _height);
       final texture = _texture;
       if (texture == null) return;
-      if (_android) _sendSize(view, texture);
+      if (_surfaced) _sendSize(view, texture);
       if (_onScreen) _sendPlace(texture);
       view.frame();
     } on FynkelException catch (error, stack) {
@@ -732,10 +758,15 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// Makes the engine view and starts registering its texture.
   WorldView? _open() {
     final WorldView view;
+    final layer = _ios && widget.onScreen && !_noLayer;
     try {
       if (_android) {
         view = Platform.isAndroid
             ? AndroidSurfaceView(world, width: _width, height: _height)
+            : HeadlessView(world, width: _width, height: _height);
+      } else if (layer) {
+        view = Platform.isIOS
+            ? AppleLayerView(world, width: _width, height: _height)
             : HeadlessView(world, width: _width, height: _height);
       } else if (Platform.isMacOS || Platform.isIOS) {
         view = AppleView(world, width: _width, height: _height);
@@ -748,21 +779,40 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
     _viewsOpen++;
     _view = view;
-    _registration = _register(view);
+    _surfaced = _android || layer;
+    _registration = _register(view, layer: layer);
     return view;
   }
 
-  Future<int?> _register(WorldView view) async {
+  Future<int?> _register(WorldView view, {required bool layer}) async {
     try {
       if (!_resetSent) {
         _resetSent = true;
         await channel.invokeMethod<void>('reset');
       }
       final Map<String, Object> arguments;
-      if (_android) {
+      if (layer) {
         _sentWidth = view.width;
         _sentHeight = view.height;
-        final place = widget.androidSurface ? _place() : null;
+        final place = _place();
+        arguments = {
+          'view': view.address,
+          'width': view.width,
+          'height': view.height,
+          'layer': true,
+          'attach': AppleLayerView.attachAddress,
+          'detach': AppleLayerView.detachAddress,
+          'free': AppleView.freeAddress,
+          'onScreen': true,
+          'left': place.left.round(),
+          'top': place.top.round(),
+          'frameWidth': place.width.round(),
+          'frameHeight': place.height.round(),
+        };
+      } else if (_android) {
+        _sentWidth = view.width;
+        _sentHeight = view.height;
+        final place = widget.onScreen ? _place() : null;
         arguments = {
           'view': view.address,
           'width': view.width,
@@ -783,7 +833,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           'free': AppleView.freeAddress,
         };
       }
-      if (_android) _listenToPlugin();
+      if (_surfaced) _listenToPlugin();
       // A texture's id, or for a surface on screen {id, onScreen}.
       final answer = await channel.invokeMethod<Object>('register', arguments);
       final onScreen = answer is Map && answer['onScreen'] == true;
@@ -812,12 +862,21 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (mounted && _view == view) _withoutPicture();
       return null;
     } catch (error, stack) {
+      if (layer && error is PlatformException && error.code == 'nolayer') {
+        // No layer here: a texture from the next frame.
+        if (mounted && _view == view) {
+          _noLayer = true;
+          setState(_release);
+        }
+        return null;
+      }
       if (mounted && _view == view) _fail(error, stack);
       return null;
     }
   }
 
-  /// Android: gives the plugin the new size, which brings a new surface.
+  /// Android and iOS's layer: gives the plugin the new size (a new surface
+  /// on Android, the layer set up again on iOS).
   /// The plugin handles the calls in order, so the last size sent wins.
   void _sendSize(WorldView view, int texture) {
     if (_width == _sentWidth && _height == _sentHeight) return;
@@ -833,7 +892,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     );
   }
 
-  /// Android, on screen: where the view is, in physical pixels from the
+  /// On screen: where the view is, in physical pixels from the
   /// top left of Flutter's view, rounded as the plugin places it.
   Rect _place() {
     final box = context.findRenderObject() as RenderBox?;
@@ -849,7 +908,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     );
   }
 
-  /// Android, on screen: moves the surface to where the view now is (a
+  /// On screen: moves the surface or layer to where the view now is (a
   /// page sliding in, a resize), and over the other views when it lies
   /// within one of them (a minimap over the game).
   void _sendPlace(int texture) {

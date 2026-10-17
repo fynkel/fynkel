@@ -85,6 +85,11 @@ A game whose activity stays a `FlutterActivity` runs too, with its views
 drawn as textures Flutter shows. What this changes for widgets around
 the game is in §15.
 
+**On iOS nothing is needed**: each `FynkelView` draws straight to the
+screen, on a layer under Flutter's view, which the plugin makes
+see-through itself. Flutter then never copies the game's frames, which
+keeps an iPhone cool ([the report](ios-surface-report.md)).
+
 ## 2. Hello
 
 The whole of `lib/main.dart` for a lit, turning cube:
@@ -1907,10 +1912,10 @@ class ScoreHud extends StatelessWidget {
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
 ScoreHud(game)))`.
 
-**On Android the view is under Flutter, not in it** (with a
+**On a phone the view is under Flutter, not in it** (on Android with a
 `FynkelActivity`, §1). Widgets over the view draw over the game, as
 everywhere: the HUD, a pause menu, a dialog's dimmed background. Three
-things differ from macOS and iOS:
+things differ from the Mac:
 
 - Whatever is painted under the view doesn't show: the view clears its
   place, so the game shows through. That's what you want.
@@ -1922,9 +1927,9 @@ things differ from macOS and iOS:
 - Two views stack, no more: a minimap over the game. A view lying within
   another goes over it.
 
-Where one of those matters, give that view `androidSurface: false`: it's
-a texture Flutter draws, as on the other platforms, and slower on some
-phones.
+Where one of those matters, give that view `onScreen: false`: it's a
+texture Flutter draws, as on the Mac, slower on some Android phones and
+warmer on an iPhone.
 
 **From the game to the UI and back.** A `Signal` has a `stream`, for
 `StreamBuilder` or a `listen` that opens a dialog when the game is over
@@ -2620,8 +2625,9 @@ What keeps a game fast:
   reaches, and the pixels it lights; one that reaches no further than it
   needs to costs least. Turn a lamp off with `enabled = false`: it's
   left out altogether.
-- **On Android, a `FynkelActivity`** (§1), so Flutter doesn't wait for
-  the game's frames.
+- **Views on screen** (`onScreen`, on unless turned off; on Android with
+  a `FynkelActivity`, §1), so Flutter neither waits for the game's
+  frames nor copies them.
 - **A cheaper quality for an older phone.** `world.quality =
   Quality.low` draws in one pass, with no image between the scene and the
   screen; or take from a level only what costs most there, bloom first,
@@ -2743,6 +2749,13 @@ What keeps a game fast:
 ## 21. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **The iPhone draws straight to the screen** (2026-10-17):
+  - A view draws to a layer of its own under Flutter's view, not to a
+    texture, and what's painted under it, or a fade over it, no longer
+    shows on it (§15), as on Android.
+  - `FynkelView.androidSurface` is `onScreen`, for both phones:
+    `onScreen: false` keeps the texture.
 
 - **60 frames a second unless the game asks for more** (2026-10-17):
   - The world runs and draws at most `world.targetFrameRate` (60) frames
