@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:math' as math;
 import 'dart:typed_data';
@@ -74,8 +75,9 @@ void main() {
     expect(truck.textures, hasLength(1));
     expect(truck.materials.map((m) => m.name), ['truck', 'glass', 'window_trim', 'wheels']);
     expect(truck.warnings, isEmpty);
+    // Its skin is read: nothing skipped.
     final fox = await Model.load(glb('Fox.glb'));
-    expect(fox.warnings, ['skins are skipped; skinned meshes show their bind pose']);
+    expect(fox.warnings, isEmpty);
     // One image, used by the body's and the wheels' materials.
     final [body, glass, _, wheels] = truck.materials;
     expect(body.baseColorTexture, same(truck.textures.single));
@@ -98,6 +100,16 @@ void main() {
     );
     expect(bed.emissiveTexture, isNull);
     expect((await Model.load(glb('Box.glb'))).warnings, isEmpty);
+  });
+
+  test('a debug build prints what a model skipped as it loads', () async {
+    final printed = <String>[];
+    final boxed = await runZoned(
+      () => Model.load(glb('BoxTextured.glb')),
+      zoneSpecification: ZoneSpecification(print: (_, _, _, line) => printed.add(line)),
+    );
+    expect(boxed.warnings, hasLength(1));
+    expect(printed, ['Fynkel: a model: ${boxed.warnings.single}.']);
   });
 
   test('a spawned model is a tree of named objects drawing its meshes and materials', () async {
