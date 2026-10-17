@@ -1,7 +1,7 @@
 # iPhone: drawing straight to the screen
 
-Status: proposed 2026-10-17 (your call: "let's merge and then do the new
-plan"). Follows [iPhone heat](iphone-heat-report.md), as Android's
+Status: done 2026-10-17 ([the report](ios-surface-report.md)); proposed
+the same day (your call: "let's merge and then do the new plan"). Follows [iPhone heat](iphone-heat-report.md), as Android's
 [drawing straight to the screen](android-surface.md) followed its frame
 pacing. Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 
@@ -39,8 +39,8 @@ view.**
   instead of the IOSurfaces, at the game's own rate: 60 frames a second
   while Flutter draws 120.
 - **The texture stays**, as Android's does: `FynkelView(androidSurface:
-  false)` becomes a setting for both phones (its name to be settled: one
-  for both), and the Mac keeps the texture (below).
+  false)` becomes a setting for both phones (`onScreen: false`, as
+  built), and the Mac keeps the texture (below).
 
 The other way, a platform view (`UiKitView`), makes Flutter split its
 picture around the view and merge its threads, which costs Flutter's own
