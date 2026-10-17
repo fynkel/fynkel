@@ -411,10 +411,7 @@ impl<'a> Reader<'a> {
             return None;
         };
         if joints.len() > MAX_JOINTS {
-            self.warn(format!(
-                "a skin has {} joints, more than {MAX_JOINTS}; its meshes aren't bent",
-                joints.len()
-            ));
+            self.warn(format!("a skin has {} joints, more than {MAX_JOINTS}; its meshes aren't bent", joints.len()));
             return None;
         }
         let identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
@@ -422,13 +419,13 @@ impl<'a> Reader<'a> {
             None => vec![identity; joints.len()],
             Some(accessor) => {
                 let matrices = match (accessor.data_type(), accessor.dimensions()) {
-                    (DataType::F32, Dimensions::Mat4) => accessor::Iter::<[[f32; 4]; 4]>::new(accessor, |b| {
-                        match b.source() {
+                    (DataType::F32, Dimensions::Mat4) => {
+                        accessor::Iter::<[[f32; 4]; 4]>::new(accessor, |b| match b.source() {
                             gltf::buffer::Source::Bin => Some(self.blob),
                             gltf::buffer::Source::Uri(_) => None,
-                        }
-                    })
-                    .map(|m| m.map(|m| m.as_flattened().try_into().expect("16")).collect::<Vec<[f32; 16]>>()),
+                        })
+                        .map(|m| m.map(|m| m.as_flattened().try_into().expect("16")).collect::<Vec<[f32; 16]>>())
+                    }
                     _ => None,
                 };
                 match matrices {

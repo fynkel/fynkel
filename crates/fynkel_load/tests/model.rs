@@ -202,8 +202,7 @@ fn a_skin_names_its_joints_and_a_skinned_mesh_has_four_joints_a_vertex() {
     assert!(skin.joints.iter().any(|&j| name(j) == "hand.r"));
     // Its six body parts are bent by it; what it holds isn't, but hangs
     // from a joint.
-    let skinned: Vec<&str> =
-        knight.nodes().iter().filter(|n| n.skin == Some(0)).map(|n| n.name.as_str()).collect();
+    let skinned: Vec<&str> = knight.nodes().iter().filter(|n| n.skin == Some(0)).map(|n| n.name.as_str()).collect();
     assert_eq!(
         skinned,
         ["Knight_ArmLeft", "Knight_ArmRight", "Knight_Body", "Knight_Head", "Knight_LegLeft", "Knight_LegRight"]
