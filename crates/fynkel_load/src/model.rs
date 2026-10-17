@@ -1,9 +1,10 @@
 //! `.glb` files (binary glTF 2.0) into [`ModelData`]: meshes, images,
 //! materials and the node tree, as plain values (`docs/stage-2.md` §3.3).
 //!
-//! Animations come as [`ClipData`], one per glTF animation.
+//! Animations come as [`ClipData`], one per glTF animation, and skins as
+//! [`SkinData`]: the joints that bend a mesh, each a node.
 //!
-//! What the engine can't draw yet (skins, morph targets,
+//! What the engine can't draw yet (morph targets,
 //! cameras, lights, see-through materials, ...) is skipped with one
 //! readable warning per kind, never an error. A file is refused only when
 //! it can't be read at all, or needs an extension this reader doesn't
@@ -40,7 +41,26 @@ pub struct ModelData {
     nodes: Vec<NodeData>,
     roots: Vec<usize>,
     clips: Vec<Arc<ClipData>>,
+    skins: Vec<SkinData>,
     warnings: Vec<String>,
+}
+
+/// The most joints a skin may have: a vertex's joint numbers are 0 to 255.
+pub const MAX_JOINTS: usize = 256;
+
+/// A skeleton that bends meshes: its joints, each a node, and where each
+/// was when the meshes were bound to it.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SkinData {
+    /// The file's name for it, or `""`.
+    pub name: String,
+    /// Indices into [`ModelData::nodes`], in the order a vertex's joint
+    /// numbers count them. At most [`MAX_JOINTS`].
+    pub joints: Vec<usize>,
+    /// Each joint's inverse bind matrix, column by column: from the mesh's
+    /// space to the joint's, as it was bound. A mesh's vertex goes where
+    /// `joint's world matrix × this` takes it, mixed by its weights.
+    pub inverse_binds: Vec<[f32; 16]>,
 }
 
 /// A glTF material, as plain values. Colours are linear, as glTF stores
@@ -105,6 +125,9 @@ pub struct NodeData {
     /// What it draws: a glTF mesh's primitives, each a mesh with a
     /// material.
     pub parts: Vec<Part>,
+    /// The skin that bends its parts: an index into [`ModelData::skins`].
+    /// The node's own place then doesn't move them; the joints do.
+    pub skin: Option<usize>,
     /// Indices into [`ModelData::nodes`].
     pub children: Vec<usize>,
 }
@@ -164,6 +187,11 @@ impl ModelData {
     /// the model plays the same ones.
     pub fn clips(&self) -> &[Arc<ClipData>] {
         &self.clips
+    }
+
+    /// The model's skins, which [`NodeData::skin`] names.
+    pub fn skins(&self) -> &[SkinData] {
+        &self.skins
     }
 
     /// What was skipped, one line per kind, in the order met.
@@ -294,9 +322,6 @@ impl<'a> Reader<'a> {
                 other => self.warn(format!("the glTF extension {other} isn't supported; the model is read without it")),
             }
         }
-        if document.skins().len() > 0 {
-            self.warn("skins are skipped; skinned meshes show their bind pose");
-        }
         if document.cameras().len() > 0 {
             self.warn("the model's cameras are skipped");
         }
@@ -341,11 +366,84 @@ impl<'a> Reader<'a> {
             let children: Vec<_> = node.children().collect();
             stack.extend(children.into_iter().rev().map(|c| (c, Some(index))));
         }
+        self.skins(&document, &ours);
         for animation in document.animations() {
             let clip = self.clip(&animation, &ours);
             self.model.clips.push(Arc::new(clip));
         }
         Ok(())
+    }
+
+    /// The skins the nodes use, each read once. One that can't be used
+    /// (too many joints, a joint outside the scene, joint numbers past its
+    /// end) is left out with a warning: its meshes stay as they were bound.
+    fn skins(&mut self, document: &gltf::Document, ours: &HashMap<usize, usize>) {
+        let mut read: HashMap<usize, Option<usize>> = HashMap::new();
+        for node in document.nodes() {
+            let (Some(skin), Some(&index)) = (node.skin(), ours.get(&node.index())) else { continue };
+            let ours_skin = match read.get(&skin.index()) {
+                Some(&done) => done,
+                None => {
+                    let made = self.skin(&skin, ours);
+                    read.insert(skin.index(), made);
+                    made
+                }
+            };
+            let Some(skin_index) = ours_skin else { continue };
+            // Every joint number its meshes use must be one of the skin's.
+            let joints = self.model.skins[skin_index].joints.len();
+            let fits = self.model.nodes[index].parts.iter().all(|part| {
+                let mesh = &self.model.meshes[part.mesh];
+                mesh.skin().is_none_or(|s| s.iter().flat_map(|v| v.joints).all(|j| usize::from(j) < joints))
+            });
+            if fits {
+                self.model.nodes[index].skin = Some(skin_index);
+            } else {
+                self.warn("a skinned mesh names joints its skin doesn't have; it isn't bent");
+            }
+        }
+    }
+
+    fn skin(&mut self, skin: &gltf::Skin, ours: &HashMap<usize, usize>) -> Option<usize> {
+        let joints: Option<Vec<usize>> = skin.joints().map(|j| ours.get(&j.index()).copied()).collect();
+        let Some(joints) = joints else {
+            self.warn("a skin has a joint that isn't in the scene; its meshes aren't bent");
+            return None;
+        };
+        if joints.len() > MAX_JOINTS {
+            self.warn(format!(
+                "a skin has {} joints, more than {MAX_JOINTS}; its meshes aren't bent",
+                joints.len()
+            ));
+            return None;
+        }
+        let identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        let inverse_binds = match skin.inverse_bind_matrices() {
+            None => vec![identity; joints.len()],
+            Some(accessor) => {
+                let matrices = match (accessor.data_type(), accessor.dimensions()) {
+                    (DataType::F32, Dimensions::Mat4) => accessor::Iter::<[[f32; 4]; 4]>::new(accessor, |b| {
+                        match b.source() {
+                            gltf::buffer::Source::Bin => Some(self.blob),
+                            gltf::buffer::Source::Uri(_) => None,
+                        }
+                    })
+                    .map(|m| m.map(|m| m.as_flattened().try_into().expect("16")).collect::<Vec<[f32; 16]>>()),
+                    _ => None,
+                };
+                match matrices {
+                    Some(m) if m.len() >= joints.len() && m.iter().flatten().all(|x| x.is_finite()) => {
+                        m[..joints.len()].to_vec()
+                    }
+                    _ => {
+                        self.warn("a skin's inverse bind matrices can't be read; its meshes aren't bent");
+                        return None;
+                    }
+                }
+            }
+        };
+        self.model.skins.push(SkinData { name: skin.name().unwrap_or_default().to_owned(), joints, inverse_binds });
+        Some(self.model.skins.len() - 1)
     }
 
     /// A glTF animation as a clip. A channel that can't be used (morph
@@ -454,6 +552,7 @@ impl<'a> Reader<'a> {
             rotation,
             scale,
             parts,
+            skin: None,
             children: Vec::new(),
         })
     }
@@ -495,6 +594,8 @@ impl<'a> Reader<'a> {
             normals: accessor(gltf::Semantic::Normals),
             tangents: accessor(gltf::Semantic::Tangents),
             uvs: accessor(gltf::Semantic::TexCoords(0)),
+            joints: accessor(gltf::Semantic::Joints(0)),
+            weights: accessor(gltf::Semantic::Weights(0)),
             indices: primitive.indices().map(|a| a.index()),
             mode: primitive.mode().as_gl_enum(),
         };
@@ -544,6 +645,23 @@ impl<'a> Reader<'a> {
         if reader.read_colors(0).is_some() {
             self.warn("vertex colours are skipped");
         }
+        // Four joints a vertex: glTF's first set. A second set (more than
+        // four) is left out, the first four's weights scaled up to make up.
+        let joints: Option<Vec<[u16; 4]>> = reader.read_joints(0).map(|j| j.into_u16().collect());
+        let weights: Option<Vec<[f32; 4]>> = reader.read_weights(0).map(|w| w.into_f32().collect());
+        if reader.read_joints(1).is_some() {
+            self.warn("only four joints a vertex are used; the rest are left out");
+        }
+        let skin = match (&joints, &weights) {
+            (Some(j), Some(w)) if j.len() == positions.len() && w.len() == positions.len() => {
+                Some((j.as_slice(), w.as_slice()))
+            }
+            (None, None) => None,
+            _ => {
+                self.warn("a mesh's joints and weights don't match its vertices; it isn't bent");
+                None
+            }
+        };
         if primitive.morph_targets().len() > 0 {
             self.warn("morph targets are skipped; meshes show their base shape");
         }
@@ -567,6 +685,7 @@ impl<'a> Reader<'a> {
                 tangents: if tangents { tangents_given.as_deref() } else { None },
                 uvs: uvs.as_deref(),
                 indices: &indices,
+                skin,
             })
         };
         let mesh_data = match given(true, true) {
@@ -717,6 +836,8 @@ struct Geometry {
     normals: Option<usize>,
     tangents: Option<usize>,
     uvs: Option<usize>,
+    joints: Option<usize>,
+    weights: Option<usize>,
     indices: Option<usize>,
     mode: u32,
 }

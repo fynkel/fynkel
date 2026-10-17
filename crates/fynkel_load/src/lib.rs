@@ -12,7 +12,7 @@ mod clip;
 mod model;
 
 pub use clip::{ChannelData, ClipData, Interpolation, Property, normalize, slerp};
-pub use model::{MaterialData, ModelData, ModelError, NodeData, Part};
+pub use model::{MAX_JOINTS, MaterialData, ModelData, ModelError, NodeData, Part, SkinData};
 
 /// An image as 8-bit RGBA, straight (not premultiplied) alpha, rows from
 /// the top. Colour channels are as the file stored them: whether they are

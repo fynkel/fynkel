@@ -35,12 +35,27 @@ pub struct Vertex {
 
 const _: () = assert!(std::mem::size_of::<Vertex>() == 48);
 
+/// What bends a vertex with a skeleton, as the GPU reads it: 16 bytes,
+/// beside its [`Vertex`].
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct SkinVertex {
+    /// Up to four joints, as indices into the skin's list of joints.
+    pub joints: [u16; 4],
+    /// How much each moves the vertex, out of 65535: they add up to it.
+    pub weights: [u16; 4],
+}
+
+const _: () = assert!(std::mem::size_of::<SkinVertex>() == 16);
+
 /// A checked triangle list: every index points at a vertex, and every
 /// vertex has a unit normal and tangent.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct MeshData {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
+    /// One per vertex for a skinned mesh, none for another.
+    skin: Vec<SkinVertex>,
     /// The smallest and largest corner of the box around every vertex.
     bounds: (Vec3, Vec3),
 }
@@ -64,6 +79,10 @@ pub struct MeshParts<'a> {
     pub uvs: Option<&'a [[f32; 2]]>,
     /// Three per triangle.
     pub indices: &'a [u32],
+    /// For a mesh a skeleton bends: each vertex's four joints, and how
+    /// much each moves it. Weights are 0 or more; they're scaled to add up
+    /// to 1, and a vertex with none follows its first joint alone.
+    pub skin: Option<(&'a [[u16; 4]], &'a [[f32; 4]])>,
 }
 
 /// Why [`MeshData::new`] refused a mesh.
@@ -98,6 +117,10 @@ pub enum MeshError {
         at: usize,
         w: f32,
     },
+    /// A skin weight is below 0.
+    NegativeWeight {
+        at: usize,
+    },
 }
 
 impl fmt::Display for MeshError {
@@ -117,6 +140,7 @@ impl fmt::Display for MeshError {
             MeshError::NotFinite { what, at } => write!(f, "{what} {at} isn't finite"),
             MeshError::ZeroLength { what, at } => write!(f, "{what} {at} has no direction (zero length)"),
             MeshError::TangentSign { at, w } => write!(f, "tangent {at} has w = {w}; it must be 1 or -1"),
+            MeshError::NegativeWeight { at } => write!(f, "vertex {at} has a skin weight below 0"),
         }
     }
 }
@@ -131,7 +155,7 @@ impl MeshData {
     /// out (see [`MeshParts`]). The result may have more vertices than
     /// `parts`, when generated tangents split some.
     pub fn new(parts: MeshParts<'_>) -> Result<Self, MeshError> {
-        let MeshParts { positions, normals, tangents, uvs, indices } = parts;
+        let MeshParts { positions, normals, tangents, uvs, indices, skin } = parts;
         let n = positions.len();
         if indices.is_empty() {
             return Err(MeshError::NoTriangles);
@@ -142,9 +166,13 @@ impl MeshData {
         if u32::try_from(n).is_err() {
             return Err(MeshError::TooManyVertices(n));
         }
-        for (what, len) in
-            [("normals", normals.map(<[_]>::len)), ("tangents", tangents.map(<[_]>::len)), ("uvs", uvs.map(<[_]>::len))]
-        {
+        for (what, len) in [
+            ("normals", normals.map(<[_]>::len)),
+            ("tangents", tangents.map(<[_]>::len)),
+            ("uvs", uvs.map(<[_]>::len)),
+            ("joints", skin.map(|(j, _)| j.len())),
+            ("weights", skin.map(|(_, w)| w.len())),
+        ] {
             if let Some(len) = len.filter(|&len| len != n) {
                 return Err(MeshError::WrongLength { what, len, positions: n });
             }
@@ -154,6 +182,16 @@ impl MeshData {
         }
         finite("position", positions.iter().flatten().copied(), 3)?;
         finite("uv", uvs.unwrap_or_default().iter().flatten().copied(), 2)?;
+        let skin = match skin {
+            Some((joints, weights)) => {
+                finite("weight", weights.iter().flatten().copied(), 4)?;
+                if let Some(at) = weights.iter().flatten().position(|&w| w < 0.0) {
+                    return Err(MeshError::NegativeWeight { at: at / 4 });
+                }
+                joints.iter().zip(weights).map(|(&joints, &weights)| skin_vertex(joints, weights)).collect()
+            }
+            None => Vec::new(),
+        };
 
         let normals: Vec<Vec3> = match normals {
             Some(given) => {
@@ -172,6 +210,7 @@ impl MeshData {
                 .map(|i| Vertex { position: positions[i], normal: normals[i].into(), tangent: [0.0; 4], uv: uv(i) })
                 .collect(),
             indices: indices.to_vec(),
+            skin,
             bounds: positions.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), &p| {
                 (lo.min(Vec3::from(p)), hi.max(Vec3::from(p)))
             }),
@@ -208,6 +247,11 @@ impl MeshData {
         &self.indices
     }
 
+    /// Each vertex's joints and weights, for a mesh a skeleton bends.
+    pub fn skin(&self) -> Option<&[SkinVertex]> {
+        (!self.skin.is_empty()).then_some(&self.skin[..])
+    }
+
     /// The smallest and largest corner of the axis-aligned box around
     /// every vertex.
     pub fn bounds(&self) -> (Vec3, Vec3) {
@@ -241,6 +285,9 @@ impl MeshData {
                     let copy = *copies.entry((index, tangent.map(f32::to_bits))).or_insert(next);
                     if copy == next {
                         self.vertices.push(Vertex { tangent, ..vertex });
+                        if !self.skin.is_empty() {
+                            self.skin.push(self.skin[index as usize]);
+                        }
                     }
                     self.indices[corner] = copy;
                 }
@@ -253,6 +300,23 @@ impl MeshData {
             }
         }
     }
+}
+
+/// A vertex's joints and weights, the weights scaled to add up to 65535
+/// exactly (the largest takes what rounding leaves). With no weight at
+/// all, its first joint moves it alone.
+fn skin_vertex(joints: [u16; 4], weights: [f32; 4]) -> SkinVertex {
+    let sum: f32 = weights.iter().sum();
+    if sum <= 0.0 {
+        return SkinVertex { joints, weights: [u16::MAX, 0, 0, 0] };
+    }
+    let mut quantized = weights.map(|w| (w / sum * 65535.0).round() as i32);
+    let largest = (0..4).max_by(|&a, &b| weights[a].total_cmp(&weights[b])).expect("four");
+    quantized[largest] += 65535 - quantized.iter().sum::<i32>();
+    // A joint that doesn't move the vertex is left at 0, so the GPU reads
+    // no further than the joints used.
+    let joints = std::array::from_fn(|i| if quantized[i] == 0 { 0 } else { joints[i] });
+    SkinVertex { joints, weights: quantized.map(|w| w.clamp(0, 65535) as u16) }
 }
 
 /// Fails on the first value that isn't finite, naming the item it's in.

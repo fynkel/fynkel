@@ -261,7 +261,7 @@ fn cesium_milk_truck_matches_its_golden() {
     assert_golden("gltf_milk_truck", &render("CesiumMilkTruck.glb", Vec3::new(1.0, 0.6, 1.3), 1.0));
 }
 
-/// Skinned and animated, drawn in its bind pose.
+/// Skinned and animated, drawn in its rest pose.
 #[test]
 fn fox_matches_its_golden() {
     assert_golden("gltf_fox", &render("Fox.glb", Vec3::new(1.0, 0.5, 1.0), 1.0));
@@ -278,8 +278,8 @@ fn tower_matches_its_golden() {
 fn a_model_reports_what_it_has_and_what_was_skipped() {
     let model = Model::load(sample("CesiumMilkTruck.glb")).unwrap();
     assert_eq!(model.counts(), FyModelCounts { meshes: 4, textures: 1, materials: 4, warnings: 0, clips: 1 });
-    let fox = Model::load(sample("Fox.glb")).unwrap();
-    assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
+    let boxed = Model::load(sample("BoxTextured.glb")).unwrap();
+    assert_eq!(boxed.warnings(), ["nearest-neighbour texture filtering isn't supported; textures are filtered smoothly"]);
     let name = |i| {
         let mut buf = [0u8; 32];
         let mut len = 0;

@@ -164,10 +164,7 @@ fn a_hundred_node_model_keeps_its_tree_and_reads_each_mesh_once() {
 
 #[test]
 fn what_the_engine_cant_draw_is_skipped_with_one_warning_per_kind() {
-    let fox = load("Fox.glb");
-    assert_eq!(fox.warnings(), ["skins are skipped; skinned meshes show their bind pose"]);
-    // The skinned mesh is still there, in its bind pose.
-    assert_eq!(fox.nodes().iter().filter(|n| !n.parts.is_empty()).count(), 1);
+    assert!(load("Fox.glb").warnings().is_empty(), "skins are read");
     assert_eq!(
         load("BoxTextured.glb").warnings(),
         ["nearest-neighbour texture filtering isn't supported; textures are filtered smoothly"]
@@ -192,6 +189,68 @@ fn what_the_engine_cant_draw_is_skipped_with_one_warning_per_kind() {
         // flat has no rotation to decompose into.
         warnings(|j| j["nodes"][0]["matrix"] = json!([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1])),
         ["a node's transform can't be used (not finite, or a zero scale in a matrix); it's left out"]
+    );
+}
+
+#[test]
+fn a_skin_names_its_joints_and_a_skinned_mesh_has_four_joints_a_vertex() {
+    let knight = load("Knight.glb");
+    assert!(knight.warnings().is_empty(), "{:?}", knight.warnings());
+    let [skin] = knight.skins() else { panic!("one skin, not {}", knight.skins().len()) };
+    assert_eq!((skin.joints.len(), skin.inverse_binds.len()), (41, 41));
+    let name = |n: usize| knight.nodes()[n].name.as_str();
+    assert!(skin.joints.iter().any(|&j| name(j) == "hand.r"));
+    // Its six body parts are bent by it; what it holds isn't, but hangs
+    // from a joint.
+    let skinned: Vec<&str> =
+        knight.nodes().iter().filter(|n| n.skin == Some(0)).map(|n| n.name.as_str()).collect();
+    assert_eq!(
+        skinned,
+        ["Knight_ArmLeft", "Knight_ArmRight", "Knight_Body", "Knight_Head", "Knight_LegLeft", "Knight_LegRight"]
+    );
+    for node in knight.nodes().iter().filter(|n| n.skin.is_some()) {
+        for part in &node.parts {
+            let mesh = &knight.meshes()[part.mesh];
+            let joints = mesh.skin().expect("skinned");
+            assert_eq!(joints.len(), mesh.vertices().len());
+            assert!(joints.iter().flat_map(|v| v.joints).all(|j| usize::from(j) < 41));
+        }
+    }
+    let sword = knight.nodes().iter().position(|n| n.name == "1H_Sword").unwrap();
+    let slot = knight.nodes().iter().position(|n| n.children.contains(&sword)).unwrap();
+    assert_eq!((name(slot), knight.nodes()[sword].skin), ("handslot.r", None));
+    assert!(knight.meshes()[knight.nodes()[sword].parts[0].mesh].skin().is_none());
+    assert_eq!(knight.clips().len(), 76);
+}
+
+#[test]
+fn a_skin_that_cant_be_used_leaves_its_meshes_as_they_were_bound() {
+    let warnings = |edit: fn(&mut Value)| {
+        let fox = edited("Fox.glb", edit).unwrap();
+        assert!(fox.nodes().iter().all(|n| n.skin.is_none()));
+        fox.warnings().to_vec()
+    };
+    assert_eq!(
+        warnings(|j| {
+            let joints = j["skins"][0]["joints"].as_array().unwrap().clone();
+            j["skins"][0]["joints"] = json!(joints.iter().cycle().take(300).collect::<Vec<_>>());
+        }),
+        ["a skin has 300 joints, more than 256; its meshes aren't bent"]
+    );
+    // Fewer joints than its mesh's vertices name.
+    assert_eq!(
+        warnings(|j| {
+            let joints = j["skins"][0]["joints"].as_array().unwrap()[..3].to_vec();
+            j["skins"][0]["joints"] = json!(joints);
+        }),
+        ["a skinned mesh names joints its skin doesn't have; it isn't bent"]
+    );
+    assert_eq!(
+        warnings(|j| {
+            let at = j["skins"][0]["inverseBindMatrices"].as_u64().unwrap() as usize;
+            j["accessors"][at]["count"] = json!(2);
+        }),
+        ["a skin's inverse bind matrices can't be read; its meshes aren't bent"]
     );
 }
 

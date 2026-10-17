@@ -1921,6 +1921,7 @@ pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyM
                 indices: items::<u32, 1>(m.indices, m.index_count, "indices")?
                     .ok_or_else(|| Error::null("indices"))?
                     .as_flattened(),
+                skin: None,
             }
         };
         let data = MeshData::new(parts).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
