@@ -73,7 +73,11 @@ impl From<WorldError> for Error {
             WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } | WorldError::TextureInUse { .. } => {
                 FyStatus::InUse
             }
-            WorldError::Field(_) | WorldError::Cycle { .. } | WorldError::ModelIds { .. } | WorldError::Layer(_) => {
+            WorldError::Field(_)
+            | WorldError::Cycle { .. }
+            | WorldError::ModelIds { .. }
+            | WorldError::Layer(_)
+            | WorldError::NoClip { .. } => {
                 FyStatus::InvalidValue
             }
         };

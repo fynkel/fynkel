@@ -54,6 +54,12 @@ pub enum WorldError {
         given: usize,
         needed: usize,
     },
+    /// A model's animator has `count` clips; `clip` isn't one.
+    NoClip {
+        object: ObjectId,
+        clip: u32,
+        count: u32,
+    },
 }
 
 impl std::fmt::Display for WorldError {
@@ -74,6 +80,9 @@ impl std::fmt::Display for WorldError {
             WorldError::Layer(layer) => write!(f, "layer {layer} doesn't exist: layers are 0 to 31"),
             WorldError::ModelIds { what, given, needed } => {
                 write!(f, "the model has {needed} {what}, but {given} ids were given for them")
+            }
+            WorldError::NoClip { object, clip, count } => {
+                write!(f, "{object}'s model has {count} clips; there's no clip {clip}")
             }
         }
     }
@@ -109,6 +118,8 @@ pub struct World {
     /// batch allocates nothing.
     batch: Vec<hecs::Entity>,
     pub(crate) debug_lines: Vec<crate::DebugLine>,
+    /// Each model copy's animator, by its root.
+    pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
 }
 
 impl std::fmt::Debug for World {
@@ -143,6 +154,7 @@ impl World {
             texture_ids: IdCounter::new(),
             batch: Vec::new(),
             debug_lines: Vec::new(),
+            animators: IdMap::default(),
         }
     }
 
@@ -164,6 +176,9 @@ impl World {
         let below = self.take_subtree(id);
         for id in std::iter::once(id).chain(below.into_iter().flatten()) {
             let entity = self.entities.remove(&id).expect("the hierarchy only holds live objects");
+            if !self.animators.is_empty() {
+                self.animators.remove(&id);
+            }
             self.ecs.despawn(entity).expect("the id map only holds live entities");
         }
         Ok(())

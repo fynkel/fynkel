@@ -4,6 +4,7 @@
 //! hierarchy). Nothing here knows about rendering, platforms, Flutter or
 //! Dart.
 
+mod animation;
 mod color;
 mod components;
 mod debug;
@@ -15,11 +16,12 @@ pub mod raycast;
 mod resources;
 mod world;
 
+pub use animation::{AnimationEvent, AnimatorState};
 pub use color::Color;
 pub use components::{Camera, Component, Light, LightKind, MeshRenderer, Transform};
 pub use debug::DebugLine;
 pub use describe::{Describe, Field, FieldError, FieldKind, Range, Value};
-pub use fynkel_load::{HdrData, ImageData, ImageError, MaterialData, ModelData, ModelError};
+pub use fynkel_load::{ClipData, HdrData, ImageData, ImageError, MaterialData, ModelData, ModelError};
 pub use fynkel_mesh::{MeshData, MeshError, MeshParts, Vertex};
 pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
