@@ -289,7 +289,9 @@ class FynkelView extends StatefulWidget {
   /// Whether a page or dialog over the view pauses the game
   /// ([World.paused]): a pause menu, a settings page, a pop-up. Closing
   /// the last one goes on, unless the game was paused already, or paused
-  /// itself meanwhile. Covered, the view gets no taps or keys either.
+  /// itself meanwhile. Covered, the view gets no taps or keys either, and,
+  /// as nothing in it moves, it's drawn only 10 times a second, which keeps
+  /// a phone cool behind a menu.
   final bool pauseWhenCovered;
 
   /// The camera the view draws from, read each frame; the world's main
@@ -444,6 +446,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   // Whether a route is over the view's, and whether that paused the world.
   bool _covered = false, _pausedIt = false;
+
+  /// The frames a second of a world the view paused when a route covered
+  /// it ([FynkelView.pauseWhenCovered]): enough for a resize to show.
+  static const _coveredFrameRate = 10;
 
   /// Pauses the world when a route covers the view's, and goes on when
   /// it's uncovered.
@@ -636,8 +642,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final world = this.world;
     final clock = _WorldClock.of(world);
     // Not one of the world's frames ([World.targetFrameRate]): nothing runs
-    // or is drawn, and the last picture stays.
-    if (!world.isDisposed && !clock.due(world)) return;
+    // or is drawn, and the last picture stays. Paused under a menu, the
+    // picture doesn't change, so it's drawn only [_coveredFrameRate] times
+    // a second.
+    if (!world.isDisposed) {
+      final rate = world.targetFrameRate;
+      final covered = _pausedIt && world.paused && (rate == 0 || rate > _coveredFrameRate);
+      if (!clock.due(covered ? _coveredFrameRate : rate)) return;
+    }
     final last = _lastMicros;
     _lastMicros = micros;
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
@@ -1090,16 +1102,17 @@ class _WorldClock {
   Duration? _asked;
   bool _due = true;
 
-  /// Whether this display frame is one of the world's, at its
-  /// [World.targetFrameRate]. One a quarter of a frame early counts, as the
-  /// display's frames come a little unevenly: at 60 on a 120 Hz screen,
-  /// every other one.
-  bool due(World world) {
+  /// Whether this display frame is one of the world's, at [rate] a second
+  /// (0 for every one): its [World.targetFrameRate], or fewer. One that
+  /// comes up to half a display frame early counts, as they come a little
+  /// unevenly: at 60 on a 120 Hz screen, every other one.
+  bool due(int rate) {
     final now = SchedulerBinding.instance.currentFrameTimeStamp;
     if (now != _asked) {
+      final display = _asked == null ? Duration.zero : now - _asked!;
       _asked = now;
-      final last = _updated, rate = world.targetFrameRate;
-      _due = last == null || rate == 0 || (now - last).inMicroseconds >= 750000 / rate;
+      final last = _updated;
+      _due = last == null || rate == 0 || (now - last + display ~/ 2).inMicroseconds >= 1000000 / rate;
     }
     return _due;
   }

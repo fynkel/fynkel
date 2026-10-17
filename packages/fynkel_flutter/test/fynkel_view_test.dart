@@ -1478,11 +1478,13 @@ void main() {
   group('covered', () {
     late BuildContext page;
 
-    Widget app({bool pauseWhenCovered = true}) => MaterialApp(
+    Widget app({bool pauseWhenCovered = true, void Function(double)? onFrame}) => MaterialApp(
       home: Builder(
         builder: (context) {
           page = context;
-          return Center(child: sized(FynkelView.world(world, pauseWhenCovered: pauseWhenCovered)));
+          return Center(
+            child: sized(FynkelView.world(world, pauseWhenCovered: pauseWhenCovered, onFrame: onFrame)),
+          );
         },
       ),
     );
@@ -1508,6 +1510,29 @@ void main() {
       Navigator.of(page).pop();
       await settle(tester);
       expect(world.paused, isFalse);
+    });
+
+    testWidgets('covered and paused, it draws 10 frames a second; a game paused by itself keeps its rate', (
+      tester,
+    ) async {
+      final dts = <double>[];
+      await tester.pumpWidget(app(onFrame: dts.add));
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      dts.clear();
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(inInclusiveRange(9, 11)), reason: 'about 10 in a second');
+      Navigator.of(page).pop();
+      await settle(tester);
+      dts.clear();
+      world.paused = true;
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(120), reason: "paused by the game, at its rate (every frame, here)");
     });
 
     testWidgets('a page over a dialog over the view: the game goes on once both are closed', (tester) async {
