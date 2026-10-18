@@ -37,7 +37,7 @@
 //! 4. The camera's screen effects, in order, each over what the one before
 //!    made, the last onto the view (effect.wgsl).
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bytemuck::{Pod, Zeroable};
@@ -105,6 +105,11 @@ pub struct FrameStats {
     /// GPU memory the view holds for the pictures they pass between, kept
     /// as `behind_bytes` is.
     pub effect_bytes: u64,
+    /// Pipelines for materials' own shaders still being made on threads
+    /// of their own, for a renderer that doesn't wait for them
+    /// ([`Renderer::set_wait_for_shaders`]): their draws are left out
+    /// till they're made. As of the frame before.
+    pub shaders_waiting: u32,
 }
 
 /// `Frame` in forward.wgsl.
@@ -460,6 +465,24 @@ type Look = (Option<ShaderKey>, OwnTextures);
 /// one), mirrored, skinned, and with normals of its own.
 type OutlineKey = (Option<u64>, bool, bool, bool);
 
+/// A pipeline of a material's own shader being made on a thread of its
+/// own: its key in its map.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum Building {
+    Own(u64, usize),
+    Shadow(u64, bool, bool, bool),
+    Depth(u64, bool),
+    Outline(OutlineKey),
+}
+
+/// The pipeline under `key` in `map`, if it's made.
+fn made<K: Eq + std::hash::Hash>(
+    map: &Mutex<HashMap<K, wgpu::RenderPipeline>>,
+    key: &K,
+) -> Option<wgpu::RenderPipeline> {
+    map.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
+}
+
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
 ///
@@ -514,6 +537,8 @@ pub(crate) struct Pipelines {
     /// Screen effects', by their code's hash.
     effect_layout: wgpu::BindGroupLayout,
     effects: Mutex<HashMap<u64, wgpu::RenderPipeline>>,
+    /// Own shaders' pipelines being made on threads of their own.
+    building: Mutex<HashSet<Building>>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -526,6 +551,9 @@ pub struct Renderer {
     /// The pipelines that draw into the scene image, got when its format
     /// is first used.
     image_pipelines: Option<Arc<Pipelines>>,
+    /// Whether a frame waits for its own shaders' pipelines to be made,
+    /// or goes without their draws till they are.
+    wait_for_shaders: bool,
     assets: SharedAssets,
     frame_data: FrameRing,
     targets: Option<Targets>,
@@ -681,6 +709,7 @@ impl Renderer {
             quality: kit.device_quality().quality(),
             format,
             image_pipelines: None,
+            wait_for_shaders: true,
             assets,
             targets: None,
             uniforms: FrameUniforms::zeroed(),
@@ -727,6 +756,15 @@ impl Renderer {
             effects_idle: 0,
             kit,
         }
+    }
+
+    /// Whether a frame waits for the pipelines of materials' own shaders
+    /// it hasn't drawn with before (the default), or draws without those
+    /// objects while they're made on threads of their own, so a shader the
+    /// driver hasn't seen doesn't hold the frame up: for a view on screen.
+    /// [`FrameStats::shaders_waiting`] says how many are being made.
+    pub fn set_wait_for_shaders(&mut self, wait: bool) {
+        self.wait_for_shaders = wait;
     }
 
     /// The meshes and textures it draws, to share with another renderer
@@ -818,7 +856,11 @@ impl Renderer {
         self.bloom = None;
         self.ao = None;
         self.behind = false;
-        let mut stats = FrameStats::default();
+        let mut stats = FrameStats {
+            shaders_waiting: (self.pipelines.waiting() + self.image_pipelines.as_ref().map_or(0, |p| p.waiting()))
+                as u32,
+            ..FrameStats::default()
+        };
 
         let Some(mut camera) = scene.camera else {
             self.clear = wgpu::Color::BLACK;
@@ -1375,6 +1417,7 @@ impl Renderer {
             image.bloom = Some(BloomChain::new(&self.kit.bloom, &image.view, width, height));
         }
         let Self { kit, pipelines, image_pipelines, assets, frame_data, targets, shadow_maps, environment, .. } = self;
+        let wait = self.wait_for_shaders;
         let sky_light = match (&self.sky_next, &*environment) {
             (Some(_), Some(environment)) => &environment.light,
             _ => &kit.sky.no_light,
@@ -1479,7 +1522,9 @@ impl Renderer {
                     continue;
                 }
                 if last.is_none_or(|l| (l.own, l.skinned, l.cutout) != (batch.own, batch.skinned, batch.cutout)) {
-                    pass.set_pipeline(&pipelines.own_shadow(shader, spot, batch.skinned, batch.cutout));
+                    let parts = (spot, batch.skinned, batch.cutout);
+                    let Some(pipeline) = pipelines.own_shadow_ready(shader, parts, wait) else { continue };
+                    pass.set_pipeline(&pipeline);
                 }
                 if last.is_none_or(|l| l.own != batch.own) {
                     pass.set_bind_group(1, bind_group, &[]);
@@ -1519,7 +1564,13 @@ impl Renderer {
                         last = Some(pipeline);
                         match moving {
                             None => pass.set_pipeline(kit.ao.depth_pipeline(batch.skinned)),
-                            Some(shader) => pass.set_pipeline(&pipelines.own_depth(shader, batch.skinned)),
+                            Some(shader) => match pipelines.own_depth_ready(shader, batch.skinned, wait) {
+                                Some(made) => pass.set_pipeline(&made),
+                                None => {
+                                    last = None;
+                                    continue;
+                                }
+                            },
                         }
                     }
                     if let Some(skin) = skin {
@@ -1539,8 +1590,8 @@ impl Renderer {
         // for them to read; then that put back and the see-through drawn
         // over it.
         let (scene_pipelines, resolve) = match &targets.image {
-            Some(image) => (image_pipelines.as_deref().expect("got above"), &image.view),
-            None => (&**pipelines, target),
+            Some(image) => (image_pipelines.as_ref().expect("got above"), &image.view),
+            None => (&*pipelines, target),
         };
         let behind = targets.behind.as_ref().filter(|_| self.behind);
         let behind_group = behind.and(shadow_maps.behind_bind_group());
@@ -1590,7 +1641,8 @@ impl Renderer {
                     if last.is_none_or(|l| pipeline(l) != pipeline(batch) || l.mesh != batch.mesh) {
                         let mirrored = batch.faces == Faces::Mirrored;
                         let normals = mesh.outline_normals.is_some();
-                        let pipeline = scene_pipelines.outline(shader.map(|s| &**s), mirrored, batch.skinned, normals);
+                        let parts = (mirrored, batch.skinned, normals);
+                        let Some(pipeline) = scene_pipelines.outline_ready(shader, parts, wait) else { continue };
                         pass.set_pipeline(&pipeline);
                     }
                     if let Some(normals) = &mesh.outline_normals {
@@ -1610,7 +1662,10 @@ impl Renderer {
                     };
                     match shader {
                         None => pass.set_pipeline(scene_pipelines.forward(variant)),
-                        Some(shader) => pass.set_pipeline(&scene_pipelines.own(shader, variant)),
+                        Some(shader) => {
+                            let Some(pipeline) = scene_pipelines.own_ready(shader, variant, wait) else { continue };
+                            pass.set_pipeline(&pipeline);
+                        }
                     }
                 }
                 if batch.skinned
@@ -1913,7 +1968,101 @@ impl Pipelines {
             finish_bloom: OnceLock::new(),
             effect_layout: kit.effects.layout.clone(),
             effects: Mutex::new(HashMap::new()),
+            building: Mutex::default(),
         }
+    }
+
+    /// How many of its pipelines are being made on threads of their own.
+    pub(crate) fn waiting(&self) -> usize {
+        self.building.lock().unwrap_or_else(PoisonError::into_inner).len()
+    }
+
+    /// `made`, a pipeline of a material's own shader, if it's made. If
+    /// not: with `wait`, made now by `make`; without, `make` runs on a
+    /// thread of its own (once, however many frames ask), and the draw
+    /// goes without it till then. A driver compiling a shader it hasn't
+    /// seen can take a third of a second, which a frame on screen can't.
+    fn ready(
+        self: &Arc<Self>,
+        wait: bool,
+        key: Building,
+        made: Option<wgpu::RenderPipeline>,
+        make: impl FnOnce(&Self) -> wgpu::RenderPipeline + Send + 'static,
+    ) -> Option<wgpu::RenderPipeline> {
+        if made.is_some() {
+            return made;
+        }
+        if wait {
+            return Some(make(self));
+        }
+        if self.building.lock().unwrap_or_else(PoisonError::into_inner).insert(key) {
+            let pipelines = Arc::clone(self);
+            let spawned = std::thread::Builder::new().name("fynkel shader".into()).spawn(move || {
+                make(&pipelines);
+                pipelines.building.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
+            });
+            if spawned.is_err() {
+                // No thread to be had: it's tried again next frame.
+                self.building.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
+            }
+        }
+        None
+    }
+
+    /// [`Pipelines::own`] when it's ready ([`Pipelines::ready`]).
+    fn own_ready(
+        self: &Arc<Self>,
+        shader: &Arc<CustomShader>,
+        variant: Variant,
+        wait: bool,
+    ) -> Option<wgpu::RenderPipeline> {
+        let key = (shader.hash, variant.index());
+        let shader = Arc::clone(shader);
+        self.ready(wait, Building::Own(key.0, key.1), made(&self.own, &key), move |p| p.own(&shader, variant))
+    }
+
+    /// [`Pipelines::own_shadow`] when it's ready.
+    fn own_shadow_ready(
+        self: &Arc<Self>,
+        shader: &Arc<CustomShader>,
+        (spot, skinned, cutout): (bool, bool, bool),
+        wait: bool,
+    ) -> Option<wgpu::RenderPipeline> {
+        let key = (shader.hash, spot, skinned, cutout);
+        let shader = Arc::clone(shader);
+        self.ready(wait, Building::Shadow(key.0, spot, skinned, cutout), made(&self.own_shadows, &key), move |p| {
+            p.own_shadow(&shader, spot, skinned, cutout)
+        })
+    }
+
+    /// [`Pipelines::own_depth`] when it's ready.
+    fn own_depth_ready(
+        self: &Arc<Self>,
+        shader: &Arc<CustomShader>,
+        skinned: bool,
+        wait: bool,
+    ) -> Option<wgpu::RenderPipeline> {
+        let key = (shader.hash, skinned);
+        let shader = Arc::clone(shader);
+        self.ready(wait, Building::Depth(key.0, skinned), made(&self.own_depths, &key), move |p| {
+            p.own_depth(&shader, skinned)
+        })
+    }
+
+    /// [`Pipelines::outline`] when it's ready. The built-in material's are
+    /// made at once, as its forward pipelines are.
+    fn outline_ready(
+        self: &Arc<Self>,
+        shader: Option<&Arc<CustomShader>>,
+        (mirrored, skinned, normals): (bool, bool, bool),
+        wait: bool,
+    ) -> Option<wgpu::RenderPipeline> {
+        let key = (shader.map(|s| s.hash), mirrored, skinned, normals);
+        let shader = shader.cloned();
+        let wait = wait || shader.is_none();
+        self.ready(wait, Building::Outline(key), made(&self.outlines, &key), move |p| {
+            p.outline(shader.as_deref(), mirrored, skinned, normals)
+        })
     }
 
     /// The forward pipeline for `variant`.

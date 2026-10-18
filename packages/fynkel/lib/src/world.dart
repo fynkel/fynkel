@@ -177,6 +177,34 @@ final class World implements Finalizable {
     _errors.close();
   }
 
+  /// Completes once every shader the world's views have drawn with is
+  /// ready: for a loading screen to wait on before it shows the game.
+  ///
+  /// A view on screen doesn't hold a frame up for a shader the GPU's
+  /// driver hasn't compiled before (a third of a second, or more on a
+  /// phone, the first time each look is drawn on a device): it draws the
+  /// frame without those objects while the shader is compiled beside it.
+  /// Build the level behind the loading screen, let the view draw it, and
+  /// `await world.shadersReady()`; then nothing pops in. Checks once a
+  /// frame, after at least two; completes at [timeout] whatever's left.
+  Future<void> shadersReady({Duration timeout = const Duration(seconds: 10)}) async {
+    ensureEngine();
+    final from = time.frame;
+    final watch = Stopwatch()..start();
+    final out = malloc<Uint32>();
+    try {
+      while (!isDisposed && watch.elapsed < timeout) {
+        if (time.frame >= from + 2) {
+          check(fy_shaders_waiting(out));
+          if (out.value == 0) return;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 16));
+      }
+    } finally {
+      malloc.free(out);
+    }
+  }
+
   /// Reads every shader [assets] loaded again from the world's source and
   /// puts its new code in ([Shader.reload]): `FynkelGame` calls it on a hot
   /// reload, so a shader's file can be changed while the game runs. One

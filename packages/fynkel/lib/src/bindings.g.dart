@@ -441,6 +441,9 @@ external int fy_shader_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyShader>)>(isLeaf: true)
 external int fy_shader_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyShader> shader);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>(isLeaf: true)
+external int fy_shaders_waiting(ffi.Pointer<ffi.Uint32> out);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FySkyImage>>)>(isLeaf: true)
 external int fy_sky_image_decode(ffi.Pointer<ffi.Uint8> bytes, int len, ffi.Pointer<ffi.Pointer<FySkyImage>> out);
 
@@ -607,7 +610,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 35;
+const int FY_ABI_VERSION = 36;
 
 const int FY_APPLE_MORE = 2;
 

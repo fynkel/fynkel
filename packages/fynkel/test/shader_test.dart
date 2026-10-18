@@ -299,4 +299,23 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     world.update(0.016);
     invert.dispose();
   });
+
+  test('shadersReady completes once the views have drawn and every shader is ready', () async {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    scene.cube.get<MeshRenderer>()!.material = Material(shader: Shader(_tint, name: 'tint.wgsl'));
+    var ready = false;
+    final waiting = world.shadersReady().then((_) => ready = true);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(ready, isFalse, reason: 'not before the views have drawn twice');
+    for (var i = 0; i < 3; i++) {
+      world.update(0.016);
+      view.read(view.frame());
+    }
+    await waiting.timeout(const Duration(seconds: 5));
+    expect(ready, isTrue);
+  });
 }

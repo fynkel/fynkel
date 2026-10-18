@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 35;
+pub const FY_ABI_VERSION: u32 = 36;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -1209,6 +1209,25 @@ pub unsafe extern "C" fn fy_quality_preset(level: u32, out: *mut FyQuality) -> F
             level_named(level).ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("{level} isn't a level")))?;
         // SAFETY: per this function's contract.
         unsafe { write(out, FyQuality::from_quality(level.quality()), "out") }
+    })
+}
+
+/// Writes to `out` how many pipelines of materials' own shaders are being
+/// made beside the frames: a view on screen draws without a shader's
+/// objects while the driver compiles it, the first time it's drawn on the
+/// device, rather than holding a frame up. 0 when every shader drawn so
+/// far is ready, as a loading screen waits for. Makes the device if
+/// there's none yet.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_shaders_waiting(out: *mut u32) -> FyStatus {
+    guard(|| {
+        let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, device.kit.shaders_waiting(), "out") }
     })
 }
 
@@ -3260,7 +3279,12 @@ unsafe fn new_view<T: fynkel_present::Target + 'static>(
         }
     };
     let (target, output) = make(&device.gpu, width, height)?;
-    let renderer = Renderer::sharing(gpu.assets.clone(), fynkel_present::Target::format(&target));
+    let mut renderer = Renderer::sharing(gpu.assets.clone(), fynkel_present::Target::format(&target));
+    // On screen, a shader the driver hasn't seen is compiled beside the
+    // frames, its objects left out till it's ready, rather than holding a
+    // frame up for a third of a second. Headless views wait, so what they
+    // read back is the whole scene.
+    renderer.set_wait_for_shaders(matches!(output, Output::Headless(_)));
     let worker = Worker::start_for(gpu.clone(), renderer, target)
         .map_err(|e| Error::new(FyStatus::WorkerFailed, format!("couldn't start the render worker: {e}")))?;
     let view = FyView { world, gpu, clock: Mutex::default(), worker, output };

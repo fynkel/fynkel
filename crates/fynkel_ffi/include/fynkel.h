@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 35
+#define FY_ABI_VERSION 36
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -693,6 +693,18 @@ FyStatus fy_world_quality_set(const struct FyWorld *world, const struct FyQualit
 //
 // `out` is null or writable.
 FyStatus fy_quality_preset(uint32_t level, struct FyQuality *out);
+
+// Writes to `out` how many pipelines of materials' own shaders are being
+// made beside the frames: a view on screen draws without a shader's
+// objects while the driver compiles it, the first time it's drawn on the
+// device, rather than holding a frame up. 0 when every shader drawn so
+// far is ready, as a loading screen waits for. Makes the device if
+// there's none yet.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_shaders_waiting(uint32_t *out);
 
 // Writes the level this device picks for a world without a quality of
 // its own to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`. Makes the

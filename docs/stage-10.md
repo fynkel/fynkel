@@ -301,7 +301,7 @@ own lines and hot reload takes its new code. What isn't good enough:
    screen build a missing shader's pipelines on a thread of their own and
    draw the frame without those objects meanwhile (as Unreal's
    precaching does); headless views and tests wait, so pictures stay
-   exact. `ViewStats.shadersWaiting` counts what's being built, and
+   exact. `fy_shaders_waiting` counts what's being built, and
    `await world.shadersReady()` waits for it, for a loading screen.
 2. **What a shader can use is hard to find**: the guide's "Shaders"
    chapter (phase 5's, brought forward), a file declaring the engine's
