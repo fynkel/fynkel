@@ -42,7 +42,8 @@ use std::sync::Arc;
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
     AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
-    MaterialTextures, MeshKey, PbrMaterial, Quality, RenderScene, ShaderKey, ShaderUse, Sky, TextureKey,
+    MaterialTextures, MeshKey, Outline, PbrMaterial, Quality, RenderScene, ScreenEffect, ShaderKey, ShaderUse, Sky,
+    TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
@@ -279,6 +280,16 @@ impl Extract {
         });
         // The layers drawn: all without a camera, which draws nothing anyway.
         let mask = camera.map_or(u32::MAX, |(_, c, ..)| c.culling_mask);
+        // The camera's screen effects, their values after the materials'.
+        if let Some((id, ..)) = camera {
+            for effect in world.camera_effects(id) {
+                if compiled(world, effect.shader).is_some_and(|s| s.effect) {
+                    let values = scene.shader_values.len() as u32;
+                    push_values(&mut scene.shader_values, &effect.values);
+                    scene.effects.push(ScreenEffect { shader: shader_key(effect.shader), values });
+                }
+            }
+        }
         scene.camera = camera.map(|(_, c, rotation, position)| CameraView {
             view: Mat4::from_rotation_translation(rotation, position).inverse(),
             position,
@@ -293,6 +304,7 @@ impl Extract {
                 intensity: c.ambient_occlusion_intensity,
                 radius: c.ambient_occlusion_radius,
             }),
+            pixels: (c.pixels > 0).then_some(c.pixels),
         });
 
         scene.quality = self.quality;
@@ -411,6 +423,7 @@ fn pbr(m: &Material) -> PbrMaterial {
         },
         textures: texture_keys(m),
         shader: None,
+        outline: (m.outline_width > 0.0).then(|| Outline { width: m.outline_width, color: rgb(m.outline_color) }),
     }
 }
 

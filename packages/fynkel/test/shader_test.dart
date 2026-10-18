@@ -163,6 +163,59 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     expect(_centre(view), isNot(_near(red)));
   });
 
+  test('a shader with its own light lights its object, light by light', () {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    const surface = 'fn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n';
+    final standard = Shader('${surface}fn light(in: LightInput) -> vec3<f32> {\n    return standard_light(in);\n}\n');
+    final dark = Shader('${surface}fn light(in: LightInput) -> vec3<f32> {\n    return vec3<f32>(0.0);\n}\n');
+    expect(standard.hasOwnLighting, isTrue);
+    expect(Shader(_tint).hasOwnLighting, isFalse);
+    final renderer = scene.cube.get<MeshRenderer>()!;
+    renderer.material = Material(color: const Color(0xFFFF0000));
+    final lit = _centre(view);
+    renderer.material = Material(color: const Color(0xFFFF0000), shader: standard);
+    expect(_centre(view), _near(lit));
+    // Lit by no sun or lamp: only the ambient light is left.
+    renderer.material = Material(color: const Color(0xFFFF0000), shader: dark);
+    expect(_centre(view)[0], lessThan(lit[0] - 40));
+    expect(
+      () => Shader('${surface}fn light(in: LightInput) -> vec4<f32> {\n    return vec4<f32>(1.0);\n}\n'),
+      throwsA(isA<ShaderError>().having((e) => e.message, 'message', contains('fn light(in: LightInput)'))),
+    );
+  });
+
+  test('an outline rings its object in its colour', () {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    int green() {
+      final rgba = view.read(view.frame()).rgba;
+      var n = 0;
+      for (var i = 0; i < rgba.length; i += 4) {
+        if (rgba[i + 1] > 200 && rgba[i] < 60 && rgba[i + 2] < 60) n++;
+      }
+      return n;
+    }
+
+    final material = Material(color: const Color(0xFFFF0000));
+    scene.cube.get<MeshRenderer>()!.material = material;
+    expect(green(), 0);
+    material.outline = const Outline(width: 0.3, color: Color(0xFF00FF00));
+    expect(green(), greaterThan(10));
+    expect(material.copy().outline, const Outline(width: 0.3, color: Color(0xFF00FF00)));
+    expect(material.toString(), contains('outline'));
+    material.outline = null;
+    expect(green(), 0);
+    expect(() => Material(outline: const Outline(width: -1)), throwsRangeError);
+    expect(() => material.outline = const Outline(width: double.nan), throwsRangeError);
+  });
+
   test('a shader loaded as an asset takes its new code when the world reloads its shaders', () async {
     var code = 'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(1.0, 0.0, 0.0, 1.0);\n}\n';
     final world = World(source: (name) async => Uint8List.fromList(utf8.encode(code)));
@@ -187,5 +240,63 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     await Future<void>.delayed(Duration.zero);
     expect(errors.single.error, isA<ShaderError>().having((e) => e.line, 'line', 2));
     expect(_centre(view), _near([0, 255, 0]));
+  });
+
+  test("a camera's screen effects run over its picture, in order, and change with their values", () {
+    final world = World();
+    stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    final invert = Shader(
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return vec4<f32>(1.0 - picture(in.uv).rgb, 1.0);\n}\n',
+      name: 'invert.wgsl',
+    );
+    final gain = Shader(
+      'struct Values { gain: vec3<f32> }\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return vec4<f32>(picture(in.uv).rgb * values.gain, 1.0);\n}\n',
+      name: 'gain.wgsl',
+    );
+    expect(invert.isEffect, isTrue);
+    expect(gain.values, ['gain']);
+    final camera = world.camera!;
+    final before = _centre(view);
+
+    // The orange cube's red alone, then inverted (in linear light): green
+    // and blue full, red what's left of the orange's.
+    final red = ScreenEffect(gain, values: {'gain': Vec3(1, 0, 0)});
+    camera.effects = [red, ScreenEffect(invert)];
+    expect(_centre(view), _near([203, 255, 255]));
+    expect(camera.toString(), contains('effects: [ScreenEffect(gain.wgsl), ScreenEffect(invert.wgsl)]'));
+    // The other way round: red's left of the inverted picture.
+    camera.effects = [ScreenEffect(invert), red];
+    expect(_centre(view)[1], lessThan(10));
+    red.set('gain', Vec3(0, 1, 0));
+    expect(_centre(view)[0], lessThan(10), reason: 'a value set shows in every camera with the effect');
+    expect(red.value('gain'), Vec3(0, 1, 0));
+
+    // A new version of its code lays its values out again.
+    gain.reload(
+      'struct Values { pad: f32, gain: vec3<f32> }\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return vec4<f32>(picture(in.uv).rgb * values.gain, 1.0);\n}\n',
+    );
+    expect(_centre(view)[0], lessThan(10));
+    expect(_centre(view)[1], greaterThan(100));
+
+    expect(() => gain.dispose(), throwsStateError, reason: 'a camera uses it');
+    camera.effects = [];
+    expect(_centre(view), before);
+    gain.dispose();
+
+    expect(() => ScreenEffect(Shader(_tint, name: 'tint.wgsl')), throwsArgumentError);
+    expect(() => Material(shader: invert), throwsArgumentError);
+    expect(() => red.set('nope', 1.0), throwsArgumentError);
+    expect(() => ScreenEffect(invert).set('gain', 1.0), throwsArgumentError);
+
+    // An effect goes with its camera, so its shader can be freed.
+    camera.effects = [ScreenEffect(invert)];
+    camera.gameObject.destroy();
+    world.update(0.016);
+    invert.dispose();
   });
 }

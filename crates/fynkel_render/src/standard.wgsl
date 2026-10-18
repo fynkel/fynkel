@@ -8,3 +8,9 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
 fn fy_moved(in: VertexIn, model: array<vec4<f32>, 3>, out: VertexOut) -> VertexOut {
     return out;
 }
+
+// It lights as the engine does.
+fn fy_light(b: Brdf, s: Surface, p: vec3<f32>, l: vec3<f32>, color: vec3<f32>, shadow: f32, distance: f32,
+    highlights: bool) -> vec3<f32> {
+    return standard_lit(b, l, color, shadow, highlights);
+}

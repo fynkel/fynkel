@@ -40,8 +40,40 @@ struct VertexInput {
     origin: vec3<f32>,
 };
 
+// One light reaching a point of the surface, as a shader's `light` gets
+// it: called for each sun and lamp that reaches the point, and what it
+// returns is added up, with the ambient and sky light and the glow, which
+// stay the engine's. Fog and tone mapping come after, as ever.
+struct LightInput {
+    // The way to the light, unit length.
+    direction: vec3<f32>,
+    // The light as it arrives: its colour times its intensity, faded with
+    // distance and by a spot's cone; not by its shadow.
+    color: vec3<f32>,
+    // 1 lit, 0 in the light's shadow, between at a shadow's soft edge.
+    shadow: f32,
+    // How far the light is, in metres: 0 for a sun.
+    distance: f32,
+    // The point, in the world; the way it faces (the surface's normal,
+    // unit length); and the way to the camera.
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    view: vec3<f32>,
+    // What the shader's `surface` returned.
+    surface: Surface,
+};
+
+// How the engine lights it: physically based, with a highlight. A
+// shader's `light` can start from it.
+fn standard_light(in: LightInput) -> vec3<f32> {
+    return standard_lit(brdf(in.surface, in.normal, in.view), in.direction, in.color, in.shadow, fy_highlights);
+}
+
 // What the shader's `surface` is lit as, and its `standard` reads.
 var<private> fy_in: VertexOut;
+// Whether the light `standard_light` lights with gives a highlight: a
+// lamp at low doesn't.
+var<private> fy_highlights: bool;
 var<private> fy_front: bool;
 
 // The material's own surface, as the built-in shader has it: its colour,

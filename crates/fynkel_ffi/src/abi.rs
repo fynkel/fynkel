@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 34;
+pub const FY_ABI_VERSION: u32 = 35;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -135,6 +135,10 @@ pub struct FyCamera {
     pub ambient_occlusion: bool,
     pub ambient_occlusion_intensity: f32,
     pub ambient_occlusion_radius: f32,
+    /// The pixel look: the scene drawn this many pixels high, then
+    /// enlarged to the view with hard edges. 0 for the view's own size; up
+    /// to 16384.
+    pub pixels: u32,
 }
 
 /// `FyLight::kind`.
@@ -337,6 +341,11 @@ pub struct FyMaterial {
     /// How far, in metres, its shader's `vertex` can move a vertex: the
     /// object's bounds grow by it for culling. 0 to 1e4.
     pub reach: f32,
+    /// How wide a line drawn around it is, in metres; 0 for none. 0 to
+    /// 100. Opaque surfaces only.
+    pub outline_width: f32,
+    /// sRGB; alpha is ignored.
+    pub outline_color: FyColor,
 }
 
 // The renderer's limit, the world's and the C struct's agree.
@@ -483,6 +492,7 @@ impl CComponent for FyCamera {
             ambient_occlusion: self.ambient_occlusion,
             ambient_occlusion_intensity: self.ambient_occlusion_intensity,
             ambient_occlusion_radius: self.ambient_occlusion_radius,
+            pixels: self.pixels,
         })
     }
     fn from_component(c: Camera) -> Self {
@@ -501,6 +511,7 @@ impl CComponent for FyCamera {
             ambient_occlusion: c.ambient_occlusion,
             ambient_occlusion_intensity: c.ambient_occlusion_intensity,
             ambient_occlusion_radius: c.ambient_occlusion_radius,
+            pixels: c.pixels,
         }
     }
 }
@@ -589,6 +600,8 @@ impl FyMaterial {
             shader: ShaderId::from_raw(self.shader),
             shader_textures: self.shader_textures.map(TextureId::from_raw),
             reach: self.reach,
+            outline_width: self.outline_width,
+            outline_color: self.outline_color.into(),
         })
     }
 }
@@ -619,6 +632,8 @@ impl From<Material> for FyMaterial {
             shader: m.shader.map_or(0, ShaderId::raw),
             shader_textures: m.shader_textures.map(raw),
             reach: m.reach,
+            outline_width: m.outline_width,
+            outline_color: m.outline_color.into(),
         }
     }
 }
@@ -1107,6 +1122,58 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
         };
         *world.shake.lock().unwrap_or_else(PoisonError::into_inner) = shake;
         Ok(())
+    })
+}
+
+/// A screen effect, for `fy_camera_effects_set`: a shader the world has
+/// (`fy_shader_add`) with `fn effect`, and `values_len` bytes of its values,
+/// laid out as its `Values` (`fy_shader_describe`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FyScreenEffect {
+    pub shader: u64,
+    pub values: *const u8,
+    pub values_len: usize,
+}
+
+/// Gives the camera on `object` these `count` screen effects, in place of
+/// any it had (0 takes them away): run over its picture in order, each
+/// over what the one before made, when a view draws from it. A shader that
+/// isn't an effect's is `FY_STATUS_INVALID_VALUE`; values that aren't as
+/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`. A shader can't be
+/// removed while an effect uses it.
+///
+/// # Safety
+///
+/// `world` is null or live; `effects` is null or valid for `count` reads
+/// (null when `count` is 0), and each one's `values` for `values_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_camera_effects_set(
+    world: *const FyWorld,
+    object: u64,
+    effects: *const FyScreenEffect,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let effects: &[FyScreenEffect] = if count == 0 {
+            &[]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(effects, "effects")?, count) }
+        };
+        let mut list = Vec::with_capacity(effects.len());
+        for e in effects {
+            let values = if e.values_len == 0 {
+                Vec::new()
+            } else {
+                // SAFETY: per this function's contract.
+                unsafe { std::slice::from_raw_parts(handle(e.values, "values")?, e.values_len) }.to_vec()
+            };
+            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values });
+        }
+        Ok(world.lock()?.set_camera_effects(self::object(object)?, list)?)
     })
 }
 
@@ -2170,8 +2237,9 @@ pub unsafe extern "C" fn fy_material_values_set(
 #[derive(Debug)]
 pub struct FyShader(Shader);
 
-/// Compiles `source` (`source_len` bytes of WGSL) for a material: checked
-/// and joined to the engine's code. `name` is its file's, for messages.
+/// Compiles `source` (`source_len` bytes of WGSL) for a material, or for a
+/// screen effect when it has `fn effect` (`fy_camera_effects_set`):
+/// checked and joined to the engine's code. `name` is its file's, for messages.
 /// Writes the new handle to `out`. A shader that doesn't compile is
 /// `FY_STATUS_INVALID_VALUE`, its message `name:line:column: what`, the
 /// line its file's own.
@@ -2200,6 +2268,7 @@ pub unsafe extern "C" fn fy_shader_new(
             name: name.to_owned(),
             values_size: compiled.values_size as usize,
             textures: compiled.textures.len(),
+            effect: compiled.effect,
             compiled: Arc::new(compiled),
         };
         // SAFETY: checked non-null; the caller promises it's writable.
@@ -2231,9 +2300,10 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 /// offset in bytes) for each of its `Values`; `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
-/// `PerObject`, in order; `moves` if it has a `vertex`; `behind` if it reads what's behind it
-/// (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
-/// fits in `cap`.
+/// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
+/// has a `light`; `behind` if it reads what's behind it (`scene_depth`,
+/// `scene_color`); `effect` if it's a screen effect's. Its length goes to
+/// `out_len`; it's copied into `buf` only when it fits in `cap`.
 ///
 /// # Safety
 ///
@@ -2280,8 +2350,14 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
     if shader.moves {
         let _ = writeln!(text, "moves");
     }
+    if shader.lights {
+        let _ = writeln!(text, "lights");
+    }
     if shader.reads_behind {
         let _ = writeln!(text, "behind");
+    }
+    if shader.effect {
+        let _ = writeln!(text, "effect");
     }
     text
 }

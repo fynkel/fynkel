@@ -287,9 +287,18 @@ final class Camera extends Component {
     this._showSky = true,
     this._bloom,
     this._ambientOcclusion,
-  }) : super._();
+    this._pixels,
+    List<ScreenEffect> effects = const [],
+  }) : super._() {
+    _useEffects(effects);
+  }
 
   double _fovY, _near, _far, _orthographicSize;
+  int? _pixels;
+  List<ScreenEffect> _effects = const [];
+
+  /// Whether the engine was given effects, so taking them away is sent.
+  bool _effectsSent = false;
   Color _clearColor;
   bool _orthographic, _showSky;
   LayerMask _cullingMask;
@@ -434,6 +443,66 @@ final class Camera extends Component {
     }
   }
 
+  /// The pixel look: the game drawn this many pixels high (and as wide as
+  /// the view's shape makes it), then enlarged to the view with hard
+  /// edges, as `pixels = 240`. The camera is put on the nearest whole
+  /// pixel, so what's still doesn't shimmer as it moves: exactly when
+  /// [orthographic]; for a perspective camera, for what's where it looks
+  /// at the ground. Null (the default) for the view's own size; 1 to
+  /// 16,384, and never more than the view's height.
+  int? get pixels => _pixels;
+  set pixels(int? value) {
+    _checkChangeable();
+    if (value != null && (value < 1 || value > 16384)) {
+      throw RangeError.range(value, 1, 16384, 'pixels');
+    }
+    final old = _pixels;
+    _pixels = value;
+    if (_write() case final failed?) {
+      _pixels = old;
+      failed.raise();
+    }
+  }
+
+  /// What runs over its picture once it's drawn, in order, each over what
+  /// the one before made: `[ScreenEffect(oldTv)]`. Empty (the default) for
+  /// the picture as it is. They run at every quality level; a frame with
+  /// none pays nothing for them. Set a new list to change them.
+  List<ScreenEffect> get effects => _effects;
+  set effects(List<ScreenEffect> value) {
+    _checkChangeable();
+    final old = _effects;
+    _useEffects(value);
+    if (_writeEffects() case final failed?) {
+      _useEffects(old);
+      failed.raise();
+    }
+  }
+
+  void _useEffects(List<ScreenEffect> value) {
+    for (final effect in _effects) {
+      effect._cameras.removeWhere((c) => identical(c.target, this));
+    }
+    for (final effect in value) {
+      if (effect.shader.isDisposed) throw StateError('${effect.shader} was disposed');
+    }
+    _effects = List.unmodifiable(value);
+    for (final effect in _effects) {
+      effect._cameras.add(WeakReference(this));
+    }
+  }
+
+  /// Sends its [effects] to the engine, as [_write] does the rest.
+  _Failure? _writeEffects() {
+    if (!_enabledFlag) return null;
+    try {
+      _live?._writeCameraEffects(this);
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
+    }
+  }
+
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
   /// [World.raycast] to find what's drawn there (Unity's
@@ -519,7 +588,9 @@ final class Camera extends Component {
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'}'
       '${showSky ? '' : ', showSky: false'}'
       '${bloom == null ? '' : ', bloom: $bloom'}'
-      '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'})';
+      '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'}'
+      '${pixels == null ? '' : ', pixels: $pixels'}'
+      '${effects.isEmpty ? '' : ', effects: $effects'})';
 }
 
 /// What kind of light a [Light] is.

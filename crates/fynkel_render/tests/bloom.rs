@@ -23,6 +23,7 @@ fn glowing(glow: f32, bloom: Option<Bloom>, quality: QualityLevel) -> RenderScen
         quality: Some(quality.quality()),
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         draws: vec![Draw::new(PLANE, model, material)],
         ..Default::default()
     }
@@ -135,6 +136,7 @@ fn bloom_looks_like_its_golden() {
         quality: Some(QualityLevel::High.quality()),
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         ambient: Vec3::splat(0.1),
         lights: vec![Light::sun(Vec3::new(-0.3, -1.0, -0.4), Vec3::splat(0.6))],
         draws: vec![floor, ball(-1.6, [6.0, 1.5, 0.3]), ball(0.0, [0.5, 4.0, 1.0]), ball(1.6, [0.4, 0.8, 0.9])],

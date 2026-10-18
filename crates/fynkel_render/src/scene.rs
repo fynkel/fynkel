@@ -123,6 +123,15 @@ pub struct CameraView {
     /// don't. Only where the quality level draws it
     /// ([`Quality::ambient_occlusion`]).
     pub ambient_occlusion: Option<AmbientOcclusion>,
+    /// The pixel look: the scene drawn this many pixels high (and as wide
+    /// as the view's shape makes it), then enlarged to the view with hard
+    /// edges. The camera is moved to the nearest whole pixel of that
+    /// picture, so what's still doesn't shimmer as it moves: exactly for
+    /// an orthographic camera; for a perspective one, for what's where it
+    /// looks at the ground (y = 0), or where it looks 10 m away when it
+    /// doesn't. `None`, at the view's own size. At least 1, and no more
+    /// than the view's height.
+    pub pixels: Option<u32>,
 }
 
 /// Surfaces darkening where they meet, in corners and creases and under
@@ -185,6 +194,7 @@ impl CameraView {
             sky: true,
             bloom: None,
             ambient_occlusion: None,
+            pixels: None,
         }
     }
 }
@@ -474,6 +484,22 @@ pub struct PbrMaterial {
     pub textures: MaterialTextures,
     /// Its own shader, or `None` for the built-in one.
     pub shader: Option<ShaderUse>,
+    /// A line drawn around it, as in a cartoon, or `None`. Opaque surfaces
+    /// only: a cut-out or see-through one has none.
+    pub outline: Option<Outline>,
+}
+
+/// A line around an object: its mesh drawn again behind it, inside out and
+/// [`width`](Self::width) bigger all round, in one colour. Lit by nothing,
+/// fogged as the object is. Moved and bent as the object is, by its
+/// shader's `vertex` and its skeleton. A mesh whose faces don't share their
+/// corners' normals (a cube's) shows gaps at its corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Outline {
+    /// How far out it reaches, in metres.
+    pub width: f32,
+    /// Linear RGB.
+    pub color: [f32; 3],
 }
 
 /// How a surface covers what's behind it.
@@ -513,6 +539,7 @@ impl PbrMaterial {
         blend: Blend::Opaque,
         textures: MaterialTextures::NONE,
         shader: None,
+        outline: None,
     };
 }
 
@@ -754,6 +781,18 @@ pub struct RenderScene {
     /// its [`ShaderUse::values`], laid out as its shader's `Values`, in
     /// blocks of 48 bytes (a joint's room: they go after the joints).
     pub shader_values: Vec<[[f32; 4]; 3]>,
+    /// The camera's screen effects, run over the finished picture in
+    /// order. One whose shader isn't there, or isn't an effect's
+    /// ([`CustomShader::effect`](crate::CustomShader::effect)), is left out.
+    pub effects: Vec<ScreenEffect>,
+}
+
+/// A screen effect: its shader (an effect's) and the first of its values'
+/// blocks in [`RenderScene::shader_values`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenEffect {
+    pub shader: ShaderKey,
+    pub values: u32,
 }
 
 impl RenderScene {
@@ -779,5 +818,6 @@ impl RenderScene {
         self.quality = None;
         self.time = [0.0; 2];
         self.shader_values.clear();
+        self.effects.clear();
     }
 }

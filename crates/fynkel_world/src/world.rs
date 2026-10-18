@@ -10,7 +10,7 @@ use std::sync::Arc;
 use fynkel_load::ImageData;
 use fynkel_mesh::MeshData;
 
-use crate::resources::{Material, Shader};
+use crate::resources::{Material, ScreenEffect, Shader};
 use crate::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 
 /// Why a world operation was refused. On error, the world is unchanged.
@@ -42,6 +42,24 @@ pub enum WorldError {
     ShaderInUse {
         shader: ShaderId,
         material: MaterialId,
+    },
+    /// The shader can't be removed while a camera's screen effect uses it.
+    EffectInUse {
+        shader: ShaderId,
+        object: ObjectId,
+    },
+    /// A screen effect's shader given a material, or a material's given a
+    /// camera's effects (`effect`: whether it's an effect's).
+    ShaderKind {
+        shader: ShaderId,
+        effect: bool,
+    },
+    /// A screen effect's values aren't as many bytes as its shader's: it
+    /// has `size`.
+    EffectValues {
+        shader: ShaderId,
+        given: usize,
+        size: usize,
     },
     /// Values written past the end of a material's shader's: it has
     /// `size` bytes of them.
@@ -89,6 +107,18 @@ impl std::fmt::Display for WorldError {
             WorldError::MaterialInUse { material, object } => write!(f, "{material} is still used by {object}"),
             WorldError::TextureInUse { texture, material } => write!(f, "{texture} is still used by {material}"),
             WorldError::ShaderInUse { shader, material } => write!(f, "{shader} is still used by {material}"),
+            WorldError::EffectInUse { shader, object } => {
+                write!(f, "{shader} is still a screen effect on {object}'s camera")
+            }
+            WorldError::ShaderKind { shader, effect: true } => {
+                write!(f, "{shader} is a screen effect's shader: it goes on a camera, not a material")
+            }
+            WorldError::ShaderKind { shader, effect: false } => {
+                write!(f, "{shader} is a material's shader, not a screen effect's (fn effect)")
+            }
+            WorldError::EffectValues { shader, given, size } => {
+                write!(f, "{shader} has {size} bytes of values; a screen effect gave {given}")
+            }
             WorldError::Values { material, end, size } => {
                 write!(f, "{material}'s shader has {size} bytes of values; {end} is past them")
             }
@@ -151,6 +181,8 @@ pub struct World {
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
     /// The skin of each model copy's skinned part, by the part.
     pub(crate) skins: IdMap<ObjectId, crate::skin::Skin>,
+    /// Each camera's screen effects, in order, by its object.
+    camera_effects: IdMap<ObjectId, Vec<ScreenEffect>>,
 }
 
 impl std::fmt::Debug for World {
@@ -193,6 +225,7 @@ impl World {
             debug_lines: Vec::new(),
             animators: IdMap::default(),
             skins: IdMap::default(),
+            camera_effects: IdMap::default(),
         }
     }
 
@@ -219,6 +252,9 @@ impl World {
             }
             if !self.skins.is_empty() {
                 self.skins.remove(&id);
+            }
+            if !self.camera_effects.is_empty() {
+                self.camera_effects.remove(&id);
             }
             self.ecs.despawn(entity).expect("the id map only holds live entities");
         }
@@ -419,8 +455,9 @@ impl World {
     }
 
     fn check_shader(&self, material: &Material) -> Result<()> {
-        match material.shader {
-            Some(shader) if !self.shaders.contains_key(&shader) => Err(WorldError::NoShader(shader)),
+        match material.shader.map(|s| (s, self.shaders.get(&s))) {
+            Some((shader, None)) => Err(WorldError::NoShader(shader)),
+            Some((shader, Some((s, _)))) if s.effect => Err(WorldError::ShaderKind { shader, effect: true }),
             _ => Ok(()),
         }
     }
@@ -532,9 +569,23 @@ impl World {
         if !self.shaders.contains_key(&id) {
             return Err(WorldError::NoShader(id));
         }
+        // An effect's stays one, and a material's a material's, while used.
+        if shader.effect != self.shaders[&id].0.effect {
+            let used = if shader.effect {
+                self.materials.values().any(|m| m.shader == Some(id))
+            } else {
+                self.camera_effects.values().flatten().any(|e| e.shader == id)
+            };
+            if used {
+                return Err(WorldError::ShaderKind { shader: id, effect: !shader.effect });
+            }
+        }
         let size = shader.values_size;
         self.shader_versions += 1;
         self.shaders.insert(id, (shader, self.shader_versions));
+        for effect in self.camera_effects.values_mut().flatten().filter(|e| e.shader == id) {
+            effect.values.resize(size, 0);
+        }
         for (material, m) in &self.materials {
             if m.shader == Some(id) {
                 if size == 0 {
@@ -555,6 +606,9 @@ impl World {
         if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.shader == Some(id)) {
             return Err(WorldError::ShaderInUse { shader: id, material });
         }
+        if let Some((&object, _)) = self.camera_effects.iter().find(|(_, e)| e.iter().any(|e| e.shader == id)) {
+            return Err(WorldError::EffectInUse { shader: id, object });
+        }
         self.shaders.remove(&id);
         Ok(())
     }
@@ -563,6 +617,35 @@ impl World {
     /// no particular order.
     pub fn shaders(&self) -> impl Iterator<Item = (ShaderId, &Shader, u64)> + '_ {
         self.shaders.iter().map(|(&id, (shader, version))| (id, shader, *version))
+    }
+
+    /// Gives the camera on `object` these screen effects, in place of any
+    /// it had: run over its picture in order. Each one's shader must be an
+    /// effect's, and its values as many bytes as the shader's.
+    pub fn set_camera_effects(&mut self, object: ObjectId, effects: Vec<ScreenEffect>) -> Result<()> {
+        self.get::<crate::Camera>(object)?;
+        for effect in &effects {
+            let shader = self.shader(effect.shader)?;
+            if !shader.effect {
+                return Err(WorldError::ShaderKind { shader: effect.shader, effect: false });
+            }
+            if effect.values.len() != shader.values_size {
+                let (given, size) = (effect.values.len(), shader.values_size);
+                return Err(WorldError::EffectValues { shader: effect.shader, given, size });
+            }
+        }
+        if effects.is_empty() {
+            self.camera_effects.remove(&object);
+        } else {
+            self.camera_effects.insert(object, effects);
+        }
+        Ok(())
+    }
+
+    /// The screen effects of the camera on `object`, in order: none when
+    /// it has none, or isn't there.
+    pub fn camera_effects(&self, object: ObjectId) -> &[ScreenEffect] {
+        self.camera_effects.get(&object).map_or(&[], Vec::as_slice)
     }
 
     /// The time shaders see, and how far it moved since the last frame:

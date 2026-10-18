@@ -32,7 +32,10 @@
 //!    they're picked (the clear colour, a gradient sky) are 0, so a white
 //!    sky doesn't glow.
 //! 3. The last pass, when there is a scene image: the image onto the view
-//!    (`finish.wgsl`), with bloom's glow added.
+//!    (`finish.wgsl`), with bloom's glow added. With screen effects, into
+//!    an image the view's size instead (made even at low: `effects`).
+//! 4. The camera's screen effects, in order, each over what the one before
+//!    made, the last onto the view (effect.wgsl).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, PoisonError};
@@ -44,6 +47,7 @@ use crate::ao::{self, AoImages};
 use crate::assets::{self, Assets, Kit, PipelineMaker, SharedAssets};
 use crate::bloom::BloomChain;
 use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
+use crate::effects::EffectImages;
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{
@@ -96,6 +100,11 @@ pub struct FrameStats {
     /// GPU memory the view holds for that: kept a second after the last
     /// frame that read it, 0 when no frame has for longer.
     pub behind_bytes: u64,
+    /// Screen effects run.
+    pub effects: u32,
+    /// GPU memory the view holds for the pictures they pass between, kept
+    /// as `behind_bytes` is.
+    pub effect_bytes: u64,
 }
 
 /// `Frame` in forward.wgsl.
@@ -199,7 +208,7 @@ struct LightUniform {
 const MAX_SUNS: usize = 4;
 pub(crate) const MAX_LIGHTS: usize = 64;
 
-/// The per-draw vertex data (instance step), locations 4–12.
+/// The per-draw vertex data (instance step), locations 4–13.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
@@ -217,6 +226,8 @@ struct Instance {
     own: [f32; 4],
     /// Where the material's values start among the joints: a shader's.
     values: u32,
+    /// Its outline's linear colour, and how wide it is, in metres.
+    outline: [f32; 4],
 }
 
 /// A debug line's end, as lines.wgsl reads it.
@@ -411,6 +422,8 @@ struct Batch {
     cover: Cover,
     faces: Faces,
     skinned: bool,
+    /// Its draws have outlines, drawn after the solid scene.
+    outlined: bool,
     /// The material's own shader, or `None` for the built-in one.
     shader: Option<ShaderKey>,
     textures: OwnTextures,
@@ -442,6 +455,10 @@ type CasterKey = (u8, Option<Look>, bool, bool, MaterialTextures, u64);
 
 /// A draw's own shader, if it has one, and its textures.
 type Look = (Option<ShaderKey>, OwnTextures);
+
+/// An outline pipeline's key: its shader's hash (`None`, the built-in
+/// one), mirrored, skinned, and with normals of its own.
+type OutlineKey = (Option<u64>, bool, bool, bool);
 
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
@@ -478,6 +495,9 @@ pub(crate) struct Pipelines {
     /// Ambient occlusion's depth of those that move their vertices, by
     /// hash and skinned.
     own_depths: Mutex<HashMap<(u64, bool), wgpu::RenderPipeline>>,
+    /// Outlines' pipelines, by their shader's hash (`None`, the built-in
+    /// one), mirrored, skinned, and with normals of their own.
+    outlines: Mutex<HashMap<OutlineKey, wgpu::RenderPipeline>>,
     own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
@@ -491,6 +511,9 @@ pub(crate) struct Pipelines {
     finish: OnceLock<wgpu::RenderPipeline>,
     /// The same, adding bloom's glow.
     finish_bloom: OnceLock<wgpu::RenderPipeline>,
+    /// Screen effects', by their code's hash.
+    effect_layout: wgpu::BindGroupLayout,
+    effects: Mutex<HashMap<u64, wgpu::RenderPipeline>>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -578,9 +601,25 @@ pub struct Renderer {
     ao_params: ao::Params,
     /// The cubes (and image) of the last such sky, kept until another.
     environment: Option<Environment>,
+    /// What the scene is drawn at: the view's size, or with
+    /// [`CameraView::pixels`], smaller.
     size: (u32, u32),
+    /// The scene image's format this frame: the level's, or with the
+    /// pixel look the view's even at low; `None`, drawn straight to the
+    /// view.
+    image_format: Option<wgpu::TextureFormat>,
     /// This frame's level: the scene's, or the device's.
     quality: Quality,
+    /// The view's size.
+    view_size: (u32, u32),
+    /// This frame's screen effects' shaders, in order, and their uniforms,
+    /// each at its stride ([`crate::effects::EffectKit::stride`]).
+    effect_chain: Vec<ShaderKey>,
+    effect_uniforms: Vec<u8>,
+    /// The pictures they pass between, and for how many frames none has
+    /// run.
+    effect_images: Option<EffectImages>,
+    effects_idle: u32,
 }
 
 impl std::fmt::Debug for Renderer {
@@ -680,6 +719,12 @@ impl Renderer {
             ao_params: bytemuck::Zeroable::zeroed(),
             environment: None,
             size: (0, 0),
+            image_format: None,
+            view_size: (1, 1),
+            effect_chain: Vec::new(),
+            effect_uniforms: Vec::new(),
+            effect_images: None,
+            effects_idle: 0,
             kit,
         }
     }
@@ -747,8 +792,13 @@ impl Renderer {
     /// for a `width` × `height` target. Makes no GPU calls, and allocates
     /// nothing once its buffers have grown to the scene's size.
     pub fn prepare(&mut self, scene: &RenderScene, width: u32, height: u32) -> FrameStats {
-        self.size = (width.max(1), height.max(1));
+        let view_size = (width.max(1), height.max(1));
+        self.size = view_size;
+        self.view_size = view_size;
+        self.effect_chain.clear();
+        self.effect_uniforms.clear();
         self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
+        self.image_format = self.quality.image_format();
         self.joints.clear();
         self.skinned.clear();
         self.looks.clear();
@@ -770,16 +820,24 @@ impl Renderer {
         self.behind = false;
         let mut stats = FrameStats::default();
 
-        let Some(camera) = scene.camera else {
+        let Some(mut camera) = scene.camera else {
             self.clear = wgpu::Color::BLACK;
             return stats;
         };
+        // The view's shape, whatever size the scene is drawn at.
+        let aspect = view_size.0 as f32 / view_size.1 as f32;
+        // The pixel look: drawn small, into an image even at low, and the
+        // camera on the picture's pixels.
+        if let Some(pixels) = camera.pixels.map(|p| p.clamp(1, view_size.1)) {
+            self.size = (((pixels as f32 * aspect).round() as u32).max(1), pixels);
+            self.image_format.get_or_insert(self.format);
+            snap_to_pixels(&mut camera, pixels);
+        }
         self.bloom = camera.bloom.filter(|b| self.quality.bloom && b.strength > 0.0);
         let [r, g, b] = camera.clear_color.map(f64::from);
         // Linear: the sRGB target encodes it like everything else.
         self.clear = wgpu::Color { r, g, b, a: 1.0 };
 
-        let aspect = self.size.0 as f32 / self.size.1 as f32;
         // Near and far swapped: reversed-Z.
         let projection = match camera.orthographic {
             Some(half) => glam::camera::rh::proj::directx::orthographic(
@@ -970,7 +1028,8 @@ impl Renderer {
             let mut reads_behind = false;
             let look = match &m.shader {
                 None => Some((None, OwnTextures::of(m.textures))),
-                Some(used) => assets.shaders.get(&used.shader).map(|shader| {
+                // A screen effect's shader draws no object.
+                Some(used) => assets.shaders.get(&used.shader).filter(|s| !s.effect).map(|shader| {
                     let srgb = shader
                         .textures
                         .iter()
@@ -1008,7 +1067,8 @@ impl Renderer {
                 continue;
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
-            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, draw.mesh.0);
+            let outlined = cover == Cover::Opaque && m.outline.is_some_and(|o| o.width > 0.0);
+            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, outlined, draw.mesh.0);
             if cover.blended() {
                 self.behind |= reads_behind;
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
@@ -1016,7 +1076,30 @@ impl Renderer {
                 self.order.push((key, i as u32));
             }
         }
+        // The camera's screen effects, each one's uniform laid out as
+        // effect.wgsl reads it. Any makes the scene image, even at low, for
+        // the last pass to draw into theirs.
+        let stride = self.kit.effects.stride as usize;
+        for effect in &scene.effects {
+            let Some(shader) = assets.shaders.get(&effect.shader).filter(|s| s.effect) else { continue };
+            self.effect_chain.push(effect.shader);
+            let at = self.effect_uniforms.len();
+            self.effect_uniforms.resize(at + stride, 0);
+            let frame = [view_size.0 as f32, view_size.1 as f32, scene.time[0], 0.0];
+            self.effect_uniforms[at..at + 16].copy_from_slice(bytemuck::bytes_of(&frame));
+            let first = effect.values as usize;
+            let blocks = (shader.values_size as usize).div_ceil(48);
+            if let Some(values) = scene.shader_values.get(first..first + blocks) {
+                let bytes: &[u8] = bytemuck::cast_slice(values);
+                let size = shader.values_size as usize;
+                self.effect_uniforms[at + 16..at + 16 + size].copy_from_slice(&bytes[..size]);
+            }
+        }
         drop(assets);
+        if !self.effect_chain.is_empty() {
+            self.image_format.get_or_insert(self.format);
+        }
+        stats.effects = self.effect_chain.len() as u32;
         self.order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
         // The same distance keeps the scene's order, so they don't flicker.
         self.blended.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
@@ -1055,8 +1138,16 @@ impl Renderer {
         self.behind_kept = self.behind || held && self.behind_idle <= KEEP_UNUSED_MAPS;
         stats.behind = self.behind;
         if self.behind_kept {
-            let format = self.quality.image_format().unwrap_or(self.format);
+            let format = self.image_format.unwrap_or(self.format);
             stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format);
+        }
+        // The effects' pictures: kept a while too.
+        let count = self.effect_chain.len();
+        self.effects_idle = if count > 0 { 0 } else { self.effects_idle.saturating_add(1) };
+        if count > 0 {
+            stats.effect_bytes = EffectImages::bytes(view_size, self.format, count);
+        } else if let Some(images) = self.effect_images.as_ref().filter(|_| self.effects_idle <= KEEP_UNUSED_MAPS) {
+            stats.effect_bytes = EffectImages::bytes(images.size, self.format, images.images.len());
         }
         stats.lines = scene.lines.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
@@ -1212,7 +1303,7 @@ impl Renderer {
     /// `encode`.
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let (width, height) = self.size;
-        let image = self.quality.image_format();
+        let image = self.image_format;
         if self
             .targets
             .as_ref()
@@ -1224,6 +1315,16 @@ impl Renderer {
             && self.image_pipelines.as_ref().is_none_or(|p| p.format != format)
         {
             self.image_pipelines = Some(self.kit.pipelines(format));
+        }
+        let effects = self.effect_chain.len();
+        if effects > 0 {
+            if self.effect_images.as_ref().is_none_or(|e| !e.fit(self.view_size, self.format, effects)) {
+                let device = &self.kit.gpu.device;
+                self.effect_images =
+                    Some(EffectImages::new(&self.kit.effects, device, self.view_size, self.format, effects));
+            }
+        } else if self.effects_idle > KEEP_UNUSED_MAPS {
+            self.effect_images = None;
         }
         if self.shadow_maps.as_ref().is_none_or(|m| m.shape != self.shadow_next) {
             let none = (0, &self.kit.ao.none, &self.kit.ao.sampler);
@@ -1447,11 +1548,13 @@ impl Renderer {
         let ao = self.ao.is_some();
         let shadowed = self.shadow_maps_drawn != (0, 0);
         let (solid, blended) = self.batches.split_at(self.blended_from);
-        let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
+        // Their surfaces, or with `outlines`, the outlines of those that
+        // have them.
+        let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch], outlines: bool| {
             let mut last: Option<&Batch> = None;
             // The maps bound in group 2, or what's behind as well.
             let mut reading = false;
-            for batch in batches {
+            for batch in batches.iter().filter(|b| b.outlined || !outlines) {
                 // Freed since prepare, by another view's render worker.
                 let (Some(mesh), Some(bind_group)) =
                     (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
@@ -1482,7 +1585,18 @@ impl Renderer {
                 }
                 let textured = |b: &Batch| b.textures.base != MaterialTextures::NONE;
                 let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned, b.shader);
-                if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
+                if outlines {
+                    // Its mesh's outline normals or not choose it too.
+                    if last.is_none_or(|l| pipeline(l) != pipeline(batch) || l.mesh != batch.mesh) {
+                        let mirrored = batch.faces == Faces::Mirrored;
+                        let normals = mesh.outline_normals.is_some();
+                        let pipeline = scene_pipelines.outline(shader.map(|s| &**s), mirrored, batch.skinned, normals);
+                        pass.set_pipeline(&pipeline);
+                    }
+                    if let Some(normals) = &mesh.outline_normals {
+                        pass.set_vertex_buffer(3, normals.slice(..));
+                    }
+                } else if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
                     let (cover, faces) = (batch.cover, batch.faces);
                     let variant = Variant {
                         cover,
@@ -1568,7 +1682,8 @@ impl Renderer {
                 Some(_) => (solid, false),
             };
             bind(&mut pass, drawn, self.sky_drawn, line_drawn);
-            draw(&mut pass, solid);
+            draw(&mut pass, solid, false);
+            draw(&mut pass, solid, true);
             // After the solid scene, so it's drawn only where nothing else
             // is; before the blended, which show it through them.
             if self.sky_drawn {
@@ -1577,7 +1692,7 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
             }
             if behind.is_none() {
-                draw(&mut pass, blended);
+                draw(&mut pass, blended, false);
                 lines(&mut pass);
             }
         }
@@ -1627,7 +1742,7 @@ impl Renderer {
             pass.set_bind_group(0, &behind.restore, &[]);
             pass.draw(0..3, 0..1);
             bind(&mut pass, blended, false, !self.line_vertices.is_empty());
-            draw(&mut pass, blended);
+            draw(&mut pass, blended, false);
             lines(&mut pass);
         }
 
@@ -1636,12 +1751,14 @@ impl Renderer {
             chain.encode(&kit.bloom, &kit.gpu.queue, encoder, bloom);
         }
 
-        // 3. The last pass: the scene image onto the view.
+        // 3. The last pass: the scene image onto the view, or with screen
+        // effects into the first's picture.
+        let effect_images = self.effect_images.as_ref().filter(|_| effects > 0);
         if let Some(image) = &targets.image {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("finish"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: target,
+                    view: effect_images.map_or(target, |e| &e.images[0].0),
                     depth_slice: None,
                     resolve_target: None,
                     // Every pixel is written, so what was there is never read.
@@ -1664,6 +1781,37 @@ impl Renderer {
                 None => pass.set_pipeline(pipelines.finish(false)),
             }
             pass.draw(0..3, 0..1);
+        }
+
+        // 4. The screen effects, passing the picture between their two
+        // images, the last onto the view.
+        if let Some(images) = effect_images {
+            kit.gpu.queue.write_buffer(&images.buffer, 0, &self.effect_uniforms);
+            for (i, key) in self.effect_chain.iter().enumerate() {
+                let last = i + 1 == effects;
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("screen effect"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: if last { target } else { &images.images[(i + 1) % 2].0 },
+                        depth_slice: None,
+                        resolve_target: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                // Freed since prepare: the picture goes on as it was.
+                let pipeline = shaders.get(key).map_or_else(|| pipelines.effect_copy(), |s| pipelines.effect(s));
+                pass.set_pipeline(&pipeline);
+                let offset = (i as u64 * kit.effects.stride) as u32;
+                pass.set_bind_group(0, &images.images[i % 2].1, &[offset]);
+                pass.draw(0..3, 0..1);
+            }
         }
     }
 
@@ -1754,6 +1902,7 @@ impl Pipelines {
             own: Mutex::default(),
             own_shadows: Mutex::default(),
             own_depths: Mutex::default(),
+            outlines: Mutex::default(),
             own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
@@ -1762,6 +1911,8 @@ impl Pipelines {
             restore: OnceLock::new(),
             finish: OnceLock::new(),
             finish_bloom: OnceLock::new(),
+            effect_layout: kit.effects.layout.clone(),
+            effects: Mutex::new(HashMap::new()),
         }
     }
 
@@ -1771,12 +1922,17 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let (shader, layout) = self.forward_shader.get_or_init(|| {
+        let (shader, layout) = self.forward_shader();
+        self.make_forward_with(variant, shader, layout, "")
+    }
+
+    /// The built-in material's module and its layout, made the first time.
+    fn forward_shader(&self) -> &(wgpu::ShaderModule, wgpu::PipelineLayout) {
+        self.forward_shader.get_or_init(|| {
             let source =
                 concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"));
             self.forward_module("forward", source, &self.textures_layout, &self.maps_layout)
-        });
-        self.make_forward_with(variant, shader, layout, "")
+        })
     }
 
     /// The textures layout of `shader`'s group 1.
@@ -1874,6 +2030,91 @@ impl Pipelines {
             cache: None,
         });
         self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// The pipeline that draws outlines of draws with `shader` (`None`,
+    /// the built-in one), mirrored or not, bent by skeletons or not, with
+    /// their mesh's outline normals in vertex buffer 3 or not: their back
+    /// faces, pushed out (forward.wgsl, `vs_outline`).
+    fn outline(
+        &self,
+        shader: Option<&CustomShader>,
+        mirrored: bool,
+        skinned: bool,
+        normals: bool,
+    ) -> wgpu::RenderPipeline {
+        let key = (shader.map(|s| s.hash), mirrored, skinned, normals);
+        if let Some(pipeline) = self.outlines.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return pipeline.clone();
+        }
+        let (module, layout) = match shader {
+            Some(shader) => self.own_module(shader),
+            None => self.forward_shader().clone(),
+        };
+        // With normals of its own, they're read in place of the tangents.
+        let [position, normal, tangent, uv] = VERTEX_ATTRIBUTES;
+        let vertex_attributes: &[wgpu::VertexAttribute] =
+            if normals { &[position, normal, uv] } else { &[position, normal, tangent, uv] };
+        let instance_attributes = INSTANCE_ATTRIBUTES;
+        let skin_attributes = SKIN_ATTRIBUTES;
+        let normal_attributes = wgpu::vertex_attr_array![2 => Float32x3];
+        let [vertex, instance, skin] = forward_buffers(vertex_attributes, &instance_attributes, &skin_attributes);
+        let normal_buffer = wgpu::VertexBufferLayout {
+            array_stride: 12,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &normal_attributes,
+        };
+        let buffers = [vertex, instance, skin.filter(|_| skinned), normals.then_some(normal_buffer)];
+        let used = if normals {
+            4
+        } else if skinned {
+            3
+        } else {
+            2
+        };
+        let constants = [("outline_normals", if normals { 1.0 } else { 0.0 })];
+        let label = match shader {
+            Some(shader) => format!("outline ({})", shader.name),
+            None => "outline".to_owned(),
+        };
+        let pipeline = self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(&label),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some(if skinned { "vs_outline_skinned" } else { "vs_outline" }),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+                buffers: &buffers[..used],
+            },
+            // Inside out: its front faces are left out.
+            primitive: wgpu::PrimitiveState {
+                front_face: if mirrored { wgpu::FrontFace::Cw } else { wgpu::FrontFace::Ccw },
+                cull_mode: Some(wgpu::Face::Front),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_outline"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.outlines.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
         pipeline
     }
 
@@ -2251,6 +2492,70 @@ impl Pipelines {
         }
     }
 
+    /// A screen effect's pipeline, onto a view's format, made the first
+    /// time.
+    fn effect(&self, shader: &CustomShader) -> wgpu::RenderPipeline {
+        self.effects
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(shader.hash)
+            .or_insert_with(|| self.make_effect(&shader.name, &shader.wgsl))
+            .clone()
+    }
+
+    /// An effect that changes nothing, for one freed since its frame was
+    /// prepared.
+    fn effect_copy(&self) -> wgpu::RenderPipeline {
+        const COPY: &str = concat!(
+            include_str!("effect.wgsl"),
+            "@fragment\nfn fs_fy_effect(in: FyOut) -> @location(0) vec4<f32> {\n",
+            "    return vec4<f32>(picture_at(vec2<i32>(in.clip.xy)).rgb, 1.0);\n}\n"
+        );
+        self.effects
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(0)
+            .or_insert_with(|| self.make_effect("copy", COPY))
+            .clone()
+    }
+
+    fn make_effect(&self, name: &str, source: &str) -> wgpu::RenderPipeline {
+        let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(name),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("screen effect"),
+            bind_group_layouts: &[Some(&self.effect_layout)],
+            immediate_size: 0,
+        });
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(name),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs_fy_effect"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: None,
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs_fy_effect"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+
     fn make_finish(&self, bloom: bool) -> wgpu::RenderPipeline {
         // The last pass, onto a view.
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -2303,8 +2608,9 @@ fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>, mo
 }
 
 /// A draw's sort key: how it covers what's behind, which faces, whether
-/// it's bent, its textures and its mesh, in the order draws are grouped.
-type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, u64);
+/// it's bent, its shader, its textures, whether it's outlined and its mesh,
+/// in the order draws are grouped.
+type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, bool, u64);
 
 /// A skinned mesh's joints and weights (`fynkel_mesh::SkinVertex`), as
 /// skin.wgsl reads them.
@@ -2316,10 +2622,10 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
 
 /// An [`Instance`], as forward.wgsl reads it.
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
     4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
     7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
-    11 => Float32x4, 12 => Uint32,
+    11 => Float32x4, 12 => Uint32, 13 => Float32x4,
 ];
 
 /// The forward pass's vertex buffers: the mesh's, the instances and a
@@ -2356,11 +2662,13 @@ pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexB
 /// Adds `draw` to the last of `batches` if it has `key`, or starts another.
 /// `values` is where the materials' values start among the joints.
 fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw, values: u32) {
-    let (cover, faces, skinned, shader, textures, _) = key;
+    let (cover, faces, skinned, shader, textures, outlined, _) = key;
     let first = instances.len() as u32;
     match batches.last_mut() {
-        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.mesh.0) == key => b.count += 1,
-        _ => batches.push(Batch { cover, faces, skinned, shader, textures, mesh: draw.mesh, first, count: 1 }),
+        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.outlined, b.mesh.0) == key => b.count += 1,
+        _ => {
+            batches.push(Batch { cover, faces, skinned, outlined, shader, textures, mesh: draw.mesh, first, count: 1 })
+        }
     }
     instances.push(instance(draw, skinned, values));
 }
@@ -2381,7 +2689,32 @@ fn instance(draw: &crate::Draw, skinned: bool, values: u32) -> Instance {
         uv: [su, sv, ou, ov],
         own: draw.own,
         values: m.shader.map_or(0, |used| values + used.values),
+        outline: m.outline.map_or([0.0; 4], |o| [o.color[0], o.color[1], o.color[2], o.width]),
     }
+}
+
+/// Moves `camera` across its view to the nearest whole pixel of a picture
+/// `pixels` high ([`CameraView::pixels`]): for a perspective camera, a
+/// pixel where it looks at the ground, or 10 m away.
+fn snap_to_pixels(camera: &mut crate::CameraView, pixels: u32) {
+    let world = camera.view.inverse();
+    let (right, up, forward) = (world.x_axis.truncate(), world.y_axis.truncate(), -world.z_axis.truncate());
+    let height = match camera.orthographic {
+        Some(half) => half * 2.0,
+        None => {
+            let ground = camera.position.y > 0.0 && forward.y < -1e-3;
+            let distance = if ground { camera.position.y / -forward.y } else { 10.0 };
+            2.0 * (camera.fov_y * 0.5).tan() * distance
+        }
+    };
+    let texel = height / pixels as f32;
+    if !(texel.is_finite() && texel > 0.0) {
+        return;
+    }
+    let snap = |along: f32| (along / texel).round() * texel - along;
+    let moved = right * snap(camera.position.dot(right)) + up * snap(camera.position.dot(up));
+    camera.position += moved;
+    camera.view *= Mat4::from_translation(-moved);
 }
 
 /// The six planes around what `view_proj` shows (left, right, bottom, top,

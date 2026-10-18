@@ -179,6 +179,8 @@ struct VertexIn {
     @location(11) own: vec4<f32>,
     // Where the material's values start in `joints` (a shader's).
     @location(12) values: u32,
+    // rgb: its outline's linear colour. w: how wide it is, in metres.
+    @location(13) outline: vec4<f32>,
 };
 
 struct VertexOut {
@@ -239,6 +241,57 @@ fn place(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     out = fy_moved(in, model, out);
     out.clip = frame.view_proj * vec4<f32>(out.world_position, 1.0);
     return out;
+}
+
+// An outline (stage 10): the mesh placed as it is, then pushed out along
+// its normals by the outline's width, drawn inside out behind it in the
+// outline's colour. A mesh with a normal per face at its corners has
+// them averaged for it (assets.rs), in place of its tangents, which an
+// outline doesn't need.
+override outline_normals: bool = false;
+
+@vertex
+fn vs_outline(in: VertexIn) -> VertexOut {
+    let v = outline_vertex(in);
+    return outlined(v, place(v, array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2)));
+}
+
+@vertex
+fn vs_outline_skinned(in: VertexIn, skin: SkinIn) -> VertexOut {
+    let v = outline_vertex(in);
+    return outlined(v, place(v, skin_rows(skin, u32(in.params.w))));
+}
+
+fn outline_vertex(in: VertexIn) -> VertexIn {
+    var v = in;
+    if outline_normals {
+        v.normal = in.tangent.xyz;
+        v.tangent = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return v;
+}
+
+// Pushed across the view rather than straight out: the part of the
+// normal that's at right angles to the way to the camera, so the outline
+// keeps the depth of the edge it rings, rather than lying behind the
+// object where what it stands on would hide it.
+fn outlined(in: VertexIn, placed: VertexOut) -> VertexOut {
+    var out = placed;
+    let length = length(placed.normal);
+    if length > 0.0 {
+        let n = placed.normal / length;
+        let v = to_viewer(placed.world_position);
+        out.world_position += (n - v * dot(n, v)) * in.outline.w;
+    }
+    out.base_color = vec4<f32>(in.outline.rgb, 1.0);
+    out.clip = frame.view_proj * vec4<f32>(out.world_position, 1.0);
+    return out;
+}
+
+// Its colour as it was picked, unlit and not tone mapped, behind the fog.
+@fragment
+fn fs_outline(in: VertexOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(fogged(in.base_color.rgb, in.world_position), 1.0);
 }
 
 const PI: f32 = 3.14159265359;
@@ -307,6 +360,27 @@ struct Brdf {
     diffuse: vec3<f32>,
     alpha: f32,
 };
+
+// `s` seen along `v` (to the viewer) with normal `n`, unit length.
+fn brdf(s: Surface, n: vec3<f32>, v: vec3<f32>) -> Brdf {
+    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
+    let roughness = clamp(s.roughness, 0.045, 1.0);
+    let f0 = mix(vec3<f32>(0.04), s.color, s.metallic);
+    return Brdf(n, v, max(dot(n, v), 1e-4), f0, s.color * (1.0 - s.metallic), roughness * roughness);
+}
+
+// What a light reflects to the viewer, as the engine lights: `color` as
+// it arrives from direction `l`, times `shadow`. Without `highlights`
+// (low's lamps), what a highlight would reflect is spread out like the
+// matte part: metal (all f0, no diffuse) is lit in its own colour
+// rather than black.
+fn standard_lit(b: Brdf, l: vec3<f32>, color: vec3<f32>, shadow: f32, highlights: bool) -> vec3<f32> {
+    let irradiance = color * (PI * shadow);
+    if highlights {
+        return reflected(b, l, irradiance);
+    }
+    return (b.diffuse + b.f0) / PI * irradiance * max(dot(b.n, l), 0.0);
+}
 
 fn reflected(s: Brdf, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
     let n_dot_l = dot(s.n, l);
@@ -496,11 +570,6 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
     if ao {
         occlusion *= textureSampleLevel(ao_texture, ao_sampler, in.clip.xy * frame.view_size.xy, 0.0).r;
     }
-    let albedo = s.color;
-    let metallic = s.metallic;
-    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
-    let roughness = clamp(s.roughness, 0.045, 1.0);
-    let alpha = roughness * roughness;
     let n = normalize(s.normal);
     // The surface's own normal, without the map: shadow lookups move out
     // along it.
@@ -510,9 +579,11 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
     }
     let receives = in.emissive.w > 0.5;
     let v = to_viewer(in.world_position);
-    let n_dot_v = max(dot(n, v), 1e-4);
-    let f0 = mix(vec3<f32>(0.04), albedo, metallic);
-    let diffuse_color = albedo * (1.0 - metallic);
+    let surface = brdf(s, n, v);
+    let roughness = clamp(s.roughness, 0.045, 1.0);
+    let n_dot_v = surface.n_dot_v;
+    let f0 = surface.f0;
+    let diffuse_color = surface.diffuse;
 
     // Occlusion darkens only the ambient light: the sun's shadows are
     // another matter (glTF's rule).
@@ -527,14 +598,15 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
         color += frame.sky_light.x * (irradiance * diffuse_color + mirrored * ambient_specular) * occlusion;
     }
 
-    let surface = Brdf(n, v, n_dot_v, f0, diffuse_color, alpha);
+    // Each light through `fy_light`: the engine's own (standard.wgsl), or
+    // a material's shader's `light`.
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
         var lit = 1.0;
         if shadowed && i == frame.counts.y && receives {
             lit = sun_shadow(in.world_position, ng, sun.to_sun.xyz);
         }
-        color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
+        color += fy_light(surface, s, in.world_position, sun.to_sun.xyz, sun.color.rgb, lit, 0.0, true);
     }
     // Every lamp that reaches the pixel's cell, lowest bit first.
     let cell = cell_of(in.clip.xy, in.world_position) * 2u;
@@ -558,19 +630,18 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
             // isn't infinitely bright.
             let reach = 1.0 - near * near;
             let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
-            var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-            if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
-                falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
+            let falloff = reach * reach * cone * cone / max(distance2, 0.01);
+            if falloff <= 0.0 {
+                continue;
             }
-            let irradiance = lamp.color.rgb * (PI * falloff);
-            if frame.counts.z != 0u {
-                color += reflected(surface, l, irradiance);
-            } else {
-                // No highlight, but what a highlight would reflect is spread
-                // out like the matte part: metal (all f0, no diffuse) is
-                // lit in its own colour rather than black.
-                color += (surface.diffuse + surface.f0) / PI * irradiance * max(dot(surface.n, l), 0.0);
+            var shadow = 1.0;
+            if shadowed && lamp.cone.z >= 0.0 && receives {
+                shadow = spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
             }
+            color += fy_light(
+                surface, s, in.world_position, l, lamp.color.rgb * falloff, shadow, sqrt(distance2),
+                frame.counts.z != 0u,
+            );
         }
     }
     color += s.emission;

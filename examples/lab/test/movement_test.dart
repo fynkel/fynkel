@@ -8,7 +8,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:fynkel/fynkel.dart' show HeadlessView, MeshRenderer, Quality;
+import 'package:fynkel/fynkel.dart' show Camera, HeadlessView, MeshRenderer, Quality;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:lab/lab.dart';
 import 'package:lab/main.dart';
@@ -66,8 +66,27 @@ void main() {
     await wait(tester, 1);
     expect(scene.readout.value, contains('wind 0.40 m'));
 
+    // The pixel look, while the camera drifts.
+    await tester.ensureVisible(find.text('pixel look'));
+    await tester.tap(find.text('pixel look'));
+    await wait(tester, 2);
+    expect(scene.find('camera')!.get<Camera>()!.pixels, 180);
+    expect(scene.readout.value, contains('180 px high'));
+    scene.drift = true;
+    final from = scene.find('camera')!.position;
+    await wait(tester, 30);
+    expect(scene.find('camera')!.position.x, isNot(from.x), reason: 'the camera drifts');
+    scene.drift = false;
+
     final shots = Platform.environment['LAB_SHOT'];
     if (shots != null) {
+      for (final quality in Quality.levels) {
+        scene.world.quality = quality;
+        final view = HeadlessView(scene.world, width: 960, height: 640);
+        File('$shots/movement_pixels_${quality.name}.png').writeAsBytesSync(view.png());
+        view.dispose();
+      }
+      scene.pixelLook = false;
       for (final quality in Quality.levels) {
         scene.world.quality = quality;
         final view = HeadlessView(scene.world, width: 960, height: 640);

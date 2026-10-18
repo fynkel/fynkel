@@ -875,6 +875,7 @@ class GameObject with _Moving {
                   radius: scratch.camera.ref.ambient_occlusion_radius,
                 )
               : null,
+          pixels: scratch.camera.ref.pixels == 0 ? null : scratch.camera.ref.pixels,
         ),
       if (missing<Light>() && fy_light_get(w, _id, scratch.light) == FyStatus.FY_STATUS_OK) _readLight(),
       if (missing<MeshRenderer>() && fy_mesh_renderer_get(w, _id, scratch.meshRenderer) == FyStatus.FY_STATUS_OK)
@@ -909,7 +910,12 @@ class GameObject with _Moving {
 
   void _unwrite(Component component) {
     switch (component) {
-      case Camera():
+      case Camera c:
+        // Its effects go with it, so their shaders can be let go.
+        if (c._effectsSent) {
+          check(fy_camera_effects_set(world.pointer, id, nullptr, 0));
+          c._effectsSent = false;
+        }
         check(fy_camera_remove(world.pointer, id));
       case Light l:
         check(fy_light_remove(world.pointer, id));
@@ -1025,13 +1031,38 @@ class GameObject with _Moving {
     c.ambient_occlusion = ao != null;
     c.ambient_occlusion_intensity = ao?.intensity ?? 1;
     c.ambient_occlusion_radius = ao?.radius ?? 0.5;
+    c.pixels = value.pixels ?? 0;
     check(fy_camera_set(_engine('its Camera can\'t be changed'), id, scratch.camera));
+    if (value._effects.isNotEmpty || value._effectsSent) _writeCameraEffects(value);
     if (_world case final world? when (bloom != null && !world._bloomAsked) || (ao != null && !world._aoAsked)) {
       world
         .._bloomAsked |= bloom != null
         .._aoAsked |= ao != null
         .._checkEffects();
     }
+  }
+
+  void _writeCameraEffects(Camera value) {
+    final w = _engine('its Camera can\'t be changed');
+    final effects = value._effects;
+    using((arena) {
+      final list = arena<FyScreenEffect>(effects.isEmpty ? 1 : effects.length);
+      for (final (i, effect) in effects.indexed) {
+        final bytes = effect._bytes;
+        final e = (list + i).ref;
+        e.shader = world._shaderId(effect.shader);
+        e.values_len = bytes?.length ?? 0;
+        if (bytes != null) {
+          final native = arena<Uint8>(bytes.length);
+          native.asTypedList(bytes.length).setAll(0, bytes);
+          e.values = native;
+        } else {
+          e.values = nullptr;
+        }
+      }
+      check(fy_camera_effects_set(w, id, effects.isEmpty ? nullptr : list, effects.length));
+    });
+    value._effectsSent = effects.isNotEmpty;
   }
 
   void _writeLight(Light value) {

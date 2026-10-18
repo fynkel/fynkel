@@ -125,3 +125,45 @@ fn values_own_numbers_time_and_new_code_show_in_the_next_frame() {
         assert_eq!(fy_shader_remove(world.0, shader), FyStatus::NoShader);
     }
 }
+
+#[test]
+fn a_cameras_screen_effects_change_its_picture() {
+    let world = World::new();
+    stage1(&world);
+    let invert = "struct Values { gain: f32 }\nfn effect(in: EffectInput) -> vec4<f32> {\n    return vec4<f32>((1.0 - picture(in.uv).rgb) * values.gain, 1.0);\n}\n";
+    let compiled = compile("invert.wgsl", invert).unwrap();
+    assert!(describe(&compiled).ends_with("\neffect\n"), "{}", describe(&compiled));
+    drop(compiled);
+    let shader = add(&world, "invert.wgsl", invert).unwrap();
+    let surface = add(&world, "tint.wgsl", TINT).unwrap();
+    let mut camera = 0;
+    // SAFETY: a live world and a local out-value.
+    ok(unsafe { fy_camera_active(world.0, &mut camera) });
+    let view = View::headless(&world, 32, 32);
+    let before = centre(&view);
+
+    let gain = 1.0f32.to_le_bytes();
+    let effect = FyScreenEffect { shader, values: gain.as_ptr(), values_len: gain.len() };
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        let wrong = FyScreenEffect { shader: surface, ..effect };
+        assert_eq!(fy_camera_effects_set(world.0, camera, &wrong, 1), FyStatus::InvalidValue);
+        let short = FyScreenEffect { values_len: 2, ..effect };
+        assert_eq!(fy_camera_effects_set(world.0, camera, &short, 1), FyStatus::WrongSize);
+        ok(fy_camera_effects_set(world.0, camera, &effect, 1));
+        assert_eq!(fy_shader_remove(world.0, shader), FyStatus::InUse);
+    }
+    // Inverted in linear colour, as effects see the picture.
+    let linear = |c: u8| (f32::from(c) / 255.0).powf(2.2);
+    let after = centre(&view);
+    for c in 0..3 {
+        assert!((linear(before[c]) + linear(after[c]) - 1.0).abs() < 0.05, "{before:?} → {after:?}");
+    }
+
+    // SAFETY: a live world.
+    unsafe {
+        ok(fy_camera_effects_set(world.0, camera, std::ptr::null(), 0));
+        ok(fy_shader_remove(world.0, shader));
+    }
+    assert_eq!(centre(&view), before);
+}

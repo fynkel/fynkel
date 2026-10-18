@@ -146,6 +146,14 @@ external int fy_apple_set_frame_ready(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_camera_active(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyScreenEffect>, ffi.Size)>(isLeaf: true)
+external int fy_camera_effects_set(
+  ffi.Pointer<FyWorld> world,
+  int object,
+  ffi.Pointer<FyScreenEffect> effects,
+  int count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> out);
 
@@ -599,7 +607,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 34;
+const int FY_ABI_VERSION = 35;
 
 const int FY_APPLE_MORE = 2;
 
@@ -761,6 +769,9 @@ final class FyCamera extends ffi.Struct {
 
   @ffi.Float()
   external double ambient_occlusion_radius;
+
+  @ffi.Uint32()
+  external int pixels;
 }
 
 final class FyColor extends ffi.Struct {
@@ -885,6 +896,11 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Float()
   external double reach;
+
+  @ffi.Float()
+  external double outline_width;
+
+  external FyColor outline_color;
 }
 
 final class FyMesh extends ffi.Opaque {}
@@ -1083,6 +1099,26 @@ final class FyRayHit extends ffi.Struct {
 
   @ffi.Float()
   external double distance;
+}
+
+final class FyScreenEffect extends ffi.Struct {
+  @ffi.Uint64()
+  external int shader;
+
+  external ffi.Pointer<ffi.Uint8> values;
+
+  @ffi.Size()
+  external int values_len;
+
+  static ffi.Pointer<FyScreenEffect> $allocate(
+    ffi.Allocator $allocator, {
+    required int shader,
+    required ffi.Pointer<ffi.Uint8> values,
+    required int values_len,
+  }) => $allocator<FyScreenEffect>()
+    ..ref.shader = shader
+    ..ref.values = values
+    ..ref.values_len = values_len;
 }
 
 final class FyShader extends ffi.Opaque {}

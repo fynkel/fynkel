@@ -43,6 +43,8 @@ pub struct Kit {
     pub(crate) bloom: BloomKit,
     /// Ambient occlusion's.
     pub(crate) ao: AoKit,
+    /// Screen effects' layout and sampler.
+    pub(crate) effects: crate::effects::EffectKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
     pub(crate) maker: PipelineMaker,
 }
@@ -208,6 +210,7 @@ impl Kit {
             sky: SkyKit::new(&gpu.device, &gpu.queue, &maker),
             bloom: BloomKit::new(&gpu.device, &maker),
             ao: AoKit::new(&gpu.device, &gpu.queue, &maker, &frame_layout, crate::renderer::INSTANCE_SIZE),
+            effects: crate::effects::EffectKit::new(&gpu.device),
             maker,
             gpu: gpu.clone(),
             quality: QualityLevel::for_adapter(&gpu.adapter.get_info()),
@@ -251,7 +254,18 @@ impl Kit {
             buffer: filled_buffer(device, "mesh joints", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(skin)),
             joints: joint_bounds(data.vertices(), skin),
         });
-        MadeMesh(GpuMesh { vertices, indices, index_count: data.indices().len() as u32, centre, radius, skin })
+        let outline_normals = outline_normals(data.vertices()).map(|normals| {
+            filled_buffer(device, "mesh outline normals", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&normals))
+        });
+        MadeMesh(GpuMesh {
+            vertices,
+            indices,
+            index_count: data.indices().len() as u32,
+            centre,
+            radius,
+            skin,
+            outline_normals,
+        })
     }
 
     /// A texture on the GPU, for [`Assets::insert_texture`]: its pixels
@@ -279,6 +293,21 @@ impl Kit {
     }
 }
 
+/// Each vertex's normal averaged with those of every other vertex at the
+/// same place, unit length; `None` when every vertex at a place has the
+/// same normal already, as on a smooth mesh.
+fn outline_normals(vertices: &[fynkel_mesh::Vertex]) -> Option<Vec<[f32; 3]>> {
+    let mut at = HashMap::<[u32; 3], (Vec3, Vec3)>::with_capacity(vertices.len());
+    let mut split = false;
+    for v in vertices {
+        let normal = Vec3::from(v.normal);
+        let (first, sum) = at.entry(v.position.map(f32::to_bits)).or_insert((normal, Vec3::ZERO));
+        split |= first.dot(normal) < 0.999;
+        *sum += normal;
+    }
+    split.then(|| vertices.iter().map(|v| at[&v.position.map(f32::to_bits)].1.normalize_or_zero().into()).collect())
+}
+
 pub(crate) struct GpuMesh {
     pub(crate) vertices: wgpu::Buffer,
     pub(crate) indices: wgpu::Buffer,
@@ -289,6 +318,11 @@ pub(crate) struct GpuMesh {
     pub(crate) radius: f32,
     /// A skinned mesh's joints and weights.
     pub(crate) skin: Option<GpuSkin>,
+    /// For a mesh whose corners have a normal for each face that meets
+    /// there, a cube's: each vertex's normal averaged with those of the
+    /// others where it is, which an outline is pushed out along so it
+    /// doesn't split at the corners. `[f32; 3]` each.
+    pub(crate) outline_normals: Option<wgpu::Buffer>,
 }
 
 /// What a skeleton bends a mesh with: each vertex's joints and weights
@@ -303,7 +337,10 @@ pub(crate) struct GpuSkin {
 
 impl GpuMesh {
     fn bytes(&self) -> u64 {
-        self.vertices.size() + self.indices.size() + self.skin.as_ref().map_or(0, |s| s.buffer.size())
+        self.vertices.size()
+            + self.indices.size()
+            + self.skin.as_ref().map_or(0, |s| s.buffer.size())
+            + self.outline_normals.as_ref().map_or(0, wgpu::Buffer::size)
     }
 }
 

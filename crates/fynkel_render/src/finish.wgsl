@@ -1,6 +1,7 @@
 // The last pass: the scene's half-float image onto the view, one pixel
 // for one pixel, with bloom's glow added (fs_bloom). Comes after
-// neutral.wgsl.
+// neutral.wgsl. With the pixel look the image is smaller than the view,
+// and each of its pixels covers a block of the view's, edges hard.
 //
 // The image holds each sample tone mapped, as the scene pass writes it, so
 // the MSAA resolve averages what the screen shows and edges stay as clean
@@ -22,16 +23,28 @@ struct Params {
 @group(1) @binding(1) var linear: sampler;
 @group(1) @binding(2) var<uniform> params: Params;
 
+struct Out {
+    @builtin(position) clip: vec4<f32>,
+    // 0 to 1 across the view, from its top left.
+    @location(0) uv: vec2<f32>,
+};
+
 // One triangle over the whole view.
 @vertex
-fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
+fn vs_main(@builtin(vertex_index) i: u32) -> Out {
     let at = vec2<f32>(f32((i << 1u) & 2u), f32(i & 2u));
-    return vec4<f32>(at * 2.0 - 1.0, 0.0, 1.0);
+    return Out(vec4<f32>(at * 2.0 - 1.0, 0.0, 1.0), vec2<f32>(at.x, 1.0 - at.y));
+}
+
+// The image's pixel under `uv`.
+fn pixel(uv: vec2<f32>) -> vec2<i32> {
+    let size = textureDimensions(image);
+    return min(vec2<i32>(uv * vec2<f32>(size)), vec2<i32>(size) - 1);
 }
 
 @fragment
-fn fs_main(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
-    return vec4<f32>(textureLoad(image, vec2<i32>(at.xy), 0).rgb, 1.0);
+fn fs_main(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(textureLoad(image, pixel(in.uv), 0).rgb, 1.0);
 }
 
 fn tap(uv: vec2<f32>) -> vec3<f32> {
@@ -42,9 +55,10 @@ fn tap(uv: vec2<f32>) -> vec3<f32> {
 // is none, the pixel is as it was: it's the change tone mapping makes
 // that's added, so undoing and redoing it costs no precision.
 @fragment
-fn fs_bloom(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
-    let mapped = textureLoad(image, vec2<i32>(at.xy), 0).rgb;
-    let uv = at.xy / vec2<f32>(textureDimensions(image));
+fn fs_bloom(in: Out) -> @location(0) vec4<f32> {
+    let at = pixel(in.uv);
+    let mapped = textureLoad(image, at, 0).rgb;
+    let uv = (vec2<f32>(at) + 0.5) / vec2<f32>(textureDimensions(image));
     let t = 1.0 / vec2<f32>(textureDimensions(glow));
     var sum = tap(uv) * 4.0;
     sum += (tap(uv + vec2<f32>(-t.x, 0.0)) + tap(uv + vec2<f32>(t.x, 0.0))) * 2.0;

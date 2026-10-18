@@ -40,6 +40,7 @@ fn wall(at: Vec3, ambient: Vec3, sky: Option<Sky>, quality: QualityLevel) -> Ren
         quality: Some(quality.quality()),
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         draws: vec![Draw::new(
             PLANE,
             Mat4::from_translation(at) * Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(4.0)),
@@ -58,6 +59,7 @@ fn ball(metallic: f32, roughness: f32, sky: Sky) -> RenderScene {
         quality: Some(QualityLevel::High.quality()),
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         draws: vec![Draw::new(
             SPHERE,
             Mat4::IDENTITY,

@@ -48,6 +48,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         quality: None,
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         sky: None,
         fog: None,
         ambient: Vec3::splat(0.15),
@@ -136,6 +137,7 @@ fn grass(moving: bool, t: f32) -> RenderScene {
         lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(true)],
         time: [t, 1.0 / 60.0],
         shader_values: vec![[[0.25, 0.0, 0.0, 0.0], [0.0; 4], [0.0; 4]]],
+        effects: Vec::new(),
         ambient: Vec3::splat(0.15),
         draws,
         ..RenderScene::default()
@@ -232,6 +234,7 @@ fn main() {
                             quality: Some(quality.quality()),
                             time: [0.0; 2],
                             shader_values: Vec::new(),
+                            effects: Vec::new(),
                             sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
                             fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
                             ..base
@@ -277,6 +280,7 @@ fn main() {
                         quality: Some(quality.quality()),
                         time: [0.0; 2],
                         shader_values: Vec::new(),
+                        effects: Vec::new(),
                         sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
                         ..scene(1_000, 0, false, false, 0.0)
                     };

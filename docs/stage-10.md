@@ -231,6 +231,59 @@ multisampled depth kept, the geometry drawn twice).
 doesn't shimmer when the camera moves slowly (two frames compared), and
 effects compose in order.
 
+As built:
+
+- **Own light.** `fn light(in: LightInput) -> vec3<f32>` beside a
+  `surface` is called for each sun and lamp reaching a point (its way,
+  colour, shadow, distance, the point, its normal, the way to the camera
+  and what `surface` returned) and what it returns is added up;
+  `standard_light(in)` is the engine's own, so a shader can change one
+  light and keep the rest. Ambient and sky light, the glow, fog and tone
+  mapping stay the engine's. `Shader.hasOwnLighting` says it has one.
+- **Outlines.** `Material.outline = Outline(width:, color:)`: the mesh
+  drawn again behind itself, inside out, pushed out along its normals,
+  unlit, moved by a shader's `vertex` and bent by its skeleton. A mesh
+  with a normal per face at its corners (a cube, a low-poly model) gets
+  averaged normals for it at upload, so its outline doesn't split
+  there. Opaque materials only. *Known limit:* where an object stands
+  on the ground the ground hides the outline's lower edge, as with
+  every inside-out outline; a screen-space outline (an edge effect over
+  depth and normals) would draw it, and can come later as an effect.
+- **The pixel look.** `Camera.pixels = 240`: the scene drawn that many
+  pixels high (as wide as the view's shape makes it), into an image even
+  at low, then enlarged to the view with hard edges by the last pass.
+  The camera moves to the nearest whole pixel of the picture, so a
+  slowly moving camera doesn't shimmer: exactly for an orthographic
+  camera, and for what's where a perspective one looks at the ground.
+  A test moves the camera by less than a pixel, frame by frame, and
+  compares. *Known limit:* edges keep their multisampled softness inside
+  each big pixel (see the garden's picture); a crisper look can draw
+  without multisampling later if games want it. A palette is an effect
+  (the lab's `palette.wgsl`), not a setting.
+- **Screen effects.** `fn effect(in: EffectInput) -> vec4<f32>` (the
+  pixel's `uv` from the top left, `pixel`, the view's `size`, `time`)
+  reads the picture with `picture(uv)` or `picture_at(pixel)`, tone
+  mapped, linear, fog and glow in; its alpha is dropped. Its `struct
+  Values` are set by name as a material's: `ScreenEffect(shader,
+  values: {...})`, `effect.set(name, value)` for every camera with it,
+  and a shader's new code lays them out again. `Camera.effects` runs
+  them in order, passing the picture between two view-sized images (one
+  for a single effect), the last drawing onto the view. Any effect makes
+  the scene image even at low; a frame without effects keeps no effect
+  images (`FrameStats::effects`, `effect_bytes`), and they're let go a
+  while after the last. An effect shader can't be a material's and a
+  surface shader can't be an effect (both refused with a reason); a
+  shader can't be removed while a camera's effect uses it, and a camera
+  that goes takes its effects with it. Effects compose in order: the
+  render tests check two against the colours worked out on the CPU, and
+  an identity effect leaves the picture unchanged at every level, with
+  and without the pixel look.
+- **The lab**: "Look: toon" (the Knight, the Rogue and shapes in bands,
+  outlined, beside the engine's own light), "Look: screen effects" (an
+  old TV, four colours, a hit flash, in the order asked, over the pixel
+  look or not, the camera circling) and the garden ("Look: movement")
+  with the pixel look and a drifting camera.
+
 ### Phase 5: games, the measure, the guide and the report
 
 - **Sheepdog**: grass in the wind, a pond, wolves that burn away when
@@ -297,5 +350,5 @@ say otherwise.
 - [x] Phase 1: surfaces
 - [x] Phase 2: movement (Mac: 2,000 swaying blades add about 0.1 ms a frame at every level; phones in phase 5)
 - [x] Phase 3: what's behind (memory: 28 bytes a pixel while a reader is in view; phones in phase 5)
-- [ ] Phase 4: whole styles
+- [x] Phase 4: whole styles (outline lower edges hidden by the ground; pixel look keeps multisampled edges)
 - [ ] Phase 5: games, the measure, the guide and the report

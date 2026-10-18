@@ -280,7 +280,7 @@ fn textures_cannot_be_removed_while_a_material_uses_them() {
 // --- Shaders (stage 10) ------------------------------------------------------
 
 fn shader(values_size: usize) -> Shader {
-    Shader { name: "test.wgsl".into(), values_size, textures: 1, compiled: std::sync::Arc::new(()) }
+    Shader { name: "test.wgsl".into(), values_size, textures: 1, effect: false, compiled: std::sync::Arc::new(()) }
 }
 
 #[test]
@@ -345,4 +345,51 @@ fn shaders_and_their_textures_cannot_be_removed_while_a_material_uses_them() {
     world.remove_shader(id).unwrap();
     world.remove_texture(texture).unwrap();
     assert!(world.shader(id).is_err());
+}
+
+fn effect(values_size: usize) -> Shader {
+    Shader { effect: true, textures: 0, ..shader(values_size) }
+}
+
+#[test]
+fn a_camera_takes_screen_effects_and_a_material_refuses_them() {
+    let mut world = World::new();
+    let tv = world.add_shader(effect(8));
+    let lava = world.add_shader(shader(4));
+    let camera = world.spawn();
+    let plain = world.spawn();
+    let on = |shader, values: &[u8]| ScreenEffect { shader, values: values.to_vec() };
+
+    assert_eq!(
+        world.add_material(Material { shader: Some(tv), ..Material::default() }),
+        Err(WorldError::ShaderKind { shader: tv, effect: true })
+    );
+    assert_eq!(
+        world.set_camera_effects(plain, vec![on(tv, &[0; 8])]),
+        Err(WorldError::NoComponent { object: plain, component: "Camera" })
+    );
+    world.insert(camera, Camera::default()).unwrap();
+    assert_eq!(
+        world.set_camera_effects(camera, vec![on(lava, &[0; 4])]),
+        Err(WorldError::ShaderKind { shader: lava, effect: false })
+    );
+    assert_eq!(
+        world.set_camera_effects(camera, vec![on(tv, &[0; 4])]),
+        Err(WorldError::EffectValues { shader: tv, given: 4, size: 8 })
+    );
+    assert!(world.camera_effects(camera).is_empty());
+
+    world.set_camera_effects(camera, vec![on(tv, &[1; 8]), on(tv, &[2; 8])]).unwrap();
+    assert_eq!(world.camera_effects(camera), [on(tv, &[1; 8]), on(tv, &[2; 8])]);
+    // Set again: its values keep what fits; it can't stop being an effect's.
+    world.set_shader(tv, effect(4)).unwrap();
+    assert_eq!(world.camera_effects(camera)[0].values, [1; 4]);
+    assert_eq!(world.set_shader(tv, shader(4)), Err(WorldError::ShaderKind { shader: tv, effect: true }));
+    assert_eq!(world.remove_shader(tv), Err(WorldError::EffectInUse { shader: tv, object: camera }));
+
+    world.set_camera_effects(camera, Vec::new()).unwrap();
+    assert!(world.camera_effects(camera).is_empty());
+    world.set_camera_effects(camera, vec![on(tv, &[0; 4])]).unwrap();
+    world.despawn(camera).unwrap();
+    world.remove_shader(tv).unwrap();
 }

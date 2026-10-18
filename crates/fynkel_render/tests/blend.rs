@@ -193,6 +193,7 @@ fn see_through_surfaces_cast_no_shadow() {
             quality: Some(QualityLevel::High.quality()),
             time: [0.0; 2],
             shader_values: Vec::new(),
+            effects: Vec::new(),
             draws,
             ..Default::default()
         };
