@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart' show Brightness, ValueNotifier;
 import 'package:flutter_test/flutter_test.dart';
@@ -8,17 +9,21 @@ import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldTheme, WorldWidget
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/palette.dart';
 
+/// The game's models, from its assets folder, as the app's bundle has them.
+Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
+
 const width = 480, height = 320;
 
 void main() {
   late World world;
   late SheepdogGame game;
-  setUp(() {
-    world = World();
+  setUp(() async {
+    world = World(source: files);
     world.input.simulate.resize(width.toDouble(), height.toDouble());
     // As the app's light theme would: FynkelGame gives it from the app.
     world.theme = sheepdogTheme(Brightness.light);
     game = world.add(SheepdogGame(seed: 1));
+    await game.loaded;
   });
   tearDown(() => world.dispose());
 
@@ -116,6 +121,23 @@ void main() {
       final from = sheep.position;
       world.run(1);
       expect((sheep.position - from).length, lessThanOrEqualTo(Sheep.grazing + 1e-6), reason: 'grazing again');
+    });
+
+    test('the sheep and the dog are animals: their legs go at their pace, and home a sheep hops', () {
+      world.run(0.1);
+      final sheep = round().flock.first;
+      alone(sheep);
+      Animator legs(GameObject animal) => animal.children.firstWhere((c) => c.animator != null).animator!;
+      expect(legs(dog()).weight('Idle'), 1, reason: 'the dog stands still');
+      sheep.position = Vec3(0, 0.4, 0);
+      dog().position = Vec3(0, 0.35, 1.5);
+      world.run(0.5);
+      expect(sheep.velocity.length, greaterThan(2));
+      expect(legs(sheep).weight('Run'), greaterThan(legs(sheep).weight('Idle')), reason: 'running from the dog');
+      sheep.position = Vec3(0, 0.4, penFront - 1);
+      world.run(1 / 60);
+      expect(sheep.isHome, isTrue);
+      expect(legs(sheep).current, 'Jump');
     });
 
     test('the flock keeps together: driven from behind, it goes the way the dog goes, as one', () {
@@ -301,11 +323,12 @@ void main() {
     /// gate, round it rather than through it, at a trot) or with [noDog]
     /// one in a far corner; how many came home, and how many were lost.
     Future<(int, int)> play(int level, int seed, {bool noDog = false}) async {
-      final world = World();
+      final world = World(source: files);
       addTearDown(world.dispose);
       world.input.simulate.resize(width.toDouble(), height.toDouble());
       world.theme = sheepdogTheme(Brightness.light);
       final game = world.add(SheepdogGame(seed: seed, level: level));
+      await game.loaded;
       world.update(1 / 60);
       final dog = game.round.dog;
       if (noDog) dog.position = Vec3(size - 0.5, 0.35, -size + 0.5);
@@ -418,12 +441,12 @@ void main() {
     expect(eyes, isNotEmpty, reason: 'bright enough to glow');
   });
 
-  test('the quality setting is the world\'s: the device\'s pick until one is chosen', () {
+  test('the quality setting is the world\'s: the device\'s pick until one is chosen', () async {
     final quality = ValueNotifier<Quality?>(null);
-    final other = World();
+    final other = World(source: files);
     addTearDown(other.dispose);
     other.theme = sheepdogTheme(Brightness.light);
-    other.add(SheepdogGame(seed: 1, quality: quality));
+    await other.add(SheepdogGame(seed: 1, quality: quality)).loaded;
     other.run(0.1);
     expect(other.quality, isNull);
     quality.value = Quality.low;
