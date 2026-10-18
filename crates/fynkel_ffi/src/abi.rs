@@ -1125,6 +1125,58 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
     })
 }
 
+/// A screen effect, for `fy_camera_effects_set`: a shader the world has
+/// (`fy_shader_add`) with `fn effect`, and `values_len` bytes of its values,
+/// laid out as its `Values` (`fy_shader_describe`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug)]
+pub struct FyScreenEffect {
+    pub shader: u64,
+    pub values: *const u8,
+    pub values_len: usize,
+}
+
+/// Gives the camera on `object` these `count` screen effects, in place of
+/// any it had (0 takes them away): run over its picture in order, each
+/// over what the one before made, when a view draws from it. A shader that
+/// isn't an effect's is `FY_STATUS_INVALID_VALUE`; values that aren't as
+/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`. A shader can't be
+/// removed while an effect uses it.
+///
+/// # Safety
+///
+/// `world` is null or live; `effects` is null or valid for `count` reads
+/// (null when `count` is 0), and each one's `values` for `values_len`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_camera_effects_set(
+    world: *const FyWorld,
+    object: u64,
+    effects: *const FyScreenEffect,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let effects: &[FyScreenEffect] = if count == 0 {
+            &[]
+        } else {
+            // SAFETY: per this function's contract.
+            unsafe { std::slice::from_raw_parts(handle(effects, "effects")?, count) }
+        };
+        let mut list = Vec::with_capacity(effects.len());
+        for e in effects {
+            let values = if e.values_len == 0 {
+                Vec::new()
+            } else {
+                // SAFETY: per this function's contract.
+                unsafe { std::slice::from_raw_parts(handle(e.values, "values")?, e.values_len) }.to_vec()
+            };
+            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values });
+        }
+        Ok(world.lock()?.set_camera_effects(self::object(object)?, list)?)
+    })
+}
+
 /// Sets what the world's views draw, and how finely, or the device's
 /// level's (`fy_quality_auto`) when `quality` is null, as a new world has.
 /// Taken by each `fy_view_frame` after.
@@ -2185,8 +2237,9 @@ pub unsafe extern "C" fn fy_material_values_set(
 #[derive(Debug)]
 pub struct FyShader(Shader);
 
-/// Compiles `source` (`source_len` bytes of WGSL) for a material: checked
-/// and joined to the engine's code. `name` is its file's, for messages.
+/// Compiles `source` (`source_len` bytes of WGSL) for a material, or for a
+/// screen effect when it has `fn effect` (`fy_camera_effects_set`):
+/// checked and joined to the engine's code. `name` is its file's, for messages.
 /// Writes the new handle to `out`. A shader that doesn't compile is
 /// `FY_STATUS_INVALID_VALUE`, its message `name:line:column: what`, the
 /// line its file's own.
@@ -2215,6 +2268,7 @@ pub unsafe extern "C" fn fy_shader_new(
             name: name.to_owned(),
             values_size: compiled.values_size as usize,
             textures: compiled.textures.len(),
+            effect: compiled.effect,
             compiled: Arc::new(compiled),
         };
         // SAFETY: checked non-null; the caller promises it's writable.
@@ -2246,9 +2300,10 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 /// offset in bytes) for each of its `Values`; `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
-/// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it has a `light`; `behind` if
-/// it reads what's behind it (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
-/// fits in `cap`.
+/// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
+/// has a `light`; `behind` if it reads what's behind it (`scene_depth`,
+/// `scene_color`); `effect` if it's a screen effect's. Its length goes to
+/// `out_len`; it's copied into `buf` only when it fits in `cap`.
 ///
 /// # Safety
 ///
@@ -2300,6 +2355,9 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
     }
     if shader.reads_behind {
         let _ = writeln!(text, "behind");
+    }
+    if shader.effect {
+        let _ = writeln!(text, "effect");
     }
     text
 }

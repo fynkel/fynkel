@@ -1024,7 +1024,8 @@ impl Renderer {
             let mut reads_behind = false;
             let look = match &m.shader {
                 None => Some((None, OwnTextures::of(m.textures))),
-                Some(used) => assets.shaders.get(&used.shader).map(|shader| {
+                // A screen effect's shader draws no object.
+                Some(used) => assets.shaders.get(&used.shader).filter(|s| !s.effect).map(|shader| {
                     let srgb = shader
                         .textures
                         .iter()

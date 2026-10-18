@@ -224,6 +224,14 @@ impl Describe for Material {
     }
 }
 
+/// A screen effect on a camera: its shader (an effect's) and its values,
+/// laid out as the shader's `Values`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ScreenEffect {
+    pub shader: ShaderId,
+    pub values: Vec<u8>,
+}
+
 /// A material's own shader as the world keeps it (stage 10): what the
 /// world checks its materials against, and the compiled shader, which only
 /// the renderer looks into.
@@ -236,6 +244,10 @@ pub struct Shader {
     pub values_size: usize,
     /// How many textures of its own it reads.
     pub textures: usize,
+    /// Whether it's a screen effect's, for cameras
+    /// ([`World::set_camera_effects`](crate::World::set_camera_effects)),
+    /// rather than a material's.
+    pub effect: bool,
     /// The compiled shader. The renderer's own type: the world only hands
     /// it on.
     pub compiled: std::sync::Arc<dyn std::any::Any + Send + Sync>,
@@ -247,6 +259,7 @@ impl std::fmt::Debug for Shader {
             .field("name", &self.name)
             .field("values_size", &self.values_size)
             .field("textures", &self.textures)
+            .field("effect", &self.effect)
             .finish_non_exhaustive()
     }
 }
