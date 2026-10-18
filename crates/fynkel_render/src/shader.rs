@@ -131,10 +131,15 @@ impl std::error::Error for ShaderError {}
 const SHADOW: &str = include_str!("own_shadow.wgsl");
 
 /// The engine's code before a shader's: its lighting and the library.
-const BEFORE: &str = concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("library.wgsl"));
+const BEFORE: &str = concat!(
+    include_str!("skin.wgsl"),
+    include_str!("forward.wgsl"),
+    include_str!("library.wgsl"),
+    include_str!("helpers.wgsl")
+);
 
 /// The engine's code before a screen effect's.
-const EFFECT: &str = include_str!("effect.wgsl");
+const EFFECT: &str = concat!(include_str!("effect.wgsl"), include_str!("helpers.wgsl"));
 
 impl CustomShader {
     /// Checks `source`, a shader's file called `name`, and joins it to the
