@@ -19,9 +19,9 @@ use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, Sha
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    AnimationEvent, Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind, Material,
-    MAX_SHADER_TEXTURES, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat, Ray,
-    Raycaster, Shader, ShaderId, TextureId, Transform, Vec2, Vec3, World,
+    AnimationEvent, Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
+    MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat,
+    Ray, Raycaster, Shader, ShaderId, TextureId, Transform, Vec2, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};

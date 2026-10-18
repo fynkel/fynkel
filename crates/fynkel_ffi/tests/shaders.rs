@@ -110,8 +110,7 @@ fn values_own_numbers_time_and_new_code_show_in_the_next_frame() {
     assert!(r > 200 && g < 40 && b > 200, "time: {r} {g} {b}");
 
     // New code shows, though its handle's freed.
-    let green =
-        "struct Values { tint: vec4<f32> }\nfn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(values.tint.g, 1.0, 0.0, 1.0);\n}\n";
+    let green = "struct Values { tint: vec4<f32> }\nfn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(values.tint.g, 1.0, 0.0, 1.0);\n}\n";
     let new = compile("tint.wgsl", green).unwrap();
     // SAFETY: a live world and shader.
     ok(unsafe { fy_shader_set(world.0, shader, new.0) });

@@ -247,7 +247,8 @@ fn a_cut_out_shaders_shadow_is_cut_where_it_is() {
     let same = ShaderKey(1);
     shader(&mut r, same, "same.wgsl", "fn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n");
     let gone = ShaderKey(2);
-    let source = "fn surface(in: SurfaceInput) -> Surface {\n    var s = standard(in);\n    s.alpha = 0.0;\n    return s;\n}\n";
+    let source =
+        "fn surface(in: SurfaceInput) -> Surface {\n    var s = standard(in);\n    s.alpha = 0.0;\n    return s;\n}\n";
     shader(&mut r, gone, "gone.wgsl", source);
     let dissolve = shader(&mut r, ShaderKey(3), "dissolve.wgsl", DISSOLVE);
     let own = |scene: RenderScene, key: ShaderKey| {

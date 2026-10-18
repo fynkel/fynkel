@@ -982,7 +982,8 @@ impl Renderer {
                 for (c, cascade) in cascades[..count].iter_mut().enumerate() {
                     if cascade.reach(&basis, at, r) {
                         let skinned = self.skinned[i as usize];
-                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize], skinned, self.looks[i as usize]), i));
+                        self.caster_order
+                            .push((caster_key(c as u8, &scene.draws[i as usize], skinned, self.looks[i as usize]), i));
                     }
                 }
             }
@@ -1034,7 +1035,8 @@ impl Renderer {
             for &(at, r, d) in &self.shadow_candidates {
                 if in_view(&planes, at, r) {
                     let skinned = self.skinned[d as usize];
-                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize], skinned, self.looks[d as usize]), d));
+                    self.caster_order
+                        .push((caster_key(map as u8, &scene.draws[d as usize], skinned, self.looks[d as usize]), d));
                 }
             }
             spots += 1;

@@ -129,7 +129,15 @@ impl FrameRing {
         instance_bytes: u64,
     ) -> Self {
         let parts = Layout::new(uniforms, view_stride, views);
-        let mut ring = Self { layout, views_layout, own_views_layout, parts, slots: Vec::with_capacity(SLOTS), next: 0, last: None };
+        let mut ring = Self {
+            layout,
+            views_layout,
+            own_views_layout,
+            parts,
+            slots: Vec::with_capacity(SLOTS),
+            next: 0,
+            last: None,
+        };
         for _ in 0..SLOTS {
             let slot = ring.create_slot(device, JOINT_BYTES, instance_bytes);
             ring.slots.push(slot);

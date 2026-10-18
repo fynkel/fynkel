@@ -221,7 +221,9 @@ impl CustomShader {
             let fields = ["x", "y", "z", "w"][..own.len()].iter().map(|c| format!("in.own.{c}")).collect::<Vec<_>>();
             glue.push_str(&format!("    per_object = PerObject({});\n", fields.join(", ")));
         }
-        glue.push_str("}\n\nfn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    fy_begin(in, front_facing);\n");
+        glue.push_str(
+            "}\n\nfn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    fy_begin(in, front_facing);\n",
+        );
         glue.push_str(match lighting {
             Lighting::Lit => "    return lit(in, front_facing, surface(fy_surface_input(in, front_facing)));\n}\n",
             Lighting::Unlit => "    return unlit(fy_surface_input(in, front_facing));\n}\n",
