@@ -63,7 +63,7 @@ void main() {
 
   /// With `SHEEPDOG_SHOT=<dir>`, a picture of the field as it is now, in
   /// [name].png there, to look at.
-  void shot(String name) {
+  void shot(String name, {int width = width, int height = height}) {
     final dir = Platform.environment['SHEEPDOG_SHOT'];
     if (dir == null) return;
     final view = HeadlessView(world, width: width, height: height);
@@ -439,6 +439,82 @@ void main() {
         .nonNulls
         .where((m) => m.emissiveIntensity > 1);
     expect(eyes, isNotEmpty, reason: 'bright enough to glow');
+  });
+
+  group('the shaders', () {
+    test('grass sways in the wind on every patch, one material, left off the minimap and the shadows', () {
+      world.run(0.1);
+      final patches = round().children.where((c) => c.name?.startsWith('grass') ?? false).toList();
+      expect(patches, hasLength(game.patches.length));
+      expect(patches.length, greaterThan(30), reason: 'the whole field');
+      final renderers = patches.map((p) => p.get<MeshRenderer>()!);
+      expect(renderers.map((r) => r.material).toSet(), {game.blades}, reason: 'one material for every blade');
+      expect(game.blades.shader?.values, contains('wind'));
+      expect(game.blades.reach, SheepdogGame.wind, reason: 'culled no sooner than its tips bend');
+      expect(renderers.every((r) => !r.castShadows), isTrue);
+      expect(patches.every((p) => p.layer == effects), isTrue);
+      world.theme = sheepdogTheme(Brightness.dark);
+      expect(game.blades.color, game.grass.color, reason: 'the colour of the floor, day or night');
+    });
+
+    test('the pond: the ground dips under it, sandy, and nothing walks into the water', () {
+      world.run(0.1);
+      expect(SheepdogGame.groundAt(pond.x, pond.z), lessThan(-0.3));
+      expect(SheepdogGame.groundAt(pond.x + pondRadius + 1, pond.z), 0, reason: 'flat beyond its bank');
+      expect(
+        SheepdogGame.groundAt(pond.x + pondRadius, pond.z),
+        closeTo(SheepdogGame.waterLevel, 0.03),
+        reason: 'the water meets the bank at its edge',
+      );
+      expect(game.grass.shader?.values, contains('sand'));
+      expect(game.water.shader?.readsBehind, isTrue, reason: 'it shows the bed under it');
+      // Walking straight through, it goes round.
+      var at = pond + Vec3(pondRadius + 0.5, 0.4, 0);
+      for (var i = 0; i < 200; i++) {
+        at = walk(at, at + Vec3(-0.05, 0, 0.01));
+        expect((at - pond).flat.length, greaterThanOrEqualTo(pondRadius - 1e-6));
+      }
+      expect(at.x, lessThan(pond.x), reason: 'round it, to the far side');
+      dog().position = Vec3(pond.x + 2, 0.35, pond.z + 3);
+      world.run(1);
+      shot('pond', width: 960, height: 640);
+    });
+
+    test('a wolf chased off burns away as it runs, and is gone', () async {
+      final wolf = await firstWolf();
+      final parts = [for (final c in wolf.children) c.get<MeshRenderer>()].nonNulls.toList();
+      expect(parts.map((p) => p.material).toSet(), {game.wolfCoat, game.wolfEyes});
+      expect(game.wolfCoat.alphaCutoff, greaterThan(0), reason: 'cut out where it has burnt, its shadow too');
+      expect(parts.map((p) => p.number('burnt')), everyElement(0));
+      for (final sheep in round().flock) {
+        sheep.position = Vec3(10, 0.4, -10);
+      }
+      wolf.position = Vec3(0, 0.45, 2);
+      dog().position = wolf.position + Vec3(3, -0.1, 0);
+      dog().bark();
+      world.run(Wolf.burning / 2);
+      expect(parts.map((p) => p.number('burnt')), everyElement(allOf(greaterThan(0.05), lessThan(1))));
+      dog().position = wolf.position + Vec3(1.5, -0.1, 1.5);
+      world.run(0.1);
+      shot('burning', width: 960, height: 640);
+      world.run(Wolf.burning);
+      expect(wolf.isDestroyed, isTrue, reason: 'burnt away before it reached the fence');
+    });
+
+    test('a bitten sheep flashes on its own, then is gone', () async {
+      world.run(0.1);
+      final bitten = round().flock.first, other = round().flock.last;
+      List<MeshRenderer> parts(GameObject o) => [...o.getAll<MeshRenderer>(), ...o.children.expand(parts)];
+      expect(parts(bitten), isNotEmpty);
+      expect(parts(bitten).map((p) => p.material?.shader?.perObject), everyElement(contains('flash')));
+      bitten.take();
+      world.run(0.05);
+      expect(parts(bitten).map((p) => p.number('flash')), everyElement(greaterThan(0.5)));
+      expect(parts(other).map((p) => p.number('flash')), everyElement(0), reason: 'the rest of the flock as it was');
+      dog().position = bitten.position + Vec3(0, 0, 3);
+      world.run(Sheep.biteFlash + 0.2);
+      expect(bitten.isDestroyed, isTrue);
+    });
   });
 
   test('the quality setting is the world\'s: the device\'s pick until one is chosen', () async {

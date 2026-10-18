@@ -41,6 +41,13 @@ Each file shows one side of it:
   Quaternius's Farm Animals (CC0, [assets/CREDITS.md](assets/CREDITS.md)):
   each one's legs are a blend of its clips (idle, slow walk, walk, run) by
   its speed, and a sheep hops into the pen. The wolves are still shapes.
+  Since stage 10 its shaders are in `assets/shaders/`: the grass sways in
+  the wind (`grass.wgsl`, a few meshes of many blades, all one material),
+  the pond shows its sandy bed through ripples and foams at its bank
+  (`pond.wgsl` reads what's behind it; `ground.wgsl` turns the floor to
+  sand where it dips), a wolf chased off burns away as it runs
+  (`burn.wgsl`, its own number per wolf), and a bitten sheep flashes
+  (`flash.wgsl`). Nothing walks into the pond.
 - `lib/palette.dart` is the palette, written once: one colour the themes
   grow from.
 - `lib/app.dart` is the app around it, plain Flutter: a title screen, the
@@ -55,7 +62,8 @@ Each file shows one side of it:
   each wolf's nerve, placed by `WorldWidget`s.
 
 `test/game_test.dart` plays the game without Flutter, a frame at a time
-(`SHEEPDOG_SHOT=<dir>` saves pictures of the day and the night there).
+(`SHEEPDOG_SHOT=<dir>` saves pictures of the day, the night, the pond and
+a burning wolf there).
 Two of its tests check that it's fun, or at least fair: a dog that only
 walks behind the flock brings six or more home at every level, and with
 no dog the wolves win.
