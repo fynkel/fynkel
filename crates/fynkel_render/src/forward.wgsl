@@ -308,6 +308,27 @@ struct Brdf {
     alpha: f32,
 };
 
+// `s` seen along `v` (to the viewer) with normal `n`, unit length.
+fn brdf(s: Surface, n: vec3<f32>, v: vec3<f32>) -> Brdf {
+    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
+    let roughness = clamp(s.roughness, 0.045, 1.0);
+    let f0 = mix(vec3<f32>(0.04), s.color, s.metallic);
+    return Brdf(n, v, max(dot(n, v), 1e-4), f0, s.color * (1.0 - s.metallic), roughness * roughness);
+}
+
+// What a light reflects to the viewer, as the engine lights: `color` as
+// it arrives from direction `l`, times `shadow`. Without `highlights`
+// (low's lamps), what a highlight would reflect is spread out like the
+// matte part: metal (all f0, no diffuse) is lit in its own colour
+// rather than black.
+fn standard_lit(b: Brdf, l: vec3<f32>, color: vec3<f32>, shadow: f32, highlights: bool) -> vec3<f32> {
+    let irradiance = color * (PI * shadow);
+    if highlights {
+        return reflected(b, l, irradiance);
+    }
+    return (b.diffuse + b.f0) / PI * irradiance * max(dot(b.n, l), 0.0);
+}
+
 fn reflected(s: Brdf, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
     let n_dot_l = dot(s.n, l);
     if n_dot_l <= 0.0 {
@@ -496,11 +517,6 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
     if ao {
         occlusion *= textureSampleLevel(ao_texture, ao_sampler, in.clip.xy * frame.view_size.xy, 0.0).r;
     }
-    let albedo = s.color;
-    let metallic = s.metallic;
-    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
-    let roughness = clamp(s.roughness, 0.045, 1.0);
-    let alpha = roughness * roughness;
     let n = normalize(s.normal);
     // The surface's own normal, without the map: shadow lookups move out
     // along it.
@@ -510,9 +526,11 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
     }
     let receives = in.emissive.w > 0.5;
     let v = to_viewer(in.world_position);
-    let n_dot_v = max(dot(n, v), 1e-4);
-    let f0 = mix(vec3<f32>(0.04), albedo, metallic);
-    let diffuse_color = albedo * (1.0 - metallic);
+    let surface = brdf(s, n, v);
+    let roughness = clamp(s.roughness, 0.045, 1.0);
+    let n_dot_v = surface.n_dot_v;
+    let f0 = surface.f0;
+    let diffuse_color = surface.diffuse;
 
     // Occlusion darkens only the ambient light: the sun's shadows are
     // another matter (glTF's rule).
@@ -527,14 +545,15 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
         color += frame.sky_light.x * (irradiance * diffuse_color + mirrored * ambient_specular) * occlusion;
     }
 
-    let surface = Brdf(n, v, n_dot_v, f0, diffuse_color, alpha);
+    // Each light through `fy_light`: the engine's own (standard.wgsl), or
+    // a material's shader's `light`.
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
         var lit = 1.0;
         if shadowed && i == frame.counts.y && receives {
             lit = sun_shadow(in.world_position, ng, sun.to_sun.xyz);
         }
-        color += reflected(surface, sun.to_sun.xyz, sun.color.rgb * (PI * lit));
+        color += fy_light(surface, s, in.world_position, sun.to_sun.xyz, sun.color.rgb, lit, 0.0, true);
     }
     // Every lamp that reaches the pixel's cell, lowest bit first.
     let cell = cell_of(in.clip.xy, in.world_position) * 2u;
@@ -558,19 +577,18 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
             // isn't infinitely bright.
             let reach = 1.0 - near * near;
             let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
-            var falloff = reach * reach * cone * cone / max(distance2, 0.01);
-            if shadowed && lamp.cone.z >= 0.0 && receives && falloff > 0.0 {
-                falloff *= spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
+            let falloff = reach * reach * cone * cone / max(distance2, 0.01);
+            if falloff <= 0.0 {
+                continue;
             }
-            let irradiance = lamp.color.rgb * (PI * falloff);
-            if frame.counts.z != 0u {
-                color += reflected(surface, l, irradiance);
-            } else {
-                // No highlight, but what a highlight would reflect is spread
-                // out like the matte part: metal (all f0, no diffuse) is
-                // lit in its own colour rather than black.
-                color += (surface.diffuse + surface.f0) / PI * irradiance * max(dot(surface.n, l), 0.0);
+            var shadow = 1.0;
+            if shadowed && lamp.cone.z >= 0.0 && receives {
+                shadow = spot_shadow(lamp, in.world_position, ng, l, sqrt(distance2));
             }
+            color += fy_light(
+                surface, s, in.world_position, l, lamp.color.rgb * falloff, shadow, sqrt(distance2),
+                frame.counts.z != 0u,
+            );
         }
     }
     color += s.emission;

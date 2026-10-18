@@ -89,6 +89,9 @@ pub struct CustomShader {
     /// its surfaces are then drawn see-through, after the solid scene,
     /// and a frame they're in keeps that scene's depth and colour.
     pub reads_behind: bool,
+    /// Whether it has `fn light(in: LightInput) -> vec3<f32>`, which lights
+    /// it in place of the engine's lighting, light by light.
+    pub lights: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
     /// Of `wgsl`: pipelines made from the same code are shared.
@@ -148,7 +151,9 @@ impl CustomShader {
             &declared,
             &own_source,
             "fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    return vec4<f32>(0.0);\n}\n\n\
-             fn fy_moved(in: VertexIn, model: array<vec4<f32>, 3>, out: VertexOut) -> VertexOut {\n    return out;\n}\n",
+             fn fy_moved(in: VertexIn, model: array<vec4<f32>, 3>, out: VertexOut) -> VertexOut {\n    return out;\n}\n\n\
+             fn fy_light(b: Brdf, s: Surface, p: vec3<f32>, l: vec3<f32>, color: vec3<f32>, shadow: f32, \
+             distance: f32, highlights: bool) -> vec3<f32> {\n    return vec3<f32>(0.0);\n}\n",
         );
         let module = probe.parse().map_err(|e| e.into_error(name))?;
 
@@ -182,6 +187,29 @@ impl CustomShader {
                         None,
                         "`vertex` must be `fn vertex(in: VertexInput) -> VertexInput`".into(),
                     ));
+                }
+                true
+            }
+        };
+        let lights = match module.functions.iter().find(|(_, f)| f.name.as_deref() == Some("light")) {
+            None => false,
+            Some((_, f)) => {
+                let takes =
+                    f.arguments.len() == 1 && module.types[f.arguments[0].ty].name.as_deref() == Some("LightInput");
+                let gives = f.result.as_ref().is_some_and(|r| {
+                    matches!(
+                        module.types[r.ty].inner,
+                        TypeInner::Vector {
+                            size: VectorSize::Tri,
+                            scalar: naga::Scalar { kind: ScalarKind::Float, width: 4 }
+                        }
+                    )
+                });
+                if !takes || !gives {
+                    return Err(error(None, None, "`light` must be `fn light(in: LightInput) -> vec3<f32>`".into()));
+                }
+                if lighting == Lighting::Unlit {
+                    return Err(error(None, None, "has `light` and `unlit`: an unlit shader isn't lit".into()));
                 }
                 true
             }
@@ -261,6 +289,15 @@ impl CustomShader {
         } else {
             glue.push_str("    return out;\n}\n\n");
         }
+        glue.push_str(
+            "fn fy_light(b: Brdf, s: Surface, p: vec3<f32>, l: vec3<f32>, color: vec3<f32>, shadow: f32, \
+             distance: f32, highlights: bool) -> vec3<f32> {\n",
+        );
+        glue.push_str(if lights {
+            "    fy_highlights = highlights;\n    return light(LightInput(l, color, shadow, distance, p, b.n, b.v, s));\n}\n\n"
+        } else {
+            "    return standard_lit(b, l, color, shadow, highlights);\n}\n\n"
+        });
         glue.push_str("fn fy_begin(in: VertexOut, front_facing: bool) {\n");
         glue.push_str("    fy_in = in;\n    fy_front = front_facing;\n");
         glue.push_str(&load);
@@ -318,6 +355,7 @@ impl CustomShader {
             own,
             moves,
             reads_behind,
+            lights,
             wgsl,
             hash: hasher.finish(),
         })
