@@ -283,11 +283,25 @@ impl Extract {
         // The camera's screen effects, their values after the materials'.
         if let Some((id, ..)) = camera {
             for effect in world.camera_effects(id) {
-                if compiled(world, effect.shader).is_some_and(|s| s.effect) {
-                    let values = scene.shader_values.len() as u32;
-                    push_values(&mut scene.shader_values, &effect.values);
-                    scene.effects.push(ScreenEffect { shader: shader_key(effect.shader), values });
+                let Some(shader) = compiled(world, effect.shader).filter(|s| s.effect) else { continue };
+                let mut textures = [None; MAX_TEXTURES];
+                for (i, declared) in shader.textures.iter().enumerate() {
+                    if let Some(texture) = effect.textures[i] {
+                        if uploaded.textures.insert((texture, declared.space)) {
+                            let image =
+                                world.texture(texture).expect("the world refuses an effect with a missing texture");
+                            ops.push(ResourceOp::UploadTexture(
+                                texture_key(texture),
+                                declared.space,
+                                Arc::clone(image),
+                            ));
+                        }
+                        textures[i] = Some(texture_key(texture));
+                    }
                 }
+                let values = scene.shader_values.len() as u32;
+                push_values(&mut scene.shader_values, &effect.values);
+                scene.effects.push(ScreenEffect { shader: shader_key(effect.shader), values, textures });
             }
         }
         scene.camera = camera.map(|(_, c, rotation, position)| CameraView {

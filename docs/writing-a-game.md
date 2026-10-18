@@ -1734,6 +1734,46 @@ A camera's effects run in order, each over what the one before made:
 `camera.effects = [palette, oldTv]` isn't `[oldTv, palette]`. They work
 at every quality level; a frame without any pays nothing for them.
 
+An effect can have textures, as a material's shader can. A **colour
+grade** is one: a table of colours, made in an image editor (or Unity's
+neutral table, coloured to taste), each colour of the picture looked up
+in it with `color_lut`:
+
+```wgsl
+// assets/shaders/grade.wgsl
+struct Values { amount: f32 }
+var table: color_texture;
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    let seen = picture(in.uv).rgb;
+    return vec4<f32>(mix(seen, color_lut(table, seen), values.amount), 1.0);
+}
+```
+
+```dart
+class Evening extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final grade = ScreenEffect(
+      await assets.shader('shaders/grade.wgsl'),
+      values: {'table': await assets.texture('evening_lut.png'), 'amount': 1.0},
+    );
+    world.camera!.effects = [grade];
+  }
+}
+```
+
+The table is a strip of square tiles side by side, as many as each is
+wide (256 × 16 or 1024 × 32 pixels): red across a tile, green down it,
+blue from tile to tile. An effect can read **the scene's depth** too:
+`scene_depth(in.uv)` is how far the solid scene is at a pixel, in metres
+along the view, and `scene_position(in.uv)` where it is in the world, for
+fog of your own, a scanner's pulse ringing out from
+`camera_position()`, or outlines where the depth jumps. See-through
+surfaces and the sky aren't in it; a frame with an effect that reads it
+keeps it, and others pay nothing. The lab's effects page has both.
+
 ### Mistakes, changes and the first frame
 
 - **A shader that doesn't compile** throws a `ShaderError` with its file,
@@ -1753,8 +1793,7 @@ at every quality level; a frame without any pays nothing for them.
 ### Limits
 
 Four textures and four `PerObject` numbers to a shader, 512 bytes of
-`Values`, numbers and vectors only (no arrays or matrices yet). Effects
-read the picture alone: not a texture or the scene's depth yet (§21).
+`Values`, numbers and vectors only (no arrays or matrices yet, §21).
 A shader can't use another's code.
 
 ## 15. Cameras, layers and debug drawing
@@ -3086,9 +3125,8 @@ What keeps a game fast:
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), particles, sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows.
-- **Shaders** (§14): screen effects read the picture alone (no texture,
-  no depth); no arrays or matrices in `Values`; no node graph (Shader
-  Graph): shaders are written in WGSL.
+- **Shaders** (§14): no arrays or matrices in `Values`; no node graph
+  (Shader Graph): shaders are written in WGSL.
 - **Animation** (§13): morph targets (faces, blend shapes), 2D blends
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
@@ -3150,6 +3188,8 @@ What keeps a game fast:
 | `_CameraDepthTexture`, `_CameraOpaqueTexture` | `depth_behind(in)`, `scene_depth(screen)`, `scene_color(screen)` |
 | A custom lighting function (toon) | `fn light` |
 | A full-screen pass (a renderer feature, a post-process) | `ScreenEffect`, `camera.effects` |
+| Color Grading's lookup texture (a LUT) | an effect with `color_lut(table, colour)` (§14) |
+| `_CameraDepthTexture` in a full-screen pass | `scene_depth(in.uv)`, `scene_position(in.uv)` in an effect |
 | Shader warm-up, `ShaderVariantCollection.WarmUp` | `await world.shadersReady()` behind a loading screen (§14) |
 | Bloom and SSAO (a Volume, a renderer feature) | `Camera(bloom: Bloom(...), ambientOcclusion: AmbientOcclusion(...))`, off unless given |
 | Quality Settings, a URP asset per level | `world.quality = Quality(...)` or `Quality.low/medium/high.copyWith(...)` |
@@ -3212,7 +3252,9 @@ For code written before: each change that breaks it, newest first.
   screen draws without a material's objects the first time its shader is
   drawn on the device, while the driver compiles it (a third of a second
   or more), and draws them from the frame it's ready. A loading screen
-  waits for them with `await world.shadersReady()` (§14).
+  waits for them with `await world.shadersReady()` (§14). Screen
+  effects can have textures (a colour grade's table) and read the
+  scene's depth; `FyScreenEffect` has a `textures` field (ABI 37).
 
 - **The iPhone draws straight to the screen** (2026-10-17):
   - A view draws to a layer of its own under Flutter's view, not to a

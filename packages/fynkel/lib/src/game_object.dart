@@ -1051,6 +1051,9 @@ class GameObject with _Moving {
         final bytes = effect._bytes;
         final e = (list + i).ref;
         e.shader = world._shaderId(effect.shader);
+        for (var t = 0; t < 4; t++) {
+          e.textures[t] = world._textureOrNone(effect._texture(t));
+        }
         e.values_len = bytes?.length ?? 0;
         if (bytes != null) {
           final native = arena<Uint8>(bytes.length);

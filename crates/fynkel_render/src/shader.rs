@@ -88,7 +88,9 @@ pub struct CustomShader {
     pub moves: bool,
     /// Whether it reads what's behind it (`scene_depth`, `scene_color`):
     /// its surfaces are then drawn see-through, after the solid scene,
-    /// and a frame they're in keeps that scene's depth and colour.
+    /// and a frame they're in keeps that scene's depth and colour. An
+    /// effect's: whether it reads the solid scene's depth (`scene_depth`,
+    /// `scene_position`), which a frame it's in then keeps.
     pub reads_behind: bool,
     /// Whether it has `fn light(in: LightInput) -> vec3<f32>`, which lights
     /// it in place of the engine's lighting, light by light.
@@ -96,7 +98,7 @@ pub struct CustomShader {
     /// Whether it's a screen effect's, `fn effect(in: EffectInput) ->
     /// vec4<f32>`, for a camera ([`crate::ScreenEffect`]) rather than a
     /// material. Its lighting is then [`Lighting::Unlit`], and it has no
-    /// textures or `PerObject`.
+    /// `PerObject`.
     pub effect: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
@@ -371,15 +373,13 @@ impl CustomShader {
         if has_struct(source, "PerObject") {
             return Err(error("a screen effect has no `PerObject`: it isn't drawn for an object"));
         }
-        let (_, textures) = bind_textures(source).map_err(|(line, m)| ShaderError {
+        let (source, textures) = bind_textures(source).map_err(|(line, m)| ShaderError {
             file: name.to_owned(),
             line: Some(line),
             column: None,
             message: m,
         })?;
-        if !textures.is_empty() {
-            return Err(error("a screen effect can't have textures of its own: it reads the picture"));
-        }
+        let source = source.as_str();
         let declared = if has_struct(source, "Values") { "var<private> values: Values;\n" } else { "" };
         let probe = Joined::new(EFFECT, declared, source, "");
         let module = probe.parse().map_err(|e| e.into_error(name))?;
@@ -412,7 +412,14 @@ impl CustomShader {
         ));
         let joined = Joined::new(EFFECT, declared, source, &glue);
         let module = joined.parse().map_err(|e| e.into_error(name))?;
-        joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let info = joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let (at, _) =
+            module.entry_points.iter().enumerate().find(|(_, e)| e.name == "fs_fy_effect").expect("the glue's");
+        let uses = info.get_entry_point(at);
+        let reads_depth = module
+            .global_variables
+            .iter()
+            .any(|(handle, global)| global.name.as_deref() == Some("fy_effect_depth") && !uses[handle].is_empty());
         let wgsl: Arc<str> = joined.source.into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         wgsl.hash(&mut hasher);
@@ -421,10 +428,10 @@ impl CustomShader {
             lighting: Lighting::Unlit,
             values,
             values_size,
-            textures: Vec::new(),
+            textures,
             own: Vec::new(),
             moves: false,
-            reads_behind: false,
+            reads_behind: reads_depth,
             lights: false,
             effect: true,
             wgsl,

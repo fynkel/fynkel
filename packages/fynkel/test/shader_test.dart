@@ -293,6 +293,25 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     expect(() => red.set('nope', 1.0), throwsArgumentError);
     expect(() => ScreenEffect(invert).set('gain', 1.0), throwsArgumentError);
 
+    // One with a texture of its own: red, so only the cube's red is kept.
+    final tinted = Shader(
+      'var tint: color_texture;\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return sample(tint, in.uv) * picture(in.uv);\n}\n',
+      name: 'tinted.wgsl',
+    );
+    expect(tinted.textures, ['tint']);
+    final redTexture = Texture2D.rgba(1, 1, Uint8List.fromList([255, 0, 0, 255]));
+    final tint = ScreenEffect(tinted, values: {'tint': redTexture});
+    expect(tint.value('tint'), same(redTexture));
+    camera.effects = [tint];
+    expect(_centre(view), _near([before[0], 0, 0]));
+    expect(() => redTexture.dispose(), throwsStateError, reason: 'an effect on a camera uses it');
+    tint.set('tint', Texture2D.rgba(1, 1, Uint8List.fromList([0, 255, 0, 255])));
+    expect(_centre(view), _near([0, before[1], 0]), reason: 'a texture set shows too');
+    expect(() => tint.set('nope', redTexture), throwsArgumentError);
+    camera.effects = [];
+    redTexture.dispose();
+
     // An effect goes with its camera, so its shader can be freed.
     camera.effects = [ScreenEffect(invert)];
     camera.gameObject.destroy();

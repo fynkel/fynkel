@@ -8,7 +8,8 @@
 //! scene small and enlarges it with hard edges, and holds still as the
 //! camera moves less than a pixel, or moves by whole ones. Screen effects
 //! see the picture as it was and where, run in order, work at every level
-//! and with the pixel look, and an effect that's wrong is told.
+//! and with the pixel look, grade colour from a table, read the solid
+//! scene's depth, and an effect that's wrong is told.
 
 mod common;
 
@@ -484,7 +485,7 @@ const WHERE_KEY: ShaderKey = ShaderKey(23);
 /// The stage with `effects` (their values from the scene's first block).
 fn with_effects(quality: QualityLevel, effects: &[ShaderKey]) -> RenderScene {
     let mut scene = stage(quality, None);
-    scene.effects = effects.iter().map(|&shader| ScreenEffect { shader, values: 0 }).collect();
+    scene.effects = effects.iter().map(|&shader| ScreenEffect { shader, values: 0, textures: [None; 4] }).collect();
     scene
 }
 
@@ -518,7 +519,12 @@ fn a_screen_effect_that_is_wrong_is_told() {
     told("fn effect(in: EffectInput) -> vec3<f32> {\n    return picture(in.uv).rgb;\n}\n", "-> vec4<f32>");
     told(&format!("{KEEP}{SURFACE}"), "only `effect`");
     told(&format!("struct PerObject {{ hit: f32 }}\n{KEEP}"), "PerObject");
-    told(&format!("var picture2: color_texture;\n{KEEP}"), "textures");
+    told(
+        &format!(
+            "var a: color_texture;\nvar b: color_texture;\nvar c: color_texture;\nvar d: color_texture;\nvar e: color_texture;\n{KEEP}"
+        ),
+        "4 textures",
+    );
     told("fn effect(in: EffectInput) -> vec4<f32> {\n    return picture(in.uv)\n}\n", "fx.wgsl:3:1");
     let keep = CustomShader::new("keep.wgsl", KEEP).unwrap();
     assert!(keep.effect && keep.lighting == Lighting::Unlit);
@@ -647,10 +653,138 @@ fn picture_effects() {
     blocks.extend(values(&gain, "gain", &[1.0, 0.85, 0.6]));
     for quality in LEVELS {
         let mut scene = stage(quality, None);
-        scene.effects =
-            vec![ScreenEffect { shader: ShaderKey(24), values: 0 }, ScreenEffect { shader: GAIN_KEY, values: 1 }];
+        scene.effects = vec![
+            ScreenEffect { shader: ShaderKey(24), values: 0, textures: [None; 4] },
+            ScreenEffect { shader: GAIN_KEY, values: 1, textures: [None; 4] },
+        ];
         scene.shader_values = blocks.clone();
         let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
         assert_golden(&format!("effects_{}", level_name(quality)), &image);
+    }
+}
+
+// --- What an effect reads besides the picture (phase 4b) -------------------
+
+const GRADE: &str = "var lut: color_texture;
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    return vec4<f32>(color_lut(lut, picture(in.uv).rgb), 1.0);
+}
+";
+const GRADE_KEY: ShaderKey = ShaderKey(30);
+const LUT_KEY: TextureKey = TextureKey(30);
+
+/// A colour grade's table `n` tiles of `n` × `n` side by side, each
+/// entry `f` of its colour (sRGB, 0 to 1).
+fn table(n: u32, f: impl Fn([f32; 3]) -> [f32; 3]) -> (u32, u32, Vec<u8>) {
+    let step = |i: u32| i as f32 / (n - 1) as f32;
+    let rgba = (0..n)
+        .flat_map(|g| (0..n * n).map(move |x| (x % n, g, x / n)))
+        .flat_map(|(r, g, b)| {
+            let c = f([step(r), step(g), step(b)]);
+            [c[0], c[1], c[2], 1.0].map(|v| (v * 255.0).round() as u8)
+        })
+        .collect();
+    (n * n, n, rgba)
+}
+
+/// An effect grades colour from a table, as image editors make them: one
+/// that changes nothing keeps the picture, one that inverts inverts it.
+#[test]
+fn an_effect_grades_colour_from_a_table() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    shader(&mut r, GRADE_KEY, "grade.wgsl", GRADE);
+    for quality in LEVELS {
+        let (plain, _) = render(&gpu, &mut r, &stage(quality, None), SIZE, SIZE);
+        for (name, f, by) in [
+            ("same", &(|c: [f32; 3]| c) as &dyn Fn([f32; 3]) -> [f32; 3], 2),
+            ("inverted", &|c: [f32; 3]| c.map(|v| 1.0 - v), 6),
+        ] {
+            let (w, h, rgba) = table(16, f);
+            r.upload_texture(LUT_KEY, ColorSpace::Srgb, w, h, &rgba);
+            let mut scene = with_effects(quality, &[GRADE_KEY]);
+            scene.effects[0].textures[0] = Some(LUT_KEY);
+            let (image, stats) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+            assert_eq!(stats.effects, 1);
+            let expected = Image {
+                rgba: plain
+                    .rgba
+                    .chunks(4)
+                    .flat_map(|p| {
+                        let c = f([p[0], p[1], p[2]].map(|v| v as f32 / 255.0));
+                        [c[0], c[1], c[2], 1.0].map(|v| (v * 255.0).round() as u8)
+                    })
+                    .collect(),
+                ..plain.clone()
+            };
+            let off = differing(&image, &expected, by);
+            assert!(off == 0, "{quality:?} {name}: {off} pixels graded wrong");
+        }
+    }
+}
+
+const DEPTH: &str = "fn effect(in: EffectInput) -> vec4<f32> {
+    return vec4<f32>(vec3<f32>(scene_depth(in.uv) / 10.0), 1.0);
+}
+";
+const DEPTH_KEY: ShaderKey = ShaderKey(31);
+
+/// An effect reads how far the solid scene is at each pixel, in metres
+/// along the view, at every level; the sky is far; see-through surfaces
+/// aren't in it; and the frame keeps the depth only while one reads it.
+#[test]
+fn an_effect_reads_the_scenes_depth() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let depth = shader(&mut r, DEPTH_KEY, "depth.wgsl", DEPTH);
+    assert!(depth.reads_behind && !shader(&mut r, KEEP_KEY, "keep.wgsl", KEEP).reads_behind);
+    let eye = Vec3::new(0.0, 2.0, 4.0);
+    let camera = CameraView::looking_at(eye, Vec3::ZERO);
+    let glass =
+        PbrMaterial { blend: Blend::Transparent, base_color: [1.0, 1.0, 1.0, 0.5], ..material(0xFFFFFFFF, 0.5) };
+    let scene = |effect| RenderScene {
+        camera: Some(camera),
+        lights: vec![Light::sun(Vec3::new(1.0, -1.2, -0.4), Vec3::ONE)],
+        draws: vec![
+            Draw::new(PLANE, Mat4::from_scale(Vec3::splat(40.0)), material(0xFFB0B0B0, 0.8)),
+            // Before the camera, see-through: not in the depth.
+            Draw::new(CUBE, Mat4::from_translation(Vec3::new(0.0, 1.0, 2.0)), glass),
+        ],
+        effects: vec![ScreenEffect { shader: effect, values: 0, textures: [None; 4] }],
+        ..RenderScene::default()
+    };
+    // Where the ray through `(u, v)` meets the ground, along the view.
+    let (w, h) = (SIZE, SIZE / 2);
+    let rotation = camera.view.inverse();
+    let ground = |u: f32, v: f32| {
+        let tan = (camera.fov_y / 2.0).tan();
+        let ray = rotation.transform_vector3(Vec3::new(
+            (2.0 * u - 1.0) * tan * w as f32 / h as f32,
+            (1.0 - 2.0 * v) * tan,
+            -1.0,
+        ));
+        (ray.y < 0.0).then(|| -eye.y / ray.y)
+    };
+    for quality in LEVELS {
+        let mut with = scene(DEPTH_KEY);
+        with.quality = Some(quality.quality());
+        let (image, stats) = render(&gpu, &mut r, &with, w, h);
+        assert!(!stats.behind && stats.behind_bytes > 0, "{quality:?}: the depth isn't kept");
+        for (x, y) in [(w / 2, h / 2), (w / 4, h - 4), (w - 10, h * 3 / 4), (w / 2, 2)] {
+            let (u, v) = ((x as f32 + 0.5) / w as f32, (y as f32 + 0.5) / h as f32);
+            let seen = linear(image.rgba[((y * w + x) * 4) as usize] as f32 / 255.0) * 10.0;
+            match ground(u, v) {
+                Some(depth) if depth < 9.0 => {
+                    assert!((seen - depth).abs() < 0.1, "{quality:?} ({x}, {y}): {seen} m, not {depth}")
+                }
+                _ => assert!(seen > 9.9, "{quality:?} ({x}, {y}): the sky is {seen} m away"),
+            }
+        }
+        // Without it, the depth is let go in time.
+        let mut without = scene(KEEP_KEY);
+        without.quality = Some(quality.quality());
+        let kept = (0..62).map(|_| render(&gpu, &mut r, &without, w, h).1.behind_bytes).last();
+        assert_eq!(kept, Some(0), "{quality:?}: the depth is kept without an effect that reads it");
     }
 }

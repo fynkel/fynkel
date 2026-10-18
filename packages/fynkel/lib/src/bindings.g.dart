@@ -610,7 +610,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 36;
+const int FY_ABI_VERSION = 37;
 
 const int FY_APPLE_MORE = 2;
 
@@ -1113,15 +1113,8 @@ final class FyScreenEffect extends ffi.Struct {
   @ffi.Size()
   external int values_len;
 
-  static ffi.Pointer<FyScreenEffect> $allocate(
-    ffi.Allocator $allocator, {
-    required int shader,
-    required ffi.Pointer<ffi.Uint8> values,
-    required int values_len,
-  }) => $allocator<FyScreenEffect>()
-    ..ref.shader = shader
-    ..ref.values = values
-    ..ref.values_len = values_len;
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Uint64> textures;
 }
 
 final class FyShader extends ffi.Opaque {}

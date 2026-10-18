@@ -78,7 +78,8 @@ final class Shader implements Finalizable {
   /// The names of its `Values`, which [Material.set] sets, in order.
   List<String> get values => [for (final v in _layout.values) v.name];
 
-  /// The names of its textures, which [Material.set] sets too, in order.
+  /// The names of its textures, which [Material.set] (or an effect's
+  /// [ScreenEffect.set]) sets too, in order.
   List<String> get textures => [for (final t in _layout.textures) t.name];
 
   /// The names of its `PerObject` numbers, which [MeshRenderer.set] sets,
@@ -94,7 +95,9 @@ final class Shader implements Finalizable {
   /// `scene_color`): water with a foaming shore, glass that bends what's
   /// behind it. Its materials are drawn see-through, over the solid
   /// scene, whatever their [Material.blending]. A frame with one in view
-  /// keeps the scene's depth and colour; other frames pay nothing.
+  /// keeps the scene's depth and colour; other frames pay nothing. An
+  /// effect's: whether it reads the solid scene's depth (`scene_depth`,
+  /// `scene_position`), which a frame it runs in keeps.
   bool get readsBehind => _layout.behind;
 
   /// Whether it has a `light`, which lights it in place of the engine,
@@ -185,10 +188,11 @@ final class ScreenEffect {
   /// The cameras it's in, to send it to again when it changes.
   final _cameras = <WeakReference<Camera>>[];
 
-  /// Sets its shader's value [name], as [Material.set] does: a number, a
-  /// [Vec2], a [Vec3], a [Color] or a list of numbers. Every camera with
-  /// it shows the change from the next frame. Throws an [ArgumentError]
-  /// for a name the shader doesn't have or a value that isn't its kind.
+  /// Sets its shader's value or texture [name], as [Material.set] does: a
+  /// number, a [Vec2], a [Vec3], a [Color], a list of numbers, or a
+  /// [Texture2D] (a colour grade's table, a noise). Every camera with it
+  /// shows the change from the next frame. Throws an [ArgumentError] for a
+  /// name the shader doesn't have or a value that isn't its kind.
   void set(String name, Object value) {
     _setValue(name, value);
     _changed();
@@ -199,12 +203,23 @@ final class ScreenEffect {
 
   void _setValue(String name, Object value) {
     final layout = shader._layout;
-    final v = layout.value(name);
-    if (v == null || value is Texture2D) {
-      throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
+    if (value is Texture2D) {
+      if (layout.texture(name) < 0) {
+        throw ArgumentError.value(name, 'name', 'is no texture of $shader, which has: ${layout.names}');
+      }
+      _values[name] = Material._usable(value)!;
+      return;
     }
+    final v = layout.value(name);
+    if (v == null) throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
     v.parse(value, shader);
     _values[name] = value;
+  }
+
+  /// The texture its shader's texture [index] is given, or null.
+  Texture2D? _texture(int index) {
+    final textures = shader._layout.textures;
+    return index < textures.length ? _values[textures[index].name] as Texture2D? : null;
   }
 
   /// Lays its values out for its shader as it is now and sends them to

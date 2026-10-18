@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 36;
+pub const FY_ABI_VERSION: u32 = 37;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -1126,21 +1126,24 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
 }
 
 /// A screen effect, for `fy_camera_effects_set`: a shader the world has
-/// (`fy_shader_add`) with `fn effect`, and `values_len` bytes of its values,
-/// laid out as its `Values` (`fy_shader_describe`).
+/// (`fy_shader_add`) with `fn effect`, `values_len` bytes of its values,
+/// laid out as its `Values` (`fy_shader_describe`), and its textures in
+/// the order it declares them, 0 for none (it reads white).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FyScreenEffect {
     pub shader: u64,
     pub values: *const u8,
     pub values_len: usize,
+    pub textures: [u64; 4],
 }
 
 /// Gives the camera on `object` these `count` screen effects, in place of
 /// any it had (0 takes them away): run over its picture in order, each
 /// over what the one before made, when a view draws from it. A shader that
 /// isn't an effect's is `FY_STATUS_INVALID_VALUE`; values that aren't as
-/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`. A shader can't be
+/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`; a texture the
+/// world hasn't, `FY_STATUS_NO_TEXTURE`. A shader or texture can't be
 /// removed while an effect uses it.
 ///
 /// # Safety
@@ -1171,7 +1174,11 @@ pub unsafe extern "C" fn fy_camera_effects_set(
                 // SAFETY: per this function's contract.
                 unsafe { std::slice::from_raw_parts(handle(e.values, "values")?, e.values_len) }.to_vec()
             };
-            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values });
+            let mut textures = [None; MAX_SHADER_TEXTURES];
+            for (slot, &id) in textures.iter_mut().zip(&e.textures) {
+                *slot = if id == 0 { None } else { Some(texture(id)?) };
+            }
+            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values, textures });
         }
         Ok(world.lock()?.set_camera_effects(self::object(object)?, list)?)
     })

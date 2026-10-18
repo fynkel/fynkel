@@ -224,12 +224,14 @@ impl Describe for Material {
     }
 }
 
-/// A screen effect on a camera: its shader (an effect's) and its values,
-/// laid out as the shader's `Values`.
+/// A screen effect on a camera: its shader (an effect's), its values,
+/// laid out as the shader's `Values`, and its textures, in the order the
+/// shader declares them.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ScreenEffect {
     pub shader: ShaderId,
     pub values: Vec<u8>,
+    pub textures: [Option<TextureId>; MAX_SHADER_TEXTURES],
 }
 
 /// A material's own shader as the world keeps it (stage 10): what the

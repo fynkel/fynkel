@@ -58,6 +58,20 @@ void main() {
     await wait(tester, 2);
     expect(scene.camera.pixels, 160);
 
+    // The colour grade and the scanner go first, over the picture as drawn.
+    await tester.ensureVisible(find.text('colour grade'));
+    await tester.tap(find.text('colour grade'));
+    await tester.ensureVisible(find.text('scanner'));
+    await tester.tap(find.text('scanner'));
+    await wait(tester, 2);
+    expect(scene.camera.effects.take(2), [scene.scanner, scene.grade]);
+    expect(scene.grade!.shader.textures, ['table']);
+    expect(scene.scanner!.shader.readsBehind, isTrue, reason: 'it reads the scene\'s depth');
+    expect(scene.log.value.where((l) => l.error), isEmpty);
+    scene
+      ..colourGrade = false
+      ..scanning = false;
+
     final shots = Platform.environment['LAB_SHOT'];
     if (shots != null) {
       void shot(String name) {
@@ -78,6 +92,14 @@ void main() {
         ..oldTv = false
         ..fourColours = true;
       shot('palette');
+      scene
+        ..fourColours = false
+        ..colourGrade = true;
+      shot('grade');
+      scene
+        ..colourGrade = false
+        ..scanning = true;
+      shot('scanner');
     }
   });
 }

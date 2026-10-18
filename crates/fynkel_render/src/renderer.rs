@@ -274,6 +274,8 @@ struct BehindImages {
     /// The depth copy's input, and the colour put back's.
     copy: wgpu::BindGroup,
     restore: wgpu::BindGroup,
+    /// The depth copy, as screen effects read it.
+    effect_depth: wgpu::BindGroup,
 }
 
 impl BehindImages {
@@ -308,6 +310,7 @@ impl BehindImages {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             copy: one("scene depth", &kit.msaa_depth_layout, &msaa_depth),
             restore: one("what's behind", &kit.image_layout, &color),
+            effect_depth: one("scene depth, for effects", &kit.effects.depth_layout, &depth),
             msaa_depth,
             depth,
             color,
@@ -473,6 +476,7 @@ enum Building {
     Shadow(u64, bool, bool, bool),
     Depth(u64, bool),
     Outline(OutlineKey),
+    Effect(u64),
 }
 
 /// The pipeline under `key` in `map`, if it's made.
@@ -536,6 +540,7 @@ pub(crate) struct Pipelines {
     finish_bloom: OnceLock<wgpu::RenderPipeline>,
     /// Screen effects', by their code's hash.
     effect_layout: wgpu::BindGroupLayout,
+    effect_depth_layout: wgpu::BindGroupLayout,
     effects: Mutex<HashMap<u64, wgpu::RenderPipeline>>,
     /// Own shaders' pipelines being made on threads of their own.
     building: Mutex<HashSet<Building>>,
@@ -644,6 +649,11 @@ pub struct Renderer {
     /// each at its stride ([`crate::effects::EffectKit::stride`]).
     effect_chain: Vec<ShaderKey>,
     effect_uniforms: Vec<u8>,
+    /// Their own textures, as a material shader's are.
+    effect_textures: Vec<OwnTextures>,
+    /// Whether one reads the solid scene's depth, which the frame then
+    /// keeps (in what's behind's images).
+    effect_depth: bool,
     /// The pictures they pass between, and for how many frames none has
     /// run.
     effect_images: Option<EffectImages>,
@@ -754,6 +764,8 @@ impl Renderer {
             effect_uniforms: Vec::new(),
             effect_images: None,
             effects_idle: 0,
+            effect_textures: Vec::new(),
+            effect_depth: false,
             kit,
         }
     }
@@ -835,6 +847,8 @@ impl Renderer {
         self.view_size = view_size;
         self.effect_chain.clear();
         self.effect_uniforms.clear();
+        self.effect_textures.clear();
+        self.effect_depth = false;
         self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
         self.image_format = self.quality.image_format();
         self.joints.clear();
@@ -1072,11 +1086,7 @@ impl Renderer {
                 None => Some((None, OwnTextures::of(m.textures))),
                 // A screen effect's shader draws no object.
                 Some(used) => assets.shaders.get(&used.shader).filter(|s| !s.effect).map(|shader| {
-                    let srgb = shader
-                        .textures
-                        .iter()
-                        .enumerate()
-                        .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits });
+                    let srgb = srgb_bits(shader);
                     let own =
                         OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
                     moving = shader.moves;
@@ -1125,16 +1135,27 @@ impl Renderer {
         for effect in &scene.effects {
             let Some(shader) = assets.shaders.get(&effect.shader).filter(|s| s.effect) else { continue };
             self.effect_chain.push(effect.shader);
+            self.effect_textures.push(OwnTextures {
+                base: MaterialTextures::NONE,
+                own: effect.textures,
+                count: shader.textures.len() as u8,
+                srgb: srgb_bits(shader),
+            });
+            self.effect_depth |= shader.reads_behind;
             let at = self.effect_uniforms.len();
             self.effect_uniforms.resize(at + stride, 0);
+            let u = &self.uniforms;
             let frame = [view_size.0 as f32, view_size.1 as f32, scene.time[0], 0.0];
             self.effect_uniforms[at..at + 16].copy_from_slice(bytemuck::bytes_of(&frame));
+            self.effect_uniforms[at + 16..at + 80].copy_from_slice(bytemuck::bytes_of(&u.sky.inverse_view_proj));
+            self.effect_uniforms[at + 80..at + 96].copy_from_slice(bytemuck::bytes_of(&u.cells_eye));
+            self.effect_uniforms[at + 96..at + 112].copy_from_slice(bytemuck::bytes_of(&u.cells_forward));
             let first = effect.values as usize;
             let blocks = (shader.values_size as usize).div_ceil(48);
             if let Some(values) = scene.shader_values.get(first..first + blocks) {
                 let bytes: &[u8] = bytemuck::cast_slice(values);
-                let size = shader.values_size as usize;
-                self.effect_uniforms[at + 16..at + 16 + size].copy_from_slice(&bytes[..size]);
+                let (size, from) = (shader.values_size as usize, at + crate::effects::VALUES_AT);
+                self.effect_uniforms[from..from + size].copy_from_slice(&bytes[..size]);
             }
         }
         drop(assets);
@@ -1174,10 +1195,12 @@ impl Renderer {
             self.shadow_next[k] = if fewer && self.shadow_idle[k] <= KEEP_UNUSED_MAPS { had } else { want };
         }
         stats.shadow_bytes = ShadowMaps::bytes(self.shadow_next);
-        // What's behind: kept a while too, then let go.
-        self.behind_idle = if self.behind { 0 } else { self.behind_idle.saturating_add(1) };
+        // What's behind, or the depth an effect reads: kept a while too,
+        // then let go.
+        let wanted = self.behind || self.effect_depth;
+        self.behind_idle = if wanted { 0 } else { self.behind_idle.saturating_add(1) };
         let held = self.targets.as_ref().is_some_and(|t| t.behind.is_some() && (t.width, t.height) == self.size);
-        self.behind_kept = self.behind || held && self.behind_idle <= KEEP_UNUSED_MAPS;
+        self.behind_kept = wanted || held && self.behind_idle <= KEEP_UNUSED_MAPS;
         stats.behind = self.behind;
         if self.behind_kept {
             let format = self.image_format.unwrap_or(self.format);
@@ -1432,8 +1455,8 @@ impl Renderer {
         // next frame on.
         let mut assets = assets::lock(assets);
         let Assets { kit: _, meshes, textures, shaders } = &mut *assets;
-        for batch in &self.batches {
-            textures.prepare_own(&kit.gpu.device, &kit.textures, batch.textures);
+        for set in self.batches.iter().map(|b| &b.textures).chain(&self.effect_textures) {
+            textures.prepare_own(&kit.gpu.device, &kit.textures, *set);
         }
         for batch in self.caster_batches.iter().filter(|b| b.cutout || b.own.is_some()) {
             match batch.own {
@@ -1595,6 +1618,8 @@ impl Renderer {
         };
         let behind = targets.behind.as_ref().filter(|_| self.behind);
         let behind_group = behind.and(shadow_maps.behind_bind_group());
+        // The solid scene's depth, for what's behind or a screen effect.
+        let kept_depth = targets.behind.as_ref().filter(|_| self.behind || self.effect_depth);
         let sky_lit = self.sky_next.is_some();
         let ao = self.ao.is_some();
         let shadowed = self.shadow_maps_drawn != (0, 0);
@@ -1719,12 +1744,12 @@ impl Renderer {
                         store: wgpu::StoreOp::Discard,
                     },
                 })],
-                // Kept only for what's behind.
+                // Kept only for what's behind, or an effect.
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: behind.map_or(&targets.depth, |b| &b.msaa_depth),
+                    view: kept_depth.map_or(&targets.depth, |b| &b.msaa_depth),
                     depth_ops: Some(wgpu::Operations {
                         load: wgpu::LoadOp::Clear(0.0),
-                        store: if behind.is_some() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                        store: if kept_depth.is_some() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
                     }),
                     stencil_ops: None,
                 }),
@@ -1751,27 +1776,27 @@ impl Renderer {
                 lines(&mut pass);
             }
         }
+        // One sample of the solid scene's depth, for what's behind or the
+        // effects to read: blended surfaces don't write it, so it's the
+        // same before them as after.
+        if let Some(kept) = kept_depth {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene depth"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &kept.depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(scene_pipelines.copy_depth());
+            pass.set_bind_group(0, &kept.copy, &[]);
+            pass.draw(0..3, 0..1);
+        }
         if let Some(behind) = behind {
-            {
-                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                    label: Some("scene depth"),
-                    color_attachments: &[],
-                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                        view: &behind.depth,
-                        depth_ops: Some(wgpu::Operations {
-                            load: wgpu::LoadOp::Clear(0.0),
-                            store: wgpu::StoreOp::Store,
-                        }),
-                        stencil_ops: None,
-                    }),
-                    timestamp_writes: None,
-                    occlusion_query_set: None,
-                    multiview_mask: None,
-                });
-                pass.set_pipeline(scene_pipelines.copy_depth());
-                pass.set_bind_group(0, &behind.copy, &[]);
-                pass.draw(0..3, 0..1);
-            }
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene, see-through"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
@@ -1860,11 +1885,30 @@ impl Renderer {
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
-                // Freed since prepare: the picture goes on as it was.
-                let pipeline = shaders.get(key).map_or_else(|| pipelines.effect_copy(), |s| pipelines.effect(s));
-                pass.set_pipeline(&pipeline);
+                // Freed or changed since prepare, or not made yet: the
+                // picture goes on as it was.
+                let shader = shaders.get(key).filter(|s| s.textures.len() == self.effect_textures[i].count as usize);
+                let groups = shader.and_then(|s| {
+                    let own = textures.own_bind_group(&self.effect_textures[i]).filter(|_| !s.textures.is_empty());
+                    let depth = kept_depth.map(|d| &d.effect_depth).filter(|_| s.reads_behind);
+                    let whole = s.reads_behind == depth.is_some() && s.textures.is_empty() != own.is_some();
+                    whole.then_some((s, own, depth))
+                });
+                let made = groups.and_then(|(s, own, depth)| Some((pipelines.effect_ready(s, wait)?, own, depth)));
                 let offset = (i as u64 * kit.effects.stride) as u32;
                 pass.set_bind_group(0, &images.images[i % 2].1, &[offset]);
+                match made {
+                    Some((pipeline, own, depth)) => {
+                        pass.set_pipeline(&pipeline);
+                        if let Some(own) = own {
+                            pass.set_bind_group(1, own, &[]);
+                        }
+                        if let Some(depth) = depth {
+                            pass.set_bind_group(2, depth, &[]);
+                        }
+                    }
+                    None => pass.set_pipeline(&pipelines.effect_copy()),
+                }
                 pass.draw(0..3, 0..1);
             }
         }
@@ -1967,6 +2011,7 @@ impl Pipelines {
             finish: OnceLock::new(),
             finish_bloom: OnceLock::new(),
             effect_layout: kit.effects.layout.clone(),
+            effect_depth_layout: kit.effects.depth_layout.clone(),
             effects: Mutex::new(HashMap::new()),
             building: Mutex::default(),
         }
@@ -2644,12 +2689,18 @@ impl Pipelines {
     /// A screen effect's pipeline, onto a view's format, made the first
     /// time.
     fn effect(&self, shader: &CustomShader) -> wgpu::RenderPipeline {
-        self.effects
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(shader.hash)
-            .or_insert_with(|| self.make_effect(&shader.name, &shader.wgsl))
-            .clone()
+        if let Some(made) = made(&self.effects, &shader.hash) {
+            return made;
+        }
+        let made = self.make_effect(&shader.name, &shader.wgsl, shader.textures.len(), shader.reads_behind);
+        self.effects.lock().unwrap_or_else(PoisonError::into_inner).entry(shader.hash).or_insert(made).clone()
+    }
+
+    /// [`Pipelines::effect`] when it's ready ([`Pipelines::ready`]).
+    fn effect_ready(self: &Arc<Self>, shader: &Arc<CustomShader>, wait: bool) -> Option<wgpu::RenderPipeline> {
+        let key = shader.hash;
+        let shader = Arc::clone(shader);
+        self.ready(wait, Building::Effect(key), made(&self.effects, &key), move |p| p.effect(&shader))
     }
 
     /// An effect that changes nothing, for one freed since its frame was
@@ -2664,18 +2715,30 @@ impl Pipelines {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry(0)
-            .or_insert_with(|| self.make_effect("copy", COPY))
+            .or_insert_with(|| self.make_effect("copy", COPY, 0, false))
             .clone()
     }
 
-    fn make_effect(&self, name: &str, source: &str) -> wgpu::RenderPipeline {
+    /// An effect's pipeline: the picture in group 0; its `textures` of its
+    /// own in group 1, as a material shader's; the solid scene's depth in
+    /// group 2 if it reads it (`depth`).
+    fn make_effect(&self, name: &str, source: &str, textures: usize, depth: bool) -> wgpu::RenderPipeline {
         let shader = self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some(name),
             source: wgpu::ShaderSource::Wgsl(source.into()),
         });
+        let own = textures.checked_sub(1).map(|i| &self.own_textures_layouts[i]);
+        let groups = [Some(&self.effect_layout), own, depth.then_some(&self.effect_depth_layout)];
+        let used = if depth {
+            3
+        } else if own.is_some() {
+            2
+        } else {
+            1
+        };
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("screen effect"),
-            bind_group_layouts: &[Some(&self.effect_layout)],
+            bind_group_layouts: &groups[..used],
             immediate_size: 0,
         });
         self.maker.make(wgpu::RenderPipelineDescriptor {
@@ -2930,4 +2993,13 @@ fn light_uniform(light: &crate::Light) -> LightUniform {
         direction: direction.extend(0.0).into(),
         cone: [cone[0], cone[1], -1.0, 0.0],
     }
+}
+
+/// Which of `shader`'s own textures are sRGB, a bit each.
+fn srgb_bits(shader: &CustomShader) -> u8 {
+    shader
+        .textures
+        .iter()
+        .enumerate()
+        .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits })
 }

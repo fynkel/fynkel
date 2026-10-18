@@ -20,6 +20,7 @@
 //   struct PerObject { … }    up to four f32s each object sets on its own
 //                             (MeshRenderer.set), read as `per_object.name`
 //   var name: color_texture;  a texture of colours (sRGB), set with Material.set
+//                             or ScreenEffect.set
 //   var name: texture_2d<f32>;  a texture of data (linear); four textures at most
 // Names starting with `fy_` are the engine's own; don't use them.
 
@@ -199,6 +200,32 @@ fn picture(uv: vec2<f32>) -> vec4<f32> {
 // is; outside it, its nearest edge.
 fn picture_at(at: vec2<i32>) -> vec4<f32> {
     return vec4<f32>(0.0);
+}
+
+// An effect can also use `sample` (its own textures, as a material's) and
+// `scene_depth` (the solid scene's depth at `screen`, as `EffectInput.uv`
+// gives it: see-through surfaces aren't in it; a frame with an effect
+// that reads it keeps it).
+
+// Where the solid scene is at `screen` (0 to 1 from the top left, as
+// `EffectInput.uv`), in the world: on the camera's far end where only the
+// sky is.
+fn scene_position(screen: vec2<f32>) -> vec3<f32> {
+    return vec3<f32>(0.0);
+}
+
+// Where the camera is, in the world.
+fn camera_position() -> vec3<f32> {
+    return vec3<f32>(0.0);
+}
+
+// `color` looked up in a colour grade's table, `lut`: a strip of square
+// tiles side by side, as many as each is wide (256 × 16, or 1024 × 32),
+// red across each tile, green down it, blue from tile to tile, as Unity
+// and most image editors make them. Declare it `color_texture`. A table
+// that changes nothing gives `color` back.
+fn color_lut(lut: texture_2d<f32>, color: vec3<f32>) -> vec3<f32> {
+    return color;
 }
 
 // ---------------------------------------------------------------------
