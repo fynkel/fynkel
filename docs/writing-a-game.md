@@ -3,10 +3,10 @@
 This guide teaches Fynkel from the smallest game up. Each section adds one
 idea, with code that compiles as it stands (`tools/check_guide.py` checks
 it). If you know Unity, most of it will look familiar: Fynkel works the
-way Unity works, in Dart, and §20 maps one to the other.
+way Unity works, in Dart, and §21 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
-`garden` (models, an animated character and an orbit camera), `coins` (triggers and a HUD),
+`garden` (models, an animated character and an orbit camera), `coins` (triggers, a HUD, and a character that walks, runs and picks things up),
 `arena` (a small game using most of what's here), `bowling` (a game on
 physics) and `sheepdog` (a game that feels like an app: a title screen,
 settings, pause, a HUD, labels in the world, a minimap and the app's
@@ -83,7 +83,7 @@ class MainActivity : FynkelActivity()
 
 A game whose activity stays a `FlutterActivity` runs too, with its views
 drawn as textures Flutter shows. What this changes for widgets around
-the game is in §15.
+the game is in §16.
 
 **On iOS nothing is needed**: each `FynkelView` draws straight to the
 screen, on a layer under Flutter's view, which the plugin makes
@@ -214,7 +214,7 @@ class Yard extends GameObject {
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
-  names or tags (the `name` checks in §14 are there to keep the examples
+  names or tags (the `name` checks in §15 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
   (and the components on them) unless `includeInactive: true`.
 
@@ -356,7 +356,7 @@ make it, the root or a manager, rather than searching for it. And let
 data, not subclasses, tell kinds apart: a runner and a tank are one
 `Enemy` class given a different `EnemyKind`. Put everything that belongs
 to one level under one object, so starting over is destroying it and
-adding a new one (§16):
+adding a new one (§17):
 
 ```dart
 // lib/defense.dart
@@ -486,7 +486,7 @@ class Beacon extends GameObject {
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
-  `orthographic` with an `orthographicSize`, a `cullingMask` (§13), and
+  `orthographic` with an `orthographicSize`, a `cullingMask` (§14), and
   `showSky` (below). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`). Keep `near`
   below `far`: a view drawing from a camera that isn't throws an
@@ -683,7 +683,7 @@ Future<void> photographedSky(World world) async {
 - **`Sky.gradient`** goes from `zenith` straight up to `horizon` level,
   and to `ground` (the horizon's, unless given) straight down. Its
   colours are shown as picked, so a game can take them from its theme:
-  `scheme.tertiary.toFynkel()` (§15). Sheepdog sets a day sky in its
+  `scheme.tertiary.toFynkel()` (§16). Sheepdog sets a day sky in its
   light theme and a night one in its dark.
 - **`Sky.image`** is a Radiance `.hdr`, equirectangular (twice as wide as
   high): its middle is ahead (−Z), its top row straight up. Poly Haven
@@ -858,7 +858,7 @@ to about 80; at 60 it holds 60 for 10 minutes and more
 `ios/Runner/Info.plist` needs `CADisableMinimumFrameDurationOnPhone`
 (`true`), as every example has (`flutter create` leaves it out): without
 it, iOS keeps the app's screen at 60, whatever the game asks. Behind a menu, a paused game draws less still
-(`pauseWhenCovered`, §15).
+(`pauseWhenCovered`, §16).
 
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A
@@ -1196,7 +1196,7 @@ class Button3D extends GameObject {
   next frame); a `press()` goes on holding. On a controls page,
   `keyCodeOf(event)` (from `package:fynkel_flutter`) turns the key pressed
   in a "press a key" dialog into the game's, and `key.label` names it for
-  the player (`Space`, `W`, `↑`). §15 has that dialog and a row of a
+  the player (`Space`, `W`, `↑`). §16 has that dialog and a row of a
   controls page.
 - A Flutter widget over the game (a HUD button) takes its own taps; they
   don't reach the game.
@@ -1241,7 +1241,7 @@ import 'hud.dart';
 
 void main() => runApp(
   FynkelApp(
-    Score.new, // §15's
+    Score.new, // §16's
     overlay: (context, game) => ScoreHud(game),
     shortcuts: (game) => {
       const SingleActivator(LogicalKeyboardKey.escape): () => game.world.paused = !game.world.paused,
@@ -1310,17 +1310,22 @@ the app, and loading it fails with its name.
 `.glb` (File → Export → glTF 2.0, glTF Binary, +Y Up). Every Blender
 object comes in as an object of the same name, placed as it was, empties
 too: name the places the code needs (`start`, `gate`) and `find` them
-(§16 has a level that does). The meshes, their materials and the
+(§17 has a level that does). The meshes, their materials and the
 animations come in; the file's lights and cameras are skipped
 (`Model.warnings` says what was), so light the level from code (§5). To walk on it, give it
-colliders: `MeshCollider.addToParts(level)` (§14) gives every part its
+colliders: `MeshCollider.addToParts(level)` (§15) gives every part its
 own shape.
 
-### Animating a model
+A model's clips and how to play them are §13.
+
+## 13. Animation
 
 A model's animations come with it: `model.clips` lists them, and each
 copy's `animator` plays them, as Unity gives a model its Animator. Which
-clip plays when is the game's code, not a state-machine file:
+clip plays when is the game's code, not a state-machine file.
+
+### Playing clips
+
 
 ```dart
 class Hero extends GameObject {
@@ -1374,6 +1379,8 @@ class Hero extends GameObject {
 - The parts a clip moves are the model's objects: a sword added to the
   hand (`model.find('hand')!.add(sword)`) follows it.
 
+### Skinned characters
+
 A skinned character, one whose mesh bends with a skeleton (Mixamo's,
 KayKit's, most from Blender), needs nothing more: its joints are its
 copy's objects, the clips move them, and the engine bends the mesh to
@@ -1400,6 +1407,8 @@ class Rogue extends GameObject {
   build prints why as the model loads, as it does whatever else a model
   skips (`model.warnings`).
 - The lab's "Animation: skinned" shows two KayKit characters.
+
+### Blends and layers
 
 Two tools mix clips: a **blend**, for moving at any speed, and
 **layers**, for playing one clip on part of the body over another:
@@ -1453,7 +1462,82 @@ class Runner extends GameObject {
   out to what's underneath.
 - A layer's clips call `onEnd` and `at(…)` callbacks as the base's do.
 
-## 13. Cameras, layers and debug drawing
+### A character in a game
+
+Put together, a character is a blend for its legs and a layer or two
+over it. This one walks where it's told: it runs to a place far away,
+slows to a walk near it and stands there, and waves from the waist up
+without stopping. examples/coins's player is the same, with a coin in
+its hand:
+
+```dart
+class Farmer extends GameObject {
+  late final Animator _animator;
+  Vec3 _goal = Vec3.zero;
+  double _speed = 0; // m/s, eased, so the blend eases too
+
+  static const walk = 2.0, run = 5.0; // the speeds the clips' feet go
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final model = add(await assets.instantiate('character.glb'));
+    _animator = model.animator!
+      ..blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: 0, duration: 0)
+      // A gesture is played once; then the layer fades out.
+      ..onEnd = (_) => _animator.layer(1).stop(duration: 0.15);
+    _animator.layer(1, mask: 'torso'); // the legs stay the blend's
+  }
+
+  void walkTo(Vec3 point) => _goal = point.flat;
+
+  void wave() => _animator.layer(1).crossFade('wave', duration: 0.1, loop: false);
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    final to = _goal - transform.position;
+    final distance = to.length;
+    final wanted = distance < 0.05 ? 0.0 : (distance > 3 ? run : walk);
+    _speed += (wanted - _speed) * (6 * time.delta).clamp(0, 1);
+    if (distance >= 0.05) {
+      final step = to.normalized * (_speed * time.delta).clamp(0, distance);
+      transform = Transform(position: transform.position + step, rotation: Quat.lookRotation(to));
+    }
+    _animator.blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: _speed);
+  }
+}
+```
+
+- The speed it moves at is the number the blend gets, and the
+  thresholds are the speeds the clips' feet go: the feet don't slide at
+  any speed between.
+- Easing the speed eases the blend: it slows into a walk, not snaps.
+- `onEnd` is on the animator, for every layer: here only the gesture
+  layer plays clips that end.
+- A test can check all of it frame by frame (§18):
+  `animator.weight('sprint')`, `animator.layer(1).current`.
+
+### Many characters
+
+Each character's clips are sampled and blended in the engine, and its
+mesh bent on the GPU, so a crowd costs little. The lab's "Animation: a
+crowd" shows 1 to 100 KayKit characters, each on its own clip, and says
+what the animation costs a frame. Measured with a hundred:
+
+| Device | The animation a frame | Frames a second |
+|---|---|---|
+| Mac | 0.9–1.3 ms | 120 of 120 asked, at any quality |
+| iPhone (ProMotion) | 2.1–2.8 ms | 120 of 120 at low and medium; at high, 80 (high's own cost: one character gives 80 too) |
+| Galaxy Note10+ | 6–7 ms | 42 of 60 at low; 30 characters hold 60 |
+
+Each character also takes about 160 KB of the engine's memory (its
+objects and its animator); copies of one model share its meshes and
+textures. For a crowd on an older Android phone, keep it to a few dozen
+or turn the far ones' animators off (`stop()` holds their pose and costs
+nothing).
+
+## 14. Cameras, layers and debug drawing
 
 **Cameras** work as Cinemachine's. Put a `VirtualCamera` on objects; the
 enabled one with the highest `priority` drives the view's camera, and a
@@ -1498,7 +1582,7 @@ class CameraRig extends GameObject {
   A shake moves the picture, not the camera: its transform stays where
   the game or the virtual camera put it, so moving it during a shake
   never drifts. `world.cameras.shakeOf(camera)` says how far it's moved
-  now; world widgets (§15) move with it.
+  now; world widgets (§16) move with it.
 - **Between the screen and the world**: on a `Camera`, such as
   `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
   Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
@@ -1507,7 +1591,7 @@ class CameraRig extends GameObject {
 - **A camera that follows a physics body** sees each fixed step's jump:
   a body steps 50 or 100 times a second, the screen draws at 60 or 120,
   and the camera moves smoothly, so the body seems to jitter. Give the
-  body `interpolation: RigidbodyInterpolation.interpolate` (§14), as in
+  body `interpolation: RigidbodyInterpolation.interpolate` (§15), as in
   Unity.
 
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
@@ -1534,7 +1618,7 @@ class Sparkle extends GameObject {
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
 builds.
 
-## 14. Physics: colliders, rigidbodies, queries and callbacks
+## 15. Physics: colliders, rigidbodies, queries and callbacks
 
 Physics is a package, `fynkel_physics`, on Rapier. Add it to the
 pubspec, next to `fynkel`, and a game without it ships none of it:
@@ -2013,7 +2097,7 @@ class Dragger extends GameObject {
 The lab's "Joints: a chain and a weight" scene does this, and works out
 the spring from the weight it lifts.
 
-## 15. Flutter around the game
+## 16. Flutter around the game
 
 The game is a Flutter widget, so menus, HUDs and settings are plain
 Flutter. Keep what the HUD shows in `ValueNotifier`s on the game, and give
@@ -2444,7 +2528,7 @@ players, and aims what's under a finger from its own camera
 shows the name tags placed by its own camera. The lab's "Minimap" and
 "Split screen" scenes show both, with each view's frames per second.
 
-## 16. Hot reload and starting over
+## 17. Hot reload and starting over
 
 - **Hot reload** (`r`) changes methods at once, in objects and behaviours
   alike: the next frame runs the new `onUpdate`.
@@ -2522,7 +2606,7 @@ class Levels extends GameObject {
 
 **Saving.** What's kept between runs is plain data, never objects: the
 level reached, the best score, the settings (`Controls` has `toJson` and
-`fromJson`, §15). Write it as JSON to a file in the app's own folder,
+`fromJson`, §16). Write it as JSON to a file in the app's own folder,
 which the app finds with the `path_provider` package
 (`getApplicationSupportDirectory()`) and hands to the game:
 
@@ -2564,7 +2648,7 @@ class Save {
 Save when something worth keeping happens (a level done), not every
 frame: a write is a few milliseconds on a phone.
 
-## 17. Testing a game
+## 18. Testing a game
 
 A game runs in a test with no window and no app around it, frame by
 frame, with made-up input. Run the tests with **`flutter test`**, not
@@ -2725,7 +2809,7 @@ pump a duration instead, `tester.pump(const Duration(milliseconds: 16))`
 for a frame. And input waits for the next frame, as on a device: a tap
 reaches the game in the `pump` after it.
 
-## 18. Speed
+## 19. Speed
 
 What keeps a game fast:
 
@@ -2777,22 +2861,23 @@ What keeps a game fast:
   goes). On an iPhone or a Mac it gives the thermal state too, and each
   minute's frame rate with `--seconds 600`.
 
-## 19. What isn't there yet
+## 20. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), particles, sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows, and glass doesn't bend light.
-- **Models:** morph targets, 2D blends (by direction and speed), root
-  motion, IK, and clips moved from one skeleton to another (Unity's
-  Humanoid).
+- **Animation** (§13): morph targets (faces, blend shapes), 2D blends
+  (by direction and speed), root motion, IK (feet on slopes, a look
+  beyond a turned head), clips moved from one skeleton to another
+  (Unity's Humanoid), and clips made in code.
 - **Sound:** none yet.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
-  a game does itself for now (§16 shows how); an editor.
+  a game does itself for now (§17 shows how); an editor.
 - **Physics:** 2D physics, `ConfigurableJoint`, and chains of joints that
   don't stretch (Rapier's multibody joints).
 
-## 20. From Unity
+## 21. From Unity
 
 | Unity | Fynkel |
 |---|---|
@@ -2877,7 +2962,7 @@ What keeps a game fast:
   10 × 10.
 - **An error in `onLoad` destroys the object** (§6); one in Unity's `Awake`
   leaves it half-made.
-- **The physics step runs between frames** (§14), so a force shows a
+- **The physics step runs between frames** (§15), so a force shows a
   frame later; `physics.stepBetweenFrames = false` steps as Unity does.
 - **A new `physics.gravity` wakes every body**; Unity leaves sleeping ones
   hanging.
@@ -2887,14 +2972,14 @@ What keeps a game fast:
   upright. Keep its object upright and turn a child for the model.
 - **A HUD is Flutter**: widgets over the view, not a Canvas in the scene.
 
-## 21. What changed
+## 22. What changed
 
 For code written before: each change that breaks it, newest first.
 
 - **The iPhone draws straight to the screen** (2026-10-17):
   - A view draws to a layer of its own under Flutter's view, not to a
     texture, and what's painted under it, or a fade over it, no longer
-    shows on it (§15), as on Android.
+    shows on it (§16), as on Android.
   - `FynkelView.androidSurface` is `onScreen`, for both phones:
     `onScreen: false` keeps the texture.
 
@@ -2906,12 +2991,12 @@ For code written before: each change that breaks it, newest first.
     display frame. A widget test that pumps 8 ms frames sees every other
     one: pump 17 ms, or set the world's `targetFrameRate = 0`.
   - A view covered by a page or a dialog that paused the game draws 10
-    frames a second (§15).
+    frames a second (§16).
 
 - **Android draws straight to the screen** (2026-10-16):
   - With the activity a `FynkelActivity` (§1), a view draws to the
     screen behind Flutter's, not to a texture, and what's painted under
-    it, or a fade over it, no longer shows on it (§15). An activity left a
+    it, or a fade over it, no longer shows on it (§16). An activity left a
     `FlutterActivity` works as before.
   - `Quality.device` is `low` on Android phones (§5); it was `medium`.
 
@@ -2944,7 +3029,7 @@ For code written before: each change that breaks it, newest first.
     runs `--locked` (the versions in `Cargo.lock`) with Flutter's
     macOS and iOS deployment targets. `flutter run -v` shows it working.
   - New in the guide: asset folders aren't recursive, and a level made in
-    Blender (§12); levels and saving (§16); why `flutter test` (§17).
+    Blender (§12); levels and saving (§17); why `flutter test` (§18).
 
 - **Hardening, what a game writes** (2026-10-15):
   - `Camera`, `Light` and `MeshRenderer` have `enabled`, as behaviours
@@ -2963,7 +3048,7 @@ For code written before: each change that breaks it, newest first.
     package:fynkel_flutter `Controls`, `ControlsSettings` and
     `askForKey` (keys a player changes, §11).
   - package:fynkel/testing.dart: `world.run(seconds)`, `world.tap(x, y)`
-    and `world.viewPoint(x, y)` for tests (§17).
+    and `world.viewPoint(x, y)` for tests (§18).
   - The examples' `lib/measured.dart` is `tool/measured.dart`, and
     package:fynkel_measure is a dev_dependency: move yours, and the tool
     finds it there (it still finds the old place).

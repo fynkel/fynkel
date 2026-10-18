@@ -122,6 +122,10 @@ class SheepdogGame extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
+    // The farm animals' models, held here for the whole game: each round's
+    // sheep and dog take them from here, not from the files again. (Each
+    // asks for its own, and hears of a failure there.)
+    assets.preload(['sheep.glb', 'dog.glb']).ignore();
     // The sun's (and the moon's) shadows: the sheep and the dog on the
     // grass, the fences across it.
     _sun = addWith(Light.sun(direction: Vec3(-0.4, -1, -0.6), shadows: true));
@@ -399,32 +403,22 @@ class Dog extends GameObject {
   /// moves.
   static const barkReach = 5.0, scareReach = 6.0;
 
-  static final _coat = Material(color: Color(0xFF8A5A3B));
-  static final _white = Material(color: Color.white);
   static final _ring = Material(color: Color.white, emissive: Color.white, emissiveIntensity: 1.5);
 
   Vec3 facing = Vec3.forward;
-  double _sinceBark = 1;
+  double _sinceBark = 1, _speed = 0;
+  late final Animator _moves;
 
   /// Told each bark, for the HUD's button to flash.
   final barked = Signal<void>();
 
   @override
-  void onLoad() {
-    super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(scale: Vec3(0.5, 0.5, 0.9)),
-        components: [MeshRenderer(Mesh.cube(), _coat)],
-      ),
-    );
-    // A white muzzle, to show which way it faces.
-    add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 0.15, -0.5), scale: Vec3(0.3, 0.25, 0.3)),
-        components: [MeshRenderer(Mesh.cube(), _white)],
-      ),
-    );
+  Future<void> onLoad() async {
+    await super.onLoad();
+    // A pug (assets/CREDITS.md), a game's size, its feet on the grass.
+    final model = add(await assets.instantiate('dog.glb'));
+    model.transform = _farmAnimal(lift: 0.35, scale: 0.28);
+    _moves = model.animator!..blend('move', _clips, thresholds: _dogPaces, at: 0, duration: 0);
     on(input.onTap, (_) => bark());
   }
 
@@ -437,8 +431,14 @@ class Dog extends GameObject {
     if (direction.length > 0) {
       facing = direction.normalized;
       rotation = Quat.lookRotation(facing);
+      final was = position;
       position = walk(position, position + direction * (speed * time.delta));
+      if (time.delta > 0) _speed = (position - was).flat.length / time.delta;
+    } else {
+      _speed = 0;
     }
+    // Its legs go at its pace, from a stand to a run.
+    if (time.delta > 0) _moves.blend('move', _clips, thresholds: _dogPaces, at: _speed);
     if (input.action('bark').wasPressed) bark();
   }
 
@@ -489,9 +489,6 @@ class Sheep extends GameObject {
   /// How near the dog and a wolf move it, and how near its neighbours are.
   static const dogReach = 5.0, wolfReach = 4.0, neighbours = 4.0;
 
-  static final _wool = Material(color: Color(0xFFF2EFE6), roughness: 1);
-  static final _face = Material(color: Color(0xFF2B2B2E));
-
   final math.Random _random;
 
   /// Once, when it walks into the pen.
@@ -515,21 +512,15 @@ class Sheep extends GameObject {
   /// In the field still: neither home nor taken.
   bool get isFree => !_home && !_taken;
 
+  late final Animator _moves;
+
   @override
-  void onLoad() {
-    super.onLoad();
-    add(
-      GameObject(
-        transform: Transform(scale: Vec3(0.8, 0.7, 1.1)),
-        components: [MeshRenderer(Mesh.sphere(), _wool)],
-      ),
-    );
-    add(
-      GameObject(
-        transform: Transform(position: Vec3(0, 0.15, -0.6), scale: Vec3(0.32, 0.32, 0.32)),
-        components: [MeshRenderer(Mesh.cube(), _face)],
-      ),
-    );
+  Future<void> onLoad() async {
+    await super.onLoad();
+    // A sheep (assets/CREDITS.md), a game's size, its feet on the grass.
+    final model = add(await assets.instantiate('sheep.glb'));
+    model.transform = _farmAnimal(lift: 0.4, scale: 0.2);
+    _moves = model.animator!..blend('move', _clips, thresholds: _sheepPaces, at: 0, duration: 0);
     // Its name over it: a Flutter widget, placed where the camera sees it
     // (labels.dart).
     addComponent(WorldWidget((context) => NameTag(name!), offset: Vec3(0, 0.9, 0), alignment: Alignment.bottomCenter));
@@ -609,6 +600,7 @@ class Sheep extends GameObject {
       rotation = Quat.lookRotation(velocity.normalized);
       position = walk(position, position + velocity * time.delta);
     }
+    _moves.blend('move', _clips, thresholds: _sheepPaces, at: velocity.length);
     if (inPen(position)) _comeHome();
   }
 
@@ -636,6 +628,9 @@ class Sheep extends GameObject {
     final spot = Vec3((_random.nextDouble() * 2 - 1) * (penHalf - 0.8), 0.4, -size + 1.5 + _random.nextDouble() * 3);
     moveTo(spot, seconds: 1.2, ease: Ease.inOutSine);
     punchScale(Vec3.all(0.25), seconds: 0.4);
+    _moves
+      ..crossFade('Jump', duration: 0.1, loop: false)
+      ..onEnd = (_) => _moves.crossFade('Idle');
   }
 
   /// Taken by a wolf: gone.
@@ -645,9 +640,24 @@ class Sheep extends GameObject {
     velocity = Vec3.zero;
     removeComponent(get<WorldWidget>()!);
     taken.emit(this);
+    _moves.crossFade('Death', duration: 0.05, loop: false);
     scaleTo(Vec3.zero, seconds: 0.25, ease: Ease.inBack).then((_) => destroy());
   }
 }
+
+/// The farm animals' clips for a blend by speed: standing, walking slowly,
+/// walking and running.
+const _clips = ['Idle', 'WalkSlow', 'Walk', 'Run'];
+
+/// The speeds (m/s) the clips' feet go at, for the dog and a sheep.
+const _dogPaces = [0.0, 1.0, 2.5, Dog.speed];
+const _sheepPaces = [0.0, Sheep.grazing, 1.5, Sheep.speed];
+
+/// Where a farm animal's model sits in its object: [lift] down, so its
+/// feet are on the grass, shrunk by [scale] from the pack's few metres,
+/// and turned round to face forward (-z), as the pack's face +z.
+Transform _farmAnimal({required double lift, required double scale}) =>
+    Transform(position: Vec3(0, -lift, 0), rotation: Quat.axisAngle(Vec3.up, math.pi), scale: Vec3.all(scale));
 
 /// Where a wolf is about to come in: a red mark on the ground, pulsing,
 /// seen on the minimap too.

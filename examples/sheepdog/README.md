@@ -1,6 +1,7 @@
 # sheepdog
 
-Stage 7's game ([docs/stage-7.md](../../docs/stage-7.md), phase 7): a game
+Stage 7's game ([docs/stage-7.md](../../docs/stage-7.md), phase 7; its animals since
+stage 9): a game
 that feels like an app. You're the dog; bring the eight sheep into the pen
 at the back of the field, through its gate, before the clock runs out.
 
@@ -36,6 +37,10 @@ Each file shows one side of it:
   a wolf coming), and the end through `result`. `wear` takes the game's
   colours from the app's theme, and again when it changes: the light theme
   is a day in the field, the dark one a night.
+  The dog and the sheep are animated models, a pug and a sheep from
+  Quaternius's Farm Animals (CC0, [assets/CREDITS.md](assets/CREDITS.md)):
+  each one's legs are a blend of its clips (idle, slow walk, walk, run) by
+  its speed, and a sheep hops into the pen. The wolves are still shapes.
 - `lib/palette.dart` is the palette, written once: one colour the themes
   grow from.
 - `lib/app.dart` is the app around it, plain Flutter: a title screen, the

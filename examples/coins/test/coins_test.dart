@@ -114,6 +114,51 @@ void main() {
     expect(position.x.abs(), lessThan(0.5));
   });
 
+  test('the player sprints far, walks near, stands still, and bends to a coin while its legs walk', () async {
+    await game.loaded;
+    world.update(0);
+    final player = game.player, moves = player.moves;
+    world.run(0.5);
+    expect(moves.weight('idle'), closeTo(1, 1e-4), reason: 'standing at the start');
+    expect(moves.layer(1).current, 'holding-right', reason: 'the arm holds the flower');
+
+    // Far away: up to a sprint.
+    player.walkTo(Vec3(0, 0, -12));
+    world.run(1.5);
+    expect(player.speed, closeTo(Player.sprint, 0.1));
+    expect(moves.weight('sprint'), closeTo(1, 0.05));
+    // Near: down to a walk, then standing.
+    while ((player.transform.position - Vec3(0, 0, -12)).length > 1.5) {
+      world.update(1 / 60);
+    }
+    expect(player.speed, closeTo(Player.walk, 0.3));
+    expect(moves.weight('walk'), greaterThan(0.7), reason: 'walking the last metres');
+    world.run(3);
+    expect(player.speed, 0);
+    expect(moves.weight('idle'), closeTo(1, 1e-4));
+
+    // A coin: the bend, from the torso up, while it walks on.
+    player.walkTo(Vec3(0, 0, 0));
+    world.run(0.5);
+    final leg = player.find('leg-left')!;
+    final coin = world.all<Coin>().first;
+    final at = coin.transform.position;
+    player.transform = Transform(position: Vec3(at.x, 0, at.z) + Vec3(0, 0, 4), rotation: player.transform.rotation);
+    world.update(1 / 50);
+    final legFrom = leg.localRotation;
+    player.transform = Transform(position: Vec3(at.x, 0, at.z), rotation: player.transform.rotation);
+    world.update(1 / 50);
+    world.update(1 / 50);
+    expect(coin.isDestroyed, isTrue);
+    world.run(0.1);
+    expect(moves.layer(2).current, 'pick-up');
+    expect(leg.localRotation, isNot(legFrom), reason: 'the legs walk on under the bend');
+    // Stopped, so it walks into no other coin.
+    player.walkTo(player.transform.position);
+    world.run(0.6);
+    expect(moves.layer(2).current, isNull, reason: 'the bend faded out when it ended');
+  });
+
   test('coins spin and bob; the swarm moves its motes', () async {
     await game.loaded;
     world.update(0);

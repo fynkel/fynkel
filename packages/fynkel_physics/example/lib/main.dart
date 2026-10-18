@@ -1,5 +1,5 @@
 // package:fynkel_physics's example: not a lesson but a benchmark (for the
-// physics in a game, see the guide's §14 and examples/bowling), on the raw
+// physics in a game, see the guide's §15 and examples/bowling), on the raw
 // world of stage 5 step 1 (docs/stage-5.md): a pile of cubes that fall,
 // tumble and settle, dropped again every 8 seconds. Each fixed step's moved
 // cubes are written to their objects. tool/measured.dart runs the same for
