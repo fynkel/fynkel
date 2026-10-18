@@ -126,7 +126,7 @@ the answer), and plain words.
   occlusion. Or **unlit** (`fn unlit(...)`), for holograms and things
   that shine on their own.
 - **Values** from the shader's own `struct Values`, found by name:
-  numbers, vectors, colours, and textures (up to 8). Set from Dart as
+  numbers, vectors, colours, and textures (up to 4). Set from Dart as
   `Material(shader:, values:)` and `material.set('flow', 0.6)`. The types
   are checked: a colour for a `vec4f`, a texture for a `texture_2d`.
 - **One object's values**: up to four numbers per object, named in the
@@ -270,7 +270,7 @@ say otherwise.
 
 ## 5. Checklist
 
-- [ ] Phase 1: surfaces
+- [x] Phase 1: surfaces
 - [ ] Phase 2: movement
 - [ ] Phase 3: what's behind
 - [ ] Phase 4: whole styles
