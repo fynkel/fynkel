@@ -21,7 +21,11 @@
 //!    Then light ambient occlusion, when the camera has it (`ao`).
 //! 1. The scene: every draw, then the debug lines on top. With
 //!    [`Quality::hdr`] or bloom it is drawn into a half-float image (the
-//!    scene image); otherwise, straight into the view.
+//!    scene image); otherwise, straight into the view. When a see-through
+//!    surface's shader reads what's behind it, in two: the solid scene
+//!    and the sky, its depth kept and its colour resolved into an image
+//!    for it to read; then that put back, and the see-through and the
+//!    lines drawn over it (behind.wgsl).
 //! 2. Bloom, when the camera has it and there is a scene image (`bloom`).
 //!    The image's alpha says how much of each pixel is light, which may
 //!    glow: what's drawn and lit, and an image sky. Colours shown as
@@ -85,6 +89,13 @@ pub struct FrameStats {
     /// GPU memory the view holds for the sky's light, and an image sky's
     /// pixels.
     pub sky_bytes: u64,
+    /// Whether a see-through surface in view reads what's behind it
+    /// (`scene_depth`, `scene_color`), so the frame keeps the solid
+    /// scene's depth and colour for it.
+    pub behind: bool,
+    /// GPU memory the view holds for that: kept a second after the last
+    /// frame that read it, 0 when no frame has for longer.
+    pub behind_bytes: u64,
 }
 
 /// `Frame` in forward.wgsl.
@@ -230,6 +241,68 @@ struct Targets {
     image: Option<SceneImage>,
     /// Ambient occlusion's images, made the first frame a camera has it.
     ao: Option<AoImages>,
+    /// What's behind, made the first frame a shader reads it.
+    behind: Option<BehindImages>,
+}
+
+/// What's behind see-through surfaces, for shaders that read it: the solid
+/// scene's depth, multisampled and kept past its pass, and one sample of
+/// it; its colour, resolved; and the bind groups the passes read them
+/// through.
+struct BehindImages {
+    /// Which images these are, for the bind group that reads them.
+    id: u64,
+    msaa_depth: wgpu::TextureView,
+    depth: wgpu::TextureView,
+    color: wgpu::TextureView,
+    /// The depth copy's input, and the colour put back's.
+    copy: wgpu::BindGroup,
+    restore: wgpu::BindGroup,
+}
+
+impl BehindImages {
+    fn new(kit: &Kit, width: u32, height: u32, color_format: wgpu::TextureFormat) -> Self {
+        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let device = &kit.gpu.device;
+        let make = |label, format, sample_count| {
+            device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some(label),
+                    size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count,
+                    dimension: wgpu::TextureDimension::D2,
+                    format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&Default::default())
+        };
+        let msaa_depth = make("msaa depth, kept", DEPTH_FORMAT, Renderer::SAMPLES);
+        let depth = make("scene depth", DEPTH_FORMAT, 1);
+        let color = make("scene colour", color_format, 1);
+        let one = |label, layout, view| {
+            device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some(label),
+                layout,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(view) }],
+            })
+        };
+        Self {
+            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            copy: one("scene depth", &kit.msaa_depth_layout, &msaa_depth),
+            restore: one("what's behind", &kit.image_layout, &color),
+            msaa_depth,
+            depth,
+            color,
+        }
+    }
+
+    /// Their GPU memory, `width` × `height` with colour in `format`.
+    fn bytes(width: u32, height: u32, format: wgpu::TextureFormat) -> u64 {
+        let color = format.block_copy_size(None).unwrap_or(4);
+        u64::from(width) * u64::from(height) * u64::from(4 * Renderer::SAMPLES + 4 + color)
+    }
 }
 
 /// The image the scene is drawn into, its format, and the bind group the
@@ -385,7 +458,10 @@ pub(crate) struct Pipelines {
     textures_layout: wgpu::BindGroupLayout,
     own_textures_layouts: [wgpu::BindGroupLayout; crate::MAX_TEXTURES],
     maps_layout: wgpu::BindGroupLayout,
+    /// For shaders that read what's behind: the maps' and its own.
+    behind_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
+    msaa_depth_layout: wgpu::BindGroupLayout,
     sky_light_layout: wgpu::BindGroupLayout,
     sky_image_layout: wgpu::BindGroupLayout,
     bloom_layout: wgpu::BindGroupLayout,
@@ -406,6 +482,11 @@ pub(crate) struct Pipelines {
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
     sky: OnceLock<wgpu::RenderPipeline>,
+    /// What's behind (behind.wgsl): one sample of the solid scene's depth
+    /// copied out, and its colour put back.
+    behind_shader: OnceLock<wgpu::ShaderModule>,
+    copy_depth: OnceLock<wgpu::RenderPipeline>,
+    restore: OnceLock<wgpu::RenderPipeline>,
     /// The last pass, onto a view: for sRGB formats only (a view's).
     finish: OnceLock<wgpu::RenderPipeline>,
     /// The same, adding bloom's glow.
@@ -439,6 +520,11 @@ pub struct Renderer {
     /// Whether each draw's shader moves its vertices, so its shadow is
     /// drawn with it.
     moving: Vec<bool>,
+    /// Whether a see-through draw in view reads what's behind it; whether
+    /// the images for it are kept, and for how many frames none has.
+    behind: bool,
+    behind_kept: bool,
+    behind_idle: u32,
     /// Where the materials' values start among the joints.
     values_at: u32,
     instances: Vec<Instance>,
@@ -563,6 +649,9 @@ impl Renderer {
             skinned: Vec::new(),
             looks: Vec::new(),
             moving: Vec::new(),
+            behind: false,
+            behind_kept: false,
+            behind_idle: 0,
             values_at: 0,
             instances: Vec::new(),
             batches: Vec::new(),
@@ -678,6 +767,7 @@ impl Renderer {
         self.sky_drawn = false;
         self.bloom = None;
         self.ao = None;
+        self.behind = false;
         let mut stats = FrameStats::default();
 
         let Some(camera) = scene.camera else {
@@ -877,6 +967,7 @@ impl Renderer {
             self.skinned.push(skin.is_some());
             let m = &draw.material;
             let mut moving = false;
+            let mut reads_behind = false;
             let look = match &m.shader {
                 None => Some((None, OwnTextures::of(m.textures))),
                 Some(used) => assets.shaders.get(&used.shader).map(|shader| {
@@ -888,6 +979,7 @@ impl Renderer {
                     let own =
                         OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
                     moving = shader.moves;
+                    reads_behind = shader.reads_behind;
                     (Some(used.shader), own)
                 }),
             };
@@ -902,8 +994,12 @@ impl Renderer {
             // As far as its shader can move it, besides.
             let radius = radius + m.shader.map_or(0.0, |used| used.reach.max(0.0));
             // Out of view, it can still shadow what's in it. Blended
-            // surfaces cast none.
-            let cover = Cover::of(&draw.material);
+            // surfaces cast none. One that reads what's behind is drawn
+            // over it, so it's see-through whatever its blending.
+            let cover = match Cover::of(&draw.material) {
+                cover if reads_behind && !cover.blended() => Cover::Transparent,
+                cover => cover,
+            };
             if draw.cast_shadows && !cover.blended() {
                 self.shadow_candidates.push((at, radius, i as u32));
             }
@@ -914,6 +1010,7 @@ impl Renderer {
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
             let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, draw.mesh.0);
             if cover.blended() {
+                self.behind |= reads_behind;
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
             } else {
                 self.order.push((key, i as u32));
@@ -952,6 +1049,15 @@ impl Renderer {
             self.shadow_next[k] = if fewer && self.shadow_idle[k] <= KEEP_UNUSED_MAPS { had } else { want };
         }
         stats.shadow_bytes = ShadowMaps::bytes(self.shadow_next);
+        // What's behind: kept a while too, then let go.
+        self.behind_idle = if self.behind { 0 } else { self.behind_idle.saturating_add(1) };
+        let held = self.targets.as_ref().is_some_and(|t| t.behind.is_some() && (t.width, t.height) == self.size);
+        self.behind_kept = self.behind || held && self.behind_idle <= KEEP_UNUSED_MAPS;
+        stats.behind = self.behind;
+        if self.behind_kept {
+            let format = self.quality.image_format().unwrap_or(self.format);
+            stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format);
+        }
         stats.lines = scene.lines.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
         stats
@@ -1136,8 +1242,24 @@ impl Renderer {
                 }
                 _ => (0, &self.kit.ao.none, &self.kit.ao.sampler),
             };
+            // What's behind, for the shaders that read it, and the bind
+            // group they read it through.
+            if !self.behind_kept {
+                targets.behind = None;
+            } else if targets.behind.is_none() {
+                let format = targets.image.as_ref().map_or(self.format, |i| i.format);
+                targets.behind = Some(BehindImages::new(&self.kit, width, height, format));
+            }
             if let Some(maps) = &mut self.shadow_maps {
                 maps.read_ao(&self.kit.gpu.device, &self.kit.shadows, ao);
+                if let (true, Some(behind)) = (self.behind, &targets.behind) {
+                    maps.read_behind(
+                        &self.kit.gpu.device,
+                        &self.kit.shadows,
+                        ao,
+                        (behind.id, &behind.depth, &behind.color),
+                    );
+                }
             }
         }
         // A new sky's light, worked out before anything reads it.
@@ -1311,9 +1433,103 @@ impl Renderer {
         }
 
         // 1. The scene, into the scene image or straight into the view.
+        // When a see-through surface reads what's behind it, in two: the
+        // solid scene and the sky, its depth kept and its colour resolved
+        // for them to read; then that put back and the see-through drawn
+        // over it.
         let (scene_pipelines, resolve) = match &targets.image {
             Some(image) => (image_pipelines.as_deref().expect("got above"), &image.view),
             None => (&**pipelines, target),
+        };
+        let behind = targets.behind.as_ref().filter(|_| self.behind);
+        let behind_group = behind.and(shadow_maps.behind_bind_group());
+        let sky_lit = self.sky_next.is_some();
+        let ao = self.ao.is_some();
+        let shadowed = self.shadow_maps_drawn != (0, 0);
+        let (solid, blended) = self.batches.split_at(self.blended_from);
+        let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
+            let mut last: Option<&Batch> = None;
+            // The maps bound in group 2, or what's behind as well.
+            let mut reading = false;
+            for batch in batches {
+                // Freed since prepare, by another view's render worker.
+                let (Some(mesh), Some(bind_group)) =
+                    (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
+                else {
+                    continue;
+                };
+                // Its mesh put back without joints since prepare.
+                if batch.skinned && mesh.skin.is_none() {
+                    continue;
+                }
+                // Its shader freed or changed since prepare.
+                let shader = match batch.shader {
+                    None => None,
+                    Some(key) => match shaders.get(&key) {
+                        Some(shader) if shader.textures.len() == batch.textures.count as usize => Some(shader),
+                        _ => continue,
+                    },
+                };
+                let reads = shader.is_some_and(|s| s.reads_behind);
+                if reads != reading {
+                    // Changed since prepare: what it reads isn't there.
+                    let group = if reads { behind_group } else { Some(&shadow_maps.bind_group) };
+                    let Some(group) = group else {
+                        continue;
+                    };
+                    pass.set_bind_group(2, group, &[]);
+                    reading = reads;
+                }
+                let textured = |b: &Batch| b.textures.base != MaterialTextures::NONE;
+                let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned, b.shader);
+                if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
+                    let (cover, faces) = (batch.cover, batch.faces);
+                    let variant = Variant {
+                        cover,
+                        faces,
+                        shadowed,
+                        textured: textured(batch),
+                        sky_lit,
+                        // Blended surfaces aren't in its depth.
+                        ao: ao && !cover.blended(),
+                        skinned: batch.skinned,
+                    };
+                    match shader {
+                        None => pass.set_pipeline(scene_pipelines.forward(variant)),
+                        Some(shader) => pass.set_pipeline(&scene_pipelines.own(shader, variant)),
+                    }
+                }
+                if batch.skinned
+                    && let Some(skin) = &mesh.skin
+                {
+                    pass.set_vertex_buffer(2, skin.buffer.slice(..));
+                }
+                if last.is_none_or(|l| l.textures != batch.textures) {
+                    pass.set_bind_group(1, bind_group, &[]);
+                }
+                last = Some(batch);
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            }
+        };
+        // What the draws read: the frame, the maps and the sky's light.
+        let bind = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch], sky: bool, lines: bool| {
+            if !batches.is_empty() || lines || sky {
+                pass.set_bind_group(0, frame.bind_group, &[]);
+            }
+            if !batches.is_empty() {
+                pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
+                pass.set_bind_group(3, sky_light, &[]);
+                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+            }
+        };
+        let lines = |pass: &mut wgpu::RenderPass<'_>| {
+            if !self.line_vertices.is_empty() {
+                pass.set_pipeline(scene_pipelines.lines());
+                pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
+                pass.draw(0..self.line_vertices.len() as u32, 0..1);
+            }
         };
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -1321,7 +1537,7 @@ impl Renderer {
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &targets.color,
                     depth_slice: None,
-                    resolve_target: Some(resolve),
+                    resolve_target: Some(behind.map_or(resolve, |b| &b.color)),
                     // The multisampled colour is only needed until it's
                     // resolved, so it's never stored. On tile GPUs it never
                     // leaves the chip.
@@ -1334,83 +1550,24 @@ impl Renderer {
                         store: wgpu::StoreOp::Discard,
                     },
                 })],
+                // Kept only for what's behind.
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &targets.depth,
-                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Discard }),
+                    view: behind.map_or(&targets.depth, |b| &b.msaa_depth),
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: if behind.is_some() { wgpu::StoreOp::Store } else { wgpu::StoreOp::Discard },
+                    }),
                     stencil_ops: None,
                 }),
                 timestamp_writes: None,
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            if !self.batches.is_empty() || !self.line_vertices.is_empty() || self.sky_drawn {
-                pass.set_bind_group(0, frame.bind_group, &[]);
-            }
-            if !self.batches.is_empty() {
-                pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
-                pass.set_bind_group(3, sky_light, &[]);
-            }
-            let sky_lit = self.sky_next.is_some();
-            let ao = self.ao.is_some();
-            if !self.batches.is_empty() {
-                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
-            }
-            let shadowed = self.shadow_maps_drawn != (0, 0);
-            let (solid, blended) = self.batches.split_at(self.blended_from);
-            let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
-                let mut last: Option<&Batch> = None;
-                for batch in batches {
-                    // Freed since prepare, by another view's render worker.
-                    let (Some(mesh), Some(bind_group)) =
-                        (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
-                    else {
-                        continue;
-                    };
-                    // Its mesh put back without joints since prepare.
-                    if batch.skinned && mesh.skin.is_none() {
-                        continue;
-                    }
-                    // Its shader freed or changed since prepare.
-                    let shader = match batch.shader {
-                        None => None,
-                        Some(key) => match shaders.get(&key) {
-                            Some(shader) if shader.textures.len() == batch.textures.count as usize => Some(shader),
-                            _ => continue,
-                        },
-                    };
-                    let textured = |b: &Batch| b.textures.base != MaterialTextures::NONE;
-                    let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned, b.shader);
-                    if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
-                        let (cover, faces) = (batch.cover, batch.faces);
-                        let variant = Variant {
-                            cover,
-                            faces,
-                            shadowed,
-                            textured: textured(batch),
-                            sky_lit,
-                            // Blended surfaces aren't in its depth.
-                            ao: ao && !cover.blended(),
-                            skinned: batch.skinned,
-                        };
-                        match shader {
-                            None => pass.set_pipeline(scene_pipelines.forward(variant)),
-                            Some(shader) => pass.set_pipeline(&scene_pipelines.own(shader, variant)),
-                        }
-                    }
-                    if batch.skinned
-                        && let Some(skin) = &mesh.skin
-                    {
-                        pass.set_vertex_buffer(2, skin.buffer.slice(..));
-                    }
-                    if last.is_none_or(|l| l.textures != batch.textures) {
-                        pass.set_bind_group(1, bind_group, &[]);
-                    }
-                    last = Some(batch);
-                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
-                }
+            let (drawn, line_drawn) = match behind {
+                None => (&self.batches[..], !self.line_vertices.is_empty()),
+                Some(_) => (solid, false),
             };
+            bind(&mut pass, drawn, self.sky_drawn, line_drawn);
             draw(&mut pass, solid);
             // After the solid scene, so it's drawn only where nothing else
             // is; before the blended, which show it through them.
@@ -1419,12 +1576,59 @@ impl Renderer {
                 pass.set_bind_group(1, sky_image, &[]);
                 pass.draw(0..3, 0..1);
             }
-            draw(&mut pass, blended);
-            if !self.line_vertices.is_empty() {
-                pass.set_pipeline(scene_pipelines.lines());
-                pass.set_vertex_buffer(0, frame.buffer.slice(frame.lines..));
-                pass.draw(0..self.line_vertices.len() as u32, 0..1);
+            if behind.is_none() {
+                draw(&mut pass, blended);
+                lines(&mut pass);
             }
+        }
+        if let Some(behind) = behind {
+            {
+                let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("scene depth"),
+                    color_attachments: &[],
+                    depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                        view: &behind.depth,
+                        depth_ops: Some(wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(0.0),
+                            store: wgpu::StoreOp::Store,
+                        }),
+                        stencil_ops: None,
+                    }),
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                });
+                pass.set_pipeline(scene_pipelines.copy_depth());
+                pass.set_bind_group(0, &behind.copy, &[]);
+                pass.draw(0..3, 0..1);
+            }
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("scene, see-through"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &targets.color,
+                    depth_slice: None,
+                    resolve_target: Some(resolve),
+                    // Every sample is written, by what's behind put back.
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
+                        store: wgpu::StoreOp::Discard,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &behind.msaa_depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(scene_pipelines.restore());
+            pass.set_bind_group(0, &behind.restore, &[]);
+            pass.draw(0..3, 0..1);
+            bind(&mut pass, blended, false, !self.line_vertices.is_empty());
+            draw(&mut pass, blended);
+            lines(&mut pass);
         }
 
         // 2. Bloom's glow, from the scene image.
@@ -1513,6 +1717,7 @@ impl Renderer {
             depth: make("msaa depth", DEPTH_FORMAT),
             image,
             ao: None,
+            behind: None,
         }
     }
 
@@ -1537,7 +1742,9 @@ impl Pipelines {
             textures_layout: kit.textures.layout.clone(),
             own_textures_layouts: kit.textures.own_layouts.clone(),
             maps_layout: kit.shadows.maps_layout.clone(),
+            behind_layout: kit.shadows.behind_layout.clone(),
             image_layout: kit.image_layout.clone(),
+            msaa_depth_layout: kit.msaa_depth_layout.clone(),
             sky_light_layout: kit.sky.light_layout.clone(),
             sky_image_layout: kit.sky.image_layout.clone(),
             bloom_layout: kit.bloom.layout.clone(),
@@ -1550,6 +1757,9 @@ impl Pipelines {
             own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
+            behind_shader: OnceLock::new(),
+            copy_depth: OnceLock::new(),
+            restore: OnceLock::new(),
             finish: OnceLock::new(),
             finish_bloom: OnceLock::new(),
         }
@@ -1564,7 +1774,7 @@ impl Pipelines {
         let (shader, layout) = self.forward_shader.get_or_init(|| {
             let source =
                 concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"));
-            self.forward_module("forward", source, &self.textures_layout)
+            self.forward_module("forward", source, &self.textures_layout, &self.maps_layout)
         });
         self.make_forward_with(variant, shader, layout, "")
     }
@@ -1584,7 +1794,10 @@ impl Pipelines {
             .lock()
             .unwrap_or_else(PoisonError::into_inner)
             .entry(shader.hash)
-            .or_insert_with(|| self.forward_module(&shader.name, &shader.wgsl, self.own_textures_layout(shader)))
+            .or_insert_with(|| {
+                let maps = if shader.reads_behind { &self.behind_layout } else { &self.maps_layout };
+                self.forward_module(&shader.name, &shader.wgsl, self.own_textures_layout(shader), maps)
+            })
             .clone()
     }
 
@@ -1711,12 +1924,13 @@ impl Pipelines {
     }
 
     /// A forward pass's module from `source`, and its layout with
-    /// `textures` for group 1.
+    /// `textures` for group 1 and `maps` for group 2.
     fn forward_module(
         &self,
         label: &str,
         source: &str,
         textures: &wgpu::BindGroupLayout,
+        maps: &wgpu::BindGroupLayout,
     ) -> (wgpu::ShaderModule, wgpu::PipelineLayout) {
         let device = &self.device;
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -1725,12 +1939,7 @@ impl Pipelines {
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(label),
-            bind_group_layouts: &[
-                Some(&self.frame_layout),
-                Some(textures),
-                Some(&self.maps_layout),
-                Some(&self.sky_light_layout),
-            ],
+            bind_group_layouts: &[Some(&self.frame_layout), Some(textures), Some(maps), Some(&self.sky_light_layout)],
             immediate_size: 0,
         });
         (shader, layout)
@@ -1837,6 +2046,95 @@ impl Pipelines {
             }),
             multiview_mask: None,
             cache: None,
+        })
+    }
+
+    fn behind_shader(&self) -> &wgpu::ShaderModule {
+        self.behind_shader.get_or_init(|| self.device.create_shader_module(wgpu::include_wgsl!("behind.wgsl")))
+    }
+
+    /// Copies one sample of the solid scene's multisampled depth into the
+    /// depth shaders that read what's behind see.
+    fn copy_depth(&self) -> &wgpu::RenderPipeline {
+        self.copy_depth.get_or_init(|| {
+            let shader = self.behind_shader();
+            let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("scene depth"),
+                bind_group_layouts: &[Some(&self.msaa_depth_layout)],
+                immediate_size: 0,
+            });
+            self.maker.make(wgpu::RenderPipelineDescriptor {
+                label: Some("scene depth"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_depth"),
+                    compilation_options: Default::default(),
+                    targets: &[],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
+        })
+    }
+
+    /// Puts the solid scene's resolved colour back into the multisampled
+    /// target, every sample, for the see-through draws to go over. The
+    /// depth is kept, and left as it is.
+    fn restore(&self) -> &wgpu::RenderPipeline {
+        self.restore.get_or_init(|| {
+            let shader = self.behind_shader();
+            let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("what's behind"),
+                bind_group_layouts: &[Some(&self.image_layout)],
+                immediate_size: 0,
+            });
+            self.maker.make(wgpu::RenderPipelineDescriptor {
+                label: Some("what's behind"),
+                layout: Some(&layout),
+                vertex: wgpu::VertexState {
+                    module: shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[],
+                },
+                primitive: Default::default(),
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: Some(false),
+                    depth_compare: Some(wgpu::CompareFunction::Always),
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+                fragment: Some(wgpu::FragmentState {
+                    module: shader,
+                    entry_point: Some("fs_restore"),
+                    compilation_options: Default::default(),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: self.format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                }),
+                multiview_mask: None,
+                cache: None,
+            })
         })
     }
 

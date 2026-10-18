@@ -257,6 +257,9 @@ pub(crate) struct ShadowKit {
     /// The forward pass's group 2: the cascades, the spot maps, and the
     /// sampler.
     pub(crate) maps_layout: wgpu::BindGroupLayout,
+    /// The same, and what's behind for shaders that read it: the solid
+    /// scene's depth and colour.
+    pub(crate) behind_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// How far apart the view matrices are in the frame's buffer: the
     /// device's alignment for dynamic offsets.
@@ -335,36 +338,54 @@ impl ShadowKit {
             },
             count: None,
         };
+        let maps_entries = [
+            map_entry(0),
+            map_entry(1),
+            wgpu::BindGroupLayoutEntry {
+                binding: 2,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
+                count: None,
+            },
+            // And the ambient occlusion (`ao`), which comes and goes
+            // with the view's size, as the maps with its level.
+            wgpu::BindGroupLayoutEntry {
+                binding: 3,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            },
+            wgpu::BindGroupLayoutEntry {
+                binding: 4,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                count: None,
+            },
+        ];
         let maps_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("shadow maps"),
-            entries: &[
-                map_entry(0),
-                map_entry(1),
-                wgpu::BindGroupLayoutEntry {
-                    binding: 2,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
-                    count: None,
-                },
-                // And the ambient occlusion (`ao`), which comes and goes
-                // with the view's size, as the maps with its level.
-                wgpu::BindGroupLayoutEntry {
-                    binding: 3,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Texture {
-                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                        view_dimension: wgpu::TextureViewDimension::D2,
-                        multisampled: false,
-                    },
-                    count: None,
-                },
-                wgpu::BindGroupLayoutEntry {
-                    binding: 4,
-                    visibility: wgpu::ShaderStages::FRAGMENT,
-                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                    count: None,
-                },
-            ],
+            entries: &maps_entries,
+        });
+        let texture = |binding, sample_type| wgpu::BindGroupLayoutEntry {
+            binding,
+            visibility: wgpu::ShaderStages::FRAGMENT,
+            ty: wgpu::BindingType::Texture {
+                sample_type,
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let mut behind_entries = maps_entries.to_vec();
+        behind_entries.push(texture(5, wgpu::TextureSampleType::Depth));
+        behind_entries.push(texture(6, wgpu::TextureSampleType::Float { filterable: true }));
+        let behind_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("shadow maps and what's behind"),
+            entries: &behind_entries,
         });
         // Linear: each compare is smoothed across the four texels around
         // it, so even one tap gives an edge a texel wide, not a staircase.
@@ -394,6 +415,7 @@ impl ShadowKit {
             view_layout,
             own_view_layout,
             maps_layout,
+            behind_layout,
             sampler,
             view_stride: u64::from(device.limits().min_uniform_buffer_offset_alignment).max(64),
             maker: maker.clone(),
@@ -496,7 +518,14 @@ pub(crate) struct ShadowMaps {
     pub(crate) bind_group: wgpu::BindGroup,
     /// Which ambient occlusion the bind group reads ([`Ao`]).
     ao: u64,
+    /// The same with what's behind, for the shaders that read it, and
+    /// which images and occlusion it reads.
+    behind: Option<((u64, u64), wgpu::BindGroup)>,
 }
+
+/// What's behind, as shaders read it: the images' id, the solid scene's
+/// depth and its colour.
+pub(crate) type Behind<'a> = (u64, &'a wgpu::TextureView, &'a wgpu::TextureView);
 
 /// The ambient occlusion the forward pass reads, bound with the maps: its
 /// images' id (0 for the white stand-in), view and sampler.
@@ -508,7 +537,7 @@ impl ShadowMaps {
     pub(crate) fn new(device: &wgpu::Device, kit: &ShadowKit, shape: [(u32, u32); 2], ao: Ao<'_>) -> Self {
         let arrays = [0, 1].map(|k| kit.array(device, k, shape[k]));
         let bind_group = Self::bind(device, kit, &arrays, ao);
-        Self { shape, arrays, bind_group, ao: ao.0 }
+        Self { shape, arrays, bind_group, ao: ao.0, behind: None }
     }
 
     /// Reads `ao` from now on, if it doesn't already.
@@ -519,23 +548,68 @@ impl ShadowMaps {
         }
     }
 
-    fn bind(
+    /// The bind group of the maps, `ao` and what's `behind`, for shaders
+    /// that read it; made again when either changes.
+    pub(crate) fn read_behind(
+        &mut self,
+        device: &wgpu::Device,
+        kit: &ShadowKit,
+        ao: Ao<'_>,
+        behind: Behind<'_>,
+    ) -> &wgpu::BindGroup {
+        let key = (behind.0, ao.0);
+        if self.behind.as_ref().is_none_or(|(k, _)| *k != key) {
+            self.behind = Some((key, Self::bind_with(device, kit, &self.arrays, ao, Some(behind))));
+        }
+        &self.behind.as_ref().expect("made above").1
+    }
+
+    /// The bind group of what's behind, if `read_behind` made one.
+    pub(crate) fn behind_bind_group(&self) -> Option<&wgpu::BindGroup> {
+        self.behind.as_ref().map(|(_, group)| group)
+    }
+
+    fn bind(device: &wgpu::Device, kit: &ShadowKit, arrays: &[Arc<MapArray>; 2], ao: Ao<'_>) -> wgpu::BindGroup {
+        Self::bind_with(device, kit, arrays, ao, None)
+    }
+
+    fn bind_with(
         device: &wgpu::Device,
         kit: &ShadowKit,
         arrays: &[Arc<MapArray>; 2],
         (_, view, sampler): Ao<'_>,
+        behind: Option<Behind<'_>>,
     ) -> wgpu::BindGroup {
-        device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: Some("shadow maps"),
-            layout: &kit.maps_layout,
-            entries: &[
-                wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&arrays[0].array) },
-                wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&arrays[1].array) },
-                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
-                wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view) },
-                wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(sampler) },
-            ],
-        })
+        let maps = [
+            wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&arrays[0].array) },
+            wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(&arrays[1].array) },
+            wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::Sampler(&kit.sampler) },
+            wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(view) },
+            wgpu::BindGroupEntry { binding: 4, resource: wgpu::BindingResource::Sampler(sampler) },
+        ];
+        match behind {
+            None => device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("shadow maps"),
+                layout: &kit.maps_layout,
+                entries: &maps,
+            }),
+            Some((_, depth, color)) => {
+                let [a, b, c, d, e] = maps;
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("shadow maps and what's behind"),
+                    layout: &kit.behind_layout,
+                    entries: &[
+                        a,
+                        b,
+                        c,
+                        d,
+                        e,
+                        wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::TextureView(depth) },
+                        wgpu::BindGroupEntry { binding: 6, resource: wgpu::BindingResource::TextureView(color) },
+                    ],
+                })
+            }
+        }
     }
 
     /// The view to draw cascade `i` into, or spot map `i`.

@@ -71,6 +71,64 @@ fn frame_delta() -> f32 {
     return frame.time.y;
 }
 
+// What's behind a see-through surface: the solid scene and the sky, as
+// drawn before anything see-through. A shader that reads them is drawn
+// see-through, and a frame it's in keeps them; other frames pay nothing.
+@group(2) @binding(5) var fy_scene_depth: texture_depth_2d;
+@group(2) @binding(6) var fy_scene_color: texture_2d<f32>;
+
+// How far along the view `p` is from the camera, in metres: what
+// `scene_depth` says of the scene, for a point of the shader's own.
+fn view_depth(p: vec3<f32>) -> f32 {
+    return dot(p - frame.cells_eye.xyz, frame.cells_forward.xyz);
+}
+
+// How far along the view the solid scene is at `screen` (0 to 1 across
+// and down, as `SurfaceInput.screen`), in metres: the camera's far end
+// where only the sky is.
+fn scene_depth(screen: vec2<f32>) -> f32 {
+    let size = vec2<i32>(textureDimensions(fy_scene_depth));
+    let pixel = clamp(vec2<i32>(screen * vec2<f32>(size)), vec2<i32>(0), size - 1);
+    let depth = textureLoad(fy_scene_depth, pixel, 0);
+    let seen = frame.sky.inverse_view_proj * vec4<f32>(screen.x * 2.0 - 1.0, 1.0 - screen.y * 2.0, depth, 1.0);
+    return view_depth(seen.xyz / seen.w);
+}
+
+// How far behind this point the solid scene is, along the view, in
+// metres: 0 where the surface meets it, so shallow water and soft edges.
+fn depth_behind(in: SurfaceInput) -> f32 {
+    return max(scene_depth(in.screen) - view_depth(in.position), 0.0);
+}
+
+// The solid scene's colour at `screen`, smoothly, as light: what the
+// surface returns is lit and tone mapped like anything else, so returned
+// as it is, it shows the scene unchanged. Move `screen` a little to bend
+// what's behind.
+fn scene_color(screen: vec2<f32>) -> vec3<f32> {
+    return fy_untonemap(textureSampleLevel(fy_scene_color, ao_sampler, screen, 0.0).rgb);
+}
+
+// neutral.wgsl's `untonemap`: the scene is kept tone mapped.
+fn fy_untonemap(mapped: vec3<f32>) -> vec3<f32> {
+    let start = 0.76;
+    let desaturation = 0.15;
+    var color = max(mapped, vec3<f32>(0.0));
+    let top = max(color.r, max(color.g, color.b));
+    if top >= start {
+        let d = 1.0 - start;
+        let new_peak = min(top, 0.9995);
+        let peak = d * d / (1.0 - new_peak) - d + start;
+        let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
+        color = max(color - new_peak * g, vec3<f32>(0.0)) / (1.0 - g) * (peak / new_peak);
+    }
+    let y = min(color.r, min(color.g, color.b));
+    var offset = 0.04;
+    if y < 0.04 {
+        offset = sqrt(y) / 2.5 - y;
+    }
+    return color + offset;
+}
+
 // `t` at `uv`, smoothly, repeating past 0 and 1.
 fn sample(t: texture_2d<f32>, uv: vec2<f32>) -> vec4<f32> {
     return textureSample(t, material_sampler, uv);

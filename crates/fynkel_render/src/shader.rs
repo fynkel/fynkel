@@ -85,6 +85,10 @@ pub struct CustomShader {
     /// moves its vertices: its shadows and ambient occlusion's depth are
     /// then drawn with it too.
     pub moves: bool,
+    /// Whether it reads what's behind it (`scene_depth`, `scene_color`):
+    /// its surfaces are then drawn see-through, after the solid scene,
+    /// and a frame they're in keeps that scene's depth and colour.
+    pub reads_behind: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
     /// Of `wgsl`: pipelines made from the same code are shared.
@@ -294,6 +298,14 @@ impl CustomShader {
             }
         }
 
+        // What's behind is there only for what's drawn over it.
+        let (at, _) =
+            module.entry_points.iter().enumerate().find(|(_, e)| e.name == "fs_transparent").expect("forward.wgsl's");
+        let uses = info.get_entry_point(at);
+        let reads_behind = module.global_variables.iter().any(|(handle, global)| {
+            matches!(global.name.as_deref(), Some("fy_scene_depth" | "fy_scene_color")) && !uses[handle].is_empty()
+        });
+
         let wgsl: Arc<str> = joined.source.into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         wgsl.hash(&mut hasher);
@@ -305,6 +317,7 @@ impl CustomShader {
             textures,
             own,
             moves,
+            reads_behind,
             wgsl,
             hash: hasher.finish(),
         })
