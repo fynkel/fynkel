@@ -95,6 +95,51 @@ void main() {
     expect(() => MeshRenderer(Mesh.cube(), Material()).set('boost', 1), throwsStateError);
   });
 
+  test('a shader that moves its vertices moves its object, and its reach keeps it in view', () {
+    final scene = stage1();
+    final world = scene.world;
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    const source = '''
+struct Values { by: vec3<f32> }
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    v.position += values.by;
+    return v;
+}
+
+fn unlit(in: SurfaceInput) -> vec4<f32> {
+    return vec4<f32>(1.0, 0.0, 0.0, 1.0);
+}
+''';
+    final shader = Shader(source, name: 'shift.wgsl');
+    expect(shader.movesVertices, isTrue);
+    expect(Shader(_tint).movesVertices, isFalse);
+    final material = Material(shader: shader, reach: 0.5);
+    expect(material.reach, 0.5);
+    expect(material.copy().reach, 0.5);
+    expect(() => Material(reach: -1), throwsRangeError);
+    expect(() => material.reach = double.nan, throwsRangeError);
+    final cube = scene.cube;
+    final renderer = cube.get<MeshRenderer>()!..material = material;
+    expect(_centre(view), _near([255, 0, 0]));
+
+    // Moved well away, the middle shows what's behind.
+    material.set('by', Vec3(0, 50, 0));
+    expect(_centre(view), isNot(_near([255, 0, 0])));
+
+    // Placed away and moved back: in view only with a reach that says so.
+    final at = cube.position;
+    cube.position = at + Vec3(0, 50, 0);
+    material.set('by', Vec3(0, -50, 0));
+    expect(_centre(view), isNot(_near([255, 0, 0])), reason: 'culled where its mesh is');
+    material.reach = 51;
+    expect(_centre(view), _near([255, 0, 0]));
+    expect(renderer.material!.reach, 51);
+  });
+
   test('a shader loaded as an asset takes its new code when the world reloads its shaders', () async {
     var code = 'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(1.0, 0.0, 0.0, 1.0);\n}\n';
     final world = World(source: (name) async => Uint8List.fromList(utf8.encode(code)));

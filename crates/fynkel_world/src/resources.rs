@@ -61,6 +61,10 @@ pub struct Material {
     /// The textures the shader declares, in the order it declares them.
     /// Past its count they're unused.
     pub shader_textures: [Option<TextureId>; MAX_SHADER_TEXTURES],
+    /// How far, in metres, its shader's `vertex` can move a vertex from
+    /// where the mesh has it: the object's bounds grow by this much, so
+    /// it isn't culled while what moved is still in view.
+    pub reach: f32,
 }
 
 impl Material {
@@ -82,6 +86,7 @@ impl Material {
         emissive_texture: None,
         shader: None,
         shader_textures: [None; MAX_SHADER_TEXTURES],
+        reach: 0.0,
     };
 
     pub const fn color(base_color: Color) -> Self {
@@ -155,6 +160,7 @@ impl Describe for Material {
             Field::new("shader_texture_1", FieldKind::Texture, Value::Texture(None)),
             Field::new("shader_texture_2", FieldKind::Texture, Value::Texture(None)),
             Field::new("shader_texture_3", FieldKind::Texture, Value::Texture(None)),
+            Field::new("reach", FieldKind::F32, Value::F32(D.reach)).range(0.0, 1e4),
         ];
         FIELDS
     }
@@ -173,6 +179,7 @@ impl Describe for Material {
             9..=13 => Value::Texture(self.textures()[index - 9]),
             14 => Value::Enum(self.blend as u32),
             15..=18 => Value::Texture(self.shader_textures[index - 15]),
+            19 => Value::F32(self.reach),
             _ => return None,
         })
     }
@@ -197,6 +204,7 @@ impl Describe for Material {
             (14, Value::Enum(1)) => self.blend = Blend::Transparent,
             (14, Value::Enum(2)) => self.blend = Blend::Additive,
             (15..=18, Value::Texture(t)) => self.shader_textures[index - 15] = t,
+            (19, Value::F32(v)) => self.reach = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

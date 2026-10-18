@@ -9,6 +9,10 @@
 //! (prepare, encode, submit, wait for the GPU), best of 50 frames after 10
 //! warm-up frames. Then what a new sky costs, once: the whole frame that
 //! works out its light.
+//!
+//! With `-- grass`, a field of 2,000 blades swaying in a shader's `vertex`
+//! (stage 10 phase 2) against the same field standing still in the
+//! built-in material, with shadows, bloom and AO.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -86,10 +90,63 @@ fn image(brightness: f32) -> SkyKind {
     SkyKind::Image { image: Arc::new(SkyImage::from_rgb(w, h, &rgb).unwrap()), intensity: 1.0, rotation: 0.0 }
 }
 
+/// A shader's grass, as the lab's.
+const GRASS: &str = "struct Values { wind: f32 }
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    let up = saturate(in.local.y + 0.5);
+    let t = frame_time();
+    let gust = sin(t * 0.9 - in.origin.x * 0.35) * 0.5 + 0.5;
+    let sway = sin(t * 2.3 + in.origin.x * 1.7 + in.origin.z * 1.3) * 0.35 + gust * 0.65;
+    let bend = sway * values.wind * up * up;
+    v.position.x += bend;
+    v.position.z += bend * 0.3;
+    return v;
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = standard(in);
+    s.color *= mix(0.3, 1.0, saturate(in.position.y * 2.0));
+    return s;
+}
+";
+
+/// 2,000 thin blades over 4 × 4 m, swaying (`moving`) or standing.
+fn grass(moving: bool, t: f32) -> RenderScene {
+    let mut camera = CameraView::looking_at(Vec3::new(0.0, 2.5, 4.5), Vec3::new(0.0, 0.2, 0.0));
+    camera.bloom = Some(Bloom::DEFAULT);
+    camera.ambient_occlusion = Some(AmbientOcclusion::DEFAULT);
+    let shader = moving.then_some(ShaderUse { shader: ShaderKey(1), values: 0, textures: [None; 4], reach: 0.3 });
+    let blade = PbrMaterial { base_color: [0.4, 0.7, 0.2, 1.0], roughness: 0.8, shader, ..PbrMaterial::DEFAULT };
+    let mut draws = vec![Draw::new(MeshKey(1), Mat4::from_scale(Vec3::new(12.0, 0.01, 12.0)), PbrMaterial::DEFAULT)];
+    let mut seed = 7u32;
+    let mut next = || {
+        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
+        (seed >> 8) as f32 / (1 << 24) as f32
+    };
+    for _ in 0..2000 {
+        let at = Vec3::new(next() * 4.0 - 2.0, 0.25, next() * 4.0 - 2.0);
+        let model =
+            Mat4::from_scale_rotation_translation(Vec3::new(0.03, 0.5, 0.01), Quat::from_rotation_y(next() * 3.0), at);
+        draws.push(Draw::new(MeshKey(1), model, blade));
+    }
+    RenderScene {
+        camera: Some(camera),
+        lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE).with_shadows(true)],
+        time: [t, 1.0 / 60.0],
+        shader_values: vec![[[0.25, 0.0, 0.0, 0.0], [0.0; 4], [0.0; 4]]],
+        ambient: Vec3::splat(0.15),
+        draws,
+        ..RenderScene::default()
+    }
+}
+
 fn main() {
     let gpu = Gpu::headless().expect("a GPU");
     println!("adapter: {}", gpu.adapter.get_info().name);
     let format = wgpu::TextureFormat::Bgra8UnormSrgb;
+    let grass_only = std::env::args().any(|a| a == "grass");
     // 720p, and an iPhone Pro Max's whole screen.
     for (width, height) in [(1280, 720), (2796, 1290)] {
         let target = gpu.device.create_texture(&wgpu::TextureDescriptor {
@@ -103,6 +160,44 @@ fn main() {
             view_formats: &[],
         });
         let view = target.create_view(&Default::default());
+
+        if grass_only {
+            println!("{width}x{height}, 4x MSAA, best of 50: 2,000 grass blades, shadows, bloom and AO");
+            for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {
+                let mut renderer = Renderer::new(&gpu, format);
+                renderer.upload_mesh(MeshKey(1), &MeshData::cube());
+                renderer
+                    .upload_shader(ShaderKey(1), Arc::new(CustomShader::new("grass.wgsl", GRASS).expect("compiles")));
+                for moving in [false, true] {
+                    let (mut prepare, mut frame) = (Duration::MAX, Duration::MAX);
+                    for f in 0..60 {
+                        let s = RenderScene { quality: Some(quality.quality()), ..grass(moving, f as f32 / 60.0) };
+                        let start = Instant::now();
+                        let stats = renderer.prepare(&s, width, height);
+                        let prepared = start.elapsed();
+                        let mut encoder = gpu.device.create_command_encoder(&Default::default());
+                        renderer.encode(&mut encoder, &view);
+                        gpu.queue.submit([encoder.finish()]);
+                        gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                        let total = start.elapsed();
+                        // The floor and the blades: one call standing (the same
+                        // mesh and material), two swaying.
+                        assert_eq!(stats.draw_calls, 1 + u32::from(moving));
+                        if f >= 10 {
+                            prepare = prepare.min(prepared);
+                            frame = frame.min(total);
+                        }
+                    }
+                    println!(
+                        "  {quality:?} {}: prepare {:>7.3} ms, whole frame {:>7.3} ms",
+                        if moving { "swaying (own shader)" } else { "standing (built-in) " },
+                        prepare.as_secs_f64() * 1e3,
+                        frame.as_secs_f64() * 1e3
+                    );
+                }
+            }
+            continue;
+        }
 
         println!("{width}x{height}, 4x MSAA, best of 50:");
         for quality in [QualityLevel::Low, QualityLevel::Medium, QualityLevel::High] {

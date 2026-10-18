@@ -80,7 +80,7 @@ fn shader(r: &mut Renderer, key: ShaderKey, name: &str, source: &str) -> Arc<Cus
 /// Every material of `scene` drawn with `shader` instead, its values at 0.
 fn with_shader(mut scene: RenderScene, shader: ShaderKey) -> RenderScene {
     for draw in &mut scene.draws {
-        draw.material.shader = Some(ShaderUse { shader, values: 0, textures: [None; MAX_TEXTURES] });
+        draw.material.shader = Some(ShaderUse { shader, values: 0, textures: [None; MAX_TEXTURES], reach: 0.0 });
     }
     scene
 }
@@ -157,7 +157,7 @@ fn values_textures_an_objects_numbers_and_time_reach_a_shader() {
         scene.draws.truncate(1);
         scene.shader_values = values(&lava, &[("hot", &[1.0, 0.35, 0.05, 1.0]), ("scale", &[6.0]), ("flow", &[0.4])]);
         let lava = PbrMaterial {
-            shader: Some(ShaderUse { shader: ShaderKey(1), values: 0, textures: [None; MAX_TEXTURES] }),
+            shader: Some(ShaderUse { shader: ShaderKey(1), values: 0, textures: [None; MAX_TEXTURES], reach: 0.0 }),
             ..material(0xFFFFFFFF, 0.9)
         };
         scene.draws.push(Draw::new(
@@ -166,7 +166,12 @@ fn values_textures_an_objects_numbers_and_time_reach_a_shader() {
             lava,
         ));
         let flashing = PbrMaterial {
-            shader: Some(ShaderUse { shader: ShaderKey(2), values: 0, textures: [Some(CHECKER), None, None, None] }),
+            shader: Some(ShaderUse {
+                shader: ShaderKey(2),
+                values: 0,
+                textures: [Some(CHECKER), None, None, None],
+                reach: 0.0,
+            }),
             ..material(0xFFFFFFFF, 0.5)
         };
         for (x, own) in [(-1.3, 0.0), (1.3, 1.0)] {
@@ -176,7 +181,7 @@ fn values_textures_an_objects_numbers_and_time_reach_a_shader() {
             });
         }
         let hologram = PbrMaterial {
-            shader: Some(ShaderUse { shader: ShaderKey(3), values: 0, textures: [None; MAX_TEXTURES] }),
+            shader: Some(ShaderUse { shader: ShaderKey(3), values: 0, textures: [None; MAX_TEXTURES], reach: 0.0 }),
             blend: Blend::Additive,
             ..material(0xFF40C0FF, 0.5)
         };
@@ -254,7 +259,8 @@ fn a_cut_out_shaders_shadow_is_cut_where_it_is() {
     let own = |scene: RenderScene, key: ShaderKey| {
         let mut scene = scene;
         for draw in &mut scene.draws[1..] {
-            draw.material.shader = Some(ShaderUse { shader: key, values: 0, textures: [None; MAX_TEXTURES] });
+            draw.material.shader =
+                Some(ShaderUse { shader: key, values: 0, textures: [None; MAX_TEXTURES], reach: 0.0 });
         }
         scene
     };

@@ -13,7 +13,9 @@ part of 'world.dart';
 /// What it declares a material sets by name ([Material.set]): its
 /// `struct Values` and its textures (`var picture: color_texture;`). Its
 /// `struct PerObject`, up to four numbers, each object sets for itself
-/// ([MeshRenderer.set]), as a hit flash. A shader can be used in any
+/// ([MeshRenderer.set]), as a hit flash. A `vertex` function moves its
+/// mesh's vertices, as grass in the wind ([movesVertices]); the material
+/// then says how far with [Material.reach]. A shader can be used in any
 /// number of worlds; like a [Mesh], a world lets it go once nothing reaches
 /// it, and [dispose] frees it sooner.
 final class Shader implements Finalizable {
@@ -78,6 +80,11 @@ final class Shader implements Finalizable {
   /// The names of its `PerObject` numbers, which [MeshRenderer.set] sets,
   /// in order.
   List<String> get perObject => List.unmodifiable(_layout.own);
+
+  /// Whether it has a `vertex`, which moves its mesh's vertices: grass in
+  /// the wind, waves. Its shadow moves with it. Give its materials a
+  /// [Material.reach].
+  bool get movesVertices => _layout.moves;
 
   /// Whether [dispose] was called; a disposed shader can't be used in a
   /// material (a StateError).
@@ -151,7 +158,7 @@ final class ShaderError implements Exception {
 
 /// What a shader takes, as `fy_shader_describe` tells it.
 final class _ShaderLayout {
-  _ShaderLayout(this.lit, this.size, this.values, this.textures, this.own);
+  _ShaderLayout(this.lit, this.size, this.values, this.textures, this.own, {this.moves = false});
 
   factory _ShaderLayout.parse(String text) {
     var lit = true;
@@ -159,6 +166,7 @@ final class _ShaderLayout {
     final values = <_ShaderValue>[];
     final textures = <({String name, bool srgb})>[];
     final own = <String>[];
+    var moves = false;
     for (final line in const LineSplitter().convert(text)) {
       final words = line.split(' ');
       switch (words) {
@@ -174,9 +182,11 @@ final class _ShaderLayout {
           textures.add((name: name, srgb: space == 'srgb'));
         case ['own', final name]:
           own.add(name);
+        case ['moves']:
+          moves = true;
       }
     }
-    return _ShaderLayout(lit, size, values, textures, own);
+    return _ShaderLayout(lit, size, values, textures, own, moves: moves);
   }
 
   final bool lit;
@@ -186,6 +196,7 @@ final class _ShaderLayout {
   final List<_ShaderValue> values;
   final List<({String name, bool srgb})> textures;
   final List<String> own;
+  final bool moves;
 
   _ShaderValue? value(String name) {
     for (final v in values) {

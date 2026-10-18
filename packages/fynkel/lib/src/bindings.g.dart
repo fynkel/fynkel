@@ -599,7 +599,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 33;
+const int FY_ABI_VERSION = 34;
 
 const int FY_APPLE_MORE = 2;
 
@@ -882,6 +882,9 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Array.multi([4])
   external ffi.Array<ffi.Uint64> shader_textures;
+
+  @ffi.Float()
+  external double reach;
 }
 
 final class FyMesh extends ffi.Opaque {}

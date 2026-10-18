@@ -34,6 +34,9 @@ pub struct ShaderUse {
     /// The first of its values' 48-byte blocks.
     pub values: u32,
     pub textures: [Option<TextureKey>; crate::MAX_TEXTURES],
+    /// How far, in metres, its `vertex` can move a vertex from where the
+    /// mesh has it: the draw's bounds grow by this much for culling.
+    pub reach: f32,
 }
 
 /// How a texture's values are read.

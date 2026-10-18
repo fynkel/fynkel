@@ -149,7 +149,12 @@ gives today's goldens unchanged.
 - **`fn vertex(in: VertexInput) -> VertexInput`** in the same file:
   moves the position and normal, in the object's space or the world's,
   after the skin. It runs in the scene, the shadow pass and AO's depth,
-  so the shadow sways with the grass.
+  so the shadow sways with the grass. As built: `position` and `normal`
+  are the world's; moving `local` moves the vertex in the mesh's own
+  space, turned, scaled and bent with the object (the Knight's cape);
+  `origin` is the object's place, for each copy's own sway. It reads
+  values, `PerObject` and the time, not textures (the depth passes have
+  none to give it; the shader is refused saying so).
 - **How far it moves**: the material says (`Material(…, reach: 0.3)`),
   and the engine grows the object's bounds by that much for culling.
   Without it, a moved vertex can be cut off at the screen's edge.
@@ -271,7 +276,7 @@ say otherwise.
 ## 5. Checklist
 
 - [x] Phase 1: surfaces
-- [ ] Phase 2: movement
+- [x] Phase 2: movement (Mac: 2,000 swaying blades add about 0.1 ms a frame at every level; phones in phase 5)
 - [ ] Phase 3: what's behind
 - [ ] Phase 4: whole styles
 - [ ] Phase 5: games, the measure, the guide and the report

@@ -239,7 +239,7 @@ impl Extract {
                 }
                 let values = scene.shader_values.len() as u32;
                 push_values(&mut scene.shader_values, world.material_values(id).unwrap_or_default());
-                m.shader = Some(ShaderUse { shader: shader_key(shader), values, textures });
+                m.shader = Some(ShaderUse { shader: shader_key(shader), values, textures, reach: material.reach });
             }
             self.materials.insert(id, m);
         }

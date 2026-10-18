@@ -198,18 +198,20 @@ struct VertexOut {
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
-    return vertex(in, array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2));
+    return place(in, array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2));
 }
 
 // A skinned mesh's: placed by its joints (skin.wgsl) rather than its
 // model matrix.
 @vertex
 fn vs_skinned(in: VertexIn, skin: SkinIn) -> VertexOut {
-    return vertex(in, skin_rows(skin, u32(in.params.w)));
+    return place(in, skin_rows(skin, u32(in.params.w)));
 }
 
-// A vertex placed by `model`, a matrix's three rows.
-fn vertex(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
+// A vertex placed by `model`, a matrix's three rows, then moved by the
+// material's shader if it has a `vertex` (`fy_moved`: standard.wgsl's
+// leaves it where it is).
+fn place(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     let p = vec4<f32>(in.position, 1.0);
     let world = vec4<f32>(dot(model[0], p), dot(model[1], p), dot(model[2], p), 1.0);
     // The upper 3×3's columns.
@@ -223,7 +225,6 @@ fn vertex(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     let cofactor = mat3x3<f32>(cross(c1, c2), cross(c2, c0), cross(c0, c1));
     let mirror = select(1.0, -1.0, dot(c0, cross(c1, c2)) < 0.0);
     var out: VertexOut;
-    out.clip = frame.view_proj * world;
     out.world_position = world.xyz;
     out.normal = cofactor * in.normal * mirror;
     // A tangent lies along the surface, so it turns with the model matrix
@@ -235,6 +236,8 @@ fn vertex(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     out.emissive = in.emissive;
     out.own = in.own;
     out.values = in.values;
+    out = fy_moved(in, model, out);
+    out.clip = frame.view_proj * vec4<f32>(out.world_position, 1.0);
     return out;
 }
 
