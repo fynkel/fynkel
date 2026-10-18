@@ -78,7 +78,8 @@ final class Shader implements Finalizable {
   /// The names of its `Values`, which [Material.set] sets, in order.
   List<String> get values => [for (final v in _layout.values) v.name];
 
-  /// The names of its textures, which [Material.set] sets too, in order.
+  /// The names of its textures, which [Material.set] (or an effect's
+  /// [ScreenEffect.set]) sets too, in order.
   List<String> get textures => [for (final t in _layout.textures) t.name];
 
   /// The names of its `PerObject` numbers, which [MeshRenderer.set] sets,
@@ -94,7 +95,9 @@ final class Shader implements Finalizable {
   /// `scene_color`): water with a foaming shore, glass that bends what's
   /// behind it. Its materials are drawn see-through, over the solid
   /// scene, whatever their [Material.blending]. A frame with one in view
-  /// keeps the scene's depth and colour; other frames pay nothing.
+  /// keeps the scene's depth and colour; other frames pay nothing. An
+  /// effect's: whether it reads the solid scene's depth (`scene_depth`,
+  /// `scene_position`), which a frame it runs in keeps.
   bool get readsBehind => _layout.behind;
 
   /// Whether it has a `light`, which lights it in place of the engine,
@@ -185,10 +188,12 @@ final class ScreenEffect {
   /// The cameras it's in, to send it to again when it changes.
   final _cameras = <WeakReference<Camera>>[];
 
-  /// Sets its shader's value [name], as [Material.set] does: a number, a
-  /// [Vec2], a [Vec3], a [Color] or a list of numbers. Every camera with
-  /// it shows the change from the next frame. Throws an [ArgumentError]
-  /// for a name the shader doesn't have or a value that isn't its kind.
+  /// Sets its shader's value or texture [name], as [Material.set] does: a
+  /// number, a [Vec2], a [Vec3], a [Color], a list of numbers, a list of
+  /// those for an array, or a [Texture2D] (a colour grade's table, a
+  /// noise). Every camera with it
+  /// shows the change from the next frame. Throws an [ArgumentError] for a
+  /// name the shader doesn't have or a value that isn't its kind.
   void set(String name, Object value) {
     _setValue(name, value);
     _changed();
@@ -199,12 +204,23 @@ final class ScreenEffect {
 
   void _setValue(String name, Object value) {
     final layout = shader._layout;
-    final v = layout.value(name);
-    if (v == null || value is Texture2D) {
-      throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
+    if (value is Texture2D) {
+      if (layout.texture(name) < 0) {
+        throw ArgumentError.value(name, 'name', 'is no texture of $shader, which has: ${layout.names}');
+      }
+      _values[name] = Material._usable(value)!;
+      return;
     }
-    v.parse(value, shader);
+    final v = layout.value(name);
+    if (v == null) throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
+    v.parseAll(value, shader);
     _values[name] = value;
+  }
+
+  /// The texture its shader's texture [index] is given, or null.
+  Texture2D? _texture(int index) {
+    final textures = shader._layout.textures;
+    return index < textures.length ? _values[textures[index].name] as Texture2D? : null;
   }
 
   /// Lays its values out for its shader as it is now and sends them to
@@ -287,6 +303,17 @@ final class _ShaderLayout {
           size = int.parse(bytes);
         case ['value', final name, final kind, final parts, final offset]:
           values.add(_ShaderValue(name, kind, int.parse(parts), int.parse(offset)));
+        case ['value', final name, final kind, final parts, final offset, final count, final stride]:
+          values.add(
+            _ShaderValue(
+              name,
+              kind,
+              int.parse(parts),
+              int.parse(offset),
+              count: int.parse(count),
+              stride: int.parse(stride),
+            ),
+          );
         case ['texture', final name, final space]:
           textures.add((name: name, srgb: space == 'srgb'));
         case ['own', final name]:
@@ -344,21 +371,23 @@ final class _ShaderLayout {
     for (final MapEntry(key: name, :value) in given.entries) {
       final v = this.value(name);
       if (v == null || value is Texture2D) continue;
-      final List<num> parts;
+      final List<List<num>> elements;
       try {
-        parts = v.parse(value, shader);
+        elements = v.parseAll(value, shader);
       } on ArgumentError {
         continue;
       }
-      for (final (i, n) in parts.indexed) {
-        final at = v.offset + i * 4;
-        switch (v.kind) {
-          case 'f32':
-            data.setFloat32(at, n.toDouble(), Endian.little);
-          case 'i32':
-            data.setInt32(at, n.toInt(), Endian.little);
-          default:
-            data.setUint32(at, n.toInt(), Endian.little);
+      for (final (e, parts) in elements.indexed) {
+        for (final (i, n) in parts.indexed) {
+          final at = v.offset + e * v.stride + i * 4;
+          switch (v.kind) {
+            case 'f32':
+              data.setFloat32(at, n.toDouble(), Endian.little);
+            case 'i32':
+              data.setInt32(at, n.toInt(), Endian.little);
+            default:
+              data.setUint32(at, n.toInt(), Endian.little);
+          }
         }
       }
     }
@@ -373,22 +402,44 @@ final class _ShaderLayout {
 }
 
 /// One of a shader's `Values`: `f32`, `i32` or `u32`, of [parts] (1 for a
-/// number, 2 to 4 for a vector), at [offset] bytes.
+/// number, 2 to 4 for a vector), at [offset] bytes; or an array of [count]
+/// of them, [stride] bytes apart.
 final class _ShaderValue {
-  _ShaderValue(this.name, this.kind, this.parts, this.offset);
+  _ShaderValue(this.name, this.kind, this.parts, this.offset, {this.count = 1, int? stride})
+    : stride = stride ?? parts * 4;
 
   final String name;
   final String kind;
   final int parts;
   final int offset;
+  final int count;
+  final int stride;
 
-  /// [value] as its parts, or what's wrong with it.
+  bool get isArray => count > 1;
+
+  String get _type {
+    final one = parts == 1 ? kind : 'vec$parts<$kind>';
+    return isArray ? 'array<$one, $count>' : one;
+  }
+
+  /// [value] as each of its elements' parts: one for a value, up to
+  /// [count] for an array (a list of them; those it leaves out are 0).
+  List<List<num>> parseAll(Object value, Shader shader) {
+    if (!isArray) return [parse(value, shader)];
+    if (value is! List || value.length > count) {
+      throw ArgumentError.value(
+        value,
+        name,
+        "is no value for $shader's $name, which is $_type: a list of up to $count",
+      );
+    }
+    return [for (final element in value) parse(element as Object, shader)];
+  }
+
+  /// [value] as its parts, or what's wrong with it: one element's, for an
+  /// array.
   List<num> parse(Object value, Shader shader) {
-    List<num> wrong() => throw ArgumentError.value(
-      value,
-      name,
-      "is no value for $shader's $name, which is ${parts == 1 ? kind : 'vec$parts<$kind>'}",
-    );
+    List<num> wrong() => throw ArgumentError.value(value, name, "is no value for $shader's $name, which is $_type");
     final List<num> got = switch (value) {
       num n => [n],
       Vec2 v => [v.x, v.y],

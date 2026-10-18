@@ -787,12 +787,14 @@ pub struct RenderScene {
     pub effects: Vec<ScreenEffect>,
 }
 
-/// A screen effect: its shader (an effect's) and the first of its values'
-/// blocks in [`RenderScene::shader_values`].
+/// A screen effect: its shader (an effect's), the first of its values'
+/// blocks in [`RenderScene::shader_values`], and its textures, in the
+/// order its shader declares them (one not given reads white).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ScreenEffect {
     pub shader: ShaderKey,
     pub values: u32,
+    pub textures: [Option<TextureKey>; crate::MAX_TEXTURES],
 }
 
 impl RenderScene {

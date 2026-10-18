@@ -293,10 +293,86 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     expect(() => red.set('nope', 1.0), throwsArgumentError);
     expect(() => ScreenEffect(invert).set('gain', 1.0), throwsArgumentError);
 
+    // One with a texture of its own: red, so only the cube's red is kept.
+    final tinted = Shader(
+      'var tint: color_texture;\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return sample(tint, in.uv) * picture(in.uv);\n}\n',
+      name: 'tinted.wgsl',
+    );
+    expect(tinted.textures, ['tint']);
+    final redTexture = Texture2D.rgba(1, 1, Uint8List.fromList([255, 0, 0, 255]));
+    final tint = ScreenEffect(tinted, values: {'tint': redTexture});
+    expect(tint.value('tint'), same(redTexture));
+    camera.effects = [tint];
+    expect(_centre(view), _near([before[0], 0, 0]));
+    expect(() => redTexture.dispose(), throwsStateError, reason: 'an effect on a camera uses it');
+    tint.set('tint', Texture2D.rgba(1, 1, Uint8List.fromList([0, 255, 0, 255])));
+    expect(_centre(view), _near([0, before[1], 0]), reason: 'a texture set shows too');
+    expect(() => tint.set('nope', redTexture), throwsArgumentError);
+    camera.effects = [];
+    redTexture.dispose();
+
     // An effect goes with its camera, so its shader can be freed.
     camera.effects = [ScreenEffect(invert)];
     camera.gameObject.destroy();
     world.update(0.016);
     invert.dispose();
+  });
+
+  test('an array of values reaches the shader, each in its place', () {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    final picked = Shader(
+      'struct Values { colors: array<vec4<f32>, 4>, weights: array<f32, 3>, pick: i32 }\n'
+      'fn unlit(in: SurfaceInput) -> vec4<f32> {\n'
+      '    return values.colors[values.pick] * values.weights[values.pick % 3];\n}\n',
+      name: 'picked.wgsl',
+    );
+    expect(picked.values, ['colors', 'weights', 'pick']);
+    final material = Material(
+      shader: picked,
+      values: {
+        'colors': [const Color(0xFFFF0000), const Color(0xFF00FF00), const Color(0xFF0000FF)],
+        'weights': [1.0, 1.0, 1.0],
+        'pick': 1,
+      },
+    );
+    scene.cube.get<MeshRenderer>()!.material = material;
+    final green = _centre(view);
+    expect(green[1], greaterThan(200));
+    expect(green[0] + green[2], lessThan(80));
+    material.set('pick', 2);
+    expect(_centre(view)[2], greaterThan(200), reason: 'the third colour');
+    material.set('pick', 3);
+    expect(_centre(view), [0, 0, 0], reason: 'the fourth, left out, is 0');
+    material.set('weights', [1.0, 1.0, 0.0]);
+    material.set('pick', 2);
+    expect(_centre(view), [0, 0, 0], reason: 'weighed by the third weight');
+
+    expect(() => material.set('weights', [1.0, 1.0, 1.0, 1.0]), throwsArgumentError, reason: 'longer than the array');
+    expect(() => material.set('colors', const Color(0xFFFF0000)), throwsArgumentError, reason: 'an array takes a list');
+    expect(() => material.set('weights', [Vec3(1, 1, 1)]), throwsArgumentError, reason: 'of its own kind');
+  });
+
+  test('shadersReady completes once the views have drawn and every shader is ready', () async {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    scene.cube.get<MeshRenderer>()!.material = Material(shader: Shader(_tint, name: 'tint.wgsl'));
+    var ready = false;
+    final waiting = world.shadersReady().then((_) => ready = true);
+    await Future<void>.delayed(const Duration(milliseconds: 40));
+    expect(ready, isFalse, reason: 'not before the views have drawn twice');
+    for (var i = 0; i < 3; i++) {
+      world.update(0.016);
+      view.read(view.frame());
+    }
+    await waiting.timeout(const Duration(seconds: 5));
+    expect(ready, isTrue);
   });
 }

@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 35;
+pub const FY_ABI_VERSION: u32 = 37;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -1126,21 +1126,24 @@ pub unsafe extern "C" fn fy_camera_shake_set(world: *const FyWorld, camera: u64,
 }
 
 /// A screen effect, for `fy_camera_effects_set`: a shader the world has
-/// (`fy_shader_add`) with `fn effect`, and `values_len` bytes of its values,
-/// laid out as its `Values` (`fy_shader_describe`).
+/// (`fy_shader_add`) with `fn effect`, `values_len` bytes of its values,
+/// laid out as its `Values` (`fy_shader_describe`), and its textures in
+/// the order it declares them, 0 for none (it reads white).
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FyScreenEffect {
     pub shader: u64,
     pub values: *const u8,
     pub values_len: usize,
+    pub textures: [u64; 4],
 }
 
 /// Gives the camera on `object` these `count` screen effects, in place of
 /// any it had (0 takes them away): run over its picture in order, each
 /// over what the one before made, when a view draws from it. A shader that
 /// isn't an effect's is `FY_STATUS_INVALID_VALUE`; values that aren't as
-/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`. A shader can't be
+/// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`; a texture the
+/// world hasn't, `FY_STATUS_NO_TEXTURE`. A shader or texture can't be
 /// removed while an effect uses it.
 ///
 /// # Safety
@@ -1171,7 +1174,11 @@ pub unsafe extern "C" fn fy_camera_effects_set(
                 // SAFETY: per this function's contract.
                 unsafe { std::slice::from_raw_parts(handle(e.values, "values")?, e.values_len) }.to_vec()
             };
-            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values });
+            let mut textures = [None; MAX_SHADER_TEXTURES];
+            for (slot, &id) in textures.iter_mut().zip(&e.textures) {
+                *slot = if id == 0 { None } else { Some(texture(id)?) };
+            }
+            list.push(fynkel_world::ScreenEffect { shader: shader(e.shader)?, values, textures });
         }
         Ok(world.lock()?.set_camera_effects(self::object(object)?, list)?)
     })
@@ -1209,6 +1216,25 @@ pub unsafe extern "C" fn fy_quality_preset(level: u32, out: *mut FyQuality) -> F
             level_named(level).ok_or_else(|| Error::new(FyStatus::InvalidValue, format!("{level} isn't a level")))?;
         // SAFETY: per this function's contract.
         unsafe { write(out, FyQuality::from_quality(level.quality()), "out") }
+    })
+}
+
+/// Writes to `out` how many pipelines of materials' own shaders are being
+/// made beside the frames: a view on screen draws without a shader's
+/// objects while the driver compiles it, the first time it's drawn on the
+/// device, rather than holding a frame up. 0 when every shader drawn so
+/// far is ready, as a loading screen waits for. Makes the device if
+/// there's none yet.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_shaders_waiting(out: *mut u32) -> FyStatus {
+    guard(|| {
+        let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, device.kit.shaders_waiting(), "out") }
     })
 }
 
@@ -2298,7 +2324,8 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// What a shader takes, as UTF-8 lines, so a material can be given it by
 /// name: `lit` or `unlit`; `values <bytes>`; `value <name> <f32|i32|u32>
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
-/// offset in bytes) for each of its `Values`; `texture <name>
+/// offset in bytes) for each of its `Values`, an array's with `<count>
+/// <stride>` after (its length; the bytes from one to the next); `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
 /// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
 /// has a `light`; `behind` if it reads what's behind it (`scene_depth`,
@@ -2338,7 +2365,11 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
             fynkel_render::ValueKind::I32 => "i32",
             fynkel_render::ValueKind::U32 => "u32",
         };
-        let _ = writeln!(text, "value {} {kind} {} {}", v.name, v.size, v.offset);
+        match v.count {
+            1 => writeln!(text, "value {} {kind} {} {}", v.name, v.size, v.offset),
+            count => writeln!(text, "value {} {kind} {} {} {count} {}", v.name, v.size, v.offset, v.stride),
+        }
+        .ok();
     }
     for t in &shader.textures {
         let space = if t.space == fynkel_render::ColorSpace::Srgb { "srgb" } else { "linear" };
@@ -3260,7 +3291,12 @@ unsafe fn new_view<T: fynkel_present::Target + 'static>(
         }
     };
     let (target, output) = make(&device.gpu, width, height)?;
-    let renderer = Renderer::sharing(gpu.assets.clone(), fynkel_present::Target::format(&target));
+    let mut renderer = Renderer::sharing(gpu.assets.clone(), fynkel_present::Target::format(&target));
+    // On screen, a shader the driver hasn't seen is compiled beside the
+    // frames, its objects left out till it's ready, rather than holding a
+    // frame up for a third of a second. Headless views wait, so what they
+    // read back is the whole scene.
+    renderer.set_wait_for_shaders(matches!(output, Output::Headless(_)));
     let worker = Worker::start_for(gpu.clone(), renderer, target)
         .map_err(|e| Error::new(FyStatus::WorkerFailed, format!("couldn't start the render worker: {e}")))?;
     let view = FyView { world, gpu, clock: Mutex::default(), worker, output };

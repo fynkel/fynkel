@@ -284,6 +284,79 @@ As built:
   look or not, the camera circling) and the garden ("Look: movement")
   with the pixel look and a drifting camera.
 
+### Phase 4b: the shader experience
+
+Added 2026-10-18, after phase 4, at the user's ask: how easy is it to
+write a shader, use it and control it from code, and does it perform?
+Writing and controlling one is short (one function in a `.wgsl` file,
+`Material(shader:, values:)`, `set`, `tween`), its errors point at its
+own lines and hot reload takes its new code. What isn't good enough:
+
+1. **A new shader freezes the game the first time it's drawn.** On the
+   Mac a shader the GPU's driver hasn't seen takes about 365 ms to build
+   (the forward pipeline: the driver compiling the joined shader); the
+   same again takes 1.2 ms, the OS keeping what it compiled. So a player
+   sees it once per shader and variant (shadowed, skinned, a quality
+   level) on each device: when a new look first appears. *Fix:* views on
+   screen build a missing shader's pipelines on a thread of their own and
+   draw the frame without those objects meanwhile (as Unreal's
+   precaching does); headless views and tests wait, so pictures stay
+   exact. `fy_shaders_waiting` counts what's being built, and
+   `await world.shadersReady()` waits for it, for a loading screen.
+2. **What a shader can use is hard to find**: the guide's "Shaders"
+   chapter (phase 5's, brought forward), a file declaring the engine's
+   names so an editor's WGSL support stops marking them as errors, and a
+   starting point (`fynkel shader new` or a template).
+3. **Effects can't take a texture or read the scene's depth**: colour
+   grading from a look-up table, depth of field, fog of war and outlines
+   drawn as an effect need them.
+4. **Values are numbers and vectors only**: arrays of them too.
+
+*Done when* a new shader's first frame on screen takes no longer than
+any other (a test with a shader the driver hasn't seen), a loading
+screen can wait for its shaders, the chapter and the editor file exist,
+and an effect grades colour from a texture.
+
+As built:
+
+- **No first-use freeze.** A view on screen builds a material's or an
+  effect's missing pipelines on a thread of its own ("fynkel shader"),
+  once however many frames ask, and draws without those objects (an
+  effect: the picture goes on as it was) until they're ready; headless
+  views wait. `FrameStats.shaders_waiting`, `fy_shaders_waiting` (ABI 36)
+  and `await world.shadersReady()`. A test with a shader the driver
+  hasn't seen: the first frame goes without it, a later one is the
+  waiting renderer's to the pixel. *Known limits:* the built-in
+  material's variants still build on the frame the first time an app
+  runs on a device (then the OS keeps them); an object out of view isn't
+  prewarmed, so it pops in a frame or so late on a cold first run.
+- **Written down.** The guide's §14 Shaders (every kind, from a first
+  lit shader to a screen effect, mistakes, the first frame, the limits)
+  and its Unity table rows; every ```wgsl block in it compiles, and its
+  Dart blocks build (tools/check_guide.py). `packages/fynkel/wgsl/
+  fynkel.wgsl` declares every name the engine gives a shader with what
+  it does; a test keeps its signatures and structs the engine's and
+  fails when the engine gains a function it doesn't list. It's a
+  reference to read, not an editor import: WGSL tools have no standard
+  way to pull one in. `dart run fynkel:shader <name>` writes a starter
+  (`--unlit`, `--effect`, `--moves`, `--light`) and prints how to use
+  it; every kind compiles (a test). Effects get the helpers (noise, fbm,
+  remap) too.
+- **Effects take textures and depth** (ABI 37). An effect declares
+  textures as a material's shader does, set by name with
+  `ScreenEffect.set`; `color_lut(table, colour)` grades colour from a
+  strip of tiles as Unity and image editors make them (a test: a table
+  that changes nothing keeps the picture, an inverting one inverts it,
+  at every level). `scene_depth`, `scene_position` and
+  `camera_position` read the solid scene's depth, kept only while an
+  effect reads it (a test against where each pixel's ray meets the
+  ground, see-through surfaces left out). A texture an effect uses
+  can't be removed. The lab's effects page has a colour grade made in
+  code and a scanner's pulse ringing out from the camera.
+- **Arrays in Values**: `array<vec3<f32>, 8>` and the like, set with a
+  list up to its length (the rest 0), for materials and effects; a
+  describe line gains `<count> <stride>`. Matrices aren't in yet.
+
 ### Phase 5: games, the measure, the guide and the report
 
 - **Sheepdog**: grass in the wind, a pond, wolves that burn away when
@@ -351,4 +424,5 @@ say otherwise.
 - [x] Phase 2: movement (Mac: 2,000 swaying blades add about 0.1 ms a frame at every level; phones in phase 5)
 - [x] Phase 3: what's behind (memory: 28 bytes a pixel while a reader is in view; phones in phase 5)
 - [x] Phase 4: whole styles (outline lower edges hidden by the ground; pixel look keeps multisampled edges)
+- [x] Phase 4b: the shader experience
 - [ ] Phase 5: games, the measure, the guide and the report

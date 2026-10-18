@@ -61,6 +61,11 @@ pub struct ShaderValue {
     pub size: u32,
     /// Where it is in the values' bytes.
     pub offset: u32,
+    /// How many: 1, or an array's length (`array<f32, 8>`).
+    pub count: u32,
+    /// The bytes from one of an array's to the next: 4 for numbers, 8 for
+    /// `vec2`s, 16 for `vec3`s and `vec4`s.
+    pub stride: u32,
 }
 
 /// One of a shader's textures.
@@ -88,7 +93,9 @@ pub struct CustomShader {
     pub moves: bool,
     /// Whether it reads what's behind it (`scene_depth`, `scene_color`):
     /// its surfaces are then drawn see-through, after the solid scene,
-    /// and a frame they're in keeps that scene's depth and colour.
+    /// and a frame they're in keeps that scene's depth and colour. An
+    /// effect's: whether it reads the solid scene's depth (`scene_depth`,
+    /// `scene_position`), which a frame it's in then keeps.
     pub reads_behind: bool,
     /// Whether it has `fn light(in: LightInput) -> vec3<f32>`, which lights
     /// it in place of the engine's lighting, light by light.
@@ -96,7 +103,7 @@ pub struct CustomShader {
     /// Whether it's a screen effect's, `fn effect(in: EffectInput) ->
     /// vec4<f32>`, for a camera ([`crate::ScreenEffect`]) rather than a
     /// material. Its lighting is then [`Lighting::Unlit`], and it has no
-    /// textures or `PerObject`.
+    /// `PerObject`.
     pub effect: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
@@ -131,10 +138,15 @@ impl std::error::Error for ShaderError {}
 const SHADOW: &str = include_str!("own_shadow.wgsl");
 
 /// The engine's code before a shader's: its lighting and the library.
-const BEFORE: &str = concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("library.wgsl"));
+const BEFORE: &str = concat!(
+    include_str!("skin.wgsl"),
+    include_str!("forward.wgsl"),
+    include_str!("library.wgsl"),
+    include_str!("helpers.wgsl")
+);
 
 /// The engine's code before a screen effect's.
-const EFFECT: &str = include_str!("effect.wgsl");
+const EFFECT: &str = concat!(include_str!("effect.wgsl"), include_str!("helpers.wgsl"));
 
 impl CustomShader {
     /// Checks `source`, a shader's file called `name`, and joins it to the
@@ -366,15 +378,13 @@ impl CustomShader {
         if has_struct(source, "PerObject") {
             return Err(error("a screen effect has no `PerObject`: it isn't drawn for an object"));
         }
-        let (_, textures) = bind_textures(source).map_err(|(line, m)| ShaderError {
+        let (source, textures) = bind_textures(source).map_err(|(line, m)| ShaderError {
             file: name.to_owned(),
             line: Some(line),
             column: None,
             message: m,
         })?;
-        if !textures.is_empty() {
-            return Err(error("a screen effect can't have textures of its own: it reads the picture"));
-        }
+        let source = source.as_str();
         let declared = if has_struct(source, "Values") { "var<private> values: Values;\n" } else { "" };
         let probe = Joined::new(EFFECT, declared, source, "");
         let module = probe.parse().map_err(|e| e.into_error(name))?;
@@ -407,7 +417,14 @@ impl CustomShader {
         ));
         let joined = Joined::new(EFFECT, declared, source, &glue);
         let module = joined.parse().map_err(|e| e.into_error(name))?;
-        joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let info = joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let (at, _) =
+            module.entry_points.iter().enumerate().find(|(_, e)| e.name == "fs_fy_effect").expect("the glue's");
+        let uses = info.get_entry_point(at);
+        let reads_depth = module
+            .global_variables
+            .iter()
+            .any(|(handle, global)| global.name.as_deref() == Some("fy_effect_depth") && !uses[handle].is_empty());
         let wgsl: Arc<str> = joined.source.into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         wgsl.hash(&mut hasher);
@@ -416,10 +433,10 @@ impl CustomShader {
             lighting: Lighting::Unlit,
             values,
             values_size,
-            textures: Vec::new(),
+            textures,
             own: Vec::new(),
             moves: false,
-            reads_behind: false,
+            reads_behind: reads_depth,
             lights: false,
             effect: true,
             wgsl,
@@ -436,10 +453,19 @@ fn shader_values(module: &naga::Module, file: &str) -> Result<(Vec<ShaderValue>,
     };
     let mut values = Vec::new();
     for (name_of, ty, offset) in members {
-        let (kind, size) = value_kind(&module.types[ty].inner).ok_or_else(|| {
-            error(format!("`Values.{name_of}` isn't a number or a vector of f32, i32 or u32, which values are"))
+        let (inner, count, stride) = match &module.types[ty].inner {
+            TypeInner::Array { base, size: naga::ArraySize::Constant(n), stride } => {
+                (&module.types[*base].inner, n.get(), *stride)
+            }
+            inner => (inner, 1, 0),
+        };
+        let (kind, size) = value_kind(inner).ok_or_else(|| {
+            error(format!(
+                "`Values.{name_of}` isn't a number or a vector of f32, i32 or u32, or an array of them, which values are"
+            ))
         })?;
-        values.push(ShaderValue { name: name_of, kind, size, offset });
+        let stride = if count == 1 { size * 4 } else { stride };
+        values.push(ShaderValue { name: name_of, kind, size, offset, count, stride });
     }
     let size = struct_size(module, "Values");
     if size > MAX_VALUES_BYTES {
@@ -654,37 +680,47 @@ fn value_kind(ty: &TypeInner) -> Option<(ValueKind, u32)> {
 /// renderer put them among the joints (48 bytes, three rows, each).
 fn values_loader(values: &[ShaderValue]) -> String {
     let mut s = String::from("fn fy_values(at: u32) -> Values {\n    var v: Values;\n");
-    for value in values {
-        let joint = value.offset / 48;
-        let row = (value.offset % 48) / 16;
-        let first = (value.offset % 16) / 4;
+    for (value, offset, place) in elements(values) {
+        let joint = offset / 48;
+        let row = (offset % 48) / 16;
+        let first = (offset % 16) / 4;
         let components = &"xyzw"[first as usize..(first + value.size) as usize];
-        let read = format!("joints[at + {joint}u].row_{row}.{components}");
-        let read = match value.kind {
-            ValueKind::F32 => read,
-            ValueKind::I32 => format!("bitcast<{}>({read})", wgsl_type("i32", value.size)),
-            ValueKind::U32 => format!("bitcast<{}>({read})", wgsl_type("u32", value.size)),
-        };
-        s.push_str(&format!("    v.{} = {read};\n", value.name));
+        let read = typed(value, format!("joints[at + {joint}u].row_{row}.{components}"));
+        s.push_str(&format!("    v.{place} = {read};\n"));
     }
     s.push_str("    return v;\n}\n");
     s
+}
+
+/// Each value, or each of an array's: where it is in the values' bytes,
+/// and its place in `Values` (`name`, or `name[i]`).
+fn elements(values: &[ShaderValue]) -> impl Iterator<Item = (&ShaderValue, u32, String)> {
+    values.iter().flat_map(|v| {
+        (0..v.count).map(move |i| {
+            let place = if v.count == 1 { v.name.clone() } else { format!("{}[{i}]", v.name) };
+            (v, v.offset + i * v.stride, place)
+        })
+    })
+}
+
+/// `read`, a vector of `f32`s, as `value`'s kind.
+fn typed(value: &ShaderValue, read: String) -> String {
+    match value.kind {
+        ValueKind::F32 => read,
+        ValueKind::I32 => format!("bitcast<{}>({read})", wgsl_type("i32", value.size)),
+        ValueKind::U32 => format!("bitcast<{}>({read})", wgsl_type("u32", value.size)),
+    }
 }
 
 /// `fn fy_values() -> Values`: a screen effect's values, read from its
 /// uniform (effect.wgsl), laid out as they are there.
 fn effect_values_loader(values: &[ShaderValue]) -> String {
     let mut s = String::from("fn fy_values() -> Values {\n    var v: Values;\n");
-    for value in values {
-        let first = (value.offset % 16) / 4;
+    for (value, offset, place) in elements(values) {
+        let first = (offset % 16) / 4;
         let components = &"xyzw"[first as usize..(first + value.size) as usize];
-        let read = format!("fy_effect.values[{}].{components}", value.offset / 16);
-        let read = match value.kind {
-            ValueKind::F32 => read,
-            ValueKind::I32 => format!("bitcast<{}>({read})", wgsl_type("i32", value.size)),
-            ValueKind::U32 => format!("bitcast<{}>({read})", wgsl_type("u32", value.size)),
-        };
-        s.push_str(&format!("    v.{} = {read};\n", value.name));
+        let read = typed(value, format!("fy_effect.values[{}].{components}", offset / 16));
+        s.push_str(&format!("    v.{place} = {read};\n"));
     }
     s.push_str("    return v;\n}\n");
     s

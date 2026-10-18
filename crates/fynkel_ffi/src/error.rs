@@ -76,7 +76,8 @@ impl From<WorldError> for Error {
             | WorldError::MaterialInUse { .. }
             | WorldError::TextureInUse { .. }
             | WorldError::ShaderInUse { .. }
-            | WorldError::EffectInUse { .. } => FyStatus::InUse,
+            | WorldError::EffectInUse { .. }
+            | WorldError::EffectTextureInUse { .. } => FyStatus::InUse,
             WorldError::Values { .. } | WorldError::EffectValues { .. } => FyStatus::WrongSize,
             WorldError::ShaderKind { .. }
             | WorldError::Field(_)

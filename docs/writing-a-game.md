@@ -3,7 +3,7 @@
 This guide teaches Fynkel from the smallest game up. Each section adds one
 idea, with code that compiles as it stands (`tools/check_guide.py` checks
 it). If you know Unity, most of it will look familiar: Fynkel works the
-way Unity works, in Dart, and §21 maps one to the other.
+way Unity works, in Dart, and §22 maps one to the other.
 
 The finished examples are in `examples/`: `hello` (one turning cube),
 `garden` (models, an animated character and an orbit camera), `coins` (triggers, a HUD, and a character that walks, runs and picks things up),
@@ -83,7 +83,7 @@ class MainActivity : FynkelActivity()
 
 A game whose activity stays a `FlutterActivity` runs too, with its views
 drawn as textures Flutter shows. What this changes for widgets around
-the game is in §16.
+the game is in §17.
 
 **On iOS nothing is needed**: each `FynkelView` draws straight to the
 screen, on a layer under Flutter's view, which the plugin makes
@@ -214,7 +214,7 @@ class Yard extends GameObject {
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
-  names or tags (the `name` checks in §15 are there to keep the examples
+  names or tags (the `name` checks in §16 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
   (and the components on them) unless `includeInactive: true`.
 
@@ -356,7 +356,7 @@ make it, the root or a manager, rather than searching for it. And let
 data, not subclasses, tell kinds apart: a runner and a tank are one
 `Enemy` class given a different `EnemyKind`. Put everything that belongs
 to one level under one object, so starting over is destroying it and
-adding a new one (§17):
+adding a new one (§18):
 
 ```dart
 // lib/defense.dart
@@ -486,7 +486,7 @@ class Beacon extends GameObject {
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
   most one `Light`, so each light goes on an object of its own.
 - **Camera**: `fovY` (radians: `60.deg`), `near`, `far`, `clearColor`,
-  `orthographic` with an `orthographicSize`, a `cullingMask` (§14), and
+  `orthographic` with an `orthographicSize`, a `cullingMask` (§15), and
   `showSky` (below). The view draws
   from the active one, `world.camera` (Unity's `Camera.main`). Keep `near`
   below `far`: a view drawing from a camera that isn't throws an
@@ -683,7 +683,7 @@ Future<void> photographedSky(World world) async {
 - **`Sky.gradient`** goes from `zenith` straight up to `horizon` level,
   and to `ground` (the horizon's, unless given) straight down. Its
   colours are shown as picked, so a game can take them from its theme:
-  `scheme.tertiary.toFynkel()` (§16). Sheepdog sets a day sky in its
+  `scheme.tertiary.toFynkel()` (§17). Sheepdog sets a day sky in its
   light theme and a night one in its dark.
 - **`Sky.image`** is a Radiance `.hdr`, equirectangular (twice as wide as
   high): its middle is ahead (−Z), its top row straight up. Poly Haven
@@ -858,7 +858,7 @@ to about 80; at 60 it holds 60 for 10 minutes and more
 `ios/Runner/Info.plist` needs `CADisableMinimumFrameDurationOnPhone`
 (`true`), as every example has (`flutter create` leaves it out): without
 it, iOS keeps the app's screen at 60, whatever the game asks. Behind a menu, a paused game draws less still
-(`pauseWhenCovered`, §16).
+(`pauseWhenCovered`, §17).
 
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A
@@ -1196,7 +1196,7 @@ class Button3D extends GameObject {
   next frame); a `press()` goes on holding. On a controls page,
   `keyCodeOf(event)` (from `package:fynkel_flutter`) turns the key pressed
   in a "press a key" dialog into the game's, and `key.label` names it for
-  the player (`Space`, `W`, `↑`). §16 has that dialog and a row of a
+  the player (`Space`, `W`, `↑`). §17 has that dialog and a row of a
   controls page.
 - A Flutter widget over the game (a HUD button) takes its own taps; they
   don't reach the game.
@@ -1241,7 +1241,7 @@ import 'hud.dart';
 
 void main() => runApp(
   FynkelApp(
-    Score.new, // §16's
+    Score.new, // §17's
     overlay: (context, game) => ScoreHud(game),
     shortcuts: (game) => {
       const SingleActivator(LogicalKeyboardKey.escape): () => game.world.paused = !game.world.paused,
@@ -1310,10 +1310,10 @@ the app, and loading it fails with its name.
 `.glb` (File → Export → glTF 2.0, glTF Binary, +Y Up). Every Blender
 object comes in as an object of the same name, placed as it was, empties
 too: name the places the code needs (`start`, `gate`) and `find` them
-(§17 has a level that does). The meshes, their materials and the
+(§18 has a level that does). The meshes, their materials and the
 animations come in; the file's lights and cameras are skipped
 (`Model.warnings` says what was), so light the level from code (§5). To walk on it, give it
-colliders: `MeshCollider.addToParts(level)` (§15) gives every part its
+colliders: `MeshCollider.addToParts(level)` (§16) gives every part its
 own shape.
 
 A model's clips and how to play them are §13.
@@ -1515,7 +1515,7 @@ class Farmer extends GameObject {
 - Easing the speed eases the blend: it slows into a walk, not snaps.
 - `onEnd` is on the animator, for every layer: here only the gesture
   layer plays clips that end.
-- A test can check all of it frame by frame (§18):
+- A test can check all of it frame by frame (§19):
   `animator.weight('sprint')`, `animator.layer(1).current`.
 
 ### Many characters
@@ -1537,7 +1537,268 @@ textures. For a crowd on an older Android phone, keep it to a few dozen
 or turn the far ones' animators off (`stop()` holds their pose and costs
 nothing).
 
-## 14. Cameras, layers and debug drawing
+## 14. Shaders
+
+A material's look can be written by hand: a `.wgsl` file (WebGPU's
+shading language) with one function in it. The engine does the rest:
+lights, shadows, fog, every quality level, skinned characters. Only
+what's different goes in the shader. Screen effects are shaders too,
+run over the camera's whole picture.
+
+`packages/fynkel/wgsl/fynkel.wgsl` lists every name the engine gives a
+shader, with what it does: read it beside your own. The lab's
+`examples/lab/assets/shaders/` has a dozen to copy from (lava, water,
+grass in the wind, a hologram, a dissolve, a hit flash, toon light, an
+old TV), and `dart run fynkel:shader lava` writes a new one to start from,
+`assets/shaders/lava.wgsl`, and prints how to use it (`--unlit`,
+`--effect`, `--moves` and `--light` choose what it has).
+
+### A first shader
+
+Put it in `assets/shaders/` (list the folder in `pubspec.yaml`, §12):
+
+```wgsl
+// assets/shaders/lava.wgsl
+struct Values { hot: vec4<f32>, speed: f32 }
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = standard(in);
+    let flow = fbm(in.uv * 6.0 + vec2<f32>(0.0, frame_time() * values.speed));
+    s.color = mix(vec3<f32>(0.05), values.hot.rgb, flow);
+    s.emission = values.hot.rgb * flow * flow * 4.0;
+    return s;
+}
+```
+
+and give it to a material:
+
+```dart
+class LavaPool extends GameObject {
+  late final Material lava;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    lava = Material(shader: await assets.shader('shaders/lava.wgsl'), values: {'hot': Color(0xFFFF6A10), 'speed': 0.2});
+    add(GameObject(transform: Transform(scale: Vec3(4, 1, 4)), components: [MeshRenderer(Mesh.plane(), lava)]));
+  }
+
+  void cool() => tween(0.2, 0.0, seconds: 2, onUpdate: (v) => lava.set('speed', v));
+}
+```
+
+- `surface` returns what the surface is (colour, roughness, glow...), and
+  the engine lights it. `standard(in)` is the material as the engine has
+  it, its textures and colour in, so a shader changes one thing and keeps
+  the rest. `unlit` instead returns the colour as it is, unlit.
+- `struct Values` is what the game sets: numbers and vectors of `f32`,
+  `i32` and `u32`. `values: {...}` and `material.set(name, value)` set them
+  by name, with a `double`, an `int`, a `Vec2`, a `Vec3`, a `Color` (given
+  to the shader in linear light, as the engine's own colours are) or a
+  list of numbers. An array, `colors: array<vec4<f32>, 8>`, takes a list
+  of those (`material.set('colors', [red, green])`), up to its length;
+  the rest are 0. A name the shader doesn't have, or a value of the wrong
+  kind, is an `ArgumentError` that lists what it has. Tween one as above.
+- Textures: `var rock: color_texture;` (colours) or
+  `var heights: texture_2d<f32>;` (data), read with `sample(rock, in.uv)`,
+  set like values: `material.set('rock', await assets.texture('rock.png'))`.
+- `frame_time()` is the game's time, stopping when it's paused.
+- `hash`, `noise`, `noise3`, `fbm`, `fresnel`, `triplanar` and `remap`
+  are there for patterns, rims and textures without UVs.
+
+**Each object its own numbers.** `struct PerObject` holds up to four
+`f32`s each object sets for itself, so many objects share one material
+(and one draw) and still differ: a hit flash.
+
+```wgsl
+// assets/shaders/flash.wgsl
+struct PerObject { flash: f32 }
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = standard(in);
+    s.color = mix(s.color, vec3<f32>(1.0), per_object.flash);
+    return s;
+}
+```
+
+```dart
+class Slime extends GameObject {
+  void hit() {
+    final renderer = get<MeshRenderer>()!;
+    tween(1.0, 0.0, seconds: 0.3, onUpdate: (v) => renderer.set('flash', v));
+  }
+}
+```
+
+### Moving vertices
+
+A `vertex` function moves the mesh's vertices: grass in the wind, waves,
+a wobble. The shadow moves with it. Say how far it can move a vertex
+with the material's `reach`, in metres, so the engine doesn't leave the
+object out of a frame it has moved into:
+
+```wgsl
+// assets/shaders/sway.wgsl
+struct Values { wind: f32 }
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    // The tip moves, the foot stays: local.y is the height in the mesh.
+    let gust = sin(frame_time() * 2.0 + in.origin.x * 0.7) * values.wind;
+    v.position.x += gust * in.local.y * in.local.y;
+    return v;
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    return standard(in);
+}
+```
+
+`Material(shader: sway, values: {'wind': 0.3}, reach: 0.3)`. Each copy of
+a mesh has its own `origin`, so a field of them sways out of step, in one
+draw.
+
+### What's behind
+
+A see-through surface can read the scene behind it: `depth_behind(in)`
+(how far behind it the scene is, in metres: shallow water foams, a force
+field glows where it meets the floor) and `scene_color(screen)` (the
+scene's colour there: move `screen` a little to bend it, as water and
+glass do). A shader that reads them is drawn see-through, over the
+solid scene. They cost memory only in a frame where such a shader is in
+view.
+
+### Whole styles
+
+- **Your own light.** Beside `surface`, `fn light(in: LightInput) ->
+  vec3<f32>` lights it one sun or lamp at a time, in place of the engine:
+  toon bands, light that wraps round. It's given the light's way, colour,
+  shadow and distance and what `surface` returned. `standard_light(in)`
+  is the engine's, so it can change some lights and not others. The
+  ambient and sky light, glow, fog and tone mapping stay the engine's.
+
+```wgsl
+// assets/shaders/toon.wgsl
+struct Values { bands: f32 }
+
+fn surface(in: SurfaceInput) -> Surface {
+    return standard(in);
+}
+
+fn light(in: LightInput) -> vec3<f32> {
+    let lit = max(dot(in.normal, in.direction), 0.0) * in.shadow;
+    let band = mix(0.3, 1.0, floor(lit * values.bands + 0.5) / values.bands);
+    return in.surface.color * in.color * band / 3.14159265;
+}
+```
+
+- **Outlines** are a material's: `material.outline = Outline(width: 0.02,
+  color: Color(0xFF181410))`, on any opaque material, with a shader or
+  not, skinned and moved meshes too. Where an object stands on the
+  ground, the ground hides its outline's lower edge.
+- **The pixel look**: `camera.pixels = 240` draws the game 240 pixels
+  high and enlarges it with hard edges. The camera keeps to whole pixels,
+  so the picture doesn't shimmer as it moves.
+
+### Screen effects
+
+An effect's shader has `fn effect(in: EffectInput) -> vec4<f32>`: the
+colour of each pixel of the finished picture, read with `picture(uv)`.
+Its `Values` are set by name, as a material's:
+
+```wgsl
+// assets/shaders/hurt.wgsl
+struct Values { amount: f32 }
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    let seen = picture(in.uv).rgb;
+    let edge = smoothstep(0.1, 0.5, length(in.uv - 0.5)) * values.amount;
+    return vec4<f32>(mix(seen, vec3<f32>(0.9, 0.05, 0.05), edge), 1.0);
+}
+```
+
+```dart
+class Hurt extends GameObject {
+  late final ScreenEffect red;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    red = ScreenEffect(await assets.shader('shaders/hurt.wgsl'), values: {'amount': 0.0});
+    world.camera!.effects = [red];
+  }
+
+  void flash() => tween(1.0, 0.0, seconds: 0.5, onUpdate: (v) => red.set('amount', v));
+}
+```
+
+A camera's effects run in order, each over what the one before made:
+`camera.effects = [palette, oldTv]` isn't `[oldTv, palette]`. They work
+at every quality level; a frame without any pays nothing for them.
+
+An effect can have textures, as a material's shader can. A **colour
+grade** is one: a table of colours, made in an image editor (or Unity's
+neutral table, coloured to taste), each colour of the picture looked up
+in it with `color_lut`:
+
+```wgsl
+// assets/shaders/grade.wgsl
+struct Values { amount: f32 }
+var table: color_texture;
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    let seen = picture(in.uv).rgb;
+    return vec4<f32>(mix(seen, color_lut(table, seen), values.amount), 1.0);
+}
+```
+
+```dart
+class Evening extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final grade = ScreenEffect(
+      await assets.shader('shaders/grade.wgsl'),
+      values: {'table': await assets.texture('evening_lut.png'), 'amount': 1.0},
+    );
+    world.camera!.effects = [grade];
+  }
+}
+```
+
+The table is a strip of square tiles side by side, as many as each is
+wide (256 × 16 or 1024 × 32 pixels): red across a tile, green down it,
+blue from tile to tile. An effect can read **the scene's depth** too:
+`scene_depth(in.uv)` is how far the solid scene is at a pixel, in metres
+along the view, and `scene_position(in.uv)` where it is in the world, for
+fog of your own, a scanner's pulse ringing out from
+`camera_position()`, or outlines where the depth jumps. See-through
+surfaces and the sky aren't in it; a frame with an effect that reads it
+keeps it, and others pay nothing. The lab's effects page has both.
+
+### Mistakes, changes and the first frame
+
+- **A shader that doesn't compile** throws a `ShaderError` with its file,
+  line and column (`lava.wgsl:5:12: ...`), its own lines, not the
+  engine's around them.
+- **Hot reload takes a shader's new code**: change the file, press
+  hot reload, and every material using it draws with it from the next
+  frame. Code that doesn't compile keeps the old and says why on
+  `world.errors`.
+- **The first time a shader is drawn** on a device, the GPU's driver
+  compiles it: a third of a second on a Mac, more on a phone, then kept
+  by the system for every run after. A view on screen doesn't wait for
+  it: it draws without those objects for those frames. Behind a loading
+  screen, let the view draw the level and `await world.shadersReady()`,
+  so nothing pops in when the game shows.
+
+### Limits
+
+Four textures and four `PerObject` numbers to a shader, 512 bytes of
+`Values`: numbers, vectors and arrays of them (no matrices yet, §21).
+A shader can't use another's code.
+
+## 15. Cameras, layers and debug drawing
 
 **Cameras** work as Cinemachine's. Put a `VirtualCamera` on objects; the
 enabled one with the highest `priority` drives the view's camera, and a
@@ -1582,7 +1843,7 @@ class CameraRig extends GameObject {
   A shake moves the picture, not the camera: its transform stays where
   the game or the virtual camera put it, so moving it during a shake
   never drifts. `world.cameras.shakeOf(camera)` says how far it's moved
-  now; world widgets (§16) move with it.
+  now; world widgets (§17) move with it.
 - **Between the screen and the world**: on a `Camera`, such as
   `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
   Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
@@ -1591,7 +1852,7 @@ class CameraRig extends GameObject {
 - **A camera that follows a physics body** sees each fixed step's jump:
   a body steps 50 or 100 times a second, the screen draws at 60 or 120,
   and the camera moves smoothly, so the body seems to jitter. Give the
-  body `interpolation: RigidbodyInterpolation.interpolate` (§15), as in
+  body `interpolation: RigidbodyInterpolation.interpolate` (§16), as in
   Unity.
 
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
@@ -1618,7 +1879,7 @@ class Sparkle extends GameObject {
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
 builds.
 
-## 15. Physics: colliders, rigidbodies, queries and callbacks
+## 16. Physics: colliders, rigidbodies, queries and callbacks
 
 Physics is a package, `fynkel_physics`, on Rapier. Add it to the
 pubspec, next to `fynkel`, and a game without it ships none of it:
@@ -2097,7 +2358,7 @@ class Dragger extends GameObject {
 The lab's "Joints: a chain and a weight" scene does this, and works out
 the spring from the weight it lifts.
 
-## 16. Flutter around the game
+## 17. Flutter around the game
 
 The game is a Flutter widget, so menus, HUDs and settings are plain
 Flutter. Keep what the HUD shows in `ValueNotifier`s on the game, and give
@@ -2528,7 +2789,7 @@ players, and aims what's under a finger from its own camera
 shows the name tags placed by its own camera. The lab's "Minimap" and
 "Split screen" scenes show both, with each view's frames per second.
 
-## 17. Hot reload and starting over
+## 18. Hot reload and starting over
 
 - **Hot reload** (`r`) changes methods at once, in objects and behaviours
   alike: the next frame runs the new `onUpdate`.
@@ -2606,7 +2867,7 @@ class Levels extends GameObject {
 
 **Saving.** What's kept between runs is plain data, never objects: the
 level reached, the best score, the settings (`Controls` has `toJson` and
-`fromJson`, §16). Write it as JSON to a file in the app's own folder,
+`fromJson`, §17). Write it as JSON to a file in the app's own folder,
 which the app finds with the `path_provider` package
 (`getApplicationSupportDirectory()`) and hands to the game:
 
@@ -2648,7 +2909,7 @@ class Save {
 Save when something worth keeping happens (a level done), not every
 frame: a write is a few milliseconds on a phone.
 
-## 18. Testing a game
+## 19. Testing a game
 
 A game runs in a test with no window and no app around it, frame by
 frame, with made-up input. Run the tests with **`flutter test`**, not
@@ -2809,7 +3070,7 @@ pump a duration instead, `tester.pump(const Duration(milliseconds: 16))`
 for a frame. And input waits for the next frame, as on a device: a tap
 reaches the game in the `pump` after it.
 
-## 19. Speed
+## 20. Speed
 
 What keeps a game fast:
 
@@ -2861,11 +3122,14 @@ What keeps a game fast:
   goes). On an iPhone or a Mac it gives the thermal state too, and each
   minute's frame rate with `--seconds 600`.
 
-## 20. What isn't there yet
+## 21. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), particles, sprites and 2D, 3D text, vertex colours;
-  see-through objects don't cast shadows, and glass doesn't bend light.
+  see-through objects don't cast shadows.
+- **Shaders** (§14): no matrices in `Values`; a shader can't use
+  another's code; no node graph (Shader Graph): shaders are written in
+  WGSL.
 - **Animation** (§13): morph targets (faces, blend shapes), 2D blends
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
@@ -2873,11 +3137,11 @@ What keeps a game fast:
 - **Sound:** none yet.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
-  a game does itself for now (§17 shows how); an editor.
+  a game does itself for now (§18 shows how); an editor.
 - **Physics:** 2D physics, `ConfigurableJoint`, and chains of joints that
   don't stretch (Rapier's multibody joints).
 
-## 21. From Unity
+## 22. From Unity
 
 | Unity | Fynkel |
 |---|---|
@@ -2919,6 +3183,17 @@ What keeps a game fast:
 | `MaterialPropertyBlock` for one object's colour | `renderer.color` |
 | `new Material(material)` | `material.copy()` |
 | Rendering Mode Fade, Transparent; an additive shader | `Material(opacity:)`, `blending: Blending.transparent` or `.additive` |
+| Shader Graph, a Surface Shader, URP's Lit shader with a custom function | a `.wgsl` file with `fn surface` (§14), starting from `standard(in)` |
+| An Unlit shader | `fn unlit` |
+| Vertex displacement (a Shader Graph vertex position) | `fn vertex`, with the material's `reach` |
+| Shader properties, `material.SetFloat/SetColor/SetTexture` | `struct Values`, `material.set(name, value)` |
+| `MaterialPropertyBlock` for a shader's numbers | `struct PerObject`, `renderer.set(name, value)` |
+| `_CameraDepthTexture`, `_CameraOpaqueTexture` | `depth_behind(in)`, `scene_depth(screen)`, `scene_color(screen)` |
+| A custom lighting function (toon) | `fn light` |
+| A full-screen pass (a renderer feature, a post-process) | `ScreenEffect`, `camera.effects` |
+| Color Grading's lookup texture (a LUT) | an effect with `color_lut(table, colour)` (§14) |
+| `_CameraDepthTexture` in a full-screen pass | `scene_depth(in.uv)`, `scene_position(in.uv)` in an effect |
+| Shader warm-up, `ShaderVariantCollection.WarmUp` | `await world.shadersReady()` behind a loading screen (§14) |
 | Bloom and SSAO (a Volume, a renderer feature) | `Camera(bloom: Bloom(...), ambientOcclusion: AmbientOcclusion(...))`, off unless given |
 | Quality Settings, a URP asset per level | `world.quality = Quality(...)` or `Quality.low/medium/high.copyWith(...)` |
 | `Camera.orthographicSize` | `orthographicSize`, on `Camera` and `VirtualCamera` |
@@ -2962,7 +3237,7 @@ What keeps a game fast:
   10 × 10.
 - **An error in `onLoad` destroys the object** (§6); one in Unity's `Awake`
   leaves it half-made.
-- **The physics step runs between frames** (§15), so a force shows a
+- **The physics step runs between frames** (§16), so a force shows a
   frame later; `physics.stepBetweenFrames = false` steps as Unity does.
 - **A new `physics.gravity` wakes every body**; Unity leaves sleeping ones
   hanging.
@@ -2972,14 +3247,23 @@ What keeps a game fast:
   upright. Keep its object upright and turn a child for the model.
 - **A HUD is Flutter**: widgets over the view, not a Canvas in the scene.
 
-## 22. What changed
+## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **A new shader doesn't hold the frame up** (2026-10-18): a view on
+  screen draws without a material's objects the first time its shader is
+  drawn on the device, while the driver compiles it (a third of a second
+  or more), and draws them from the frame it's ready. A loading screen
+  waits for them with `await world.shadersReady()` (§14). Screen
+  effects can have textures (a colour grade's table) and read the
+  scene's depth; `FyScreenEffect` has a `textures` field (ABI 37).
+  `Values` can have arrays.
 
 - **The iPhone draws straight to the screen** (2026-10-17):
   - A view draws to a layer of its own under Flutter's view, not to a
     texture, and what's painted under it, or a fade over it, no longer
-    shows on it (§16), as on Android.
+    shows on it (§17), as on Android.
   - `FynkelView.androidSurface` is `onScreen`, for both phones:
     `onScreen: false` keeps the texture.
 
@@ -2991,12 +3275,12 @@ For code written before: each change that breaks it, newest first.
     display frame. A widget test that pumps 8 ms frames sees every other
     one: pump 17 ms, or set the world's `targetFrameRate = 0`.
   - A view covered by a page or a dialog that paused the game draws 10
-    frames a second (§16).
+    frames a second (§17).
 
 - **Android draws straight to the screen** (2026-10-16):
   - With the activity a `FynkelActivity` (§1), a view draws to the
     screen behind Flutter's, not to a texture, and what's painted under
-    it, or a fade over it, no longer shows on it (§16). An activity left a
+    it, or a fade over it, no longer shows on it (§17). An activity left a
     `FlutterActivity` works as before.
   - `Quality.device` is `low` on Android phones (§5); it was `medium`.
 
@@ -3029,7 +3313,7 @@ For code written before: each change that breaks it, newest first.
     runs `--locked` (the versions in `Cargo.lock`) with Flutter's
     macOS and iOS deployment targets. `flutter run -v` shows it working.
   - New in the guide: asset folders aren't recursive, and a level made in
-    Blender (§12); levels and saving (§17); why `flutter test` (§18).
+    Blender (§12); levels and saving (§18); why `flutter test` (§19).
 
 - **Hardening, what a game writes** (2026-10-15):
   - `Camera`, `Light` and `MeshRenderer` have `enabled`, as behaviours
@@ -3048,7 +3332,7 @@ For code written before: each change that breaks it, newest first.
     package:fynkel_flutter `Controls`, `ControlsSettings` and
     `askForKey` (keys a player changes, §11).
   - package:fynkel/testing.dart: `world.run(seconds)`, `world.tap(x, y)`
-    and `world.viewPoint(x, y)` for tests (§18).
+    and `world.viewPoint(x, y)` for tests (§19).
   - The examples' `lib/measured.dart` is `tool/measured.dart`, and
     package:fynkel_measure is a dev_dependency: move yours, and the tool
     finds it there (it still finds the old place).

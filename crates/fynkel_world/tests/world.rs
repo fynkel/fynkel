@@ -358,7 +358,7 @@ fn a_camera_takes_screen_effects_and_a_material_refuses_them() {
     let lava = world.add_shader(shader(4));
     let camera = world.spawn();
     let plain = world.spawn();
-    let on = |shader, values: &[u8]| ScreenEffect { shader, values: values.to_vec() };
+    let on = |shader, values: &[u8]| ScreenEffect { shader, values: values.to_vec(), textures: [None; 4] };
 
     assert_eq!(
         world.add_material(Material { shader: Some(tv), ..Material::default() }),
@@ -387,7 +387,15 @@ fn a_camera_takes_screen_effects_and_a_material_refuses_them() {
     assert_eq!(world.set_shader(tv, shader(4)), Err(WorldError::ShaderKind { shader: tv, effect: true }));
     assert_eq!(world.remove_shader(tv), Err(WorldError::EffectInUse { shader: tv, object: camera }));
 
+    // Its textures must be there, and stay while it uses them.
+    let lut = world.add_texture(image());
+    let graded = ScreenEffect { textures: [None, Some(lut), None, None], ..on(tv, &[0; 4]) };
+    world.set_camera_effects(camera, vec![graded.clone()]).unwrap();
+    assert_eq!(world.remove_texture(lut), Err(WorldError::EffectTextureInUse { texture: lut, object: camera }));
     world.set_camera_effects(camera, Vec::new()).unwrap();
+    world.remove_texture(lut).unwrap();
+    assert_eq!(world.set_camera_effects(camera, vec![graded]), Err(WorldError::NoTexture(lut)));
+
     assert!(world.camera_effects(camera).is_empty());
     world.set_camera_effects(camera, vec![on(tv, &[0; 4])]).unwrap();
     world.despawn(camera).unwrap();

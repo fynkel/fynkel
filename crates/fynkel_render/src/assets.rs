@@ -239,6 +239,14 @@ impl Kit {
         self.maker.made.load(Ordering::Relaxed)
     }
 
+    /// How many pipelines of materials' own shaders are being made on
+    /// threads of their own, for views that don't wait for them
+    /// ([`crate::Renderer::set_wait_for_shaders`]).
+    pub fn shaders_waiting(&self) -> u32 {
+        let pipelines = self.pipelines.lock().unwrap_or_else(PoisonError::into_inner);
+        pipelines.values().map(|p| p.waiting() as u32).sum()
+    }
+
     /// A mesh on the GPU, for [`Assets::insert_mesh`]: made without any
     /// world's assets held.
     pub fn make_mesh(&self, data: &MeshData) -> MadeMesh {

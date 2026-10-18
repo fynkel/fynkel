@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 35
+#define FY_ABI_VERSION 37
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -188,12 +188,14 @@ typedef struct FyVec3 {
 } FyVec3;
 
 // A screen effect, for `fy_camera_effects_set`: a shader the world has
-// (`fy_shader_add`) with `fn effect`, and `values_len` bytes of its values,
-// laid out as its `Values` (`fy_shader_describe`).
+// (`fy_shader_add`) with `fn effect`, `values_len` bytes of its values,
+// laid out as its `Values` (`fy_shader_describe`), and its textures in
+// the order it declares them, 0 for none (it reads white).
 typedef struct FyScreenEffect {
   uint64_t shader;
   const uint8_t *values;
   size_t values_len;
+  uint64_t textures[4];
 } FyScreenEffect;
 
 // What a world's views draw, and how finely (`fy_world_quality_set`). A
@@ -665,7 +667,8 @@ FyStatus fy_camera_shake_set(const struct FyWorld *world,
 // any it had (0 takes them away): run over its picture in order, each
 // over what the one before made, when a view draws from it. A shader that
 // isn't an effect's is `FY_STATUS_INVALID_VALUE`; values that aren't as
-// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`. A shader can't be
+// many bytes as its shader's are `FY_STATUS_WRONG_SIZE`; a texture the
+// world hasn't, `FY_STATUS_NO_TEXTURE`. A shader or texture can't be
 // removed while an effect uses it.
 //
 // # Safety
@@ -693,6 +696,18 @@ FyStatus fy_world_quality_set(const struct FyWorld *world, const struct FyQualit
 //
 // `out` is null or writable.
 FyStatus fy_quality_preset(uint32_t level, struct FyQuality *out);
+
+// Writes to `out` how many pipelines of materials' own shaders are being
+// made beside the frames: a view on screen draws without a shader's
+// objects while the driver compiles it, the first time it's drawn on the
+// device, rather than holding a frame up. 0 when every shader drawn so
+// far is ready, as a loading screen waits for. Makes the device if
+// there's none yet.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_shaders_waiting(uint32_t *out);
 
 // Writes the level this device picks for a world without a quality of
 // its own to `out`: `FY_QUALITY_LOW`, `_MEDIUM` or `_HIGH`. Makes the
@@ -1086,7 +1101,8 @@ void fy_shader_free(struct FyShader *shader);
 // What a shader takes, as UTF-8 lines, so a material can be given it by
 // name: `lit` or `unlit`; `values <bytes>`; `value <name> <f32|i32|u32>
 // <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
-// offset in bytes) for each of its `Values`; `texture <name>
+// offset in bytes) for each of its `Values`, an array's with `<count>
+// <stride>` after (its length; the bytes from one to the next); `texture <name>
 // <srgb|linear>` for each texture, in order; `own <name>` for each of its
 // `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
 // has a `light`; `behind` if it reads what's behind it (`scene_depth`,

@@ -143,7 +143,7 @@ fn a_cameras_screen_effects_change_its_picture() {
     let before = centre(&view);
 
     let gain = 1.0f32.to_le_bytes();
-    let effect = FyScreenEffect { shader, values: gain.as_ptr(), values_len: gain.len() };
+    let effect = FyScreenEffect { shader, values: gain.as_ptr(), values_len: gain.len(), textures: [0; 4] };
     // SAFETY: a live world and pointers to locals.
     unsafe {
         let wrong = FyScreenEffect { shader: surface, ..effect };
@@ -160,9 +160,29 @@ fn a_cameras_screen_effects_change_its_picture() {
         assert!((linear(before[c]) + linear(after[c]) - 1.0).abs() < 0.05, "{before:?} → {after:?}");
     }
 
+    // One with a texture of its own: red, so only the red is kept.
+    let red = "var red: color_texture;\nfn effect(in: EffectInput) -> vec4<f32> {\n    return sample(red, in.uv) * picture(in.uv);\n}\n";
+    let tinted = add(&world, "red.wgsl", red).unwrap();
+    // SAFETY: a live world, a slice, and pointers to locals.
+    unsafe {
+        let (mut texture, mut id) = (std::ptr::null_mut(), 0);
+        ok(fy_texture_new_rgba(1, 1, [255u8, 0, 0, 255].as_ptr(), 4, &mut texture));
+        ok(fy_texture_add(world.0, texture, &mut id));
+        fy_texture_free(texture);
+        let effect =
+            FyScreenEffect { shader: tinted, values: std::ptr::null(), values_len: 0, textures: [id, 0, 0, 0] };
+        let missing = FyScreenEffect { textures: [id + 1, 0, 0, 0], ..effect };
+        assert_eq!(fy_camera_effects_set(world.0, camera, &missing, 1), FyStatus::NoTexture);
+        ok(fy_camera_effects_set(world.0, camera, &effect, 1));
+        assert_eq!(fy_texture_remove(world.0, id), FyStatus::InUse);
+        let after = centre(&view);
+        assert!(after[0].abs_diff(before[0]) <= 2 && after[1] == 0 && after[2] == 0, "{before:?} → {after:?}");
+        ok(fy_camera_effects_set(world.0, camera, std::ptr::null(), 0));
+        ok(fy_texture_remove(world.0, id));
+    }
+
     // SAFETY: a live world.
     unsafe {
-        ok(fy_camera_effects_set(world.0, camera, std::ptr::null(), 0));
         ok(fy_shader_remove(world.0, shader));
     }
     assert_eq!(centre(&view), before);

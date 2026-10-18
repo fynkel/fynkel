@@ -48,6 +48,11 @@ pub enum WorldError {
         shader: ShaderId,
         object: ObjectId,
     },
+    /// The texture can't be removed while a camera's screen effect uses it.
+    EffectTextureInUse {
+        texture: TextureId,
+        object: ObjectId,
+    },
     /// A screen effect's shader given a material, or a material's given a
     /// camera's effects (`effect`: whether it's an effect's).
     ShaderKind {
@@ -109,6 +114,9 @@ impl std::fmt::Display for WorldError {
             WorldError::ShaderInUse { shader, material } => write!(f, "{shader} is still used by {material}"),
             WorldError::EffectInUse { shader, object } => {
                 write!(f, "{shader} is still a screen effect on {object}'s camera")
+            }
+            WorldError::EffectTextureInUse { texture, object } => {
+                write!(f, "{texture} is still used by a screen effect on {object}'s camera")
             }
             WorldError::ShaderKind { shader, effect: true } => {
                 write!(f, "{shader} is a screen effect's shader: it goes on a camera, not a material")
@@ -545,6 +553,11 @@ impl World {
         if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.uses_texture(id)) {
             return Err(WorldError::TextureInUse { texture: id, material });
         }
+        if let Some((&object, _)) =
+            self.camera_effects.iter().find(|(_, e)| e.iter().any(|e| e.textures.contains(&Some(id))))
+        {
+            return Err(WorldError::EffectTextureInUse { texture: id, object });
+        }
         self.textures.remove(&id);
         Ok(())
     }
@@ -621,10 +634,14 @@ impl World {
 
     /// Gives the camera on `object` these screen effects, in place of any
     /// it had: run over its picture in order. Each one's shader must be an
-    /// effect's, and its values as many bytes as the shader's.
+    /// effect's, its values as many bytes as the shader's, and its
+    /// textures there.
     pub fn set_camera_effects(&mut self, object: ObjectId, effects: Vec<ScreenEffect>) -> Result<()> {
         self.get::<crate::Camera>(object)?;
         for effect in &effects {
+            for &texture in effect.textures.iter().flatten() {
+                self.texture(texture)?;
+            }
             let shader = self.shader(effect.shader)?;
             if !shader.effect {
                 return Err(WorldError::ShaderKind { shader: effect.shader, effect: false });

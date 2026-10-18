@@ -4,13 +4,21 @@
 //! size and format, made the first frame a camera has effects and let go
 //! a while after it has none.
 
-/// An effect's uniform: the view's size and the time, then its values.
-pub(crate) const UNIFORM_BYTES: u64 = 16 + crate::MAX_VALUES_BYTES as u64;
+/// An effect's uniform: the view's size and the time, the camera (its
+/// inverse view and projection, where it is and the way it looks), then
+/// its values.
+pub(crate) const UNIFORM_BYTES: u64 = 16 + 64 + 32 + crate::MAX_VALUES_BYTES as u64;
+
+/// Where an effect's values start in its uniform.
+pub(crate) const VALUES_AT: usize = 16 + 64 + 32;
 
 /// The layout and sampler every effect reads through.
 pub(crate) struct EffectKit {
     /// The picture, its sampler and the uniform, at a dynamic offset.
     pub(crate) layout: wgpu::BindGroupLayout,
+    /// The solid scene's depth, for effects that read it (group 2; their
+    /// own textures are group 1, as a material's shader's).
+    pub(crate) depth_layout: wgpu::BindGroupLayout,
     sampler: wgpu::Sampler,
     /// Each effect's uniform's room in the buffer.
     pub(crate) stride: u64,
@@ -49,6 +57,19 @@ impl EffectKit {
                 },
             ],
         });
+        let depth_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("screen effect depth"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("screen effect"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -56,7 +77,7 @@ impl EffectKit {
             ..Default::default()
         });
         let align = u64::from(device.limits().min_uniform_buffer_offset_alignment);
-        Self { layout, sampler, stride: UNIFORM_BYTES.div_ceil(align) * align }
+        Self { layout, depth_layout, sampler, stride: UNIFORM_BYTES.div_ceil(align) * align }
     }
 }
 
