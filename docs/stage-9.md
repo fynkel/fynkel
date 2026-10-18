@@ -222,4 +222,4 @@ say otherwise.
 - [x] Phase 2: skinned models (#121)
 - [x] Phase 3: blending (#122)
 - [x] Phase 4: many characters, and the measure (#124)
-- [ ] Phase 5: games, the guide, and the report
+- [x] Phase 5: games, the guide, and the report (#125)

@@ -2,7 +2,7 @@
 
 Phase 5 of [the stage 9 plan](stage-9.md). Phases 1 to 4 are merged
 (#120–#122, #124, with the lab's asset fix #123 between). Phase 5 is
-this PR.
+#125.
 
 ## The result
 
@@ -44,7 +44,7 @@ farmer.find('arm-right')!.add(sword); // a part is an object: the sword follows 
 | 3 | Blending: layers (masked, additive, with a strength), a 1D blend, crossfades from whatever is shown | #122 |
 | — | The lab app bundles the KayKit models | #123 |
 | 4 | The lab's crowd (1 to 100 characters), measured on the three devices | #124 |
-| 5 | Coins and Sheepdog animated; the guide's §13 "Animation"; this report | this PR |
+| 5 | Coins and Sheepdog animated; the guide's §13 "Animation"; this report | #125 |
 
 The C interface went from ABI 30 to 32. Each phase has its lab scene,
 its part of the guide, and its tests: poses checked against numbers
