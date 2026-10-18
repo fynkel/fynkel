@@ -95,6 +95,7 @@ fn busy_scene(t: f32) -> RenderScene {
     scene.draws = (0..1000)
         .map(|i| Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: Mat4::from_translation(Vec3::new((i % 40) as f32, (t + i as f32).sin(), (i / 40) as f32)),
             // Every fourth see-through, every tenth glowing: sorted back

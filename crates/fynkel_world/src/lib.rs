@@ -26,9 +26,9 @@ pub use fynkel_load::{ClipData, HdrData, ImageData, ImageError, MaterialData, Mo
 pub use fynkel_mesh::{MeshData, MeshError, MeshParts, Vertex};
 pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
-pub use id::{MaterialId, MeshId, ObjectId, TextureId};
+pub use id::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 pub use model::ModelIds;
 pub use raycast::{Ray, RayHit, Raycaster};
-pub use resources::{Blend, Material};
+pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, Shader};
 pub use skin::Skin;
 pub use world::{Result, World, WorldError};

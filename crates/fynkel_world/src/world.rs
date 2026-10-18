@@ -10,8 +10,8 @@ use std::sync::Arc;
 use fynkel_load::ImageData;
 use fynkel_mesh::MeshData;
 
-use crate::resources::Material;
-use crate::{MaterialId, MeshId, ObjectId, TextureId};
+use crate::resources::{Material, Shader};
+use crate::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 
 /// Why a world operation was refused. On error, the world is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -25,6 +25,7 @@ pub enum WorldError {
     NoMesh(MeshId),
     NoMaterial(MaterialId),
     NoTexture(TextureId),
+    NoShader(ShaderId),
     /// The resource can't be removed while an object still uses it.
     MeshInUse {
         mesh: MeshId,
@@ -37,6 +38,17 @@ pub enum WorldError {
     TextureInUse {
         texture: TextureId,
         material: MaterialId,
+    },
+    ShaderInUse {
+        shader: ShaderId,
+        material: MaterialId,
+    },
+    /// Values written past the end of a material's shader's: it has
+    /// `size` bytes of them.
+    Values {
+        material: MaterialId,
+        end: usize,
+        size: usize,
     },
     /// A field value failed validation.
     Field(FieldError),
@@ -72,9 +84,14 @@ impl std::fmt::Display for WorldError {
             WorldError::NoMesh(id) => write!(f, "{id} does not exist"),
             WorldError::NoMaterial(id) => write!(f, "{id} does not exist"),
             WorldError::NoTexture(id) => write!(f, "{id} does not exist"),
+            WorldError::NoShader(id) => write!(f, "{id} does not exist"),
             WorldError::MeshInUse { mesh, object } => write!(f, "{mesh} is still used by {object}"),
             WorldError::MaterialInUse { material, object } => write!(f, "{material} is still used by {object}"),
             WorldError::TextureInUse { texture, material } => write!(f, "{texture} is still used by {material}"),
+            WorldError::ShaderInUse { shader, material } => write!(f, "{shader} is still used by {material}"),
+            WorldError::Values { material, end, size } => {
+                write!(f, "{material}'s shader has {size} bytes of values; {end} is past them")
+            }
             WorldError::Field(e) => e.fmt(f),
             WorldError::Cycle { child, parent } => {
                 write!(f, "{parent} can't be the parent of {child}: it is {child} or below it")
@@ -117,6 +134,15 @@ pub struct World {
     material_ids: IdCounter,
     textures: IdMap<TextureId, Arc<ImageData>>,
     texture_ids: IdCounter,
+    /// Each shader, and its version: a new one each time it's set.
+    shaders: IdMap<ShaderId, (Shader, u64)>,
+    shader_ids: IdCounter,
+    shader_versions: u64,
+    /// The values of each material with a shader that has some, laid out
+    /// as its `Values`.
+    material_values: IdMap<MaterialId, Vec<u8>>,
+    /// The time and the time since the last frame, as shaders see them.
+    shader_time: [f32; 2],
     /// [`World::insert_all`]'s entities, kept between calls so a frame's
     /// batch allocates nothing.
     batch: Vec<hecs::Entity>,
@@ -134,6 +160,7 @@ impl std::fmt::Debug for World {
             .field("meshes", &self.meshes.len())
             .field("materials", &self.materials.len())
             .field("textures", &self.textures.len())
+            .field("shaders", &self.shaders.len())
             .finish()
     }
 }
@@ -157,6 +184,11 @@ impl World {
             material_ids: IdCounter::new(),
             textures: IdMap::default(),
             texture_ids: IdCounter::new(),
+            shaders: IdMap::default(),
+            shader_ids: IdCounter::new(),
+            shader_versions: 0,
+            material_values: IdMap::default(),
+            shader_time: [0.0; 2],
             batch: Vec::new(),
             debug_lines: Vec::new(),
             animators: IdMap::default(),
@@ -359,8 +391,10 @@ impl World {
     pub fn add_material(&mut self, material: Material) -> Result<MaterialId> {
         validate_all(&material)?;
         self.check_references(&material)?;
+        self.check_shader(&material)?;
         let id = MaterialId::new(self.material_ids.next());
         self.materials.insert(id, material);
+        self.reset_values(id);
         Ok(id)
     }
 
@@ -375,7 +409,57 @@ impl World {
         }
         validate_all(&material)?;
         self.check_references(&material)?;
-        self.materials.insert(id, material);
+        self.check_shader(&material)?;
+        let old = self.materials.insert(id, material).expect("checked above");
+        // Its values are its shader's: a new shader starts from zeros.
+        if old.shader != material.shader {
+            self.reset_values(id);
+        }
+        Ok(())
+    }
+
+    fn check_shader(&self, material: &Material) -> Result<()> {
+        match material.shader {
+            Some(shader) if !self.shaders.contains_key(&shader) => Err(WorldError::NoShader(shader)),
+            _ => Ok(()),
+        }
+    }
+
+    /// Zeros for `id`'s values, as many as its shader has.
+    fn reset_values(&mut self, id: MaterialId) {
+        let size = self.materials[&id].shader.map_or(0, |s| self.shaders[&s].0.values_size);
+        if size == 0 {
+            self.material_values.remove(&id);
+        } else {
+            self.material_values.insert(id, vec![0; size]);
+        }
+    }
+
+    /// A material's values, laid out as its shader's `Values`: empty
+    /// without a shader, or with one that has none.
+    pub fn material_values(&self, id: MaterialId) -> Result<&[u8]> {
+        if !self.materials.contains_key(&id) {
+            return Err(WorldError::NoMaterial(id));
+        }
+        Ok(self.material_values.get(&id).map_or(&[], Vec::as_slice))
+    }
+
+    /// Writes `bytes` into a material's values from `offset`, where its
+    /// shader's `Values` puts the one being set. Every object using it
+    /// changes with it.
+    pub fn set_material_values(&mut self, id: MaterialId, offset: usize, bytes: &[u8]) -> Result<()> {
+        if !self.materials.contains_key(&id) {
+            return Err(WorldError::NoMaterial(id));
+        }
+        let values = self.material_values.get_mut(&id);
+        let size = values.as_ref().map_or(0, |v| v.len());
+        let end = offset.saturating_add(bytes.len());
+        if end > size {
+            return Err(WorldError::Values { material: id, end, size });
+        }
+        if let Some(values) = values {
+            values[offset..end].copy_from_slice(bytes);
+        }
         Ok(())
     }
 
@@ -388,6 +472,7 @@ impl World {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         self.materials.remove(&id);
+        self.material_values.remove(&id);
         Ok(())
     }
 
@@ -420,11 +505,74 @@ impl World {
         if !self.textures.contains_key(&id) {
             return Err(WorldError::NoTexture(id));
         }
-        if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.textures().contains(&Some(id))) {
+        if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.uses_texture(id)) {
             return Err(WorldError::TextureInUse { texture: id, material });
         }
         self.textures.remove(&id);
         Ok(())
+    }
+
+    // --- Shaders -----------------------------------------------------------
+
+    /// Adds a material's own shader, compiled.
+    pub fn add_shader(&mut self, shader: Shader) -> ShaderId {
+        let id = ShaderId::new(self.shader_ids.next());
+        self.shader_versions += 1;
+        self.shaders.insert(id, (shader, self.shader_versions));
+        id
+    }
+
+    pub fn shader(&self, id: ShaderId) -> Result<&Shader> {
+        self.shaders.get(&id).map(|(s, _)| s).ok_or(WorldError::NoShader(id))
+    }
+
+    /// Replaces a shader, as when its file changes: its materials draw
+    /// with the new one. Their values keep what fits; new ones are 0.
+    pub fn set_shader(&mut self, id: ShaderId, shader: Shader) -> Result<()> {
+        if !self.shaders.contains_key(&id) {
+            return Err(WorldError::NoShader(id));
+        }
+        let size = shader.values_size;
+        self.shader_versions += 1;
+        self.shaders.insert(id, (shader, self.shader_versions));
+        for (material, m) in &self.materials {
+            if m.shader == Some(id) {
+                if size == 0 {
+                    self.material_values.remove(material);
+                } else {
+                    self.material_values.entry(*material).or_default().resize(size, 0);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Removes a shader. Refused while any material uses it.
+    pub fn remove_shader(&mut self, id: ShaderId) -> Result<()> {
+        if !self.shaders.contains_key(&id) {
+            return Err(WorldError::NoShader(id));
+        }
+        if let Some((&material, _)) = self.materials.iter().find(|(_, m)| m.shader == Some(id)) {
+            return Err(WorldError::ShaderInUse { shader: id, material });
+        }
+        self.shaders.remove(&id);
+        Ok(())
+    }
+
+    /// Every shader and its version, which changes each time it's set, in
+    /// no particular order.
+    pub fn shaders(&self) -> impl Iterator<Item = (ShaderId, &Shader, u64)> + '_ {
+        self.shaders.iter().map(|(&id, (shader, version))| (id, shader, *version))
+    }
+
+    /// The time shaders see, and how far it moved since the last frame:
+    /// the game's, so it stops while it's paused.
+    pub fn shader_time(&self) -> [f32; 2] {
+        self.shader_time
+    }
+
+    pub fn set_shader_time(&mut self, time: f32, delta: f32) {
+        self.shader_time = [time, delta];
     }
 }
 

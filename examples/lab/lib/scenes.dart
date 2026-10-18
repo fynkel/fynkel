@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps, then stage 6's, 7's, 8's and 9's. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's and 10's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -25,6 +25,7 @@ import 'scenes/joints_chain.dart';
 import 'scenes/joints_character.dart';
 import 'scenes/lamps.dart';
 import 'scenes/see_through.dart';
+import 'scenes/shaders.dart';
 import 'scenes/shadows.dart';
 import 'scenes/sky.dart';
 import 'scenes/layer_matrix.dart';
@@ -104,4 +105,5 @@ final List<LabScene Function()> scenes = [
   GlowScene.new,
   SkinnedScene.new,
   CrowdScene.new,
+  ShadersScene.new,
 ];

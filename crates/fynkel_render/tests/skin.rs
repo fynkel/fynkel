@@ -84,6 +84,8 @@ fn stage(quality: QualityLevel) -> RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(1.5, 3.0, 6.0), Vec3::new(0.0, 1.0, 0.0))),
         lights: vec![Light::sun(Vec3::new(1.0, -1.5, -0.5), Vec3::ONE).with_shadows(true)],
         quality: Some(quality.quality()),
+        time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         sky: None,

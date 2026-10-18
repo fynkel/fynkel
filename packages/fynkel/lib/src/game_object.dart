@@ -1064,6 +1064,10 @@ class GameObject with _Moving {
       ..cast_shadows = value.castShadows
       ..receive_shadows = value.receiveShadows;
     r.color.write(value.color ?? Color.white);
+    final own = value._own;
+    for (var i = 0; i < 4; i++) {
+      r.own[i] = own == null ? 0 : own[i];
+    }
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
   }
 

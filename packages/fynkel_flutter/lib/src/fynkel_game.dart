@@ -33,7 +33,8 @@ import 'world_listenables.dart' show WorldTheme;
 /// `onLoad` and `onStart` take effect (a hot reload alone changes only the
 /// methods of objects already made). In debug builds F5 restarts, and
 /// with [restartOnReload] every hot reload does too: for phones, which
-/// have no F5. [FynkelApp] uses one.
+/// have no F5. Without it, a hot reload still gives the game's shaders
+/// their files' new code (`World.reloadShaders`). [FynkelApp] uses one.
 ///
 /// A widget below it, or a widget test, reaches the game with
 /// `FynkelGame.of<ArenaGame>(context).game`; calling the game from a
@@ -126,8 +127,14 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
   @override
   void reassemble() {
     super.reassemble();
-    // The new code is in, and everything builds again after this.
-    if (widget.restartOnReload) _again();
+    // The new code is in, and everything builds again after this. The
+    // shaders' files are read again either way: a hot reload sends the
+    // changed ones.
+    if (widget.restartOnReload) {
+      _again();
+    } else {
+      unawaited(_world.reloadShaders());
+    }
   }
 
   @override

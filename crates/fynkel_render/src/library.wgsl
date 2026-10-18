@@ -1,0 +1,130 @@
+// What a material's shader can use (stage 10), after forward.wgsl: what
+// it's given for a point of its surface, and a few helpers. Names that
+// start with `fy_` are the engine's own.
+
+// A point of the surface, as a shader's `surface` or `unlit` gets it.
+struct SurfaceInput {
+    // The texture coordinates, after the material's UV scale and offset.
+    uv: vec2<f32>,
+    // Where it is in the world.
+    position: vec3<f32>,
+    // The way it faces, in the world, out of the side that's seen: the
+    // mesh's, without a normal map.
+    normal: vec3<f32>,
+    // The way to the camera, unit length.
+    view: vec3<f32>,
+    // Where it is on the screen: 0 to 1 across and down, from the top left.
+    screen: vec2<f32>,
+    // The material's colour (or the object's own), linear, with its alpha.
+    color: vec4<f32>,
+};
+
+// What the shader's `surface` is lit as, and its `standard` reads.
+var<private> fy_in: VertexOut;
+var<private> fy_front: bool;
+
+// The material's own surface, as the built-in shader has it: its colour,
+// metal, roughness and glow, times its textures, and its normal map. A
+// shader can start from it and change one thing.
+fn standard(in: SurfaceInput) -> Surface {
+    return standard_surface(fy_in, fy_front);
+}
+
+fn fy_surface_input(in: VertexOut, front_facing: bool) -> SurfaceInput {
+    var n = normalize(in.normal);
+    if seen_from_behind(in, front_facing) {
+        n = -n;
+    }
+    return SurfaceInput(in.uv, in.world_position, n, to_viewer(in.world_position), in.clip.xy * frame.view_size.xy,
+        in.base_color);
+}
+
+// The game's time in seconds, as its shaders see it: it stops while the
+// game is paused, and goes slower with its time scale.
+fn frame_time() -> f32 {
+    return frame.time.x;
+}
+
+// How much `frame_time()` moved since the last frame.
+fn frame_delta() -> f32 {
+    return frame.time.y;
+}
+
+// `t` at `uv`, smoothly, repeating past 0 and 1.
+fn sample(t: texture_2d<f32>, uv: vec2<f32>) -> vec4<f32> {
+    return textureSample(t, material_sampler, uv);
+}
+
+// `t` seen from the three axes and mixed by how `normal` faces them: a
+// texture on a surface with no UVs (rock, ground), `scale` repeats a
+// metre.
+fn triplanar(t: texture_2d<f32>, position: vec3<f32>, normal: vec3<f32>, scale: f32) -> vec4<f32> {
+    var w = pow(abs(normal), vec3<f32>(4.0));
+    w /= w.x + w.y + w.z;
+    let x = textureSample(t, material_sampler, position.zy * scale);
+    let y = textureSample(t, material_sampler, position.xz * scale);
+    let z = textureSample(t, material_sampler, position.xy * scale);
+    return x * w.x + y * w.y + z * w.z;
+}
+
+// A number from 0 to 1 that looks random, the same for the same `p`.
+fn hash(p: vec2<f32>) -> f32 {
+    let q = fract(p * vec2<f32>(0.1031, 0.1030));
+    let r = q + dot(q, q.yx + 33.33);
+    return fract((r.x + r.y) * r.x);
+}
+
+fn hash3(p: vec3<f32>) -> f32 {
+    var q = fract(p * 0.1031);
+    q += dot(q, q.zyx + 31.32);
+    return fract((q.x + q.y) * q.z);
+}
+
+// Smooth noise from 0 to 1: about one bump each 1 of `p`.
+fn noise(p: vec2<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let a = hash(i);
+    let b = hash(i + vec2<f32>(1.0, 0.0));
+    let c = hash(i + vec2<f32>(0.0, 1.0));
+    let d = hash(i + vec2<f32>(1.0, 1.0));
+    return mix(mix(a, b, u.x), mix(c, d, u.x), u.y);
+}
+
+// `noise` in 3D: for a solid that's the same all through.
+fn noise3(p: vec3<f32>) -> f32 {
+    let i = floor(p);
+    let f = fract(p);
+    let u = f * f * (3.0 - 2.0 * f);
+    let x0 = mix(hash3(i), hash3(i + vec3<f32>(1.0, 0.0, 0.0)), u.x);
+    let x1 = mix(hash3(i + vec3<f32>(0.0, 1.0, 0.0)), hash3(i + vec3<f32>(1.0, 1.0, 0.0)), u.x);
+    let x2 = mix(hash3(i + vec3<f32>(0.0, 0.0, 1.0)), hash3(i + vec3<f32>(1.0, 0.0, 1.0)), u.x);
+    let x3 = mix(hash3(i + vec3<f32>(0.0, 1.0, 1.0)), hash3(i + vec3<f32>(1.0, 1.0, 1.0)), u.x);
+    return mix(mix(x0, x1, u.y), mix(x2, x3, u.y), u.z);
+}
+
+// Noise with detail: four of `noise`, each twice as fine and half as
+// strong as the last. 0 to 1.
+fn fbm(p: vec2<f32>) -> f32 {
+    var sum = 0.0;
+    var strength = 0.5;
+    var q = p;
+    for (var i = 0; i < 4; i++) {
+        sum += noise(q) * strength;
+        q = q * 2.03 + vec2<f32>(17.0, 31.0);
+        strength *= 0.5;
+    }
+    return sum / 0.9375;
+}
+
+// 0 facing the camera, to 1 at the edges as seen: for rims and
+// holograms. A higher `power` keeps it nearer the edges.
+fn fresnel(in: SurfaceInput, power: f32) -> f32 {
+    return pow(1.0 - saturate(dot(in.normal, in.view)), power);
+}
+
+// `x` from the range `a` to `b` moved to `c` to `d`, not clamped.
+fn remap(x: f32, a: f32, b: f32, c: f32, d: f32) -> f32 {
+    return c + (x - a) * (d - c) / (b - a);
+}

@@ -65,6 +65,12 @@ id_type!(
     "texture"
 );
 
+id_type!(
+    /// A material's own shader (stage 10).
+    ShaderId,
+    "shader"
+);
+
 /// Hands out ids from 1 upwards and never repeats one.
 #[derive(Debug)]
 pub(crate) struct IdCounter(u64);
@@ -101,6 +107,12 @@ impl MaterialId {
 }
 
 impl TextureId {
+    pub(crate) const fn new(n: NonZeroU64) -> Self {
+        Self(n)
+    }
+}
+
+impl ShaderId {
     pub(crate) const fn new(n: NonZeroU64) -> Self {
         Self(n)
     }

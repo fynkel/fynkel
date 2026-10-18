@@ -58,6 +58,16 @@ final class Assets {
     return image;
   }
 
+  /// The shader in [name] (a `.wgsl`), compiled, shared by everything
+  /// that asks for it. A shader that doesn't compile throws a
+  /// [ShaderError]. [World.reloadShaders] reads it again.
+  Future<Shader> shader(String name) async {
+    final asset = _hold(name, _shader);
+    final shader = await asset.ready as Shader;
+    _stillUsable(name);
+    return shader;
+  }
+
   /// The asset in [name] as [kind] loads it: a package's kind of asset,
   /// such as a sound, held and shared as a texture is, and freed with
   /// [AssetKind.free]. A package gives it a getter of its own
@@ -71,7 +81,7 @@ final class Assets {
 
   /// Loads [names] without adding anything, so what asks for them later
   /// has them at once: models (`.glb`), textures (`.png`, `.jpg`,
-  /// `.jpeg`), sky images (`.hdr`) and the kinds packages added ([WorldSystems.addAssetKind]),
+  /// `.jpeg`), sky images (`.hdr`), shaders (`.wgsl`) and the kinds packages added ([WorldSystems.addAssetKind]),
   /// told apart by their extension. They're held as anything else asked
   /// for here is.
   Future<void> preload(Iterable<String> names) async {
@@ -82,7 +92,7 @@ final class Assets {
 
   AssetKind<Object> _kindOf(String name) {
     final lower = name.toLowerCase();
-    final kinds = <AssetKind<Object>>[_model, _texture, _skyImage, ..._world._assetKinds];
+    final kinds = <AssetKind<Object>>[_model, _texture, _skyImage, _shader, ..._world._assetKinds];
     for (final kind in kinds) {
       for (final extension in kind.extensions) {
         if (lower.endsWith(extension.toLowerCase())) return kind;
@@ -179,6 +189,19 @@ final class _TextureKind extends _BuiltInKind<Texture2D> {
   Future<Texture2D> load(World world, String name, Uint8List bytes) => Texture2D.load(bytes);
 }
 
+final class _ShaderKind extends _BuiltInKind<Shader> {
+  const _ShaderKind();
+
+  @override
+  String get name => 'shader';
+
+  @override
+  List<String> get extensions => const ['.wgsl'];
+
+  @override
+  Future<Shader> load(World world, String name, Uint8List bytes) async => Shader(utf8.decode(bytes), name: name);
+}
+
 /// Sky images: not one of a world's resources, so freed as a package's
 /// kind is.
 final class _SkyImageKind extends AssetKind<SkyImage> {
@@ -200,6 +223,7 @@ final class _SkyImageKind extends AssetKind<SkyImage> {
 const _model = _ModelKind();
 const _texture = _TextureKind();
 const _skyImage = _SkyImageKind();
+const _shader = _ShaderKind();
 
 /// One loaded (or loading) asset, and how many uses of it are held.
 final class _Asset {

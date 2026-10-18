@@ -119,12 +119,15 @@ pub fn stage1_scene() -> RenderScene {
         camera: Some(camera),
         lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE)],
         quality: None,
+        time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: Mat4::from_rotation_y(30f32.to_radians()),
             material: PbrMaterial {

@@ -780,6 +780,9 @@ final class MeshRenderer extends Component {
   Color? _color;
   bool _castShadows = true, _receiveShadows = true;
 
+  // Its numbers for its material's shader, its `PerObject`'s, in order.
+  List<double>? _own;
+
   /// The shape it draws; null draws nothing. A mesh can be on any number
   /// of renderers.
   Mesh? get mesh => _mesh;
@@ -848,6 +851,40 @@ final class MeshRenderer extends Component {
       _receiveShadows = old;
       failed.raise();
     }
+  }
+
+  /// Sets this object's own number [name], one of its material's
+  /// shader's `PerObject` ([Shader.perObject]), leaving the other objects
+  /// that share the material as they are: a hit flash, a dissolve, a
+  /// team's tint. 0 until set. Throws an [ArgumentError] for a name the
+  /// shader doesn't have, or a number that isn't finite, and a
+  /// [StateError] without a material with a shader. To tween one:
+  /// `tween(1.0, 0.0, seconds: 0.2, onUpdate: (v) => renderer.set('flash', v))`.
+  void set(String name, double value) {
+    _checkChangeable();
+    final index = _ownIndex(name);
+    if (!value.isFinite) throw ArgumentError.value(value, name, 'must be finite');
+    final own = _own ??= [0, 0, 0, 0];
+    final old = own[index];
+    own[index] = value;
+    if (_write() case final failed?) {
+      own[index] = old;
+      failed.raise();
+    }
+  }
+
+  /// This object's own number [name] ([set]): 0 until set.
+  double number(String name) => _own?[_ownIndex(name)] ?? 0;
+
+  int _ownIndex(String name) {
+    final shader = _material?.shader;
+    if (shader == null) throw StateError('$this has no material with a shader for $name');
+    final index = shader._layout.own.indexOf(name);
+    if (index < 0) {
+      final names = shader._layout.own.isEmpty ? 'none' : shader._layout.own.join(', ');
+      throw ArgumentError.value(name, 'name', 'is no PerObject number of $shader, which has: $names');
+    }
+    return index;
   }
 
   @override

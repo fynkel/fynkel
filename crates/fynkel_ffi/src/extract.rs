@@ -25,6 +25,10 @@
 //!   in, the first frame a material uses it that way, and freed when the
 //!   world removes it. Once for the world, however many views it has: what
 //!   the GPU has is the world's [`Ledger`].
+//! - A material's own shader (stage 10) is uploaded when the world adds
+//!   it, again each time it's set, and freed when it's removed. A material
+//!   with one gives its values to the scene, in 48-byte blocks; its
+//!   textures go up in the colour spaces its shader reads them in.
 //! - Only shown objects count, for all of the above: an inactive object and
 //!   everything below it are left out (stage 3 plan §3.3).
 //! - Everything is placed by its world transform: its own after its
@@ -37,12 +41,12 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    AmbientOcclusion, Bloom, CameraView, ColorSpace, Draw, Fog, Light as RenderLight, Line, MaterialTextures, MeshKey,
-    PbrMaterial, Quality, RenderScene, Sky, TextureKey,
+    AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
+    MaterialTextures, MeshKey, PbrMaterial, Quality, RenderScene, ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
-    TextureId, Transform, World, WorldMatrices,
+    ShaderId, TextureId, Transform, World, WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -55,6 +59,9 @@ pub(crate) enum ResourceOp {
     /// In every colour space. Sent once for each space the texture was
     /// uploaded in; removing again does nothing.
     RemoveTexture(TextureKey),
+    /// A material's own shader, new or set again.
+    UploadShader(ShaderKey, Arc<CustomShader>),
+    RemoveShader(ShaderKey),
 }
 
 /// Which meshes and textures the GPU has, or is about to: those uploaded,
@@ -63,6 +70,8 @@ pub(crate) enum ResourceOp {
 pub(crate) struct Uploaded {
     meshes: HashSet<MeshId>,
     textures: HashSet<(TextureId, ColorSpace)>,
+    /// Each shader's version uploaded.
+    shaders: HashMap<ShaderId, u64>,
 }
 
 /// A world's [`Uploaded`], shared by its views, and the changes still to
@@ -107,6 +116,16 @@ pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
 
 pub(crate) fn texture_key(id: TextureId) -> TextureKey {
     TextureKey(id.raw())
+}
+
+pub(crate) fn shader_key(id: ShaderId) -> ShaderKey {
+    ShaderKey(id.raw())
+}
+
+/// The renderer's shader the world keeps for `id`, if it's one (it always
+/// is: the world's shaders are made by `fy_shader_add`).
+pub(crate) fn compiled(world: &World, id: ShaderId) -> Option<Arc<CustomShader>> {
+    Arc::clone(&world.shader(id).ok()?.compiled).downcast::<CustomShader>().ok()
 }
 
 /// A material's textures as the renderer names them.
@@ -178,19 +197,51 @@ impl Extract {
             }
             kept
         });
+        uploaded.shaders.retain(|&id, _| {
+            let kept = world.shader(id).is_ok();
+            if !kept {
+                ops.push(ResourceOp::RemoveShader(shader_key(id)));
+            }
+            kept
+        });
+        for (id, _, version) in world.shaders() {
+            if uploaded.shaders.insert(id, version) != Some(version)
+                && let Some(shader) = compiled(world, id)
+            {
+                ops.push(ResourceOp::UploadShader(shader_key(id), shader));
+            }
+        }
+        scene.time = world.shader_time();
+
         // Materials are few next to objects, so looking at each one's
         // slots, and resolving it, every frame costs little.
         self.materials.clear();
+        let mut upload = |id: TextureId, space: ColorSpace| {
+            if uploaded.textures.insert((id, space)) {
+                let image = world.texture(id).expect("the world refuses a material with a missing texture");
+                ops.push(ResourceOp::UploadTexture(texture_key(id), space, Arc::clone(image)));
+            }
+        };
         for (id, material) in world.materials() {
-            self.materials.insert(id, pbr(material));
+            let mut m = pbr(material);
             for (key, space) in texture_keys(material).slots() {
                 let Some(key) = key else { continue };
-                let id = TextureId::from_raw(key.0).expect("made from a TextureId");
-                if uploaded.textures.insert((id, space)) {
-                    let image = world.texture(id).expect("the world refuses a material with a missing texture");
-                    ops.push(ResourceOp::UploadTexture(key, space, Arc::clone(image)));
-                }
+                upload(TextureId::from_raw(key.0).expect("made from a TextureId"), space);
             }
+            if let Some(shader) = material.shader.and_then(|s| compiled(world, s).map(|c| (s, c))) {
+                let (shader, compiled) = shader;
+                let mut textures = [None; MAX_TEXTURES];
+                for (i, declared) in compiled.textures.iter().enumerate() {
+                    if let Some(texture) = material.shader_textures[i] {
+                        upload(texture, declared.space);
+                        textures[i] = Some(texture_key(texture));
+                    }
+                }
+                let values = scene.shader_values.len() as u32;
+                push_values(&mut scene.shader_values, world.material_values(id).unwrap_or_default());
+                m.shader = Some(ShaderUse { shader: shader_key(shader), values, textures });
+            }
+            self.materials.insert(id, m);
         }
 
         self.matrices.update(world);
@@ -332,6 +383,7 @@ impl Extract {
                 material,
                 cast_shadows: r.cast_shadows,
                 receive_shadows: r.receive_shadows,
+                own: r.own,
             });
         });
 
@@ -358,6 +410,21 @@ fn pbr(m: &Material) -> PbrMaterial {
             fynkel_world::Blend::Additive => fynkel_render::Blend::Additive,
         },
         textures: texture_keys(m),
+        shader: None,
+    }
+}
+
+/// A material's values, laid out as its shader's `Values`, as the scene's
+/// 48-byte blocks: the last one padded with zeros.
+fn push_values(blocks: &mut Vec<[[f32; 4]; 3]>, bytes: &[u8]) {
+    for chunk in bytes.chunks(48) {
+        let mut block = [[0f32; 4]; 3];
+        for (i, word) in chunk.chunks(4).enumerate() {
+            let mut b = [0u8; 4];
+            b[..word.len()].copy_from_slice(word);
+            block[i / 4][i % 4] = f32::from_le_bytes(b);
+        }
+        blocks.push(block);
     }
 }
 

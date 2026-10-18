@@ -28,12 +28,15 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
         lights: Vec::new(),
         quality: None,
+        time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(2.0)),
             material,
@@ -220,12 +223,15 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
             camera: Some(camera),
             lights: Vec::new(),
             quality: None,
+            time: [0.0; 2],
+            shader_values: Vec::new(),
             ambient: Vec3::ZERO,
             lines: Vec::new(),
             sky: None,
             fog: None,
             draws: vec![Draw {
                 skin: None,
+                own: [0.0; 4],
                 mesh: PLANE,
                 model: Mat4::from_scale(Vec3::new(400.0, 1.0, 400.0)),
                 material: PbrMaterial {
@@ -381,6 +387,7 @@ fn draws_are_batched_by_textures_too() {
         .enumerate()
         .map(|(i, (key, cutoff))| Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: at(i as f32 - 2.0),
             material: with(key, cutoff),
@@ -465,6 +472,7 @@ fn textured_materials_match_their_golden() {
     scene.draws = vec![
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: place(-1.9, 0.5, Vec3::ONE),
             material: PbrMaterial { textures: textures(|t| t.base_color = Some(GRID)), ..PbrMaterial::DEFAULT },
@@ -473,6 +481,7 @@ fn textured_materials_match_their_golden() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: SPHERE,
             model: place(-0.4, 0.0, Vec3::splat(1.3)),
             material: PbrMaterial {
@@ -486,6 +495,7 @@ fn textured_materials_match_their_golden() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: PLANE,
             model: Mat4::from_translation(Vec3::new(0.85, 0.1, 0.4))
                 * Mat4::from_rotation_x(55f32.to_radians())
@@ -501,6 +511,7 @@ fn textured_materials_match_their_golden() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: place(2.1, -0.4, Vec3::new(0.9, 1.4, 0.2)),
             material: PbrMaterial {

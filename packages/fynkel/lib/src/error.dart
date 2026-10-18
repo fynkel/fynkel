@@ -57,6 +57,9 @@ enum FynkelStatus {
   /// stopped drawing, with every other view (they share the device). A new
   /// view gets a new device and uploads everything again; `FynkelView` makes one by itself.
   deviceLost,
+
+  /// The world has no such shader: it was disposed, or never added.
+  noShader,
 }
 
 /// The engine itself failed: no GPU, a frame that didn't finish, a lost

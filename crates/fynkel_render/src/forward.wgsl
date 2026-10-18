@@ -94,6 +94,9 @@ struct Frame {
     sky_light: vec4<f32>,
     // x, y: 1 / the view's width and height, in pixels.
     view_size: vec4<f32>,
+    // x: the game's time, in seconds, as its shaders see it. y: this
+    // frame's step of it. Both stop while the game is paused.
+    time: vec4<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -172,6 +175,10 @@ struct VertexIn {
     @location(9) emissive: vec4<f32>,
     // xy: UV scale, zw: UV offset (glTF's texture transform).
     @location(10) uv_transform: vec4<f32>,
+    // The object's own four numbers, for a material's shader (stage 10).
+    @location(11) own: vec4<f32>,
+    // Where the material's values start in `joints` (a shader's).
+    @location(12) values: u32,
 };
 
 struct VertexOut {
@@ -185,6 +192,8 @@ struct VertexOut {
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
     @location(6) @interpolate(flat) emissive: vec4<f32>,
+    @location(7) @interpolate(flat) own: vec4<f32>,
+    @location(8) @interpolate(flat) values: u32,
 };
 
 @vertex
@@ -224,6 +233,8 @@ fn vertex(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     out.base_color = in.base_color;
     out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
+    out.own = in.own;
+    out.values = in.values;
     return out;
 }
 
@@ -285,7 +296,7 @@ fn tonemap_neutral(color_in: vec3<f32>) -> vec3<f32> {
 
 // What a surface reflects towards `v` of light arriving from `l` with
 // `irradiance` (on a surface facing it).
-struct Surface {
+struct Brdf {
     n: vec3<f32>,
     v: vec3<f32>,
     n_dot_v: f32,
@@ -294,7 +305,7 @@ struct Surface {
     alpha: f32,
 };
 
-fn reflected(s: Surface, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
+fn reflected(s: Brdf, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
     let n_dot_l = dot(s.n, l);
     if n_dot_l <= 0.0 {
         return vec3<f32>(0.0);
@@ -405,8 +416,6 @@ fn surface_normal(in: VertexOut, mapped: vec3<f32>) -> vec3<f32> {
     return normalize(m.x * t + m.y * b + m.z * n);
 }
 
-// Linear radiance and alpha. `front_facing` is the builtin: whether the
-// triangle is counter-clockwise on screen.
 // The cell a pixel at `pixel` (framebuffer coordinates) and `p` (world) is
 // in: its index, two words of `cells` each.
 fn cell_of(pixel: vec2<f32>, p: vec3<f32>) -> u32 {
@@ -418,7 +427,25 @@ fn cell_of(pixel: vec2<f32>, p: vec3<f32>) -> u32 {
     return (k * CELLS_DOWN + y) * CELLS_ACROSS + x;
 }
 
-fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
+// What a point of a surface is, before it's lit: the material's factors
+// times its textures here, or what a material's shader says (stage 10).
+// Colours are linear.
+struct Surface {
+    color: vec3<f32>,
+    alpha: f32,
+    // In the world, out of the side that's seen.
+    normal: vec3<f32>,
+    metallic: f32,
+    roughness: f32,
+    // The light it gives off.
+    emission: vec3<f32>,
+    // How much of the ambient light and the sky's reaches it, 0 to 1.
+    occlusion: f32,
+};
+
+// The material's own surface. `front_facing` is the builtin: whether the
+// triangle is counter-clockwise on screen.
+fn standard_surface(in: VertexOut, front_facing: bool) -> Surface {
     // Every texture is sampled first, where control flow is still uniform
     // (WGSL requires it for implicit mip selection).
     // Untextured, each is what its stand-in holds.
@@ -434,34 +461,52 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         occlusion = textureSample(occlusion_texture, material_sampler, in.uv).r;
         emissive_sample = textureSample(emissive_texture, material_sampler, in.uv).rgb;
     }
-    if ao {
-        occlusion *= textureSampleLevel(ao_texture, ao_sampler, in.clip.xy * frame.view_size.xy, 0.0).r;
-    }
-
     let base = in.base_color * base_sample;
-    let albedo = base.rgb;
-    let metallic = in.params.x * mr_sample.b;
-    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
-    let roughness = clamp(in.params.y * mr_sample.g, 0.045, 1.0);
-    let alpha = roughness * roughness;
-
     var n = normalize(in.normal);
     if textured {
         n = surface_normal(in, normal_sample);
     }
-    // The surface's own normal, without the map: shadow lookups move out
-    // along it.
-    var ng = normalize(in.normal);
     // Mirroring turns triangles clockwise, so for a mirrored object the
     // front is the clockwise side. Turning the final normal round turns
     // the whole tangent frame, as the back's normal map needs.
-    if double_sided && front_facing == (in.params.w < 0.0) {
+    if seen_from_behind(in, front_facing) {
         n = -n;
+    }
+    return Surface(base.rgb, base.a, n, in.params.x * mr_sample.b, in.params.y * mr_sample.g,
+        in.emissive.rgb * emissive_sample, occlusion);
+}
+
+// Whether a double-sided surface is seen from its back.
+fn seen_from_behind(in: VertexOut, front_facing: bool) -> bool {
+    return double_sided && front_facing == (in.params.w < 0.0);
+}
+
+// The way from the surface at `p` to the camera.
+fn to_viewer(p: vec3<f32>) -> vec3<f32> {
+    // w = 0: an orthographic camera, and xyz is the way to it.
+    return select(normalize(frame.camera_position.xyz - p), frame.camera_position.xyz, frame.camera_position.w == 0.0);
+}
+
+// Linear radiance and alpha: `s` lit.
+fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
+    var occlusion = s.occlusion;
+    if ao {
+        occlusion *= textureSampleLevel(ao_texture, ao_sampler, in.clip.xy * frame.view_size.xy, 0.0).r;
+    }
+    let albedo = s.color;
+    let metallic = s.metallic;
+    // Below ~0.045 the highlight gets thinner than a pixel and aliases.
+    let roughness = clamp(s.roughness, 0.045, 1.0);
+    let alpha = roughness * roughness;
+    let n = normalize(s.normal);
+    // The surface's own normal, without the map: shadow lookups move out
+    // along it.
+    var ng = normalize(in.normal);
+    if seen_from_behind(in, front_facing) {
         ng = -ng;
     }
     let receives = in.emissive.w > 0.5;
-    // w = 0: an orthographic camera, and xyz is the way to it.
-    let v = select(normalize(frame.camera_position.xyz - in.world_position), frame.camera_position.xyz, frame.camera_position.w == 0.0);
+    let v = to_viewer(in.world_position);
     let n_dot_v = max(dot(n, v), 1e-4);
     let f0 = mix(vec3<f32>(0.04), albedo, metallic);
     let diffuse_color = albedo * (1.0 - metallic);
@@ -479,7 +524,7 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
         color += frame.sky_light.x * (irradiance * diffuse_color + mirrored * ambient_specular) * occlusion;
     }
 
-    let surface = Surface(n, v, n_dot_v, f0, diffuse_color, alpha);
+    let surface = Brdf(n, v, n_dot_v, f0, diffuse_color, alpha);
     for (var i = 0u; i < frame.counts.x; i++) {
         let sun = frame.suns[i];
         var lit = 1.0;
@@ -525,8 +570,8 @@ fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {
             }
         }
     }
-    color += in.emissive.rgb * emissive_sample;
-    return vec4<f32>(color, base.a);
+    color += s.emission;
+    return vec4<f32>(color, s.alpha);
 }
 
 // How much of what's at `p` the fog between it and the camera hides:

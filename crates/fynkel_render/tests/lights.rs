@@ -18,12 +18,15 @@ fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
         camera: Some(CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO)),
         lights,
         quality: Some(quality.quality()),
+        time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: PLANE,
             model: Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(size)),
             material: PbrMaterial {

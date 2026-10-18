@@ -20,6 +20,22 @@ pub struct MeshKey(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextureKey(pub u64);
 
+/// A material's own shader (stage 10), as [`Assets::upload_shader`](crate::Assets::upload_shader)
+/// names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ShaderKey(pub u64);
+
+/// A material drawn with its own shader: which, where its values are in
+/// [`RenderScene::shader_values`], and its own textures, in the shader's
+/// order (`None` reads white).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShaderUse {
+    pub shader: ShaderKey,
+    /// The first of its values' 48-byte blocks.
+    pub values: u32,
+    pub textures: [Option<TextureKey>; crate::MAX_TEXTURES],
+}
+
 /// How a texture's values are read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ColorSpace {
@@ -453,6 +469,8 @@ pub struct PbrMaterial {
     /// Whether what's behind shows through, and how.
     pub blend: Blend,
     pub textures: MaterialTextures,
+    /// Its own shader, or `None` for the built-in one.
+    pub shader: Option<ShaderUse>,
 }
 
 /// How a surface covers what's behind it.
@@ -491,6 +509,7 @@ impl PbrMaterial {
         double_sided: false,
         blend: Blend::Opaque,
         textures: MaterialTextures::NONE,
+        shader: None,
     };
 }
 
@@ -515,12 +534,15 @@ pub struct Draw {
     /// take them, and `model` doesn't move them (glTF's rule). `None`, or
     /// a mesh with no joints, draws it unbent, placed by `model`.
     pub skin: Option<u32>,
+    /// The object's own four numbers, which a material's shader reads as
+    /// its `PerObject` values (stage 10). Zeros for most.
+    pub own: [f32; 4],
 }
 
 impl Draw {
     /// `mesh` placed by `model`, casting and receiving shadows.
     pub fn new(mesh: MeshKey, model: Mat4, material: PbrMaterial) -> Self {
-        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None }
+        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None, own: [0.0; 4] }
     }
 }
 
@@ -722,6 +744,13 @@ pub struct RenderScene {
     /// What to draw, and how finely; `None` for the device's level's
     /// ([`Kit::device_quality`](crate::Kit::device_quality)).
     pub quality: Option<Quality>,
+    /// The game's time, in seconds, and this frame's step of it, as
+    /// shaders see it (`frame_time()`, `frame_delta()`).
+    pub time: [f32; 2],
+    /// The values of the materials drawn with their own shaders, each from
+    /// its [`ShaderUse::values`], laid out as its shader's `Values`, in
+    /// blocks of 48 bytes (a joint's room: they go after the joints).
+    pub shader_values: Vec<[[f32; 4]; 3]>,
 }
 
 impl RenderScene {
@@ -745,5 +774,7 @@ impl RenderScene {
         self.sky = None;
         self.fog = None;
         self.quality = None;
+        self.time = [0.0; 2];
+        self.shader_values.clear();
     }
 }
