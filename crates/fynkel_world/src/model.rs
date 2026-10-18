@@ -47,6 +47,7 @@ impl Material {
             metallic_roughness_texture: texture(data.metallic_roughness_texture),
             occlusion_texture: texture(data.occlusion_texture),
             emissive_texture: texture(data.emissive_texture),
+            ..Self::DEFAULT
         }
     }
 }

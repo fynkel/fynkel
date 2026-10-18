@@ -5,7 +5,10 @@
 use crate::describe::{Describe, Field, FieldKind, Value};
 use glam::Vec2;
 
-use crate::{Color, TextureId};
+use crate::{Color, ShaderId, TextureId};
+
+/// How many textures of its own a material's shader can read.
+pub const MAX_SHADER_TEXTURES: usize = 4;
 
 /// A metallic-roughness PBR material: glTF's, so a loaded model's
 /// materials are these. Each texture multiplies its factor.
@@ -51,6 +54,13 @@ pub struct Material {
     pub occlusion_texture: Option<TextureId>,
     /// Read as sRGB, like `emissive`.
     pub emissive_texture: Option<TextureId>,
+    /// The material's own shader (stage 10), or `None` for the built-in
+    /// one. Its values are the world's, by the material
+    /// (`World::set_material_values`).
+    pub shader: Option<ShaderId>,
+    /// The textures the shader declares, in the order it declares them.
+    /// Past its count they're unused.
+    pub shader_textures: [Option<TextureId>; MAX_SHADER_TEXTURES],
 }
 
 impl Material {
@@ -70,13 +80,15 @@ impl Material {
         metallic_roughness_texture: None,
         occlusion_texture: None,
         emissive_texture: None,
+        shader: None,
+        shader_textures: [None; MAX_SHADER_TEXTURES],
     };
 
     pub const fn color(base_color: Color) -> Self {
         Self { base_color, ..Self::DEFAULT }
     }
 
-    /// Every texture slot, `None` where it's empty.
+    /// Every built-in texture slot, `None` where it's empty.
     pub fn textures(&self) -> [Option<TextureId>; 5] {
         [
             self.base_color_texture,
@@ -85,6 +97,11 @@ impl Material {
             self.occlusion_texture,
             self.emissive_texture,
         ]
+    }
+
+    /// Whether it reads `texture`, in a built-in slot or its shader's.
+    pub fn uses_texture(&self, texture: TextureId) -> bool {
+        self.textures().contains(&Some(texture)) || self.shader_textures.contains(&Some(texture))
     }
 }
 
@@ -134,6 +151,10 @@ impl Describe for Material {
             Field::new("occlusion_texture", FieldKind::Texture, Value::Texture(None)),
             Field::new("emissive_texture", FieldKind::Texture, Value::Texture(None)),
             Field::new("blend", FieldKind::Enum(Blend::NAMES), Value::Enum(D.blend as u32)),
+            Field::new("shader_texture_0", FieldKind::Texture, Value::Texture(None)),
+            Field::new("shader_texture_1", FieldKind::Texture, Value::Texture(None)),
+            Field::new("shader_texture_2", FieldKind::Texture, Value::Texture(None)),
+            Field::new("shader_texture_3", FieldKind::Texture, Value::Texture(None)),
         ];
         FIELDS
     }
@@ -151,6 +172,7 @@ impl Describe for Material {
             8 => Value::Bool(self.double_sided),
             9..=13 => Value::Texture(self.textures()[index - 9]),
             14 => Value::Enum(self.blend as u32),
+            15..=18 => Value::Texture(self.shader_textures[index - 15]),
             _ => return None,
         })
     }
@@ -174,7 +196,35 @@ impl Describe for Material {
             (14, Value::Enum(0)) => self.blend = Blend::Opaque,
             (14, Value::Enum(1)) => self.blend = Blend::Transparent,
             (14, Value::Enum(2)) => self.blend = Blend::Additive,
+            (15..=18, Value::Texture(t)) => self.shader_textures[index - 15] = t,
             _ => unreachable!("validated by Describe::set"),
         }
+    }
+}
+
+/// A material's own shader as the world keeps it (stage 10): what the
+/// world checks its materials against, and the compiled shader, which only
+/// the renderer looks into.
+#[derive(Clone)]
+pub struct Shader {
+    /// Its file's name, for messages.
+    pub name: String,
+    /// How many bytes its `Values` take: each material using it has this
+    /// many.
+    pub values_size: usize,
+    /// How many textures of its own it reads.
+    pub textures: usize,
+    /// The compiled shader. The renderer's own type: the world only hands
+    /// it on.
+    pub compiled: std::sync::Arc<dyn std::any::Any + Send + Sync>,
+}
+
+impl std::fmt::Debug for Shader {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Shader")
+            .field("name", &self.name)
+            .field("values_size", &self.values_size)
+            .field("textures", &self.textures)
+            .finish_non_exhaustive()
     }
 }

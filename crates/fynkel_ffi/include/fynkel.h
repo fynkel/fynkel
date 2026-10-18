@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 32
+#define FY_ABI_VERSION 33
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -136,6 +136,7 @@ enum FyStatus
   // the view stopped drawing. A new view gets a new device, and uploads
   // everything again.
   FY_STATUS_DEVICE_LOST = 16,
+  FY_STATUS_NO_SHADER = 17,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L
@@ -156,6 +157,10 @@ typedef struct FyMesh FyMesh;
 // meshes and textures are shared with the handles `fy_model_mesh` and
 // `fy_model_texture` give, and with every world that spawns it.
 typedef struct FyModel FyModel;
+
+// A material's own shader, compiled (`fy_shader_new`), until
+// `fy_shader_free`. Worlds that add it share it.
+typedef struct FyShader FyShader;
 
 // A sky's image on its own, before any world has it. Opaque to C. Made
 // with `fy_sky_image_decode` on any thread, freed with
@@ -308,6 +313,9 @@ typedef struct FyMeshRenderer {
   bool cast_shadows;
   // Whether shadows fall on it.
   bool receive_shadows;
+  // Numbers of its own for its material's shader: its `PerObject`, in
+  // the order the shader lists them.
+  float own[4];
 } FyMeshRenderer;
 
 typedef struct FyCamera {
@@ -414,6 +422,11 @@ typedef struct FyMaterial {
   uint64_t occlusion_texture;
   // Read as sRGB.
   uint64_t emissive_texture;
+  // The material's own shader (`fy_shader_add`), or 0 for the built-in
+  // one. Its values are set with `fy_material_values_set`.
+  uint64_t shader;
+  // The textures its shader declares, in their order; 0 for none.
+  uint64_t shader_textures[4];
 } FyMaterial;
 
 // How many of each thing a model has, from `fy_model_counts`.
@@ -993,6 +1006,95 @@ FyStatus fy_material_get(const struct FyWorld *world, uint64_t id, struct FyMate
 //
 // `world` is null or live.
 FyStatus fy_material_remove(const struct FyWorld *world, uint64_t id);
+
+// Writes `len` bytes into a material's values from `offset`, where its
+// shader's `Values` puts the one being set (`fy_shader_describe`). Past
+// their end is `FY_STATUS_WRONG_SIZE`.
+//
+// # Safety
+//
+// `world` is null or live; `bytes` is valid for `len` reads (it may be
+// null when `len` is 0).
+FyStatus fy_material_values_set(const struct FyWorld *world,
+                                uint64_t id,
+                                size_t offset,
+                                const uint8_t *bytes,
+                                size_t len);
+
+// Compiles `source` (`source_len` bytes of WGSL) for a material: checked
+// and joined to the engine's code. `name` is its file's, for messages.
+// Writes the new handle to `out`. A shader that doesn't compile is
+// `FY_STATUS_INVALID_VALUE`, its message `name:line:column: what`, the
+// line its file's own.
+//
+// # Safety
+//
+// `name` and `source` are valid for their lengths' reads (null when the
+// length is 0); `out` is null or writable.
+FyStatus fy_shader_new(const uint8_t *name,
+                       size_t name_len,
+                       const uint8_t *source,
+                       size_t source_len,
+                       struct FyShader **out);
+
+// Frees a shader handle. Worlds that added it keep their share. Null is
+// ignored.
+//
+// # Safety
+//
+// `shader` is null or live, and not used after this.
+void fy_shader_free(struct FyShader *shader);
+
+// What a shader takes, as UTF-8 lines, so a material can be given it by
+// name: `lit` or `unlit`; `values <bytes>`; `value <name> <f32|i32|u32>
+// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
+// offset in bytes) for each of its `Values`; `texture <name>
+// <srgb|linear>` for each texture, in order; `own <name>` for each of its
+// `PerObject`, in order. Its length goes to `out_len`; it's copied into
+// `buf` only when it fits in `cap`.
+//
+// # Safety
+//
+// `shader` is null or live; `buf` is null or valid for `cap` writes;
+// `out_len` is null or writable.
+FyStatus fy_shader_describe(const struct FyShader *shader,
+                            uint8_t *buf,
+                            size_t cap,
+                            size_t *out_len);
+
+// Gives the world a share of `shader` and writes the id materials use
+// for it to `out`.
+//
+// # Safety
+//
+// `world` and `shader` are null or live; `out` is null or writable.
+FyStatus fy_shader_add(const struct FyWorld *world, const struct FyShader *shader, uint64_t *out);
+
+// Puts `shader` in place of the world's shader `id`, as when its file
+// changes: its materials draw with it from the next frame, their values
+// kept where they fit.
+//
+// # Safety
+//
+// `world` and `shader` are null or live.
+FyStatus fy_shader_set(const struct FyWorld *world, uint64_t id, const struct FyShader *shader);
+
+// Removes a shader from the world. Refused (`FY_STATUS_IN_USE`) while a
+// material uses it.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_shader_remove(const struct FyWorld *world, uint64_t id);
+
+// Sets the time a world's shaders see (`frame_time()`), in seconds, and
+// how far it moved since the last frame (`frame_delta()`): the game's,
+// so it stops while it's paused.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_world_time_set(const struct FyWorld *world, float time, float delta);
 
 // Decodes a PNG or JPEG of `len` bytes into a texture handle and writes
 // it to `out`. Any PNG layout becomes 8-bit RGBA. A broken or unsupported

@@ -222,6 +222,17 @@ external int fy_material_remove(ffi.Pointer<FyWorld> world, int id);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMaterial>)>(isLeaf: true)
 external int fy_material_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMaterial> value);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Size, ffi.Pointer<ffi.Uint8>, ffi.Size)>(
+  isLeaf: true,
+)
+external int fy_material_values_set(
+  ffi.Pointer<FyWorld> world,
+  int id,
+  int offset,
+  ffi.Pointer<ffi.Uint8> bytes,
+  int len,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_mesh_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Uint64> out);
 
@@ -383,6 +394,45 @@ external int fy_raycast(
   ffi.Pointer<FyRayHit> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyShader>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
+external int fy_shader_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyShader> shader, ffi.Pointer<ffi.Uint64> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyShader>, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)>(
+  isLeaf: true,
+)
+external int fy_shader_describe(
+  ffi.Pointer<FyShader> shader,
+  ffi.Pointer<ffi.Uint8> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_len,
+);
+
+@ffi.Native<ffi.Void Function(ffi.Pointer<FyShader>)>(isLeaf: true)
+external void fy_shader_free(ffi.Pointer<FyShader> shader);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Pointer<FyShader>>,
+  )
+>(isLeaf: true)
+external int fy_shader_new(
+  ffi.Pointer<ffi.Uint8> name,
+  int name_len,
+  ffi.Pointer<ffi.Uint8> source,
+  int source_len,
+  ffi.Pointer<ffi.Pointer<FyShader>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_shader_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyShader>)>(isLeaf: true)
+external int fy_shader_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyShader> shader);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Pointer<FySkyImage>>)>(isLeaf: true)
 external int fy_sky_image_decode(ffi.Pointer<ffi.Uint8> bytes, int len, ffi.Pointer<ffi.Pointer<FySkyImage>> out);
 
@@ -533,6 +583,9 @@ external int fy_world_quality_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyQual
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FySky>)>(isLeaf: true)
 external int fy_world_sky_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FySky> sky);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Float, ffi.Float)>(isLeaf: true)
+external int fy_world_time_set(ffi.Pointer<FyWorld> world, double time, double delta);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_world_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
@@ -546,7 +599,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 32;
+const int FY_ABI_VERSION = 33;
 
 const int FY_APPLE_MORE = 2;
 
@@ -823,6 +876,12 @@ final class FyMaterial extends ffi.Struct {
 
   @ffi.Uint64()
   external int emissive_texture;
+
+  @ffi.Uint64()
+  external int shader;
+
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Uint64> shader_textures;
 }
 
 final class FyMesh extends ffi.Opaque {}
@@ -880,6 +939,9 @@ final class FyMeshRenderer extends ffi.Struct {
 
   @ffi.Bool()
   external bool receive_shadows;
+
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Float> own;
 }
 
 final class FyModel extends ffi.Opaque {}
@@ -1020,6 +1082,8 @@ final class FyRayHit extends ffi.Struct {
   external double distance;
 }
 
+final class FyShader extends ffi.Opaque {}
+
 final class FySky extends ffi.Struct {
   @ffi.Uint32()
   external int kind;
@@ -1062,6 +1126,7 @@ sealed class FyStatus {
   static const FY_STATUS_UNSUPPORTED = 14;
   static const FY_STATUS_NO_TEXTURE = 15;
   static const FY_STATUS_DEVICE_LOST = 16;
+  static const FY_STATUS_NO_SHADER = 17;
 }
 
 final class FyTexture extends ffi.Opaque {}

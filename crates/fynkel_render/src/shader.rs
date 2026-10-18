@@ -282,10 +282,20 @@ impl Joined {
     }
 
     fn parse(&self) -> Result<naga::Module, Failure> {
-        naga::front::wgsl::parse_str(&self.source).map_err(|e| Failure {
-            location: e.location(&self.source),
-            message: e.message().to_owned(),
-            joined: self.copy(),
+        naga::front::wgsl::parse_str(&self.source).map_err(|e| {
+            let mut message = e.message().to_owned();
+            // As in `validate`: the last place in the shader's own lines.
+            let mut location = e.location(&self.source);
+            for (span, label) in e.labels() {
+                let at = span.location(&self.source);
+                if self.owns(at.line_number) {
+                    location = Some(at);
+                    if !label.is_empty() && !message.contains(label) {
+                        message = format!("{message} ({label})");
+                    }
+                }
+            }
+            Failure { location, message, joined: self.copy() }
         })
     }
 
@@ -305,7 +315,7 @@ impl Joined {
             let mut location = e.location(&self.source);
             for (span, label) in e.spans() {
                 let at = span.location(&self.source);
-                if at.line_number > self.before && at.line_number <= self.before + self.lines {
+                if self.owns(at.line_number) {
                     location = Some(at);
                     if !label.is_empty() && !message.contains(label.as_str()) {
                         message = format!("{message} ({label})");
@@ -318,6 +328,11 @@ impl Joined {
 
     fn copy(&self) -> Self {
         Self { source: String::new(), before: self.before, lines: self.lines }
+    }
+
+    /// Whether the joined module's `line` is one of the shader's own.
+    fn owns(&self, line: u32) -> bool {
+        line > self.before && line <= self.before + self.lines
     }
 }
 

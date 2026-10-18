@@ -383,7 +383,10 @@ fn take_within(waiting: &mut Vec<ResourceOp>, frame: &mut Vec<ResourceOp>, budge
                 (std::mem::size_of_val(mesh.vertices()) + std::mem::size_of_val(mesh.indices())) as u64
             }
             ResourceOp::UploadTexture(_, _, image) => image.pixels().len() as u64,
-            ResourceOp::RemoveMesh(_) | ResourceOp::RemoveTexture(_) => 0,
+            ResourceOp::RemoveMesh(_)
+            | ResourceOp::RemoveTexture(_)
+            | ResourceOp::UploadShader(..)
+            | ResourceOp::RemoveShader(_) => 0,
         };
         if count > 0 && spent + cost > budget {
             break;
@@ -401,6 +404,8 @@ enum Made {
     RemoveMesh(MeshKey),
     Texture(TextureKey, MadeTexture),
     RemoveTexture(TextureKey),
+    Shader(fynkel_render::ShaderKey, Arc<fynkel_render::CustomShader>),
+    RemoveShader(fynkel_render::ShaderKey),
 }
 
 /// Draws until stopped. Fails when the target can't take a new size.
@@ -488,6 +493,9 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                             Made::Texture(key, kit.make_texture(space, image.width(), image.height(), image.pixels()))
                         }
                         ResourceOp::RemoveTexture(key) => Made::RemoveTexture(key),
+                        // Its pipelines are made when it's first drawn.
+                        ResourceOp::UploadShader(key, shader) => Made::Shader(key, shader),
+                        ResourceOp::RemoveShader(key) => Made::RemoveShader(key),
                     }));
                     let mut assets = fynkel_render::lock_assets(&world.assets);
                     for made in made.drain(..) {
@@ -499,6 +507,10 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                             Made::Texture(key, texture) => assets.insert_texture(key, texture),
                             Made::RemoveTexture(key) => {
                                 assets.remove_texture(key);
+                            }
+                            Made::Shader(key, shader) => assets.upload_shader(key, shader),
+                            Made::RemoveShader(key) => {
+                                assets.remove_shader(key);
                             }
                         }
                     }

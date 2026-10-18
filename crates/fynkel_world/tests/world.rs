@@ -276,3 +276,68 @@ fn textures_cannot_be_removed_while_a_material_uses_them() {
     assert_ne!(world.add_texture(image()), texture, "ids are never reused");
     assert_eq!(world.textures().count(), 1);
 }
+
+// --- Shaders (stage 10) ------------------------------------------------------
+
+fn shader(values_size: usize) -> Shader {
+    Shader { name: "test.wgsl".into(), values_size, textures: 1, compiled: std::sync::Arc::new(()) }
+}
+
+#[test]
+fn a_material_with_a_shader_has_its_values_zeroed_and_kept_in_range() {
+    let mut world = World::new();
+    let ghost = ShaderId::from_raw(99).unwrap();
+    assert_eq!(world.add_material(Material { shader: Some(ghost), ..Material::default() }), Err(WorldError::NoShader(ghost)));
+
+    let lava = world.add_shader(shader(8));
+    let material = world.add_material(Material { shader: Some(lava), ..Material::default() }).unwrap();
+    assert_eq!(world.material_values(material).unwrap(), [0; 8]);
+    world.set_material_values(material, 4, &2.5f32.to_le_bytes()).unwrap();
+    assert_eq!(&world.material_values(material).unwrap()[4..], 2.5f32.to_le_bytes());
+    assert_eq!(
+        world.set_material_values(material, 6, &[0; 4]),
+        Err(WorldError::Values { material, end: 10, size: 8 })
+    );
+
+    // Set with the same shader, its values stay; with another, they start again.
+    world.set_material(material, Material { roughness: 0.2, shader: Some(lava), ..Material::default() }).unwrap();
+    assert_eq!(&world.material_values(material).unwrap()[4..], 2.5f32.to_le_bytes());
+    let other = world.add_shader(shader(4));
+    world.set_material(material, Material { shader: Some(other), ..Material::default() }).unwrap();
+    assert_eq!(world.material_values(material).unwrap(), [0; 4]);
+    world.set_material(material, Material::default()).unwrap();
+    assert!(world.material_values(material).unwrap().is_empty());
+}
+
+#[test]
+fn a_shader_set_again_keeps_its_materials_values_and_gets_a_new_version() {
+    let mut world = World::new();
+    let id = world.add_shader(shader(4));
+    let material = world.add_material(Material { shader: Some(id), ..Material::default() }).unwrap();
+    world.set_material_values(material, 0, &[1, 2, 3, 4]).unwrap();
+    let (_, _, before) = world.shaders().next().unwrap();
+    world.set_shader(id, shader(8)).unwrap();
+    let (_, _, after) = world.shaders().next().unwrap();
+    assert_ne!(before, after);
+    assert_eq!(world.material_values(material).unwrap(), [1, 2, 3, 4, 0, 0, 0, 0]);
+}
+
+#[test]
+fn shaders_and_their_textures_cannot_be_removed_while_a_material_uses_them() {
+    let mut world = World::new();
+    let id = world.add_shader(shader(0));
+    let texture = world.add_texture(image());
+    let ghost = TextureId::from_raw(99).unwrap();
+    let uses_ghost = Material { shader: Some(id), shader_textures: [Some(ghost), None, None, None], ..Material::default() };
+    assert_eq!(world.add_material(uses_ghost), Err(WorldError::NoTexture(ghost)));
+    let material = world
+        .add_material(Material { shader: Some(id), shader_textures: [Some(texture), None, None, None], ..Material::default() })
+        .unwrap();
+    assert_eq!(world.remove_texture(texture), Err(WorldError::TextureInUse { texture, material }));
+    assert_eq!(world.remove_shader(id), Err(WorldError::ShaderInUse { shader: id, material }));
+    assert_eq!(world.remove_shader(id).unwrap_err().to_string(), "shader#1 is still used by material#1");
+    world.remove_material(material).unwrap();
+    world.remove_shader(id).unwrap();
+    world.remove_texture(texture).unwrap();
+    assert!(world.shader(id).is_err());
+}

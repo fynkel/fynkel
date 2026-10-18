@@ -500,6 +500,8 @@ fn a_frame_takes_its_budget_of_uploads_and_leaves_the_rest_in_order() {
                 ResourceOp::RemoveTexture(k) => format!("-t{}", k.0),
                 ResourceOp::UploadMesh(k, _) => format!("m{}", k.0),
                 ResourceOp::RemoveMesh(k) => format!("-m{}", k.0),
+                ResourceOp::UploadShader(k, _) => format!("s{}", k.0),
+                ResourceOp::RemoveShader(k) => format!("-s{}", k.0),
             })
             .collect()
     };

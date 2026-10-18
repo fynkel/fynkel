@@ -111,6 +111,10 @@ pub struct MeshRenderer {
     pub cast_shadows: bool,
     /// Whether shadows fall on it.
     pub receive_shadows: bool,
+    /// Numbers of its own for its material's shader (stage 10): the
+    /// shader's `PerObject`, in the order it lists them. A hit flash on
+    /// one enemy, as `color` is.
+    pub own: [f32; 4],
 }
 
 impl Default for MeshRenderer {
@@ -122,6 +126,7 @@ impl Default for MeshRenderer {
             color: Color::WHITE,
             cast_shadows: true,
             receive_shadows: true,
+            own: [0.0; 4],
         }
     }
 }
@@ -137,6 +142,10 @@ impl Describe for MeshRenderer {
             Field::new("color", FieldKind::Color, Value::Color(Color::WHITE)),
             Field::new("cast_shadows", FieldKind::Bool, Value::Bool(true)),
             Field::new("receive_shadows", FieldKind::Bool, Value::Bool(true)),
+            Field::new("own_0", FieldKind::F32, Value::F32(0.0)),
+            Field::new("own_1", FieldKind::F32, Value::F32(0.0)),
+            Field::new("own_2", FieldKind::F32, Value::F32(0.0)),
+            Field::new("own_3", FieldKind::F32, Value::F32(0.0)),
         ];
         FIELDS
     }
@@ -149,6 +158,7 @@ impl Describe for MeshRenderer {
             3 => Value::Color(self.color),
             4 => Value::Bool(self.cast_shadows),
             5 => Value::Bool(self.receive_shadows),
+            6..=9 => Value::F32(self.own[index - 6]),
             _ => return None,
         })
     }
@@ -161,6 +171,7 @@ impl Describe for MeshRenderer {
             (3, Value::Color(c)) => self.color = c,
             (4, Value::Bool(b)) => self.cast_shadows = b,
             (5, Value::Bool(b)) => self.receive_shadows = b,
+            (6..=9, Value::F32(v)) => self.own[index - 6] = v,
             _ => unreachable!("validated by Describe::set"),
         }
     }

@@ -43,6 +43,7 @@ pub enum FyStatus {
     /// the view stopped drawing. A new view gets a new device, and uploads
     /// everything again.
     DeviceLost = 16,
+    NoShader = 17,
 }
 
 /// A failed call: its status and its message.
@@ -70,9 +71,12 @@ impl From<WorldError> for Error {
             WorldError::NoMesh(_) => FyStatus::NoMesh,
             WorldError::NoMaterial(_) => FyStatus::NoMaterial,
             WorldError::NoTexture(_) => FyStatus::NoTexture,
-            WorldError::MeshInUse { .. } | WorldError::MaterialInUse { .. } | WorldError::TextureInUse { .. } => {
-                FyStatus::InUse
-            }
+            WorldError::NoShader(_) => FyStatus::NoShader,
+            WorldError::MeshInUse { .. }
+            | WorldError::MaterialInUse { .. }
+            | WorldError::TextureInUse { .. }
+            | WorldError::ShaderInUse { .. } => FyStatus::InUse,
+            WorldError::Values { .. } => FyStatus::WrongSize,
             WorldError::Field(_)
             | WorldError::Cycle { .. }
             | WorldError::ModelIds { .. }
