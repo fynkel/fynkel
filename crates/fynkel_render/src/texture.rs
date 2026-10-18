@@ -15,6 +15,7 @@ use wgpu::util::DeviceExt;
 use crate::assets::PipelineMaker;
 use crate::gpu::Gpu;
 use crate::scene::{ColorSpace, MaterialTextures, TextureKey};
+use crate::shader::{FIRST_TEXTURE, MAX_TEXTURES};
 
 pub(crate) struct GpuTexture {
     view: wgpu::TextureView,
@@ -177,6 +178,9 @@ struct Defaults {
 /// layout, the sampler, the empty-slot textures and the mipmapper.
 pub(crate) struct TextureKit {
     pub(crate) layout: wgpu::BindGroupLayout,
+    /// For materials with their own shaders: `layout`'s and then 1 to
+    /// [`MAX_TEXTURES`] of the shader's own, at `own_layouts[n - 1]`.
+    pub(crate) own_layouts: [wgpu::BindGroupLayout; MAX_TEXTURES],
     sampler: wgpu::Sampler,
     defaults: Defaults,
     mipmapper: Mipmapper,
@@ -187,6 +191,33 @@ pub(crate) struct TextureKit {
 pub(crate) struct Textures {
     textures: HashMap<(TextureKey, ColorSpace), GpuTexture>,
     bind_groups: HashMap<MaterialTextures, wgpu::BindGroup>,
+    own_bind_groups: HashMap<OwnTextures, wgpu::BindGroup>,
+}
+
+/// A material's textures and its shader's own: how many it has, which,
+/// and which of them are colours (a bit each).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub(crate) struct OwnTextures {
+    pub(crate) base: MaterialTextures,
+    pub(crate) own: [Option<TextureKey>; MAX_TEXTURES],
+    pub(crate) count: u8,
+    pub(crate) srgb: u8,
+}
+
+impl OwnTextures {
+    /// A material's textures, with no shader's.
+    pub(crate) fn of(base: MaterialTextures) -> Self {
+        Self { base, own: [None; MAX_TEXTURES], count: 0, srgb: 0 }
+    }
+
+    fn uses(&self, key: TextureKey) -> bool {
+        self.base.slots().iter().any(|&(k, _)| k == Some(key)) || self.own.contains(&Some(key))
+    }
+
+    /// Own texture `i`'s colour space.
+    pub(crate) fn space(&self, i: usize) -> ColorSpace {
+        if self.srgb & (1 << i) != 0 { ColorSpace::Srgb } else { ColorSpace::Linear }
+    }
 }
 
 impl TextureKit {
@@ -202,6 +233,21 @@ impl TextureKit {
                 texture_entry(4),
                 sampler_entry(5),
             ],
+        });
+        let own_layouts = std::array::from_fn(|n| {
+            let mut entries = vec![
+                texture_entry(0),
+                texture_entry(1),
+                texture_entry(2),
+                texture_entry(3),
+                texture_entry(4),
+                sampler_entry(5),
+            ];
+            entries.extend((0..=n as u32).map(|i| texture_entry(FIRST_TEXTURE + i)));
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("material and shader textures"),
+                entries: &entries,
+            })
         });
         // Trilinear and repeating. Anisotropic filtering keeps a texture
         // sharp on a surface seen at a slant (the ground, far away); 8× is
@@ -244,7 +290,7 @@ impl TextureKit {
             white_linear: pixel("white", wgpu::TextureFormat::Rgba8Unorm, &[255; 4]),
             flat_normal: pixel("flat normal", wgpu::TextureFormat::Rgba16Float, &flat),
         };
-        Self { layout, sampler, defaults, mipmapper: Mipmapper::new(device, maker) }
+        Self { layout, own_layouts, sampler, defaults, mipmapper: Mipmapper::new(device, maker) }
     }
 }
 
@@ -324,6 +370,7 @@ impl Textures {
     /// when `key` changes or goes.
     fn forget_bind_groups(&mut self, key: TextureKey) {
         self.bind_groups.retain(|set, _| set.slots().iter().all(|&(k, _)| k != Some(key)));
+        self.own_bind_groups.retain(|set, _| !set.uses(key));
     }
 
     /// GPU memory held by textures, in bytes: every mip level of every
@@ -372,6 +419,54 @@ impl Textures {
     /// texture it used changed since.
     pub(crate) fn bind_group(&self, set: &MaterialTextures) -> Option<&wgpu::BindGroup> {
         self.bind_groups.get(set)
+    }
+
+    /// [`Textures::prepare`] for a material with its own shader. With none
+    /// of the shader's own, it's the material's bind group.
+    pub(crate) fn prepare_own(&mut self, device: &wgpu::Device, kit: &TextureKit, set: OwnTextures) {
+        if set.count == 0 {
+            return self.prepare(device, kit, set.base);
+        }
+        if self.own_bind_groups.contains_key(&set) {
+            return;
+        }
+        let slots = set.base.slots();
+        let view = |key: Option<TextureKey>, space: ColorSpace, normal: bool| match key
+            .and_then(|k| self.textures.get(&(k, space)))
+        {
+            Some(texture) => &texture.view,
+            None if normal => &kit.defaults.flat_normal,
+            None if space == ColorSpace::Srgb => &kit.defaults.white_srgb,
+            None => &kit.defaults.white_linear,
+        };
+        let mut entries: Vec<wgpu::BindGroupEntry<'_>> = (0..5)
+            .map(|slot| wgpu::BindGroupEntry {
+                binding: slot as u32,
+                resource: wgpu::BindingResource::TextureView(view(
+                    slots[slot].0,
+                    slots[slot].1,
+                    slot == MaterialTextures::NORMAL,
+                )),
+            })
+            .collect();
+        entries.push(wgpu::BindGroupEntry { binding: 5, resource: wgpu::BindingResource::Sampler(&kit.sampler) });
+        for i in 0..set.count as usize {
+            entries.push(wgpu::BindGroupEntry {
+                binding: FIRST_TEXTURE + i as u32,
+                resource: wgpu::BindingResource::TextureView(view(set.own[i], set.space(i), false)),
+            });
+        }
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("material and shader textures"),
+            layout: &kit.own_layouts[set.count as usize - 1],
+            entries: &entries,
+        });
+        self.own_bind_groups.insert(set, bind_group);
+    }
+
+    /// The bind group [`Textures::prepare_own`] made for `set`.
+    pub(crate) fn own_bind_group(&self, set: &OwnTextures) -> Option<&wgpu::BindGroup> {
+        if set.count == 0 { self.bind_groups.get(&set.base) } else { self.own_bind_groups.get(set) }
     }
 }
 

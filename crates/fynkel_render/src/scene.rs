@@ -20,6 +20,22 @@ pub struct MeshKey(pub u64);
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct TextureKey(pub u64);
 
+/// A material's own shader (stage 10), as [`Assets::upload_shader`](crate::Assets::upload_shader)
+/// names it.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct ShaderKey(pub u64);
+
+/// A material drawn with its own shader: which, where its values are in
+/// [`RenderScene::shader_values`], and its own textures, in the shader's
+/// order (`None` reads white).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ShaderUse {
+    pub shader: ShaderKey,
+    /// The first of its values' 48-byte blocks.
+    pub values: u32,
+    pub textures: [Option<TextureKey>; crate::MAX_TEXTURES],
+}
+
 /// How a texture's values are read.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum ColorSpace {
@@ -453,6 +469,8 @@ pub struct PbrMaterial {
     /// Whether what's behind shows through, and how.
     pub blend: Blend,
     pub textures: MaterialTextures,
+    /// Its own shader, or `None` for the built-in one.
+    pub shader: Option<ShaderUse>,
 }
 
 /// How a surface covers what's behind it.
@@ -491,6 +509,7 @@ impl PbrMaterial {
         double_sided: false,
         blend: Blend::Opaque,
         textures: MaterialTextures::NONE,
+        shader: None,
     };
 }
 
@@ -728,6 +747,10 @@ pub struct RenderScene {
     /// The game's time, in seconds, and this frame's step of it, as
     /// shaders see it (`frame_time()`, `frame_delta()`).
     pub time: [f32; 2],
+    /// The values of the materials drawn with their own shaders, each from
+    /// its [`ShaderUse::values`], laid out as its shader's `Values`, in
+    /// blocks of 48 bytes (a joint's room: they go after the joints).
+    pub shader_values: Vec<[[f32; 4]; 3]>,
 }
 
 impl RenderScene {
@@ -752,5 +775,6 @@ impl RenderScene {
         self.fog = None;
         self.quality = None;
         self.time = [0.0; 2];
+        self.shader_values.clear();
     }
 }

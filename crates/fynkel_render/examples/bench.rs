@@ -43,6 +43,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
             .collect(),
         quality: None,
         time: [0.0; 2],
+        shader_values: Vec::new(),
         sky: None,
         fog: None,
         ambient: Vec3::splat(0.15),
@@ -135,6 +136,7 @@ fn main() {
                             camera,
                             quality: Some(quality.quality()),
                             time: [0.0; 2],
+                            shader_values: Vec::new(),
                             sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
                             fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
                             ..base
@@ -179,6 +181,7 @@ fn main() {
                     let s = RenderScene {
                         quality: Some(quality.quality()),
                         time: [0.0; 2],
+                        shader_values: Vec::new(),
                         sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
                         ..scene(1_000, 0, false, false, 0.0)
                     };

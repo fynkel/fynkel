@@ -14,7 +14,8 @@ use crate::ao::AoKit;
 use crate::bloom::BloomKit;
 use crate::gpu::Gpu;
 use crate::renderer::Pipelines;
-use crate::scene::{ColorSpace, MeshKey, QualityLevel, TextureKey};
+use crate::scene::{ColorSpace, MeshKey, QualityLevel, ShaderKey, TextureKey};
+use crate::shader::CustomShader;
 use crate::shadows::ShadowKit;
 use crate::sky::SkyKit;
 use crate::texture::{GpuTexture, TextureKit, Textures};
@@ -315,6 +316,8 @@ pub struct Assets {
     pub(crate) kit: Arc<Kit>,
     pub(crate) meshes: HashMap<MeshKey, GpuMesh>,
     pub(crate) textures: Textures,
+    /// Materials' own shaders (stage 10).
+    pub(crate) shaders: HashMap<ShaderKey, Arc<CustomShader>>,
 }
 
 impl std::fmt::Debug for Assets {
@@ -355,7 +358,7 @@ pub type SharedAssets = Arc<Mutex<Assets>>;
 impl Assets {
     /// No meshes or textures yet, on `kit`'s device.
     pub fn new(kit: &Arc<Kit>) -> Self {
-        Self { kit: kit.clone(), meshes: HashMap::new(), textures: Textures::default() }
+        Self { kit: kit.clone(), meshes: HashMap::new(), textures: Textures::default(), shaders: HashMap::new() }
     }
 
     /// [`Assets::new`], to share.
@@ -421,6 +424,18 @@ impl Assets {
     }
 
     /// GPU memory held by textures, in bytes: every mip level, as stored.
+    /// Puts `shader` under `key`, replacing any there: materials drawn with
+    /// `key` draw with it from the next frame.
+    pub fn upload_shader(&mut self, key: ShaderKey, shader: Arc<CustomShader>) {
+        self.shaders.insert(key, shader);
+    }
+
+    /// Frees `key`'s shader. Returns whether there was one. Its pipelines
+    /// stay with the device's, for another world with the same code.
+    pub fn remove_shader(&mut self, key: ShaderKey) -> bool {
+        self.shaders.remove(&key).is_some()
+    }
+
     pub fn texture_bytes(&self) -> u64 {
         self.textures.bytes()
     }
@@ -443,7 +458,7 @@ pub fn lock(assets: &SharedAssets) -> MutexGuard<'_, Assets> {
 pub(crate) fn joints_entry() -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding: 2,
-        visibility: wgpu::ShaderStages::VERTEX,
+        visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Storage { read_only: true },
             has_dynamic_offset: false,

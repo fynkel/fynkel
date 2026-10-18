@@ -120,6 +120,7 @@ pub fn stage1_scene() -> RenderScene {
         lights: vec![Light::sun(Vec3::new(-0.4, -1.0, -0.3), Vec3::ONE)],
         quality: None,
         time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         sky: None,

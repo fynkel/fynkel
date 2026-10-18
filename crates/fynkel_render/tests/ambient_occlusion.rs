@@ -34,6 +34,7 @@ fn floor_scene(
         camera: Some(camera),
         quality: Some(quality.quality()),
         time: [0.0; 2],
+        shader_values: Vec::new(),
         ambient: Vec3::splat(ambient),
         lights,
         draws,

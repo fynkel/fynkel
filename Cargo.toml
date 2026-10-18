@@ -22,6 +22,7 @@ fynkel_physics_ffi = { path = "crates/fynkel_physics_ffi" }
 hecs = "0.11.2"
 glam = { version = "0.34.1", features = ["bytemuck"] }
 wgpu = "30.0.1"
+naga = { version = "30.0.1", features = ["wgsl-in"] }
 bytemuck = { version = "1.25.2", features = ["derive"] }
 pollster = "1.0.1"
 png = "0.18.1"

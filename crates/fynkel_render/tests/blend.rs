@@ -192,6 +192,7 @@ fn see_through_surfaces_cast_no_shadow() {
             lights: vec![Light::sun(Vec3::NEG_Y, Vec3::ONE).with_shadows(true)],
             quality: Some(QualityLevel::High.quality()),
             time: [0.0; 2],
+            shader_values: Vec::new(),
             draws,
             ..Default::default()
         };

@@ -11,6 +11,7 @@ mod frame_ring;
 mod gpu;
 mod renderer;
 mod scene;
+mod shader;
 mod shadows;
 mod sky;
 mod texture;
@@ -22,7 +23,10 @@ pub use gpu::{Gpu, GpuError, instance_flags};
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
     AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures,
-    MeshKey, PbrMaterial, Quality, QualityLevel, RenderScene, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind,
-    TextureKey,
+    MeshKey, PbrMaterial, Quality, QualityLevel, RenderScene, ShaderKey, ShaderUse, ShadowFilter, ShadowLevel, Sky,
+    SkyImage, SkyKind, TextureKey,
+};
+pub use shader::{
+    CustomShader, Lighting, MAX_OWN, MAX_TEXTURES, MAX_VALUES_BYTES, ShaderError, ShaderTexture, ShaderValue, ValueKind,
 };
 pub use wgpu;

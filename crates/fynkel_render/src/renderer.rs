@@ -30,7 +30,8 @@
 //! 3. The last pass, when there is a scene image: the image onto the view
 //!    (`finish.wgsl`), with bloom's glow added.
 
-use std::sync::{Arc, OnceLock};
+use std::collections::HashMap;
+use std::sync::{Arc, Mutex, OnceLock, PoisonError};
 
 use bytemuck::{Pod, Zeroable};
 use glam::{Mat3, Mat4, Vec3, Vec4};
@@ -42,11 +43,13 @@ use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
 use crate::scene::{
-    AmbientOcclusion, Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene,
+    AmbientOcclusion, Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShaderKey,
     ShadowFilter, SkyKind, TextureKey,
 };
+use crate::shader::CustomShader;
 use crate::shadows::{self, Caster, MAX_CASCADES, MAX_MAPS, MAX_SPOT_MAPS, ShadowMaps};
 use crate::sky::{self, Environment, SPECULAR_MIPS};
+use crate::texture::OwnTextures;
 use fynkel_mesh::{MeshData, Vertex};
 
 /// What one frame did.
@@ -335,7 +338,9 @@ struct Batch {
     cover: Cover,
     faces: Faces,
     skinned: bool,
-    textures: MaterialTextures,
+    /// The material's own shader, or `None` for the built-in one.
+    shader: Option<ShaderKey>,
+    textures: OwnTextures,
     mesh: MeshKey,
     first: u32,
     count: u32,
@@ -372,6 +377,7 @@ pub(crate) struct Pipelines {
     device: wgpu::Device,
     frame_layout: wgpu::BindGroupLayout,
     textures_layout: wgpu::BindGroupLayout,
+    own_textures_layouts: [wgpu::BindGroupLayout; crate::MAX_TEXTURES],
     maps_layout: wgpu::BindGroupLayout,
     image_layout: wgpu::BindGroupLayout,
     sky_light_layout: wgpu::BindGroupLayout,
@@ -380,6 +386,10 @@ pub(crate) struct Pipelines {
     forward_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
     /// One for each [`Variant`], at its index.
     forward: [OnceLock<wgpu::RenderPipeline>; Variant::COUNT],
+    /// Materials' own shaders, by their code's hash: each one's module
+    /// and layout, and its pipelines by variant, made as they're drawn.
+    own_shaders: Mutex<HashMap<u64, (wgpu::ShaderModule, wgpu::PipelineLayout)>>,
+    own: Mutex<HashMap<(u64, usize), wgpu::RenderPipeline>>,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
     sky: OnceLock<wgpu::RenderPipeline>,
@@ -600,6 +610,11 @@ impl Renderer {
         assets::lock(&self.assets).remove_texture(key)
     }
 
+    /// Puts a material's own shader under `key` ([`Assets::upload_shader`]).
+    pub fn upload_shader(&mut self, key: ShaderKey, shader: Arc<CustomShader>) {
+        assets::lock(&self.assets).upload_shader(key, shader);
+    }
+
     /// GPU memory held by its assets' textures ([`Assets::texture_bytes`]).
     pub fn texture_bytes(&self) -> u64 {
         assets::lock(&self.assets).texture_bytes()
@@ -806,6 +821,10 @@ impl Renderer {
             let rows = m.transpose();
             [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
         }));
+        // Materials' values go after the joints, where their shaders read
+        // them.
+        let values = self.joints.len() as u32;
+        self.joints.extend_from_slice(&scene.shader_values);
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
@@ -838,7 +857,22 @@ impl Renderer {
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
             let m = &draw.material;
-            let key = (cover, Faces::of(m, mirrored), skin.is_some(), m.textures, draw.mesh.0);
+            let (shader, textures) = match &m.shader {
+                None => (None, OwnTextures::of(m.textures)),
+                Some(used) => {
+                    // Not uploaded yet, or freed: not drawn.
+                    let Some(shader) = assets.shaders.get(&used.shader) else { continue };
+                    let srgb = shader
+                        .textures
+                        .iter()
+                        .enumerate()
+                        .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits });
+                    let own =
+                        OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
+                    (Some(used.shader), own)
+                }
+            };
+            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, draw.mesh.0);
             if cover.blended() {
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
             } else {
@@ -851,13 +885,13 @@ impl Renderer {
         self.blended.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
 
         for &(key, i) in &self.order {
-            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize]);
+            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values);
         }
         self.blended_from = self.batches.len();
         for &(_, key, i) in &self.blended {
-            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize]);
+            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values);
         }
-        stats.joints = self.joints.len() as u32;
+        stats.joints = scene.joints.len() as u32;
         for line in &scene.lines {
             for end in [line.a, line.b] {
                 self.line_vertices.push(LineVertex { position: end.into(), color: line.color });
@@ -1078,9 +1112,9 @@ impl Renderer {
         // records; a mesh or texture they free meanwhile is gone from the
         // next frame on.
         let mut assets = assets::lock(assets);
-        let Assets { kit: _, meshes, textures } = &mut *assets;
+        let Assets { kit: _, meshes, textures, shaders } = &mut *assets;
         for batch in &self.batches {
-            textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
+            textures.prepare_own(&kit.gpu.device, &kit.textures, batch.textures);
         }
         for batch in self.caster_batches.iter().filter(|b| b.cutout) {
             textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
@@ -1228,7 +1262,7 @@ impl Renderer {
                 for batch in batches {
                     // Freed since prepare, by another view's render worker.
                     let (Some(mesh), Some(bind_group)) =
-                        (meshes.get(&batch.mesh), textures.bind_group(&batch.textures))
+                        (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
                     else {
                         continue;
                     };
@@ -1236,11 +1270,19 @@ impl Renderer {
                     if batch.skinned && mesh.skin.is_none() {
                         continue;
                     }
-                    let textured = |b: &Batch| b.textures != MaterialTextures::NONE;
-                    let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned);
+                    // Its shader freed or changed since prepare.
+                    let shader = match batch.shader {
+                        None => None,
+                        Some(key) => match shaders.get(&key) {
+                            Some(shader) if shader.textures.len() == batch.textures.count as usize => Some(shader),
+                            _ => continue,
+                        },
+                    };
+                    let textured = |b: &Batch| b.textures.base != MaterialTextures::NONE;
+                    let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned, b.shader);
                     if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
                         let (cover, faces) = (batch.cover, batch.faces);
-                        pass.set_pipeline(scene_pipelines.forward(Variant {
+                        let variant = Variant {
                             cover,
                             faces,
                             shadowed,
@@ -1249,7 +1291,11 @@ impl Renderer {
                             // Blended surfaces aren't in its depth.
                             ao: ao && !cover.blended(),
                             skinned: batch.skinned,
-                        }));
+                        };
+                        match shader {
+                            None => pass.set_pipeline(scene_pipelines.forward(variant)),
+                            Some(shader) => pass.set_pipeline(&scene_pipelines.own(shader, variant)),
+                        }
                     }
                     if batch.skinned
                         && let Some(skin) = &mesh.skin
@@ -1389,6 +1435,7 @@ impl Pipelines {
             device: kit.gpu.device.clone(),
             frame_layout: kit.frame_layout.clone(),
             textures_layout: kit.textures.layout.clone(),
+            own_textures_layouts: kit.textures.own_layouts.clone(),
             maps_layout: kit.shadows.maps_layout.clone(),
             image_layout: kit.image_layout.clone(),
             sky_light_layout: kit.sky.light_layout.clone(),
@@ -1396,6 +1443,8 @@ impl Pipelines {
             bloom_layout: kit.bloom.layout.clone(),
             forward_shader: OnceLock::new(),
             forward: std::array::from_fn(|_| OnceLock::new()),
+            own_shaders: Mutex::default(),
+            own: Mutex::default(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
             finish: OnceLock::new(),
@@ -1409,28 +1458,72 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let Variant { cover, faces, shadowed, textured, sky_lit, ao, skinned } = variant;
-        let device = &self.device;
         let (shader, layout) = self.forward_shader.get_or_init(|| {
-            let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-                label: Some("forward"),
-                source: wgpu::ShaderSource::Wgsl(
-                    concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"))
-                        .into(),
-                ),
-            });
-            let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("forward"),
-                bind_group_layouts: &[
-                    Some(&self.frame_layout),
-                    Some(&self.textures_layout),
-                    Some(&self.maps_layout),
-                    Some(&self.sky_light_layout),
-                ],
-                immediate_size: 0,
-            });
-            (shader, layout)
+            let source =
+                concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"));
+            self.forward_module("forward", source, &self.textures_layout)
         });
+        self.make_forward_with(variant, shader, layout, "")
+    }
+
+    /// The pipeline for `variant` of a material's own shader.
+    fn own(&self, shader: &CustomShader, variant: Variant) -> wgpu::RenderPipeline {
+        let key = (shader.hash, variant.index());
+        if let Some(pipeline) = self.own.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return pipeline.clone();
+        }
+        let (module, layout) = self
+            .own_shaders
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(shader.hash)
+            .or_insert_with(|| {
+                let textures = match shader.textures.len() {
+                    0 => &self.textures_layout,
+                    n => &self.own_textures_layouts[n - 1],
+                };
+                self.forward_module(&shader.name, &shader.wgsl, textures)
+            })
+            .clone();
+        let pipeline = self.make_forward_with(variant, &module, &layout, &shader.name);
+        self.own.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// A forward pass's module from `source`, and its layout with
+    /// `textures` for group 1.
+    fn forward_module(
+        &self,
+        label: &str,
+        source: &str,
+        textures: &wgpu::BindGroupLayout,
+    ) -> (wgpu::ShaderModule, wgpu::PipelineLayout) {
+        let device = &self.device;
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some(label),
+            source: wgpu::ShaderSource::Wgsl(source.into()),
+        });
+        let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(label),
+            bind_group_layouts: &[
+                Some(&self.frame_layout),
+                Some(textures),
+                Some(&self.maps_layout),
+                Some(&self.sky_light_layout),
+            ],
+            immediate_size: 0,
+        });
+        (shader, layout)
+    }
+
+    fn make_forward_with(
+        &self,
+        variant: Variant,
+        shader: &wgpu::ShaderModule,
+        layout: &wgpu::PipelineLayout,
+        name: &str,
+    ) -> wgpu::RenderPipeline {
+        let Variant { cover, faces, shadowed, textured, sky_lit, ao, skinned } = variant;
         // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
         let vertex_attributes =
             wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
@@ -1503,8 +1596,9 @@ impl Pipelines {
             ),
         };
         let blend = blend.map(|color| wgpu::BlendState { color, alpha: color });
+        let label = if name.is_empty() { label.to_owned() } else { format!("{label} ({name})") };
         self.maker.make(wgpu::RenderPipelineDescriptor {
-            label: Some(label),
+            label: Some(&label),
             layout: Some(layout),
             vertex: wgpu::VertexState {
                 module: shader,
@@ -1707,7 +1801,7 @@ fn caster_key(map: u8, draw: &crate::Draw, skinned: bool) -> CasterKey {
 
 /// A draw's sort key: how it covers what's behind, which faces, whether
 /// it's bent, its textures and its mesh, in the order draws are grouped.
-type SortKey = (Cover, Faces, bool, MaterialTextures, u64);
+type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, u64);
 
 /// A skinned mesh's joints and weights (`fynkel_mesh::SkinVertex`), as
 /// skin.wgsl reads them.
@@ -1724,14 +1818,15 @@ pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexB
 }
 
 /// Adds `draw` to the last of `batches` if it has `key`, or starts another.
-fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw) {
-    let (cover, faces, skinned, textures, mesh) = key;
+/// `values` is where the materials' values start among the joints.
+fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw, values: u32) {
+    let (cover, faces, skinned, shader, textures, _) = key;
     let instance = instances.len() as u32;
     match batches.last_mut() {
-        Some(b) if (b.cover, b.faces, b.skinned, b.textures, b.mesh.0) == (cover, faces, skinned, textures, mesh) => {
-            b.count += 1
+        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.mesh.0) == key => b.count += 1,
+        _ => {
+            batches.push(Batch { cover, faces, skinned, shader, textures, mesh: draw.mesh, first: instance, count: 1 })
         }
-        _ => batches.push(Batch { cover, faces, skinned, textures, mesh: draw.mesh, first: instance, count: 1 }),
     }
     let m = &draw.material;
     let [er, eg, eb] = m.emissive;
@@ -1746,7 +1841,7 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
         emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
         uv: [su, sv, ou, ov],
         own: draw.own,
-        values: 0,
+        values: m.shader.map_or(0, |used| values + used.values),
     });
 }
 

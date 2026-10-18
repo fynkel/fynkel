@@ -388,6 +388,7 @@ dependencies = [
  "fynkel_golden",
  "fynkel_mesh",
  "glam 0.34.1",
+ "naga",
  "pollster",
  "wgpu",
 ]
