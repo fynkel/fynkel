@@ -64,6 +64,7 @@ struct Slot {
     buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
     views: wgpu::BindGroup,
+    own_views: wgpu::BindGroup,
     /// The room it has for joints, in bytes.
     joints: u64,
     /// Shared with the map callback; one per buffer, so a steady frame
@@ -80,6 +81,8 @@ struct Slot {
 pub(crate) struct Written<'a> {
     pub(crate) bind_group: &'a wgpu::BindGroup,
     pub(crate) views: &'a wgpu::BindGroup,
+    /// The shadow views as materials' own shaders read them.
+    pub(crate) own_views: &'a wgpu::BindGroup,
     pub(crate) buffer: &'a wgpu::Buffer,
     pub(crate) instances: u64,
     pub(crate) lines: u64,
@@ -106,6 +109,7 @@ pub(crate) struct Parts<'a> {
 pub(crate) struct FrameRing {
     layout: wgpu::BindGroupLayout,
     views_layout: wgpu::BindGroupLayout,
+    own_views_layout: wgpu::BindGroupLayout,
     parts: Layout,
     slots: Vec<Slot>,
     /// The slot the next frame writes.
@@ -121,11 +125,11 @@ impl FrameRing {
     pub(crate) fn new(
         device: &wgpu::Device,
         (layout, uniforms): (wgpu::BindGroupLayout, u64),
-        (views_layout, view_stride, views): (wgpu::BindGroupLayout, u64, u64),
+        (views_layout, own_views_layout, view_stride, views): (wgpu::BindGroupLayout, wgpu::BindGroupLayout, u64, u64),
         instance_bytes: u64,
     ) -> Self {
         let parts = Layout::new(uniforms, view_stride, views);
-        let mut ring = Self { layout, views_layout, parts, slots: Vec::with_capacity(SLOTS), next: 0, last: None };
+        let mut ring = Self { layout, views_layout, own_views_layout, parts, slots: Vec::with_capacity(SLOTS), next: 0, last: None };
         for _ in 0..SLOTS {
             let slot = ring.create_slot(device, JOINT_BYTES, instance_bytes);
             ring.slots.push(slot);
@@ -192,7 +196,19 @@ impl FrameRing {
                 joints(),
             ],
         });
-        Slot { buffer, bind_group, views, joints: joint_bytes, state: Arc::new(AtomicU8::new(MAPPED)) }
+        let own_views = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("own shadow views"),
+            layout: &self.own_views_layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 8,
+                resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding {
+                    buffer: &buffer,
+                    offset: self.parts.views_at,
+                    size: wgpu::BufferSize::new(64),
+                }),
+            }],
+        });
+        Slot { buffer, bind_group, views, own_views, joints: joint_bytes, state: Arc::new(AtomicU8::new(MAPPED)) }
     }
 
     /// Writes a frame's `parts` into the next buffer,
@@ -248,6 +264,7 @@ impl FrameRing {
         Written {
             bind_group: &slot.bind_group,
             views: &slot.views,
+            own_views: &slot.own_views,
             buffer: &slot.buffer,
             instances: at,
             lines: lines_at,

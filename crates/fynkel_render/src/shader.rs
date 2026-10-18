@@ -108,6 +108,10 @@ impl fmt::Display for ShaderError {
 
 impl std::error::Error for ShaderError {}
 
+/// The engine's code after a shader's glue: its shadow, drawn with its own
+/// alpha where it's cut out, so what it cuts away casts none.
+const SHADOW: &str = include_str!("own_shadow.wgsl");
+
 /// The engine's code before a shader's: its lighting and the library.
 const BEFORE: &str = concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("library.wgsl"));
 
@@ -208,7 +212,7 @@ impl CustomShader {
         if !values.is_empty() {
             glue.push_str(&values_loader(&values));
         }
-        glue.push_str("fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n");
+        glue.push_str("fn fy_begin(in: VertexOut, front_facing: bool) {\n");
         glue.push_str("    fy_in = in;\n    fy_front = front_facing;\n");
         if !values.is_empty() {
             glue.push_str("    values = fy_values(in.values);\n");
@@ -217,10 +221,17 @@ impl CustomShader {
             let fields = ["x", "y", "z", "w"][..own.len()].iter().map(|c| format!("in.own.{c}")).collect::<Vec<_>>();
             glue.push_str(&format!("    per_object = PerObject({});\n", fields.join(", ")));
         }
+        glue.push_str("}\n\nfn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    fy_begin(in, front_facing);\n");
         glue.push_str(match lighting {
             Lighting::Lit => "    return lit(in, front_facing, surface(fy_surface_input(in, front_facing)));\n}\n",
             Lighting::Unlit => "    return unlit(fy_surface_input(in, front_facing));\n}\n",
         });
+        glue.push_str("\nfn fy_alpha(in: VertexOut, front_facing: bool) -> f32 {\n    fy_begin(in, front_facing);\n");
+        glue.push_str(match lighting {
+            Lighting::Lit => "    return surface(fy_surface_input(in, front_facing)).alpha;\n}\n",
+            Lighting::Unlit => "    return unlit(fy_surface_input(in, front_facing)).a;\n}\n",
+        });
+        glue.push_str(SHADOW);
         let joined = Joined::new(&declared, &own_source, &glue);
         let module = joined.parse().map_err(|e| e.into_error(name))?;
         joined.validate(&module).map_err(|e| e.into_error(name))?;

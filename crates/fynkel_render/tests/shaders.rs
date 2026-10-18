@@ -203,3 +203,80 @@ fn a_draw_whose_shader_isnt_uploaded_isnt_drawn() {
         render(&gpu, &mut r, &RenderScene { draws: Vec::new(), ..stage(QualityLevel::Medium) }, SIZE, SIZE);
     assert_eq!(differing(&image, &empty, 0), 0);
 }
+
+const HOLES: TextureKey = TextureKey(21);
+
+/// A 4 × 4 checker with every other cell clear.
+fn holes() -> Vec<u8> {
+    (0..16).flat_map(|i| if (i % 4 + i / 4) % 2 == 0 { [230, 200, 60, 255] } else { [0, 0, 0, 0] }).collect()
+}
+
+/// [`stage`] with its cube and sphere cut out by [`HOLES`], so their
+/// shadows have holes too, lit low and from the side so they're long.
+fn cut_out_stage(quality: QualityLevel) -> RenderScene {
+    let mut scene = stage(quality);
+    scene.lights = vec![Light::sun(Vec3::new(1.0, -0.8, -0.3), Vec3::ONE).with_shadows(true)];
+    for draw in &mut scene.draws[1..] {
+        draw.material.textures = MaterialTextures { base_color: Some(HOLES), ..MaterialTextures::NONE };
+        draw.material.alpha_cutoff = 0.5;
+    }
+    scene
+}
+
+const DISSOLVE: &str = "struct Values { amount: f32 }
+
+fn surface(in: SurfaceInput) -> Surface {
+    var s = standard(in);
+    let n = noise(in.uv * 8.0);
+    s.alpha = step(values.amount, n);
+    s.emission = vec3<f32>(1.0, 0.4, 0.1) * (1.0 - smoothstep(0.0, 0.06, n - values.amount)) * 3.0;
+    return s;
+}
+";
+
+/// Every cut-out's shadow is cut where its own shader cuts it: one that
+/// gives the standard surface draws its holes and their shadows as the
+/// built-in material does, one whose alpha is 0 leaves no shadow, and a
+/// dissolve's shadow dissolves with it.
+#[test]
+fn a_cut_out_shaders_shadow_is_cut_where_it_is() {
+    let gpu = gpu();
+    let mut r = renderer_with_textures(&gpu);
+    r.upload_texture(HOLES, ColorSpace::Srgb, 4, 4, &holes());
+    r.upload_texture(HOLES, ColorSpace::Linear, 4, 4, &holes());
+    let same = ShaderKey(1);
+    shader(&mut r, same, "same.wgsl", "fn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n");
+    let gone = ShaderKey(2);
+    let source = "fn surface(in: SurfaceInput) -> Surface {\n    var s = standard(in);\n    s.alpha = 0.0;\n    return s;\n}\n";
+    shader(&mut r, gone, "gone.wgsl", source);
+    let dissolve = shader(&mut r, ShaderKey(3), "dissolve.wgsl", DISSOLVE);
+    let own = |scene: RenderScene, key: ShaderKey| {
+        let mut scene = scene;
+        for draw in &mut scene.draws[1..] {
+            draw.material.shader = Some(ShaderUse { shader: key, values: 0, textures: [None; MAX_TEXTURES] });
+        }
+        scene
+    };
+    for quality in LEVELS {
+        let (expected, _) = render(&gpu, &mut r, &cut_out_stage(quality), SIZE, SIZE);
+        let (image, stats) = render(&gpu, &mut r, &own(cut_out_stage(quality), same), SIZE, SIZE);
+        assert_eq!(stats.draws, 3);
+        let off = differing(&image, &expected, 2);
+        assert!(off == 0, "{off} pixels differ at {}", level_name(quality));
+
+        let mut floor_only = cut_out_stage(quality);
+        floor_only.draws.truncate(1);
+        let (expected, _) = render(&gpu, &mut r, &floor_only, SIZE, SIZE);
+        let (image, _) = render(&gpu, &mut r, &own(cut_out_stage(quality), gone), SIZE, SIZE);
+        let off = differing(&image, &expected, 2);
+        assert!(off == 0, "{off} pixels differ at {}: its shadow is still there", level_name(quality));
+    }
+    let mut scene = own(stage(QualityLevel::Medium), ShaderKey(3));
+    scene.lights = vec![Light::sun(Vec3::new(1.0, -0.8, -0.3), Vec3::ONE).with_shadows(true)];
+    for draw in &mut scene.draws[1..] {
+        draw.material.alpha_cutoff = 0.5;
+    }
+    scene.shader_values = values(&dissolve, &[("amount", &[0.45])]);
+    let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+    fynkel_golden::assert_golden("shaders_dissolve", &image);
+}

@@ -217,6 +217,15 @@ pub(crate) const CASCADE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Dept
 /// far end, and needs a float.
 pub(crate) const SPOT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+/// How far casters in a map of `format` are pushed away from the light,
+/// so a surface doesn't shadow itself where it slopes away from it.
+pub(crate) fn bias(format: wgpu::TextureFormat) -> wgpu::DepthBiasState {
+    match format {
+        CASCADE_FORMAT => wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 },
+        _ => wgpu::DepthBiasState { constant: 4, slope_scale: 1.5, clamp: 0.0 },
+    }
+}
+
 /// One caster in a shadow map, as shadow.wgsl reads it (instance step).
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
@@ -242,6 +251,9 @@ pub(crate) const CASTER_SIZE: u64 = std::mem::size_of::<Caster>() as u64;
 pub(crate) struct ShadowKit {
     /// A map's view matrix, at a dynamic offset into the frame's buffer.
     pub(crate) view_layout: wgpu::BindGroupLayout,
+    /// The same view for a material's own shader, which has the forward
+    /// pass's groups 0 and 1, so it reads it in group 2 (own_shadow.wgsl).
+    pub(crate) own_view_layout: wgpu::BindGroupLayout,
     /// The forward pass's group 2: the cascades, the spot maps, and the
     /// sampler.
     pub(crate) maps_layout: wgpu::BindGroupLayout,
@@ -299,6 +311,19 @@ impl ShadowKit {
                 },
                 crate::assets::joints_entry(),
             ],
+        });
+        let own_view_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("own shadow view"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 8,
+                visibility: wgpu::ShaderStages::VERTEX,
+                ty: wgpu::BindingType::Buffer {
+                    ty: wgpu::BufferBindingType::Uniform,
+                    has_dynamic_offset: true,
+                    min_binding_size: wgpu::BufferSize::new(64),
+                },
+                count: None,
+            }],
         });
         let map_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
@@ -367,6 +392,7 @@ impl ShadowKit {
         });
         Self {
             view_layout,
+            own_view_layout,
             maps_layout,
             sampler,
             view_stride: u64::from(device.limits().min_uniform_buffer_offset_alignment).max(64),
@@ -419,10 +445,7 @@ impl ShadowKit {
         // either side. The bias keeps a surface from shadowing itself where
         // it slopes away from the light (acne); the forward pass also moves
         // its lookups out along the normal.
-        let bias = match format {
-            CASCADE_FORMAT => wgpu::DepthBiasState { constant: 2, slope_scale: 1.5, clamp: 0.0 },
-            _ => wgpu::DepthBiasState { constant: 4, slope_scale: 1.5, clamp: 0.0 },
-        };
+        let bias = bias(format);
         self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some(if cutout { "shadow cut-out" } else { "shadow" }),
             layout: Some(if cutout { &self.cutout_layout } else { &self.opaque_layout }),

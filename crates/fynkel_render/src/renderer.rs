@@ -352,6 +352,8 @@ struct Batch {
 #[derive(Clone, Copy)]
 struct CasterBatch {
     map: u8,
+    /// A cut-out's own shader and its textures, which cut it.
+    own: Option<Look>,
     cutout: bool,
     skinned: bool,
     textures: MaterialTextures,
@@ -360,9 +362,13 @@ struct CasterBatch {
     count: u32,
 }
 
-/// A caster's sort key: its map, cut out or not, skinned or not, its
-/// textures (a cut-out's only) and its mesh.
-type CasterKey = (u8, bool, bool, MaterialTextures, u64);
+/// A caster's sort key: its map, a cut-out's own shader, cut out or not,
+/// skinned or not, its textures (a cut-out's only) and its mesh. Within a
+/// map, those with own shaders come last.
+type CasterKey = (u8, Option<Look>, bool, bool, MaterialTextures, u64);
+
+/// A draw's own shader, if it has one, and its textures.
+type Look = (Option<ShaderKey>, OwnTextures);
 
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
@@ -390,6 +396,9 @@ pub(crate) struct Pipelines {
     /// and layout, and its pipelines by variant, made as they're drawn.
     own_shaders: Mutex<HashMap<u64, (wgpu::ShaderModule, wgpu::PipelineLayout)>>,
     own: Mutex<HashMap<(u64, usize), wgpu::RenderPipeline>>,
+    /// Their shadows' pipelines, by hash, spot or cascade, and skinned.
+    own_shadows: Mutex<HashMap<(u64, bool, bool), wgpu::RenderPipeline>>,
+    own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
     sky: OnceLock<wgpu::RenderPipeline>,
@@ -420,6 +429,11 @@ pub struct Renderer {
     /// Whether each draw is drawn bent: its mesh has joints and its skin
     /// is in the scene's.
     skinned: Vec<bool>,
+    /// Each draw's shader and textures, or `None` when its shader isn't
+    /// there (not uploaded yet, or freed), which draws nothing.
+    looks: Vec<Option<Look>>,
+    /// Where the materials' values start among the joints.
+    values_at: u32,
     instances: Vec<Instance>,
     /// The solid draws' batches, then the blended ones' from `blended_from`.
     batches: Vec<Batch>,
@@ -524,7 +538,12 @@ impl Renderer {
             frame_data: FrameRing::new(
                 &kit.gpu.device,
                 (kit.frame_layout.clone(), FRAME_UNIFORMS_SIZE),
-                (kit.shadows.view_layout.clone(), kit.shadows.view_stride, MAX_MAPS as u64 * kit.shadows.view_stride),
+                (
+                    kit.shadows.view_layout.clone(),
+                    kit.shadows.own_view_layout.clone(),
+                    kit.shadows.view_stride,
+                    MAX_MAPS as u64 * kit.shadows.view_stride,
+                ),
                 64 * INSTANCE_SIZE,
             ),
             quality: kit.device_quality().quality(),
@@ -535,6 +554,8 @@ impl Renderer {
             uniforms: FrameUniforms::zeroed(),
             joints: Vec::new(),
             skinned: Vec::new(),
+            looks: Vec::new(),
+            values_at: 0,
             instances: Vec::new(),
             batches: Vec::new(),
             blended_from: 0,
@@ -633,6 +654,7 @@ impl Renderer {
         self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
         self.joints.clear();
         self.skinned.clear();
+        self.looks.clear();
         self.instances.clear();
         self.batches.clear();
         self.blended_from = 0;
@@ -824,12 +846,14 @@ impl Renderer {
         // Materials' values go after the joints, where their shaders read
         // them.
         let values = self.joints.len() as u32;
+        self.values_at = values;
         self.joints.extend_from_slice(&scene.shader_values);
         let assets = assets::lock(&self.assets);
         for (i, draw) in scene.draws.iter().enumerate() {
             let Some(mesh) = assets.meshes.get(&draw.mesh) else {
                 stats.missing_meshes += 1;
                 self.skinned.push(false);
+                self.looks.push(None);
                 continue;
             };
             // Bent only by a skin the scene has all of: a joint number past
@@ -841,6 +865,23 @@ impl Renderer {
                 _ => None,
             };
             self.skinned.push(skin.is_some());
+            let m = &draw.material;
+            let look = match &m.shader {
+                None => Some((None, OwnTextures::of(m.textures))),
+                Some(used) => assets.shaders.get(&used.shader).map(|shader| {
+                    let srgb = shader
+                        .textures
+                        .iter()
+                        .enumerate()
+                        .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits });
+                    let own =
+                        OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
+                    (Some(used.shader), own)
+                }),
+            };
+            self.looks.push(look);
+            // Its shader not there: not drawn, and casts no shadow.
+            let Some((shader, textures)) = look else { continue };
             let (at, radius) = match skin {
                 Some((first, skin)) => skinned_bounds(&scene.joints[first..], &skin.joints),
                 None => bounds(draw.model, mesh.centre, mesh.radius),
@@ -856,22 +897,6 @@ impl Renderer {
                 continue;
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
-            let m = &draw.material;
-            let (shader, textures) = match &m.shader {
-                None => (None, OwnTextures::of(m.textures)),
-                Some(used) => {
-                    // Not uploaded yet, or freed: not drawn.
-                    let Some(shader) = assets.shaders.get(&used.shader) else { continue };
-                    let srgb = shader
-                        .textures
-                        .iter()
-                        .enumerate()
-                        .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits });
-                    let own =
-                        OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
-                    (Some(used.shader), own)
-                }
-            };
             let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, draw.mesh.0);
             if cover.blended() {
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
@@ -897,6 +922,9 @@ impl Renderer {
                 self.line_vertices.push(LineVertex { position: end.into(), color: line.color });
             }
         }
+        // Cut-outs with their own shaders add their shadows' instances
+        // after these.
+        stats.draws = self.instances.len() as u32;
         self.prepare_shadows(scene, &camera, aspect, shadow_sun.map(|(_, direction)| direction), &mut stats);
         // The shadow maps `encode` draws with: as many as the frame uses.
         // A kind it uses fewer of keeps what it has a while, so shadows that
@@ -910,7 +938,6 @@ impl Renderer {
         }
         stats.shadow_bytes = ShadowMaps::bytes(self.shadow_next);
         stats.lines = scene.lines.len() as u32;
-        stats.draws = self.instances.len() as u32;
         stats.draw_calls = self.batches.len() as u32;
         stats
     }
@@ -955,7 +982,7 @@ impl Renderer {
                 for (c, cascade) in cascades[..count].iter_mut().enumerate() {
                     if cascade.reach(&basis, at, r) {
                         let skinned = self.skinned[i as usize];
-                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize], skinned), i));
+                        self.caster_order.push((caster_key(c as u8, &scene.draws[i as usize], skinned, self.looks[i as usize]), i));
                     }
                 }
             }
@@ -1007,7 +1034,7 @@ impl Renderer {
             for &(at, r, d) in &self.shadow_candidates {
                 if in_view(&planes, at, r) {
                     let skinned = self.skinned[d as usize];
-                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize], skinned), d));
+                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize], skinned, self.looks[d as usize]), d));
                 }
             }
             spots += 1;
@@ -1018,14 +1045,17 @@ impl Renderer {
         }
 
         self.caster_order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        for &(key @ (map, cutout, skinned, textures, _), i) in &self.caster_order {
+        for &(key @ (map, own, cutout, skinned, textures, _), i) in &self.caster_order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
-            let first = self.casters.len() as u32;
+            // A cut-out with its own shader is cut by it: drawn as the
+            // forward pass draws it, from the instances after its own.
+            let first = if own.is_some() { self.instances.len() } else { self.casters.len() } as u32;
             match self.caster_batches.last_mut() {
-                Some(b) if (b.map, b.cutout, b.skinned, b.textures, b.mesh.0) == key => b.count += 1,
+                Some(b) if (b.map, b.own, b.cutout, b.skinned, b.textures, b.mesh.0) == key => b.count += 1,
                 _ => self.caster_batches.push(CasterBatch {
                     map,
+                    own,
                     cutout,
                     skinned,
                     textures,
@@ -1033,6 +1063,10 @@ impl Renderer {
                     first,
                     count: 1,
                 }),
+            }
+            if own.is_some() {
+                self.instances.push(instance(draw, skinned, self.values_at));
+                continue;
             }
             let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
             let joints = if skinned { draw.skin.unwrap_or(0) as f32 } else { 0.0 };
@@ -1043,7 +1077,7 @@ impl Renderer {
             });
         }
         stats.shadow_maps = u32::from(self.shadow_maps_drawn.0) + u32::from(self.shadow_maps_drawn.1);
-        stats.shadow_casters = self.casters.len() as u32;
+        stats.shadow_casters = self.casters.len() as u32 + (self.instances.len() as u32 - stats.draws);
     }
 
     /// The GPU half: writes what [`Renderer::prepare`] built where the GPU
@@ -1117,7 +1151,10 @@ impl Renderer {
             textures.prepare_own(&kit.gpu.device, &kit.textures, batch.textures);
         }
         for batch in self.caster_batches.iter().filter(|b| b.cutout) {
-            textures.prepare(&kit.gpu.device, &kit.textures, batch.textures);
+            match batch.own {
+                None => textures.prepare(&kit.gpu.device, &kit.textures, batch.textures),
+                Some((_, own)) => textures.prepare_own(&kit.gpu.device, &kit.textures, own),
+            }
         }
         let frame = frame_data.write(
             &kit.gpu.device,
@@ -1149,10 +1186,11 @@ impl Renderer {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_bind_group(0, frame.views, &[(u64::from(map) * kit.shadows.view_stride) as u32]);
+            let view = (u64::from(map) * kit.shadows.view_stride) as u32;
+            pass.set_bind_group(0, frame.views, &[view]);
             pass.set_vertex_buffer(1, frame.buffer.slice(frame.casters..));
             let mut last: Option<&CasterBatch> = None;
-            while let Some(batch) = batches.next_if(|b| b.map == map) {
+            while let Some(batch) = batches.next_if(|b| b.map == map && b.own.is_none()) {
                 let Some(mesh) = meshes.get(&batch.mesh) else { continue };
                 if batch.cutout {
                     let Some(bind_group) = textures.bind_group(&batch.textures) else { continue };
@@ -1166,6 +1204,43 @@ impl Renderer {
                 }
                 if last.is_none_or(|l| (l.cutout, l.skinned) != (batch.cutout, batch.skinned)) {
                     pass.set_pipeline(kit.shadows.pipeline(spot, batch.cutout, batch.skinned));
+                }
+                last = Some(batch);
+                if let Some(skin) = skin {
+                    pass.set_vertex_buffer(2, skin.buffer.slice(..));
+                }
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+            }
+            // Then the cut-outs with their own shaders, which read what the
+            // forward pass does, and the map's view in group 2.
+            if batches.peek().is_some_and(|b| b.map == map) {
+                pass.set_bind_group(0, frame.bind_group, &[]);
+                pass.set_bind_group(2, frame.own_views, &[view]);
+                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+            }
+            let mut last: Option<&CasterBatch> = None;
+            while let Some(batch) = batches.next_if(|b| b.map == map) {
+                let Some((Some(key), looks)) = batch.own else { continue };
+                // Freed or changed since prepare.
+                let (Some(mesh), Some(bind_group), Some(shader)) =
+                    (meshes.get(&batch.mesh), textures.own_bind_group(&looks), shaders.get(&key))
+                else {
+                    continue;
+                };
+                if shader.textures.len() != looks.count as usize {
+                    continue;
+                }
+                let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
+                if batch.skinned && skin.is_none() {
+                    continue;
+                }
+                if last.is_none_or(|l| (l.own, l.skinned) != (batch.own, batch.skinned)) {
+                    pass.set_pipeline(&pipelines.own_shadow(shader, spot, batch.skinned));
+                }
+                if last.is_none_or(|l| l.own != batch.own) {
+                    pass.set_bind_group(1, bind_group, &[]);
                 }
                 last = Some(batch);
                 if let Some(skin) = skin {
@@ -1445,6 +1520,8 @@ impl Pipelines {
             forward: std::array::from_fn(|_| OnceLock::new()),
             own_shaders: Mutex::default(),
             own: Mutex::default(),
+            own_shadows: Mutex::default(),
+            own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
             finish: OnceLock::new(),
@@ -1466,27 +1543,96 @@ impl Pipelines {
         self.make_forward_with(variant, shader, layout, "")
     }
 
+    /// The textures layout of `shader`'s group 1.
+    fn own_textures_layout(&self, shader: &CustomShader) -> &wgpu::BindGroupLayout {
+        match shader.textures.len() {
+            0 => &self.textures_layout,
+            n => &self.own_textures_layouts[n - 1],
+        }
+    }
+
+    /// `shader`'s module and its forward pass's layout, made the first
+    /// time.
+    fn own_module(&self, shader: &CustomShader) -> (wgpu::ShaderModule, wgpu::PipelineLayout) {
+        self.own_shaders
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .entry(shader.hash)
+            .or_insert_with(|| self.forward_module(&shader.name, &shader.wgsl, self.own_textures_layout(shader)))
+            .clone()
+    }
+
     /// The pipeline for `variant` of a material's own shader.
     fn own(&self, shader: &CustomShader, variant: Variant) -> wgpu::RenderPipeline {
         let key = (shader.hash, variant.index());
         if let Some(pipeline) = self.own.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
             return pipeline.clone();
         }
-        let (module, layout) = self
-            .own_shaders
-            .lock()
-            .unwrap_or_else(PoisonError::into_inner)
-            .entry(shader.hash)
-            .or_insert_with(|| {
-                let textures = match shader.textures.len() {
-                    0 => &self.textures_layout,
-                    n => &self.own_textures_layouts[n - 1],
-                };
-                self.forward_module(&shader.name, &shader.wgsl, textures)
-            })
-            .clone();
+        let (module, layout) = self.own_module(shader);
         let pipeline = self.make_forward_with(variant, &module, &layout, &shader.name);
         self.own.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// The pipeline that draws the shadow of a cut-out material with its
+    /// own `shader` into a spot map or a cascade, bent by skeletons or
+    /// not: the forward pass's vertices and instances, its alpha cutting
+    /// it (own_shadow.wgsl).
+    fn own_shadow(&self, shader: &CustomShader, spot: bool, skinned: bool) -> wgpu::RenderPipeline {
+        let key = (shader.hash, spot, skinned);
+        if let Some(pipeline) = self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return pipeline.clone();
+        }
+        let (module, _) = self.own_module(shader);
+        let label = format!("shadow cut-out ({})", shader.name);
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&label),
+            bind_group_layouts: &[
+                Some(&self.frame_layout),
+                Some(self.own_textures_layout(shader)),
+                Some(&self.own_view_layout),
+            ],
+            immediate_size: 0,
+        });
+        let vertex_attributes = VERTEX_ATTRIBUTES;
+        let instance_attributes = INSTANCE_ATTRIBUTES;
+        let skin_attributes = SKIN_ATTRIBUTES;
+        let buffers = forward_buffers(&vertex_attributes, &instance_attributes, &skin_attributes);
+        let format = if spot { shadows::SPOT_FORMAT } else { shadows::CASCADE_FORMAT };
+        let pipeline = self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(&label),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some(match (spot, skinned) {
+                    (false, false) => "vs_fy_shadow_cascade",
+                    (false, true) => "vs_fy_shadow_cascade_skinned",
+                    (true, false) => "vs_fy_shadow",
+                    (true, true) => "vs_fy_shadow_skinned",
+                }),
+                compilation_options: Default::default(),
+                buffers: if skinned { &buffers } else { &buffers[..2] },
+            },
+            // Both sides, as every caster (shadows.rs).
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: shadows::bias(format),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_fy_shadow"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
         pipeline
     }
 
@@ -1524,28 +1670,10 @@ impl Pipelines {
         name: &str,
     ) -> wgpu::RenderPipeline {
         let Variant { cover, faces, shadowed, textured, sky_lit, ao, skinned } = variant;
-        // Position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
-        let vertex_attributes =
-            wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
-        let instance_attributes = wgpu::vertex_attr_array![
-            4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
-            7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
-            11 => Float32x4, 12 => Uint32,
-        ];
+        let vertex_attributes = VERTEX_ATTRIBUTES;
+        let instance_attributes = INSTANCE_ATTRIBUTES;
         let skin_attributes = SKIN_ATTRIBUTES;
-        let buffers = [
-            Some(wgpu::VertexBufferLayout {
-                array_stride: std::mem::size_of::<Vertex>() as u64,
-                step_mode: wgpu::VertexStepMode::Vertex,
-                attributes: &vertex_attributes,
-            }),
-            Some(wgpu::VertexBufferLayout {
-                array_stride: INSTANCE_SIZE,
-                step_mode: wgpu::VertexStepMode::Instance,
-                attributes: &instance_attributes,
-            }),
-            Some(skin_buffer(&skin_attributes)),
-        ];
+        let buffers = forward_buffers(&vertex_attributes, &instance_attributes, &skin_attributes);
         // Cut-outs get their own pipelines: a shader that can drop pixels
         // costs tile GPUs their hidden-surface removal, so opaque surfaces
         // don't use it. Its alpha becomes MSAA coverage, and it writes
@@ -1793,10 +1921,12 @@ impl Pipelines {
 
 /// Where a draw goes among `map`'s casters: opaque ones need no textures,
 /// so they group by mesh alone.
-fn caster_key(map: u8, draw: &crate::Draw, skinned: bool) -> CasterKey {
+fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>) -> CasterKey {
     let m = &draw.material;
     let cutout = m.alpha_cutoff > 0.0;
-    (map, cutout, skinned, if cutout { m.textures } else { MaterialTextures::default() }, draw.mesh.0)
+    let own = look.filter(|(shader, _)| cutout && shader.is_some());
+    let textures = if cutout && own.is_none() { m.textures } else { MaterialTextures::default() };
+    (map, own, cutout, skinned, textures, draw.mesh.0)
 }
 
 /// A draw's sort key: how it covers what's behind, which faces, whether
@@ -1807,6 +1937,39 @@ type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, u64);
 /// skin.wgsl reads them.
 pub(crate) const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![14 => Uint16x4, 15 => Unorm16x4];
+
+/// A mesh's position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
+const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
+
+/// An [`Instance`], as forward.wgsl reads it.
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+    4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
+    7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
+    11 => Float32x4, 12 => Uint32,
+];
+
+/// The forward pass's vertex buffers: the mesh's, the instances and a
+/// skinned mesh's joints.
+fn forward_buffers<'a>(
+    vertex: &'a [wgpu::VertexAttribute],
+    instance: &'a [wgpu::VertexAttribute],
+    skin: &'a [wgpu::VertexAttribute],
+) -> [Option<wgpu::VertexBufferLayout<'a>>; 3] {
+    [
+        Some(wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<Vertex>() as u64,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: vertex,
+        }),
+        Some(wgpu::VertexBufferLayout {
+            array_stride: INSTANCE_SIZE,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: instance,
+        }),
+        Some(skin_buffer(skin)),
+    ]
+}
 
 /// The vertex buffer of a skinned mesh's joints and weights: slot 2.
 pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexBufferLayout<'_> {
@@ -1821,17 +1984,20 @@ pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexB
 /// `values` is where the materials' values start among the joints.
 fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw, values: u32) {
     let (cover, faces, skinned, shader, textures, _) = key;
-    let instance = instances.len() as u32;
+    let first = instances.len() as u32;
     match batches.last_mut() {
         Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.mesh.0) == key => b.count += 1,
-        _ => {
-            batches.push(Batch { cover, faces, skinned, shader, textures, mesh: draw.mesh, first: instance, count: 1 })
-        }
+        _ => batches.push(Batch { cover, faces, skinned, shader, textures, mesh: draw.mesh, first, count: 1 }),
     }
+    instances.push(instance(draw, skinned, values));
+}
+
+/// `draw`'s instance, as forward.wgsl reads it.
+fn instance(draw: &crate::Draw, skinned: bool, values: u32) -> Instance {
     let m = &draw.material;
     let [er, eg, eb] = m.emissive;
     let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
-    instances.push(Instance {
+    Instance {
         model: {
             let rows = draw.model.transpose();
             [rows.x_axis.into(), rows.y_axis.into(), rows.z_axis.into()]
@@ -1842,7 +2008,7 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
         uv: [su, sv, ou, ov],
         own: draw.own,
         values: m.shader.map_or(0, |used| values + used.values),
-    });
+    }
 }
 
 /// The six planes around what `view_proj` shows (left, right, bottom, top,
