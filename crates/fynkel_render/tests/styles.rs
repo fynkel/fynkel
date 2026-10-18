@@ -6,7 +6,9 @@
 //! shader moves or a skeleton bends, and aren't drawn for see-through
 //! surfaces; and a toon scene at every level. The pixel look draws the
 //! scene small and enlarges it with hard edges, and holds still as the
-//! camera moves less than a pixel, or moves by whole ones.
+//! camera moves less than a pixel, or moves by whole ones. Screen effects
+//! see the picture as it was and where, run in order, work at every level
+//! and with the pixel look, and an effect that's wrong is told.
 
 mod common;
 
@@ -454,5 +456,201 @@ fn picture_pixels() {
         scene.camera = Some(camera);
         let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
         assert_golden(&format!("pixels_{}", level_name(quality)), &image);
+    }
+}
+
+// --- Screen effects ---------------------------------------------------------
+
+const KEEP: &str = "fn effect(in: EffectInput) -> vec4<f32> {\n    return picture(in.uv);\n}\n";
+const INVERT: &str =
+    "fn effect(in: EffectInput) -> vec4<f32> {\n    return vec4<f32>(1.0 - picture(in.uv).rgb, 1.0);\n}\n";
+const GAIN: &str = "struct Values { gain: vec3<f32> }
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    return vec4<f32>(picture_at(vec2<i32>(in.pixel)).rgb * values.gain, 1.0);
+}
+";
+/// Where each pixel is, as its colour.
+const WHERE: &str = "fn effect(in: EffectInput) -> vec4<f32> {
+    return vec4<f32>(in.uv, in.pixel.x / in.size.x, 1.0);
+}
+";
+
+const KEEP_KEY: ShaderKey = ShaderKey(20);
+const INVERT_KEY: ShaderKey = ShaderKey(21);
+const GAIN_KEY: ShaderKey = ShaderKey(22);
+const WHERE_KEY: ShaderKey = ShaderKey(23);
+
+/// The stage with `effects` (their values from the scene's first block).
+fn with_effects(quality: QualityLevel, effects: &[ShaderKey]) -> RenderScene {
+    let mut scene = stage(quality, None);
+    scene.effects = effects.iter().map(|&shader| ScreenEffect { shader, values: 0 }).collect();
+    scene
+}
+
+/// `image`'s pixels in linear light, each changed by `f`, as an sRGB view
+/// stores them.
+fn changed(image: &Image, f: impl Fn([f32; 3]) -> [f32; 3]) -> Image {
+    let encode = |c: f32| {
+        let c = c.clamp(0.0, 1.0);
+        let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        (s * 255.0).round() as u8
+    };
+    let mut rgba = image.rgba.clone();
+    for p in rgba.chunks_mut(4) {
+        let c = f([0, 1, 2].map(|i| linear(p[i] as f32 / 255.0)));
+        p[..3].copy_from_slice(&c.map(encode));
+    }
+    Image { rgba, ..image.clone() }
+}
+
+#[test]
+fn a_screen_effect_that_is_wrong_is_told() {
+    let wrong = |source: &str| CustomShader::new("fx.wgsl", source).err().map(|e| e.to_string());
+    let told = |source: &str, says: &str| {
+        let error = wrong(source).unwrap_or_else(|| panic!("compiled:\n{source}"));
+        assert!(error.contains(says), "{error:?} doesn't say {says:?}");
+    };
+    told(
+        "fn effect(uv: vec2<f32>) -> vec4<f32> {\n    return vec4<f32>(uv, 0.0, 1.0);\n}\n",
+        "fn effect(in: EffectInput)",
+    );
+    told("fn effect(in: EffectInput) -> vec3<f32> {\n    return picture(in.uv).rgb;\n}\n", "-> vec4<f32>");
+    told(&format!("{KEEP}{SURFACE}"), "only `effect`");
+    told(&format!("struct PerObject {{ hit: f32 }}\n{KEEP}"), "PerObject");
+    told(&format!("var picture2: color_texture;\n{KEEP}"), "textures");
+    told("fn effect(in: EffectInput) -> vec4<f32> {\n    return picture(in.uv)\n}\n", "fx.wgsl:3:1");
+    let keep = CustomShader::new("keep.wgsl", KEEP).unwrap();
+    assert!(keep.effect && keep.lighting == Lighting::Unlit);
+    assert!(!CustomShader::new("s.wgsl", SURFACE).unwrap().effect);
+}
+
+/// An effect that keeps the picture keeps it, at every level and with the
+/// pixel look; a frame without effects keeps no pictures for them.
+#[test]
+fn an_effect_that_keeps_the_picture_keeps_it() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    shader(&mut r, KEEP_KEY, "keep.wgsl", KEEP);
+    for quality in LEVELS {
+        for pixels in [None, Some(40)] {
+            let mut plain = stage(quality, None);
+            plain.camera.as_mut().unwrap().pixels = pixels;
+            let mut kept = with_effects(quality, &[KEEP_KEY]);
+            kept.camera = plain.camera;
+            let mut fresh = renderer(&gpu, SRGB);
+            let (before, stats) = render(&gpu, &mut fresh, &plain, SIZE, SIZE);
+            assert_eq!((stats.effects, stats.effect_bytes), (0, 0));
+            let (after, stats) = render(&gpu, &mut r, &kept, SIZE, SIZE);
+            assert_eq!(stats.effects, 1);
+            assert_eq!(stats.effect_bytes, u64::from(SIZE * SIZE * 4));
+            let off = differing(&before, &after, 1);
+            assert!(off == 0, "{quality:?} {pixels:?}: {off} pixels changed");
+        }
+    }
+}
+
+/// Each effect sees what the one before made: gain then invert isn't
+/// invert then gain, and each is as worked out from the plain picture.
+#[test]
+fn effects_compose_in_order() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    shader(&mut r, INVERT_KEY, "invert.wgsl", INVERT);
+    let gain = shader(&mut r, GAIN_KEY, "gain.wgsl", GAIN);
+    let g = [1.0, 0.5, 0.25];
+    for quality in LEVELS {
+        let (plain, _) = render(&gpu, &mut r, &stage(quality, None), SIZE, SIZE);
+        for (order, f) in [
+            (
+                [GAIN_KEY, INVERT_KEY],
+                &(|c: [f32; 3]| [0, 1, 2].map(|i| 1.0 - c[i] * g[i])) as &dyn Fn([f32; 3]) -> [f32; 3],
+            ),
+            ([INVERT_KEY, GAIN_KEY], &|c: [f32; 3]| [0, 1, 2].map(|i| (1.0 - c[i]) * g[i])),
+        ] {
+            let mut scene = with_effects(quality, &order);
+            scene.shader_values = values(&gain, "gain", &g);
+            let (image, stats) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+            assert_eq!(stats.effects, 2);
+            let off = differing(&image, &changed(&plain, f), 3);
+            assert!(off < 40, "{quality:?} {order:?}: {off} pixels aren't as worked out");
+        }
+    }
+}
+
+/// An effect is told where each pixel is: from the view's top left, its
+/// centre, and the view's size, with the pixel look too.
+#[test]
+fn an_effect_knows_where_each_pixel_is() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    shader(&mut r, WHERE_KEY, "where.wgsl", WHERE);
+    let (w, h) = (SIZE, SIZE / 2);
+    for pixels in [None, Some(20)] {
+        let mut scene = with_effects(QualityLevel::Low, &[WHERE_KEY]);
+        scene.camera.as_mut().unwrap().pixels = pixels;
+        let (image, _) = render(&gpu, &mut r, &scene, w, h);
+        let expected = Image {
+            rgba: (0..h)
+                .flat_map(|y| (0..w).map(move |x| (x, y)))
+                .flat_map(|(x, y)| {
+                    let u = (x as f32 + 0.5) / w as f32;
+                    let v = (y as f32 + 0.5) / h as f32;
+                    [u, v, u, 1.0]
+                })
+                .collect::<Vec<f32>>()
+                .chunks(4)
+                .flat_map(|c| changed_one(c))
+                .collect(),
+            ..image.clone()
+        };
+        let off = differing(&image, &expected, 1);
+        assert!(off == 0, "{pixels:?}: {off} pixels told the wrong place");
+    }
+}
+
+/// Linear `c` (rgba) as an sRGB view stores it.
+fn changed_one(c: &[f32]) -> [u8; 4] {
+    let encode = |c: f32| {
+        let s = if c <= 0.003_130_8 { c * 12.92 } else { 1.055 * c.powf(1.0 / 2.4) - 0.055 };
+        (s * 255.0).round() as u8
+    };
+    [encode(c[0]), encode(c[1]), encode(c[2]), 255]
+}
+
+const OLD_TV: &str = "struct Values { lines: f32, curve: f32 }
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    // Bent like a tube's glass, dark at its edges, with scan lines.
+    let c = in.uv - 0.5;
+    let uv = 0.5 + c * (1.0 + values.curve * dot(c, c));
+    if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) {
+        return vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    let lines = 0.75 + 0.25 * cos(uv.y * values.lines * 6.2831853);
+    let dark = 1.0 - 1.6 * dot(c, c);
+    return vec4<f32>(picture(uv).rgb * lines * dark, 1.0);
+}
+";
+
+#[test]
+fn picture_effects() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let tv = shader(&mut r, ShaderKey(24), "old_tv.wgsl", OLD_TV);
+    shader(&mut r, GAIN_KEY, "gain.wgsl", GAIN);
+    let mut blocks = values(&tv, "lines", &[40.0]);
+    let curve = tv.values.iter().find(|v| v.name == "curve").unwrap().offset as usize / 4;
+    blocks[curve / 12][curve % 12 / 4][curve % 4] = 0.4;
+    // A warm tint after it, its values in the next block.
+    let gain = CustomShader::new("gain.wgsl", GAIN).unwrap();
+    blocks.extend(values(&gain, "gain", &[1.0, 0.85, 0.6]));
+    for quality in LEVELS {
+        let mut scene = stage(quality, None);
+        scene.effects =
+            vec![ScreenEffect { shader: ShaderKey(24), values: 0 }, ScreenEffect { shader: GAIN_KEY, values: 1 }];
+        scene.shader_values = blocks.clone();
+        let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+        assert_golden(&format!("effects_{}", level_name(quality)), &image);
     }
 }

@@ -43,6 +43,8 @@ pub struct Kit {
     pub(crate) bloom: BloomKit,
     /// Ambient occlusion's.
     pub(crate) ao: AoKit,
+    /// Screen effects' layout and sampler.
+    pub(crate) effects: crate::effects::EffectKit,
     pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
     pub(crate) maker: PipelineMaker,
 }
@@ -208,6 +210,7 @@ impl Kit {
             sky: SkyKit::new(&gpu.device, &gpu.queue, &maker),
             bloom: BloomKit::new(&gpu.device, &maker),
             ao: AoKit::new(&gpu.device, &gpu.queue, &maker, &frame_layout, crate::renderer::INSTANCE_SIZE),
+            effects: crate::effects::EffectKit::new(&gpu.device),
             maker,
             gpu: gpu.clone(),
             quality: QualityLevel::for_adapter(&gpu.adapter.get_info()),

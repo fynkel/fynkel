@@ -781,6 +781,18 @@ pub struct RenderScene {
     /// its [`ShaderUse::values`], laid out as its shader's `Values`, in
     /// blocks of 48 bytes (a joint's room: they go after the joints).
     pub shader_values: Vec<[[f32; 4]; 3]>,
+    /// The camera's screen effects, run over the finished picture in
+    /// order. One whose shader isn't there, or isn't an effect's
+    /// ([`CustomShader::effect`](crate::CustomShader::effect)), is left out.
+    pub effects: Vec<ScreenEffect>,
+}
+
+/// A screen effect: its shader (an effect's) and the first of its values'
+/// blocks in [`RenderScene::shader_values`].
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ScreenEffect {
+    pub shader: ShaderKey,
+    pub values: u32,
 }
 
 impl RenderScene {
@@ -806,5 +818,6 @@ impl RenderScene {
         self.quality = None;
         self.time = [0.0; 2];
         self.shader_values.clear();
+        self.effects.clear();
     }
 }

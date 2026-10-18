@@ -2,7 +2,8 @@
 //! an `unlit`) function, and perhaps a `vertex` that moves its vertices,
 //! joined to the engine's lighting and checked with
 //! naga as it's made, so a mistake is found as the game loads it and named
-//! by its line.
+//! by its line. Or a screen effect's: an `effect` function, run over the
+//! finished picture (effect.wgsl).
 //!
 //! What a shader's file may have, besides its functions:
 //! - `struct Values { … }`: the material's values, read as `values.name`.
@@ -92,6 +93,11 @@ pub struct CustomShader {
     /// Whether it has `fn light(in: LightInput) -> vec3<f32>`, which lights
     /// it in place of the engine's lighting, light by light.
     pub lights: bool,
+    /// Whether it's a screen effect's, `fn effect(in: EffectInput) ->
+    /// vec4<f32>`, for a camera ([`crate::ScreenEffect`]) rather than a
+    /// material. Its lighting is then [`Lighting::Unlit`], and it has no
+    /// textures or `PerObject`.
+    pub effect: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
     /// Of `wgsl`: pipelines made from the same code are shared.
@@ -127,10 +133,16 @@ const SHADOW: &str = include_str!("own_shadow.wgsl");
 /// The engine's code before a shader's: its lighting and the library.
 const BEFORE: &str = concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("library.wgsl"));
 
+/// The engine's code before a screen effect's.
+const EFFECT: &str = include_str!("effect.wgsl");
+
 impl CustomShader {
     /// Checks `source`, a shader's file called `name`, and joins it to the
     /// engine's code.
     pub fn new(name: &str, source: &str) -> Result<Self, ShaderError> {
+        if has_fn(source, "effect") {
+            return Self::new_effect(name, source);
+        }
         let error = |line: Option<u32>, column: Option<u32>, message: String| ShaderError {
             file: name.to_owned(),
             line,
@@ -148,6 +160,7 @@ impl CustomShader {
             declared.push_str("var<private> per_object: PerObject;\n");
         }
         let probe = Joined::new(
+            BEFORE,
             &declared,
             &own_source,
             "fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    return vec4<f32>(0.0);\n}\n\n\
@@ -214,33 +227,7 @@ impl CustomShader {
                 true
             }
         };
-        let (values, values_size) = match find_struct(&module, "Values") {
-            None => (Vec::new(), 0),
-            Some(members) => {
-                let mut values = Vec::new();
-                for (name_of, ty, offset) in members {
-                    let (kind, size) = value_kind(&module.types[ty].inner).ok_or_else(|| {
-                        error(
-                            None,
-                            None,
-                            format!(
-                                "`Values.{name_of}` isn't a number or a vector of f32, i32 or u32, which values are"
-                            ),
-                        )
-                    })?;
-                    values.push(ShaderValue { name: name_of, kind, size, offset });
-                }
-                let size = struct_size(&module, "Values");
-                if size > MAX_VALUES_BYTES {
-                    return Err(error(
-                        None,
-                        None,
-                        format!("`Values` takes {size} bytes; it may take {MAX_VALUES_BYTES}"),
-                    ));
-                }
-                (values, size)
-            }
-        };
+        let (values, values_size) = shader_values(&module, name)?;
         let own = match find_struct(&module, "PerObject") {
             None => Vec::new(),
             Some(members) => {
@@ -314,7 +301,7 @@ impl CustomShader {
             Lighting::Unlit => "    return unlit(fy_surface_input(in, front_facing)).a;\n}\n",
         });
         glue.push_str(SHADOW);
-        let joined = Joined::new(&declared, &own_source, &glue);
+        let joined = Joined::new(BEFORE, &declared, &own_source, &glue);
         let module = joined.parse().map_err(|e| e.into_error(name))?;
         let info = joined.validate(&module).map_err(|e| e.into_error(name))?;
         if moves {
@@ -356,10 +343,109 @@ impl CustomShader {
             moves,
             reads_behind,
             lights,
+            effect: false,
             wgsl,
             hash: hasher.finish(),
         })
     }
+
+    /// A screen effect's: `fn effect(in: EffectInput) -> vec4<f32>`, and
+    /// perhaps its `Values`.
+    fn new_effect(name: &str, source: &str) -> Result<Self, ShaderError> {
+        let error = |message: &str| ShaderError {
+            file: name.to_owned(),
+            line: None,
+            column: None,
+            message: message.to_owned(),
+        };
+        for unexpected in ["surface", "unlit", "vertex", "light"] {
+            if has_fn(source, unexpected) {
+                return Err(error(&format!("has `effect` and `{unexpected}`: a screen effect has only `effect`")));
+            }
+        }
+        if has_struct(source, "PerObject") {
+            return Err(error("a screen effect has no `PerObject`: it isn't drawn for an object"));
+        }
+        let (_, textures) = bind_textures(source).map_err(|(line, m)| ShaderError {
+            file: name.to_owned(),
+            line: Some(line),
+            column: None,
+            message: m,
+        })?;
+        if !textures.is_empty() {
+            return Err(error("a screen effect can't have textures of its own: it reads the picture"));
+        }
+        let declared = if has_struct(source, "Values") { "var<private> values: Values;\n" } else { "" };
+        let probe = Joined::new(EFFECT, declared, source, "");
+        let module = probe.parse().map_err(|e| e.into_error(name))?;
+        let (_, f) = module.functions.iter().find(|(_, f)| f.name.as_deref() == Some("effect")).expect("has_fn");
+        let takes = f.arguments.len() == 1 && module.types[f.arguments[0].ty].name.as_deref() == Some("EffectInput");
+        let gives = f.result.as_ref().is_some_and(|r| {
+            matches!(
+                module.types[r.ty].inner,
+                TypeInner::Vector {
+                    size: VectorSize::Quad,
+                    scalar: naga::Scalar { kind: ScalarKind::Float, width: 4 }
+                }
+            )
+        });
+        if !takes || !gives {
+            return Err(error("`effect` must be `fn effect(in: EffectInput) -> vec4<f32>`"));
+        }
+        let (values, values_size) = shader_values(&module, name)?;
+
+        let mut glue = String::new();
+        let mut load = "";
+        if !values.is_empty() {
+            glue.push_str(&effect_values_loader(&values));
+            load = "    values = fy_values();\n";
+        }
+        glue.push_str(&format!(
+            "@fragment\nfn fs_fy_effect(in: FyOut) -> @location(0) vec4<f32> {{\n{load}    \
+             let seen = effect(EffectInput(in.uv, in.clip.xy, fy_effect.frame.xy, fy_effect.frame.z));\n    \
+             return vec4<f32>(seen.rgb, 1.0);\n}}\n"
+        ));
+        let joined = Joined::new(EFFECT, declared, source, &glue);
+        let module = joined.parse().map_err(|e| e.into_error(name))?;
+        joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let wgsl: Arc<str> = joined.source.into();
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        wgsl.hash(&mut hasher);
+        Ok(Self {
+            name: name.to_owned(),
+            lighting: Lighting::Unlit,
+            values,
+            values_size,
+            textures: Vec::new(),
+            own: Vec::new(),
+            moves: false,
+            reads_behind: false,
+            lights: false,
+            effect: true,
+            wgsl,
+            hash: hasher.finish(),
+        })
+    }
+}
+
+/// `module`'s `Values`, if it has them, and how many bytes they take.
+fn shader_values(module: &naga::Module, file: &str) -> Result<(Vec<ShaderValue>, u32), ShaderError> {
+    let error = |message: String| ShaderError { file: file.to_owned(), line: None, column: None, message };
+    let Some(members) = find_struct(module, "Values") else {
+        return Ok((Vec::new(), 0));
+    };
+    let mut values = Vec::new();
+    for (name_of, ty, offset) in members {
+        let (kind, size) = value_kind(&module.types[ty].inner).ok_or_else(|| {
+            error(format!("`Values.{name_of}` isn't a number or a vector of f32, i32 or u32, which values are"))
+        })?;
+        values.push(ShaderValue { name: name_of, kind, size, offset });
+    }
+    let size = struct_size(module, "Values");
+    if size > MAX_VALUES_BYTES {
+        return Err(error(format!("`Values` takes {size} bytes; it may take {MAX_VALUES_BYTES}")));
+    }
+    Ok((values, size))
 }
 
 /// A shader's file between the engine's code: where it starts, so a
@@ -397,9 +483,10 @@ impl Failure {
 }
 
 impl Joined {
-    fn new(declared: &str, own: &str, glue: &str) -> Self {
-        let mut source = String::with_capacity(BEFORE.len() + declared.len() + own.len() + glue.len() + 64);
-        source.push_str(BEFORE);
+    /// `own` after `engine` and what the glue `declared`, then `glue`.
+    fn new(engine: &str, declared: &str, own: &str, glue: &str) -> Self {
+        let mut source = String::with_capacity(engine.len() + declared.len() + own.len() + glue.len() + 64);
+        source.push_str(engine);
         source.push_str(declared);
         let before = source.lines().count() as u32;
         source.push_str(own);
@@ -499,6 +586,16 @@ fn bind_textures(source: &str) -> Result<(String, Vec<ShaderTexture>), (u32, Str
     Ok((out, textures))
 }
 
+/// Whether `source` declares `fn name`.
+fn has_fn(source: &str, name: &str) -> bool {
+    source.lines().any(|line| {
+        line.trim_start().strip_prefix("fn").is_some_and(|rest| {
+            rest.starts_with(char::is_whitespace)
+                && rest.trim_start().strip_prefix(name).is_some_and(|r| r.trim_start().starts_with('('))
+        })
+    })
+}
+
 /// Whether `source` declares `struct name`.
 fn has_struct(source: &str, name: &str) -> bool {
     source.lines().any(|line| {
@@ -563,6 +660,25 @@ fn values_loader(values: &[ShaderValue]) -> String {
         let first = (value.offset % 16) / 4;
         let components = &"xyzw"[first as usize..(first + value.size) as usize];
         let read = format!("joints[at + {joint}u].row_{row}.{components}");
+        let read = match value.kind {
+            ValueKind::F32 => read,
+            ValueKind::I32 => format!("bitcast<{}>({read})", wgsl_type("i32", value.size)),
+            ValueKind::U32 => format!("bitcast<{}>({read})", wgsl_type("u32", value.size)),
+        };
+        s.push_str(&format!("    v.{} = {read};\n", value.name));
+    }
+    s.push_str("    return v;\n}\n");
+    s
+}
+
+/// `fn fy_values() -> Values`: a screen effect's values, read from its
+/// uniform (effect.wgsl), laid out as they are there.
+fn effect_values_loader(values: &[ShaderValue]) -> String {
+    let mut s = String::from("fn fy_values() -> Values {\n    var v: Values;\n");
+    for value in values {
+        let first = (value.offset % 16) / 4;
+        let components = &"xyzw"[first as usize..(first + value.size) as usize];
+        let read = format!("fy_effect.values[{}].{components}", value.offset / 16);
         let read = match value.kind {
             ValueKind::F32 => read,
             ValueKind::I32 => format!("bitcast<{}>({read})", wgsl_type("i32", value.size)),

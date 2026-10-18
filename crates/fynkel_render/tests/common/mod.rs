@@ -121,6 +121,7 @@ pub fn stage1_scene() -> RenderScene {
         quality: None,
         time: [0.0; 2],
         shader_values: Vec::new(),
+        effects: Vec::new(),
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
         sky: None,
