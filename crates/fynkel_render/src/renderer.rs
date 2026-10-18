@@ -456,6 +456,10 @@ type CasterKey = (u8, Option<Look>, bool, bool, MaterialTextures, u64);
 /// A draw's own shader, if it has one, and its textures.
 type Look = (Option<ShaderKey>, OwnTextures);
 
+/// An outline pipeline's key: its shader's hash (`None`, the built-in
+/// one), mirrored, skinned, and with normals of its own.
+type OutlineKey = (Option<u64>, bool, bool, bool);
+
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
 ///
@@ -493,7 +497,7 @@ pub(crate) struct Pipelines {
     own_depths: Mutex<HashMap<(u64, bool), wgpu::RenderPipeline>>,
     /// Outlines' pipelines, by their shader's hash (`None`, the built-in
     /// one), mirrored, skinned, and with normals of their own.
-    outlines: Mutex<HashMap<(Option<u64>, bool, bool, bool), wgpu::RenderPipeline>>,
+    outlines: Mutex<HashMap<OutlineKey, wgpu::RenderPipeline>>,
     own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.

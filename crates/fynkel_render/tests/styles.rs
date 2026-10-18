@@ -600,7 +600,7 @@ fn an_effect_knows_where_each_pixel_is() {
                 })
                 .collect::<Vec<f32>>()
                 .chunks(4)
-                .flat_map(|c| changed_one(c))
+                .flat_map(changed_one)
                 .collect(),
             ..image.clone()
         };
