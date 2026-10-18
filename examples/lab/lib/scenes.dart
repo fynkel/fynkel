@@ -14,6 +14,7 @@ import 'scenes/contacts_basics.dart';
 import 'scenes/controls_basics.dart';
 import 'scenes/crowd.dart';
 import 'scenes/eases.dart';
+import 'scenes/effects.dart';
 import 'scenes/fixed_step_basics.dart';
 import 'scenes/glow.dart';
 import 'scenes/flutter_basics.dart';
@@ -55,6 +56,7 @@ import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/skinned.dart';
 import 'scenes/time.dart';
+import 'scenes/toon.dart';
 
 final List<LabScene Function()> scenes = [
   ComponentsScene.new,
@@ -110,4 +112,6 @@ final List<LabScene Function()> scenes = [
   ShadersScene.new,
   MovementScene.new,
   BehindScene.new,
+  ToonScene.new,
+  EffectsScene.new,
 ];

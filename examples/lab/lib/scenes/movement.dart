@@ -34,7 +34,7 @@ class MovementScene extends LabScene {
   final jellies = <GameObject>[];
   Material? grass, water, cape;
   GameObject? knight;
-  var _wind = 0.25, _waves = 1.0, _turning = true, _pokes = 0, _fps = '–';
+  var _wind = 0.25, _waves = 1.0, _turning = true, _pokes = 0, _pixels = false, _drift = false, _fps = '–';
   final _random = math.Random(5);
 
   @override
@@ -213,15 +213,34 @@ class MovementScene extends LabScene {
     water?.set('height', value);
   }
 
+  /// The pixel look: the garden drawn 180 pixels high, with hard edges.
+  /// The camera is put on the nearest whole pixel, so the still parts
+  /// don't shimmer as it drifts.
+  bool get pixelLook => _pixels;
+  set pixelLook(bool on) {
+    _pixels = on;
+    find('camera')!.get<Camera>()!.pixels = on ? 180 : null;
+  }
+
+  /// Whether the camera drifts slowly from side to side.
+  bool get drift => _drift;
+  set drift(bool on) {
+    _drift = on;
+    if (!on) find('camera')!.position = eye;
+  }
+
   @override
   void onUpdate() {
     super.onUpdate();
+    if (_drift) {
+      find('camera')!.position = eye + Vec3(math.sin(time.sinceStart * 0.3) * 1.5, 0, 0);
+    }
     if (_turning && knight != null) {
       knight!.rotation = Quat.axisAngle(Vec3.up, 2.4 + time.sinceStart * 0.4);
     }
     readout.value =
         '$blades blades   wind ${_wind.toStringAsFixed(2)} m   waves ${_waves.toStringAsFixed(2)}   '
-        'pokes $_pokes   $_fps fps';
+        'pokes $_pokes${_pixels ? '   180 px high' : ''}   $_fps fps';
   }
 
   @override
@@ -230,6 +249,8 @@ class MovementScene extends LabScene {
     Toggle('the Knight turns', () => _turning, (on) => _turning = on),
     Slider('wind', () => wind, (value) => wind = value, max: 0.5),
     Slider('waves', () => waves, (value) => waves = value, max: 2),
+    Toggle('pixel look', () => pixelLook, (on) => pixelLook = on),
+    Toggle('the camera drifts', () => drift, (on) => drift = on),
   ];
 
   @override
