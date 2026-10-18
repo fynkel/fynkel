@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 33
+#define FY_ABI_VERSION 34
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -427,6 +427,9 @@ typedef struct FyMaterial {
   uint64_t shader;
   // The textures its shader declares, in their order; 0 for none.
   uint64_t shader_textures[4];
+  // How far, in metres, its shader's `vertex` can move a vertex: the
+  // object's bounds grow by it for culling. 0 to 1e4.
+  float reach;
 } FyMaterial;
 
 // How many of each thing a model has, from `fy_model_counts`.
@@ -1050,7 +1053,7 @@ void fy_shader_free(struct FyShader *shader);
 // <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 // offset in bytes) for each of its `Values`; `texture <name>
 // <srgb|linear>` for each texture, in order; `own <name>` for each of its
-// `PerObject`, in order. Its length goes to `out_len`; it's copied into
+// `PerObject`, in order; `moves` if it has a `vertex`. Its length goes to `out_len`; it's copied into
 // `buf` only when it fits in `cap`.
 //
 // # Safety

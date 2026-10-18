@@ -25,6 +25,7 @@ import 'scenes/joints_chain.dart';
 import 'scenes/joints_character.dart';
 import 'scenes/lamps.dart';
 import 'scenes/see_through.dart';
+import 'scenes/movement.dart';
 import 'scenes/shaders.dart';
 import 'scenes/shadows.dart';
 import 'scenes/sky.dart';
@@ -106,4 +107,5 @@ final List<LabScene Function()> scenes = [
   SkinnedScene.new,
   CrowdScene.new,
   ShadersScene.new,
+  MovementScene.new,
 ];

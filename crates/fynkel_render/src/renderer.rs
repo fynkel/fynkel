@@ -396,8 +396,12 @@ pub(crate) struct Pipelines {
     /// and layout, and its pipelines by variant, made as they're drawn.
     own_shaders: Mutex<HashMap<u64, (wgpu::ShaderModule, wgpu::PipelineLayout)>>,
     own: Mutex<HashMap<(u64, usize), wgpu::RenderPipeline>>,
-    /// Their shadows' pipelines, by hash, spot or cascade, and skinned.
-    own_shadows: Mutex<HashMap<(u64, bool, bool), wgpu::RenderPipeline>>,
+    /// Their shadows' pipelines, by hash, spot or cascade, skinned, and
+    /// cut out.
+    own_shadows: Mutex<HashMap<(u64, bool, bool, bool), wgpu::RenderPipeline>>,
+    /// Ambient occlusion's depth of those that move their vertices, by
+    /// hash and skinned.
+    own_depths: Mutex<HashMap<(u64, bool), wgpu::RenderPipeline>>,
     own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
@@ -432,6 +436,9 @@ pub struct Renderer {
     /// Each draw's shader and textures, or `None` when its shader isn't
     /// there (not uploaded yet, or freed), which draws nothing.
     looks: Vec<Option<Look>>,
+    /// Whether each draw's shader moves its vertices, so its shadow is
+    /// drawn with it.
+    moving: Vec<bool>,
     /// Where the materials' values start among the joints.
     values_at: u32,
     instances: Vec<Instance>,
@@ -555,6 +562,7 @@ impl Renderer {
             joints: Vec::new(),
             skinned: Vec::new(),
             looks: Vec::new(),
+            moving: Vec::new(),
             values_at: 0,
             instances: Vec::new(),
             batches: Vec::new(),
@@ -655,6 +663,7 @@ impl Renderer {
         self.joints.clear();
         self.skinned.clear();
         self.looks.clear();
+        self.moving.clear();
         self.instances.clear();
         self.batches.clear();
         self.blended_from = 0;
@@ -854,6 +863,7 @@ impl Renderer {
                 stats.missing_meshes += 1;
                 self.skinned.push(false);
                 self.looks.push(None);
+                self.moving.push(false);
                 continue;
             };
             // Bent only by a skin the scene has all of: a joint number past
@@ -866,6 +876,7 @@ impl Renderer {
             };
             self.skinned.push(skin.is_some());
             let m = &draw.material;
+            let mut moving = false;
             let look = match &m.shader {
                 None => Some((None, OwnTextures::of(m.textures))),
                 Some(used) => assets.shaders.get(&used.shader).map(|shader| {
@@ -876,16 +887,20 @@ impl Renderer {
                         .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits });
                     let own =
                         OwnTextures { base: m.textures, own: used.textures, count: shader.textures.len() as u8, srgb };
+                    moving = shader.moves;
                     (Some(used.shader), own)
                 }),
             };
             self.looks.push(look);
+            self.moving.push(moving);
             // Its shader not there: not drawn, and casts no shadow.
             let Some((shader, textures)) = look else { continue };
             let (at, radius) = match skin {
                 Some((first, skin)) => skinned_bounds(&scene.joints[first..], &skin.joints),
                 None => bounds(draw.model, mesh.centre, mesh.radius),
             };
+            // As far as its shader can move it, besides.
+            let radius = radius + m.shader.map_or(0.0, |used| used.reach.max(0.0));
             // Out of view, it can still shadow what's in it. Blended
             // surfaces cast none.
             let cover = Cover::of(&draw.material);
@@ -982,8 +997,9 @@ impl Renderer {
                 for (c, cascade) in cascades[..count].iter_mut().enumerate() {
                     if cascade.reach(&basis, at, r) {
                         let skinned = self.skinned[i as usize];
+                        let (look, moving) = (self.looks[i as usize], self.moving[i as usize]);
                         self.caster_order
-                            .push((caster_key(c as u8, &scene.draws[i as usize], skinned, self.looks[i as usize]), i));
+                            .push((caster_key(c as u8, &scene.draws[i as usize], skinned, look, moving), i));
                     }
                 }
             }
@@ -1035,8 +1051,8 @@ impl Renderer {
             for &(at, r, d) in &self.shadow_candidates {
                 if in_view(&planes, at, r) {
                     let skinned = self.skinned[d as usize];
-                    self.caster_order
-                        .push((caster_key(map as u8, &scene.draws[d as usize], skinned, self.looks[d as usize]), d));
+                    let (look, moving) = (self.looks[d as usize], self.moving[d as usize]);
+                    self.caster_order.push((caster_key(map as u8, &scene.draws[d as usize], skinned, look, moving), d));
                 }
             }
             spots += 1;
@@ -1050,7 +1066,8 @@ impl Renderer {
         for &(key @ (map, own, cutout, skinned, textures, _), i) in &self.caster_order {
             let draw = &scene.draws[i as usize];
             let m = &draw.material;
-            // A cut-out with its own shader is cut by it: drawn as the
+            // A cut-out with its own shader is cut by it, and one whose
+            // shader moves its vertices is moved by it: drawn as the
             // forward pass draws it, from the instances after its own.
             let first = if own.is_some() { self.instances.len() } else { self.casters.len() } as u32;
             match self.caster_batches.last_mut() {
@@ -1152,7 +1169,7 @@ impl Renderer {
         for batch in &self.batches {
             textures.prepare_own(&kit.gpu.device, &kit.textures, batch.textures);
         }
-        for batch in self.caster_batches.iter().filter(|b| b.cutout) {
+        for batch in self.caster_batches.iter().filter(|b| b.cutout || b.own.is_some()) {
             match batch.own {
                 None => textures.prepare(&kit.gpu.device, &kit.textures, batch.textures),
                 Some((_, own)) => textures.prepare_own(&kit.gpu.device, &kit.textures, own),
@@ -1215,8 +1232,8 @@ impl Renderer {
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
             }
-            // Then the cut-outs with their own shaders, which read what the
-            // forward pass does, and the map's view in group 2.
+            // Then those with their own shaders, cut out or moving, which
+            // read what the forward pass does, and the map's view in group 2.
             if batches.peek().is_some_and(|b| b.map == map) {
                 pass.set_bind_group(0, frame.bind_group, &[]);
                 pass.set_bind_group(2, frame.own_views, &[view]);
@@ -1238,8 +1255,8 @@ impl Renderer {
                 if batch.skinned && skin.is_none() {
                     continue;
                 }
-                if last.is_none_or(|l| (l.own, l.skinned) != (batch.own, batch.skinned)) {
-                    pass.set_pipeline(&pipelines.own_shadow(shader, spot, batch.skinned));
+                if last.is_none_or(|l| (l.own, l.skinned, l.cutout) != (batch.own, batch.skinned, batch.cutout)) {
+                    pass.set_pipeline(&pipelines.own_shadow(shader, spot, batch.skinned, batch.cutout));
                 }
                 if last.is_none_or(|l| l.own != batch.own) {
                     pass.set_bind_group(1, bind_group, &[]);
@@ -1255,7 +1272,8 @@ impl Renderer {
         }
 
         // Ambient occlusion: the solid scene's depth, then how hidden each
-        // pixel is, blurred. Cut-outs and blended draws aren't in it.
+        // pixel is, blurred. Cut-outs and blended draws aren't in it. Those
+        // whose shaders move their vertices are drawn with them.
         if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
             {
                 let mut pass = images.depth_pass(&kit.ao, encoder);
@@ -1265,16 +1283,21 @@ impl Renderer {
                     pass.set_bind_group(0, frame.bind_group, &[]);
                     pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
                 }
-                let mut skinned = false;
+                let mut last = None;
                 for batch in solid {
                     let Some(mesh) = meshes.get(&batch.mesh) else { continue };
                     let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
                     if batch.skinned && skin.is_none() {
                         continue;
                     }
-                    if batch.skinned != skinned {
-                        skinned = batch.skinned;
-                        pass.set_pipeline(kit.ao.depth_pipeline(skinned));
+                    let moving = batch.shader.and_then(|key| shaders.get(&key)).filter(|s| s.moves);
+                    let pipeline = (batch.skinned, moving.map(|s| s.hash));
+                    if last != Some(pipeline) {
+                        last = Some(pipeline);
+                        match moving {
+                            None => pass.set_pipeline(kit.ao.depth_pipeline(batch.skinned)),
+                            Some(shader) => pass.set_pipeline(&pipelines.own_depth(shader, batch.skinned)),
+                        }
                     }
                     if let Some(skin) = skin {
                         pass.set_vertex_buffer(2, skin.buffer.slice(..));
@@ -1523,6 +1546,7 @@ impl Pipelines {
             own_shaders: Mutex::default(),
             own: Mutex::default(),
             own_shadows: Mutex::default(),
+            own_depths: Mutex::default(),
             own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
@@ -1576,17 +1600,18 @@ impl Pipelines {
         pipeline
     }
 
-    /// The pipeline that draws the shadow of a cut-out material with its
-    /// own `shader` into a spot map or a cascade, bent by skeletons or
-    /// not: the forward pass's vertices and instances, its alpha cutting
-    /// it (own_shadow.wgsl).
-    fn own_shadow(&self, shader: &CustomShader, spot: bool, skinned: bool) -> wgpu::RenderPipeline {
-        let key = (shader.hash, spot, skinned);
+    /// The pipeline that draws the shadow of a material with its own
+    /// `shader`, cut out or moving its vertices, into a spot map or a
+    /// cascade, bent by skeletons or not: the forward pass's vertices and
+    /// instances, moved by its `vertex`, and a cut-out's alpha cutting it
+    /// (own_shadow.wgsl).
+    fn own_shadow(&self, shader: &CustomShader, spot: bool, skinned: bool, cutout: bool) -> wgpu::RenderPipeline {
+        let key = (shader.hash, spot, skinned, cutout);
         if let Some(pipeline) = self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
             return pipeline.clone();
         }
         let (module, _) = self.own_module(shader);
-        let label = format!("shadow cut-out ({})", shader.name);
+        let label = format!("shadow ({})", shader.name);
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some(&label),
             bind_group_layouts: &[
@@ -1625,7 +1650,8 @@ impl Pipelines {
                 bias: shadows::bias(format),
             }),
             multisample: Default::default(),
-            fragment: Some(wgpu::FragmentState {
+            // Depth only, unless it's cut out.
+            fragment: cutout.then(|| wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_fy_shadow"),
                 compilation_options: Default::default(),
@@ -1635,6 +1661,52 @@ impl Pipelines {
             cache: None,
         });
         self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// The pipeline that draws ambient occlusion's depth (ao.rs) of a
+    /// material whose own `shader` moves its vertices.
+    fn own_depth(&self, shader: &CustomShader, skinned: bool) -> wgpu::RenderPipeline {
+        let key = (shader.hash, skinned);
+        if let Some(pipeline) = self.own_depths.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return pipeline.clone();
+        }
+        let (module, _) = self.own_module(shader);
+        let label = format!("ambient occlusion depth ({})", shader.name);
+        // Its `vertex` reads group 0 alone (shader.rs checks).
+        let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some(&label),
+            bind_group_layouts: &[Some(&self.frame_layout)],
+            immediate_size: 0,
+        });
+        let vertex_attributes = VERTEX_ATTRIBUTES;
+        let instance_attributes = INSTANCE_ATTRIBUTES;
+        let skin_attributes = SKIN_ATTRIBUTES;
+        let buffers = forward_buffers(&vertex_attributes, &instance_attributes, &skin_attributes);
+        let pipeline = self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(&label),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some(if skinned { "vs_fy_depth_skinned" } else { "vs_fy_depth" }),
+                compilation_options: Default::default(),
+                buffers: if skinned { &buffers } else { &buffers[..2] },
+            },
+            // As ao.rs's own.
+            primitive: wgpu::PrimitiveState { cull_mode: None, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: crate::ao::DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: None,
+            multiview_mask: None,
+            cache: None,
+        });
+        self.own_depths.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
         pipeline
     }
 
@@ -1922,11 +1994,12 @@ impl Pipelines {
 }
 
 /// Where a draw goes among `map`'s casters: opaque ones need no textures,
-/// so they group by mesh alone.
-fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>) -> CasterKey {
+/// so they group by mesh alone. One whose shader cuts it out or moves its
+/// vertices (`moving`) is drawn with that shader.
+fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>, moving: bool) -> CasterKey {
     let m = &draw.material;
     let cutout = m.alpha_cutoff > 0.0;
-    let own = look.filter(|(shader, _)| cutout && shader.is_some());
+    let own = look.filter(|(shader, _)| (cutout || moving) && shader.is_some());
     let textures = if cutout && own.is_none() { m.textures } else { MaterialTextures::default() };
     (map, own, cutout, skinned, textures, draw.mesh.0)
 }

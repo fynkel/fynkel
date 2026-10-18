@@ -19,6 +19,27 @@ struct SurfaceInput {
     color: vec4<f32>,
 };
 
+// A vertex, as a shader's `vertex` gets it and gives it back: moved, it's
+// drawn where it says in the scene, in shadows and in ambient occlusion.
+// The material's `reach` must say how far it can go, in metres, or it may
+// be culled while it's still in view.
+struct VertexInput {
+    // Where it is in the world, after its skin if it has one, and the way
+    // it faces, unit length. Move and turn these.
+    position: vec3<f32>,
+    normal: vec3<f32>,
+    // Its texture coordinates, after the material's UV scale and offset.
+    uv: vec2<f32>,
+    // Where it is in the mesh, before the object's place, scale and skin.
+    // Read it (a blade's height, say), or move it to move the vertex in
+    // the mesh's own space: turned, scaled and bent with the object, as a
+    // cape blown out behind whichever way its wearer faces.
+    local: vec3<f32>,
+    // Where the object is in the world: each copy of a mesh has its own,
+    // so each can sway on its own.
+    origin: vec3<f32>,
+};
+
 // What the shader's `surface` is lit as, and its `standard` reads.
 var<private> fy_in: VertexOut;
 var<private> fy_front: bool;

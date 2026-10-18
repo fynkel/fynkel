@@ -19,7 +19,7 @@ use crate::scene::AmbientOcclusion;
 use fynkel_mesh::Vertex;
 
 /// The depth's format, and the occlusion's: one channel, 0 to 1.
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
 
 /// `Params` in ao.wgsl.

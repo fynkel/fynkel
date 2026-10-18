@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 33;
+pub const FY_ABI_VERSION: u32 = 34;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -334,6 +334,9 @@ pub struct FyMaterial {
     pub shader: u64,
     /// The textures its shader declares, in their order; 0 for none.
     pub shader_textures: [u64; 4],
+    /// How far, in metres, its shader's `vertex` can move a vertex: the
+    /// object's bounds grow by it for culling. 0 to 1e4.
+    pub reach: f32,
 }
 
 // The renderer's limit, the world's and the C struct's agree.
@@ -585,6 +588,7 @@ impl FyMaterial {
             emissive_texture: TextureId::from_raw(self.emissive_texture),
             shader: ShaderId::from_raw(self.shader),
             shader_textures: self.shader_textures.map(TextureId::from_raw),
+            reach: self.reach,
         })
     }
 }
@@ -614,6 +618,7 @@ impl From<Material> for FyMaterial {
             emissive_texture: raw(m.emissive_texture),
             shader: m.shader.map_or(0, ShaderId::raw),
             shader_textures: m.shader_textures.map(raw),
+            reach: m.reach,
         }
     }
 }
@@ -2226,7 +2231,7 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 /// offset in bytes) for each of its `Values`; `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
-/// `PerObject`, in order. Its length goes to `out_len`; it's copied into
+/// `PerObject`, in order; `moves` if it has a `vertex`. Its length goes to `out_len`; it's copied into
 /// `buf` only when it fits in `cap`.
 ///
 /// # Safety
@@ -2270,6 +2275,9 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
     }
     for name in &shader.own {
         let _ = writeln!(text, "own {name}");
+    }
+    if shader.moves {
+        let _ = writeln!(text, "moves");
     }
     text
 }

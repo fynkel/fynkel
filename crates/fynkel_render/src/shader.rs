@@ -1,5 +1,6 @@
 //! A material's own shader (stage 10): a game's WGSL with a `surface` (or
-//! an `unlit`) function, joined to the engine's lighting and checked with
+//! an `unlit`) function, and perhaps a `vertex` that moves its vertices,
+//! joined to the engine's lighting and checked with
 //! naga as it's made, so a mistake is found as the game loads it and named
 //! by its line.
 //!
@@ -80,6 +81,10 @@ pub struct CustomShader {
     pub textures: Vec<ShaderTexture>,
     /// The `PerObject` numbers' names, in order.
     pub own: Vec<String>,
+    /// Whether it has `fn vertex(in: VertexInput) -> VertexInput`, which
+    /// moves its vertices: its shadows and ambient occlusion's depth are
+    /// then drawn with it too.
+    pub moves: bool,
     /// The whole module, the engine's code and the shader's.
     pub(crate) wgsl: Arc<str>,
     /// Of `wgsl`: pipelines made from the same code are shared.
@@ -138,7 +143,8 @@ impl CustomShader {
         let probe = Joined::new(
             &declared,
             &own_source,
-            "fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    return vec4<f32>(0.0);\n}\n",
+            "fn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    return vec4<f32>(0.0);\n}\n\n\
+             fn fy_moved(in: VertexIn, model: array<vec4<f32>, 3>, out: VertexOut) -> VertexOut {\n    return out;\n}\n",
         );
         let module = probe.parse().map_err(|e| e.into_error(name))?;
 
@@ -157,6 +163,23 @@ impl CustomShader {
                     "has no `fn surface(in: SurfaceInput) -> Surface` (lit) or `fn unlit(in: SurfaceInput) -> vec4<f32>`"
                         .into(),
                 ));
+            }
+        };
+        let moves = match module.functions.iter().find(|(_, f)| f.name.as_deref() == Some("vertex")) {
+            None => false,
+            Some((_, f)) => {
+                let named = |ty: naga::Handle<naga::Type>| module.types[ty].name.as_deref() == Some("VertexInput");
+                if f.arguments.len() != 1
+                    || !named(f.arguments[0].ty)
+                    || !f.result.as_ref().is_some_and(|r| named(r.ty))
+                {
+                    return Err(error(
+                        None,
+                        None,
+                        "`vertex` must be `fn vertex(in: VertexInput) -> VertexInput`".into(),
+                    ));
+                }
+                true
             }
         };
         let (values, values_size) = match find_struct(&module, "Values") {
@@ -209,18 +232,34 @@ impl CustomShader {
 
         // Then with the glue that loads them and calls it.
         let mut glue = String::new();
+        let mut load = String::new();
         if !values.is_empty() {
             glue.push_str(&values_loader(&values));
-        }
-        glue.push_str("fn fy_begin(in: VertexOut, front_facing: bool) {\n");
-        glue.push_str("    fy_in = in;\n    fy_front = front_facing;\n");
-        if !values.is_empty() {
-            glue.push_str("    values = fy_values(in.values);\n");
+            load.push_str("    values = fy_values(in.values);\n");
         }
         if !own.is_empty() {
             let fields = ["x", "y", "z", "w"][..own.len()].iter().map(|c| format!("in.own.{c}")).collect::<Vec<_>>();
-            glue.push_str(&format!("    per_object = PerObject({});\n", fields.join(", ")));
+            load.push_str(&format!("    per_object = PerObject({});\n", fields.join(", ")));
         }
+        glue.push_str("fn fy_moved(in: VertexIn, model: array<vec4<f32>, 3>, out: VertexOut) -> VertexOut {\n");
+        if moves {
+            // What `local` moved by goes where the vertex's matrix (its
+            // object's, or its skin's) takes it.
+            glue.push_str(&load);
+            glue.push_str(
+                "    let origin = vec3<f32>(in.model_0.w, in.model_1.w, in.model_2.w);\n    \
+                 let v = vertex(VertexInput(out.world_position, normalize(out.normal), out.uv, in.position, origin));\n    \
+                 let turn = mat3x3<f32>(vec3<f32>(model[0].x, model[1].x, model[2].x), \
+                 vec3<f32>(model[0].y, model[1].y, model[2].y), vec3<f32>(model[0].z, model[1].z, model[2].z));\n    \
+                 var moved = out;\n    moved.world_position = v.position + turn * (v.local - in.position);\n    \
+                 moved.normal = v.normal;\n    moved.uv = v.uv;\n    return moved;\n}\n\n",
+            );
+        } else {
+            glue.push_str("    return out;\n}\n\n");
+        }
+        glue.push_str("fn fy_begin(in: VertexOut, front_facing: bool) {\n");
+        glue.push_str("    fy_in = in;\n    fy_front = front_facing;\n");
+        glue.push_str(&load);
         glue.push_str(
             "}\n\nfn shade(in: VertexOut, front_facing: bool) -> vec4<f32> {\n    fy_begin(in, front_facing);\n",
         );
@@ -236,12 +275,39 @@ impl CustomShader {
         glue.push_str(SHADOW);
         let joined = Joined::new(&declared, &own_source, &glue);
         let module = joined.parse().map_err(|e| e.into_error(name))?;
-        joined.validate(&module).map_err(|e| e.into_error(name))?;
+        let info = joined.validate(&module).map_err(|e| e.into_error(name))?;
+        if moves {
+            // The passes that draw only depth have no textures to give it.
+            let (at, _) = module.entry_points.iter().enumerate().find(|(_, e)| e.name == "vs_fy_depth").expect("glued");
+            let uses = info.get_entry_point(at);
+            for (handle, global) in module.global_variables.iter() {
+                if global.binding.as_ref().is_some_and(|b| b.group != 0) && !uses[handle].is_empty() {
+                    let what = global.name.as_deref().unwrap_or("a texture");
+                    return Err(error(
+                        None,
+                        None,
+                        format!(
+                            "`vertex` reads `{what}`: it can read its values, its object's numbers and the time, not textures"
+                        ),
+                    ));
+                }
+            }
+        }
 
         let wgsl: Arc<str> = joined.source.into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         wgsl.hash(&mut hasher);
-        Ok(Self { name: name.to_owned(), lighting, values, values_size, textures, own, wgsl, hash: hasher.finish() })
+        Ok(Self {
+            name: name.to_owned(),
+            lighting,
+            values,
+            values_size,
+            textures,
+            own,
+            moves,
+            wgsl,
+            hash: hasher.finish(),
+        })
     }
 }
 
@@ -312,10 +378,10 @@ impl Joined {
         })
     }
 
-    fn validate(&self, module: &naga::Module) -> Result<(), Failure> {
+    fn validate(&self, module: &naga::Module) -> Result<naga::valid::ModuleInfo, Failure> {
         let mut validator =
             naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::empty());
-        validator.validate(module).map(|_| ()).map_err(|e| {
+        validator.validate(module).map_err(|e| {
             let mut message = e.as_inner().to_string();
             let mut cause = std::error::Error::source(e.as_inner());
             while let Some(c) = cause {
@@ -545,6 +611,51 @@ fn surface(in: SurfaceInput) -> Surface {
         )
         .expect_err("a vec2 isn't a roughness");
         assert_eq!(error.line, Some(3), "{error}");
+    }
+
+    #[test]
+    fn a_vertex_that_moves_is_found_and_reads_values_and_the_time() {
+        let source = "struct Values { strength: f32 }
+struct PerObject { phase: f32 }
+
+fn vertex(in: VertexInput) -> VertexInput {
+    var v = in;
+    let sway = sin(frame_time() + in.origin.x + per_object.phase) * values.strength;
+    v.position.x += sway * in.local.y;
+    return v;
+}
+
+fn surface(in: SurfaceInput) -> Surface {
+    return standard(in);
+}
+";
+        let shader = CustomShader::new("grass.wgsl", source).expect("it compiles");
+        assert!(shader.moves);
+        let still =
+            CustomShader::new("still.wgsl", "fn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n");
+        assert!(!still.expect("it compiles").moves);
+    }
+
+    #[test]
+    fn a_vertex_with_the_wrong_shape_says_what_it_must_be() {
+        let error = CustomShader::new(
+            "wave.wgsl",
+            "fn vertex(p: vec3<f32>) -> vec3<f32> {\n    return p;\n}\nfn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n",
+        )
+        .expect_err("it takes a VertexInput");
+        assert!(error.message.contains("fn vertex(in: VertexInput) -> VertexInput"), "{error}");
+    }
+
+    #[test]
+    fn a_vertex_cant_read_a_texture() {
+        let error = CustomShader::new(
+            "bumps.wgsl",
+            "var height: texture_2d<f32>;\nfn vertex(in: VertexInput) -> VertexInput {\n    var v = in;\n    \
+             v.position.y += textureLoad(height, vec2<i32>(0, 0), 0).r;\n    return v;\n}\n\
+             fn surface(in: SurfaceInput) -> Surface {\n    return standard(in);\n}\n",
+        )
+        .expect_err("no textures in the depth passes");
+        assert!(error.message.contains("`height`"), "{error}");
     }
 
     #[test]

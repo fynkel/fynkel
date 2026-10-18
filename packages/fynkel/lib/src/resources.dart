@@ -382,7 +382,7 @@ final class Material {
   /// [Blending.transparent] unless [blending] says otherwise. [opacity],
   /// [metallic], [roughness] and [alphaCutoff] are 0 to 1,
   /// [emissiveIntensity] 0 to 1,000,000, [uvScale] and [uvOffset] -10,000
-  /// to 10,000 each way: out of range or NaN throws a [RangeError]. A
+  /// to 10,000 each way, [reach] 0 to 10,000: out of range or NaN throws a [RangeError]. A
   /// disposed texture throws a [StateError].
   Material({
     this.name,
@@ -404,6 +404,7 @@ final class Material {
     Texture2D? emissiveTexture,
     Shader? shader,
     Map<String, Object> values = const {},
+    double reach = 0,
   }) : _metallic = _unit(metallic, 'metallic'),
        _roughness = _unit(roughness, 'roughness'),
        _emissiveIntensity = _atLeast0(emissiveIntensity, 'emissiveIntensity'),
@@ -419,7 +420,8 @@ final class Material {
          _usable(occlusionTexture),
          _usable(emissiveTexture),
        ],
-       _shader = _usableShader(shader) {
+       _shader = _usableShader(shader),
+       _reach = _metres(reach, 'reach') {
     if (values.isNotEmpty && shader == null) {
       throw ArgumentError.value(values, 'values', 'are for a shader, and the material has none');
     }
@@ -448,6 +450,7 @@ final class Material {
   final List<Texture2D?> _textures;
 
   Shader? _shader;
+  double _reach;
 
   /// What [set] set, by name: numbers, vectors, colours and textures.
   final _values = <String, Object>{};
@@ -500,6 +503,7 @@ final class Material {
     emissiveTexture: _textures[4],
     shader: _shader,
     values: _values,
+    reach: _reach,
   );
 
   /// Its own shader, or null for the engine's: see [Shader]. A new one
@@ -510,6 +514,17 @@ final class Material {
     _shader = _usableShader(value);
     if (value == null) _values.clear();
     _pack();
+    _changed();
+  }
+
+  /// How far, in metres, its [shader]'s `vertex` can move a vertex from
+  /// where the mesh has it: grass that sways 0.3 m needs 0.3. The engine
+  /// grows each object's bounds by this much when it decides what's in
+  /// view, so something that moved into view isn't left out. 0 (the
+  /// default) for a shader that doesn't move its vertices; 0 to 1e4.
+  double get reach => _reach;
+  set reach(double value) {
+    _reach = _metres(value, 'reach');
     _changed();
   }
 
@@ -740,6 +755,11 @@ final class Material {
     return value;
   }
 
+  static double _metres(double value, String name) {
+    if (!(value >= 0 && value <= 1e4)) throw RangeError.value(value, name, 'must be between 0 and 1e4');
+    return value;
+  }
+
   static Shader? _usableShader(Shader? shader) {
     if (shader != null && shader.isDisposed) throw StateError('$shader was disposed');
     return shader;
@@ -767,6 +787,7 @@ final class Material {
       if (blending != Blending.opaque) 'blending: $blending',
       ...textures,
       if (_shader case final shader?) 'shader: $shader',
+      if (_reach != 0) 'reach: $_reach',
     ];
     return 'Material(${fields.join(', ')})';
   }
