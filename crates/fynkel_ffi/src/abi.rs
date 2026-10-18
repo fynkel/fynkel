@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 34;
+pub const FY_ABI_VERSION: u32 = 35;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -337,6 +337,11 @@ pub struct FyMaterial {
     /// How far, in metres, its shader's `vertex` can move a vertex: the
     /// object's bounds grow by it for culling. 0 to 1e4.
     pub reach: f32,
+    /// How wide a line drawn around it is, in metres; 0 for none. 0 to
+    /// 100. Opaque surfaces only.
+    pub outline_width: f32,
+    /// sRGB; alpha is ignored.
+    pub outline_color: FyColor,
 }
 
 // The renderer's limit, the world's and the C struct's agree.
@@ -589,6 +594,8 @@ impl FyMaterial {
             shader: ShaderId::from_raw(self.shader),
             shader_textures: self.shader_textures.map(TextureId::from_raw),
             reach: self.reach,
+            outline_width: self.outline_width,
+            outline_color: self.outline_color.into(),
         })
     }
 }
@@ -619,6 +626,8 @@ impl From<Material> for FyMaterial {
             shader: m.shader.map_or(0, ShaderId::raw),
             shader_textures: m.shader_textures.map(raw),
             reach: m.reach,
+            outline_width: m.outline_width,
+            outline_color: m.outline_color.into(),
         }
     }
 }
@@ -2231,8 +2240,8 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 /// offset in bytes) for each of its `Values`; `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
-/// `PerObject`, in order; `moves` if it has a `vertex`; `behind` if it reads what's behind it
-/// (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
+/// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it has a `light`; `behind` if
+/// it reads what's behind it (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
 /// fits in `cap`.
 ///
 /// # Safety
@@ -2279,6 +2288,9 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
     }
     if shader.moves {
         let _ = writeln!(text, "moves");
+    }
+    if shader.lights {
+        let _ = writeln!(text, "lights");
     }
     if shader.reads_behind {
         let _ = writeln!(text, "behind");

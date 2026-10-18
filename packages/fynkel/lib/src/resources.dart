@@ -368,6 +368,33 @@ enum Blending {
   additive,
 }
 
+/// A line drawn around an object, as in a cartoon ([Material.outline]):
+/// its mesh drawn again behind it, inside out and [width] metres bigger
+/// all round, in [color], lit by nothing. It moves and bends as the object
+/// does, by its skeleton and its shader's `vertex`. Opaque materials only:
+/// a cut-out or see-through one has none. A mesh whose faces don't share
+/// their corners' normals, a cube's, shows gaps at its corners.
+final class Outline {
+  /// [width] is 0 to 100 metres: out of range or NaN throws a
+  /// [RangeError] where it's used.
+  const Outline({this.width = 0.02, this.color = Color.black});
+
+  /// How far out it reaches, in metres.
+  final double width;
+
+  /// Its colour, picked in sRGB; alpha is ignored.
+  final Color color;
+
+  @override
+  bool operator ==(Object other) => other is Outline && other.width == width && other.color == color;
+
+  @override
+  int get hashCode => Object.hash(width, color);
+
+  @override
+  String toString() => 'Outline(width: $width, color: $color)';
+}
+
 /// How a surface looks under light: glTF's metallic-roughness model, so a
 /// loaded model's materials are these. A material can be used in any
 /// number of worlds, and changing it changes every object that uses it, in
@@ -382,8 +409,9 @@ final class Material {
   /// [Blending.transparent] unless [blending] says otherwise. [opacity],
   /// [metallic], [roughness] and [alphaCutoff] are 0 to 1,
   /// [emissiveIntensity] 0 to 1,000,000, [uvScale] and [uvOffset] -10,000
-  /// to 10,000 each way, [reach] 0 to 10,000: out of range or NaN throws a [RangeError]. A
-  /// disposed texture throws a [StateError].
+  /// to 10,000 each way, [reach] 0 to 10,000, an [outline]'s width 0 to
+  /// 100: out of range or NaN throws a [RangeError]. A disposed texture
+  /// throws a [StateError].
   Material({
     this.name,
     Color color = Color.white,
@@ -405,6 +433,7 @@ final class Material {
     Shader? shader,
     Map<String, Object> values = const {},
     double reach = 0,
+    Outline? outline,
   }) : _metallic = _unit(metallic, 'metallic'),
        _roughness = _unit(roughness, 'roughness'),
        _emissiveIntensity = _atLeast0(emissiveIntensity, 'emissiveIntensity'),
@@ -421,7 +450,8 @@ final class Material {
          _usable(emissiveTexture),
        ],
        _shader = _usableShader(shader),
-       _reach = _metres(reach, 'reach') {
+       _reach = _metres(reach, 'reach'),
+       _outline = _usableOutline(outline) {
     if (values.isNotEmpty && shader == null) {
       throw ArgumentError.value(values, 'values', 'are for a shader, and the material has none');
     }
@@ -451,6 +481,7 @@ final class Material {
 
   Shader? _shader;
   double _reach;
+  Outline? _outline;
 
   /// What [set] set, by name: numbers, vectors, colours and textures.
   final _values = <String, Object>{};
@@ -504,6 +535,7 @@ final class Material {
     shader: _shader,
     values: _values,
     reach: _reach,
+    outline: _outline,
   );
 
   /// Its own shader, or null for the engine's: see [Shader]. A new one
@@ -525,6 +557,16 @@ final class Material {
   double get reach => _reach;
   set reach(double value) {
     _reach = _metres(value, 'reach');
+    _changed();
+  }
+
+  /// The line drawn around every object using it, or null (the default)
+  /// for none: `Outline(width: 0.02, color: Color(0xFF202020))`. Opaque
+  /// materials only. An outline's width out of 0 to 100, or NaN, throws a
+  /// [RangeError].
+  Outline? get outline => _outline;
+  set outline(Outline? value) {
+    _outline = _usableOutline(value);
     _changed();
   }
 
@@ -760,6 +802,13 @@ final class Material {
     return value;
   }
 
+  static Outline? _usableOutline(Outline? outline) {
+    if (outline != null && !(outline.width >= 0 && outline.width <= 100)) {
+      throw RangeError.value(outline.width, 'outline.width', 'must be between 0 and 100');
+    }
+    return outline;
+  }
+
   static Shader? _usableShader(Shader? shader) {
     if (shader != null && shader.isDisposed) throw StateError('$shader was disposed');
     return shader;
@@ -788,6 +837,7 @@ final class Material {
       ...textures,
       if (_shader case final shader?) 'shader: $shader',
       if (_reach != 0) 'reach: $_reach',
+      if (_outline case final outline?) 'outline: $outline',
     ];
     return 'Material(${fields.join(', ')})';
   }

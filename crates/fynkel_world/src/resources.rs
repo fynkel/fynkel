@@ -65,6 +65,12 @@ pub struct Material {
     /// where the mesh has it: the object's bounds grow by this much, so
     /// it isn't culled while what moved is still in view.
     pub reach: f32,
+    /// How wide a line is drawn around it, in metres, as in a cartoon: its
+    /// mesh again, that much bigger, inside out behind it. 0 for none.
+    /// Opaque surfaces only.
+    pub outline_width: f32,
+    /// The line's colour (sRGB), unlit. Alpha is ignored.
+    pub outline_color: Color,
 }
 
 impl Material {
@@ -87,6 +93,8 @@ impl Material {
         shader: None,
         shader_textures: [None; MAX_SHADER_TEXTURES],
         reach: 0.0,
+        outline_width: 0.0,
+        outline_color: Color::BLACK,
     };
 
     pub const fn color(base_color: Color) -> Self {
@@ -161,6 +169,8 @@ impl Describe for Material {
             Field::new("shader_texture_2", FieldKind::Texture, Value::Texture(None)),
             Field::new("shader_texture_3", FieldKind::Texture, Value::Texture(None)),
             Field::new("reach", FieldKind::F32, Value::F32(D.reach)).range(0.0, 1e4),
+            Field::new("outline_width", FieldKind::F32, Value::F32(D.outline_width)).range(0.0, 100.0),
+            Field::new("outline_color", FieldKind::Color, Value::Color(D.outline_color)),
         ];
         FIELDS
     }
@@ -180,6 +190,8 @@ impl Describe for Material {
             14 => Value::Enum(self.blend as u32),
             15..=18 => Value::Texture(self.shader_textures[index - 15]),
             19 => Value::F32(self.reach),
+            20 => Value::F32(self.outline_width),
+            21 => Value::Color(self.outline_color),
             _ => return None,
         })
     }
@@ -205,6 +217,8 @@ impl Describe for Material {
             (14, Value::Enum(2)) => self.blend = Blend::Additive,
             (15..=18, Value::Texture(t)) => self.shader_textures[index - 15] = t,
             (19, Value::F32(v)) => self.reach = v,
+            (20, Value::F32(v)) => self.outline_width = v,
+            (21, Value::Color(c)) => self.outline_color = c,
             _ => unreachable!("validated by Describe::set"),
         }
     }

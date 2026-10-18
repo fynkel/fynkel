@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 34
+#define FY_ABI_VERSION 35
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -430,6 +430,11 @@ typedef struct FyMaterial {
   // How far, in metres, its shader's `vertex` can move a vertex: the
   // object's bounds grow by it for culling. 0 to 1e4.
   float reach;
+  // How wide a line drawn around it is, in metres; 0 for none. 0 to
+  // 100. Opaque surfaces only.
+  float outline_width;
+  // sRGB; alpha is ignored.
+  struct FyColor outline_color;
 } FyMaterial;
 
 // How many of each thing a model has, from `fy_model_counts`.
@@ -1053,8 +1058,8 @@ void fy_shader_free(struct FyShader *shader);
 // <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 // offset in bytes) for each of its `Values`; `texture <name>
 // <srgb|linear>` for each texture, in order; `own <name>` for each of its
-// `PerObject`, in order; `moves` if it has a `vertex`; `behind` if it reads what's behind it
-// (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
+// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it has a `light`; `behind` if
+// it reads what's behind it (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
 // fits in `cap`.
 //
 // # Safety

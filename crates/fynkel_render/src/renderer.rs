@@ -199,7 +199,7 @@ struct LightUniform {
 const MAX_SUNS: usize = 4;
 pub(crate) const MAX_LIGHTS: usize = 64;
 
-/// The per-draw vertex data (instance step), locations 4–12.
+/// The per-draw vertex data (instance step), locations 4–13.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
@@ -217,6 +217,8 @@ struct Instance {
     own: [f32; 4],
     /// Where the material's values start among the joints: a shader's.
     values: u32,
+    /// Its outline's linear colour, and how wide it is, in metres.
+    outline: [f32; 4],
 }
 
 /// A debug line's end, as lines.wgsl reads it.
@@ -411,6 +413,8 @@ struct Batch {
     cover: Cover,
     faces: Faces,
     skinned: bool,
+    /// Its draws have outlines, drawn after the solid scene.
+    outlined: bool,
     /// The material's own shader, or `None` for the built-in one.
     shader: Option<ShaderKey>,
     textures: OwnTextures,
@@ -478,6 +482,9 @@ pub(crate) struct Pipelines {
     /// Ambient occlusion's depth of those that move their vertices, by
     /// hash and skinned.
     own_depths: Mutex<HashMap<(u64, bool), wgpu::RenderPipeline>>,
+    /// Outlines' pipelines, by their shader's hash (`None`, the built-in
+    /// one), mirrored, skinned, and with normals of their own.
+    outlines: Mutex<HashMap<(Option<u64>, bool, bool, bool), wgpu::RenderPipeline>>,
     own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
     /// The sky, behind everything.
@@ -1008,7 +1015,8 @@ impl Renderer {
                 continue;
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
-            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, draw.mesh.0);
+            let outlined = cover == Cover::Opaque && m.outline.is_some_and(|o| o.width > 0.0);
+            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, outlined, draw.mesh.0);
             if cover.blended() {
                 self.behind |= reads_behind;
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
@@ -1447,11 +1455,13 @@ impl Renderer {
         let ao = self.ao.is_some();
         let shadowed = self.shadow_maps_drawn != (0, 0);
         let (solid, blended) = self.batches.split_at(self.blended_from);
-        let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch]| {
+        // Their surfaces, or with `outlines`, the outlines of those that
+        // have them.
+        let draw = |pass: &mut wgpu::RenderPass<'_>, batches: &[Batch], outlines: bool| {
             let mut last: Option<&Batch> = None;
             // The maps bound in group 2, or what's behind as well.
             let mut reading = false;
-            for batch in batches {
+            for batch in batches.iter().filter(|b| b.outlined || !outlines) {
                 // Freed since prepare, by another view's render worker.
                 let (Some(mesh), Some(bind_group)) =
                     (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
@@ -1482,7 +1492,18 @@ impl Renderer {
                 }
                 let textured = |b: &Batch| b.textures.base != MaterialTextures::NONE;
                 let pipeline = |b: &Batch| (b.cover, b.faces, textured(b), b.skinned, b.shader);
-                if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
+                if outlines {
+                    // Its mesh's outline normals or not choose it too.
+                    if last.is_none_or(|l| pipeline(l) != pipeline(batch) || l.mesh != batch.mesh) {
+                        let mirrored = batch.faces == Faces::Mirrored;
+                        let normals = mesh.outline_normals.is_some();
+                        let pipeline = scene_pipelines.outline(shader.map(|s| &**s), mirrored, batch.skinned, normals);
+                        pass.set_pipeline(&pipeline);
+                    }
+                    if let Some(normals) = &mesh.outline_normals {
+                        pass.set_vertex_buffer(3, normals.slice(..));
+                    }
+                } else if last.is_none_or(|l| pipeline(l) != pipeline(batch)) {
                     let (cover, faces) = (batch.cover, batch.faces);
                     let variant = Variant {
                         cover,
@@ -1568,7 +1589,8 @@ impl Renderer {
                 Some(_) => (solid, false),
             };
             bind(&mut pass, drawn, self.sky_drawn, line_drawn);
-            draw(&mut pass, solid);
+            draw(&mut pass, solid, false);
+            draw(&mut pass, solid, true);
             // After the solid scene, so it's drawn only where nothing else
             // is; before the blended, which show it through them.
             if self.sky_drawn {
@@ -1577,7 +1599,7 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
             }
             if behind.is_none() {
-                draw(&mut pass, blended);
+                draw(&mut pass, blended, false);
                 lines(&mut pass);
             }
         }
@@ -1627,7 +1649,7 @@ impl Renderer {
             pass.set_bind_group(0, &behind.restore, &[]);
             pass.draw(0..3, 0..1);
             bind(&mut pass, blended, false, !self.line_vertices.is_empty());
-            draw(&mut pass, blended);
+            draw(&mut pass, blended, false);
             lines(&mut pass);
         }
 
@@ -1754,6 +1776,7 @@ impl Pipelines {
             own: Mutex::default(),
             own_shadows: Mutex::default(),
             own_depths: Mutex::default(),
+            outlines: Mutex::default(),
             own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
             sky: OnceLock::new(),
@@ -1771,12 +1794,17 @@ impl Pipelines {
     }
 
     fn make_forward(&self, variant: Variant) -> wgpu::RenderPipeline {
-        let (shader, layout) = self.forward_shader.get_or_init(|| {
+        let (shader, layout) = self.forward_shader();
+        self.make_forward_with(variant, shader, layout, "")
+    }
+
+    /// The built-in material's module and its layout, made the first time.
+    fn forward_shader(&self) -> &(wgpu::ShaderModule, wgpu::PipelineLayout) {
+        self.forward_shader.get_or_init(|| {
             let source =
                 concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"));
             self.forward_module("forward", source, &self.textures_layout, &self.maps_layout)
-        });
-        self.make_forward_with(variant, shader, layout, "")
+        })
     }
 
     /// The textures layout of `shader`'s group 1.
@@ -1874,6 +1902,91 @@ impl Pipelines {
             cache: None,
         });
         self.own_shadows.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
+        pipeline
+    }
+
+    /// The pipeline that draws outlines of draws with `shader` (`None`,
+    /// the built-in one), mirrored or not, bent by skeletons or not, with
+    /// their mesh's outline normals in vertex buffer 3 or not: their back
+    /// faces, pushed out (forward.wgsl, `vs_outline`).
+    fn outline(
+        &self,
+        shader: Option<&CustomShader>,
+        mirrored: bool,
+        skinned: bool,
+        normals: bool,
+    ) -> wgpu::RenderPipeline {
+        let key = (shader.map(|s| s.hash), mirrored, skinned, normals);
+        if let Some(pipeline) = self.outlines.lock().unwrap_or_else(PoisonError::into_inner).get(&key) {
+            return pipeline.clone();
+        }
+        let (module, layout) = match shader {
+            Some(shader) => self.own_module(shader),
+            None => self.forward_shader().clone(),
+        };
+        // With normals of its own, they're read in place of the tangents.
+        let [position, normal, tangent, uv] = VERTEX_ATTRIBUTES;
+        let vertex_attributes: &[wgpu::VertexAttribute] =
+            if normals { &[position, normal, uv] } else { &[position, normal, tangent, uv] };
+        let instance_attributes = INSTANCE_ATTRIBUTES;
+        let skin_attributes = SKIN_ATTRIBUTES;
+        let normal_attributes = wgpu::vertex_attr_array![2 => Float32x3];
+        let [vertex, instance, skin] = forward_buffers(vertex_attributes, &instance_attributes, &skin_attributes);
+        let normal_buffer = wgpu::VertexBufferLayout {
+            array_stride: 12,
+            step_mode: wgpu::VertexStepMode::Vertex,
+            attributes: &normal_attributes,
+        };
+        let buffers = [vertex, instance, skin.filter(|_| skinned), normals.then_some(normal_buffer)];
+        let used = if normals {
+            4
+        } else if skinned {
+            3
+        } else {
+            2
+        };
+        let constants = [("outline_normals", if normals { 1.0 } else { 0.0 })];
+        let label = match shader {
+            Some(shader) => format!("outline ({})", shader.name),
+            None => "outline".to_owned(),
+        };
+        let pipeline = self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(&label),
+            layout: Some(&layout),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some(if skinned { "vs_outline_skinned" } else { "vs_outline" }),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+                buffers: &buffers[..used],
+            },
+            // Inside out: its front faces are left out.
+            primitive: wgpu::PrimitiveState {
+                front_face: if mirrored { wgpu::FrontFace::Cw } else { wgpu::FrontFace::Ccw },
+                cull_mode: Some(wgpu::Face::Front),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs_outline"),
+                compilation_options: Default::default(),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        self.outlines.lock().unwrap_or_else(PoisonError::into_inner).insert(key, pipeline.clone());
         pipeline
     }
 
@@ -2303,8 +2416,9 @@ fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>, mo
 }
 
 /// A draw's sort key: how it covers what's behind, which faces, whether
-/// it's bent, its textures and its mesh, in the order draws are grouped.
-type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, u64);
+/// it's bent, its shader, its textures, whether it's outlined and its mesh,
+/// in the order draws are grouped.
+type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, bool, u64);
 
 /// A skinned mesh's joints and weights (`fynkel_mesh::SkinVertex`), as
 /// skin.wgsl reads them.
@@ -2316,10 +2430,10 @@ const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
 
 /// An [`Instance`], as forward.wgsl reads it.
-const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 9] = wgpu::vertex_attr_array![
+const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
     4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
     7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
-    11 => Float32x4, 12 => Uint32,
+    11 => Float32x4, 12 => Uint32, 13 => Float32x4,
 ];
 
 /// The forward pass's vertex buffers: the mesh's, the instances and a
@@ -2356,11 +2470,13 @@ pub(crate) fn skin_buffer(attributes: &[wgpu::VertexAttribute]) -> wgpu::VertexB
 /// Adds `draw` to the last of `batches` if it has `key`, or starts another.
 /// `values` is where the materials' values start among the joints.
 fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, draw: &crate::Draw, values: u32) {
-    let (cover, faces, skinned, shader, textures, _) = key;
+    let (cover, faces, skinned, shader, textures, outlined, _) = key;
     let first = instances.len() as u32;
     match batches.last_mut() {
-        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.mesh.0) == key => b.count += 1,
-        _ => batches.push(Batch { cover, faces, skinned, shader, textures, mesh: draw.mesh, first, count: 1 }),
+        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.outlined, b.mesh.0) == key => b.count += 1,
+        _ => {
+            batches.push(Batch { cover, faces, skinned, outlined, shader, textures, mesh: draw.mesh, first, count: 1 })
+        }
     }
     instances.push(instance(draw, skinned, values));
 }
@@ -2381,6 +2497,7 @@ fn instance(draw: &crate::Draw, skinned: bool, values: u32) -> Instance {
         uv: [su, sv, ou, ov],
         own: draw.own,
         values: m.shader.map_or(0, |used| values + used.values),
+        outline: m.outline.map_or([0.0; 4], |o| [o.color[0], o.color[1], o.color[2], o.width]),
     }
 }
 

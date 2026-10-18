@@ -242,6 +242,8 @@ extension _Resources on World {
       ..y = material.uvOffset.y;
     m.alpha_cutoff = material.alphaCutoff;
     m.reach = material.reach;
+    m.outline_width = material.outline?.width ?? 0;
+    m.outline_color.write(material.outline?.color ?? Color.black);
     m.double_sided = material.doubleSided;
     m.blend = material.blending.index;
     m.base_color_texture = base;

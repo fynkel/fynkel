@@ -179,6 +179,8 @@ struct VertexIn {
     @location(11) own: vec4<f32>,
     // Where the material's values start in `joints` (a shader's).
     @location(12) values: u32,
+    // rgb: its outline's linear colour. w: how wide it is, in metres.
+    @location(13) outline: vec4<f32>,
 };
 
 struct VertexOut {
@@ -239,6 +241,57 @@ fn place(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     out = fy_moved(in, model, out);
     out.clip = frame.view_proj * vec4<f32>(out.world_position, 1.0);
     return out;
+}
+
+// An outline (stage 10): the mesh placed as it is, then pushed out along
+// its normals by the outline's width, drawn inside out behind it in the
+// outline's colour. A mesh with a normal per face at its corners has
+// them averaged for it (assets.rs), in place of its tangents, which an
+// outline doesn't need.
+override outline_normals: bool = false;
+
+@vertex
+fn vs_outline(in: VertexIn) -> VertexOut {
+    let v = outline_vertex(in);
+    return outlined(v, place(v, array<vec4<f32>, 3>(in.model_0, in.model_1, in.model_2)));
+}
+
+@vertex
+fn vs_outline_skinned(in: VertexIn, skin: SkinIn) -> VertexOut {
+    let v = outline_vertex(in);
+    return outlined(v, place(v, skin_rows(skin, u32(in.params.w))));
+}
+
+fn outline_vertex(in: VertexIn) -> VertexIn {
+    var v = in;
+    if outline_normals {
+        v.normal = in.tangent.xyz;
+        v.tangent = vec4<f32>(0.0, 0.0, 0.0, 1.0);
+    }
+    return v;
+}
+
+// Pushed across the view rather than straight out: the part of the
+// normal that's at right angles to the way to the camera, so the outline
+// keeps the depth of the edge it rings, rather than lying behind the
+// object where what it stands on would hide it.
+fn outlined(in: VertexIn, placed: VertexOut) -> VertexOut {
+    var out = placed;
+    let length = length(placed.normal);
+    if length > 0.0 {
+        let n = placed.normal / length;
+        let v = to_viewer(placed.world_position);
+        out.world_position += (n - v * dot(n, v)) * in.outline.w;
+    }
+    out.base_color = vec4<f32>(in.outline.rgb, 1.0);
+    out.clip = frame.view_proj * vec4<f32>(out.world_position, 1.0);
+    return out;
+}
+
+// Its colour as it was picked, unlit and not tone mapped, behind the fog.
+@fragment
+fn fs_outline(in: VertexOut) -> @location(0) vec4<f32> {
+    return vec4<f32>(fogged(in.base_color.rgb, in.world_position), 1.0);
 }
 
 const PI: f32 = 3.14159265359;

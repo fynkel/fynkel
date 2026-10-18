@@ -42,7 +42,7 @@ use std::sync::Arc;
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
     AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
-    MaterialTextures, MeshKey, PbrMaterial, Quality, RenderScene, ShaderKey, ShaderUse, Sky, TextureKey,
+    MaterialTextures, MeshKey, Outline, PbrMaterial, Quality, RenderScene, ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
@@ -411,6 +411,7 @@ fn pbr(m: &Material) -> PbrMaterial {
         },
         textures: texture_keys(m),
         shader: None,
+        outline: (m.outline_width > 0.0).then(|| Outline { width: m.outline_width, color: rgb(m.outline_color) }),
     }
 }
 

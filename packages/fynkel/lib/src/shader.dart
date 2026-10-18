@@ -93,6 +93,11 @@ final class Shader implements Finalizable {
   /// keeps the scene's depth and colour; other frames pay nothing.
   bool get readsBehind => _layout.behind;
 
+  /// Whether it has a `light`, which lights it in place of the engine,
+  /// one sun or lamp at a time: banded toon light, light that wraps round.
+  /// Shadows, fog and the sky's light stay the engine's.
+  bool get hasOwnLighting => _layout.lights;
+
   /// Whether [dispose] was called; a disposed shader can't be used in a
   /// material (a StateError).
   bool get isDisposed => _pointer == nullptr;
@@ -165,7 +170,16 @@ final class ShaderError implements Exception {
 
 /// What a shader takes, as `fy_shader_describe` tells it.
 final class _ShaderLayout {
-  _ShaderLayout(this.lit, this.size, this.values, this.textures, this.own, {this.moves = false, this.behind = false});
+  _ShaderLayout(
+    this.lit,
+    this.size,
+    this.values,
+    this.textures,
+    this.own, {
+    this.moves = false,
+    this.behind = false,
+    this.lights = false,
+  });
 
   factory _ShaderLayout.parse(String text) {
     var lit = true;
@@ -175,6 +189,7 @@ final class _ShaderLayout {
     final own = <String>[];
     var moves = false;
     var behind = false;
+    var lights = false;
     for (final line in const LineSplitter().convert(text)) {
       final words = line.split(' ');
       switch (words) {
@@ -194,9 +209,11 @@ final class _ShaderLayout {
           moves = true;
         case ['behind']:
           behind = true;
+        case ['lights']:
+          lights = true;
       }
     }
-    return _ShaderLayout(lit, size, values, textures, own, moves: moves, behind: behind);
+    return _ShaderLayout(lit, size, values, textures, own, moves: moves, behind: behind, lights: lights);
   }
 
   final bool lit;
@@ -208,6 +225,7 @@ final class _ShaderLayout {
   final List<String> own;
   final bool moves;
   final bool behind;
+  final bool lights;
 
   _ShaderValue? value(String name) {
     for (final v in values) {

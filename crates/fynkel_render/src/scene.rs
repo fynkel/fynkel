@@ -474,6 +474,22 @@ pub struct PbrMaterial {
     pub textures: MaterialTextures,
     /// Its own shader, or `None` for the built-in one.
     pub shader: Option<ShaderUse>,
+    /// A line drawn around it, as in a cartoon, or `None`. Opaque surfaces
+    /// only: a cut-out or see-through one has none.
+    pub outline: Option<Outline>,
+}
+
+/// A line around an object: its mesh drawn again behind it, inside out and
+/// [`width`](Self::width) bigger all round, in one colour. Lit by nothing,
+/// fogged as the object is. Moved and bent as the object is, by its
+/// shader's `vertex` and its skeleton. A mesh whose faces don't share their
+/// corners' normals (a cube's) shows gaps at its corners.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Outline {
+    /// How far out it reaches, in metres.
+    pub width: f32,
+    /// Linear RGB.
+    pub color: [f32; 3],
 }
 
 /// How a surface covers what's behind it.
@@ -513,6 +529,7 @@ impl PbrMaterial {
         blend: Blend::Opaque,
         textures: MaterialTextures::NONE,
         shader: None,
+        outline: None,
     };
 }
 
