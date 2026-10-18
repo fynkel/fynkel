@@ -214,6 +214,10 @@ pub struct Camera {
     pub ambient_occlusion: bool,
     pub ambient_occlusion_intensity: f32,
     pub ambient_occlusion_radius: f32,
+    /// The pixel look: the scene drawn this many pixels high, then
+    /// enlarged to the view with hard edges, the camera on whole pixels so
+    /// it doesn't shimmer as it moves. 0, at the view's own size.
+    pub pixels: u32,
 }
 
 impl Camera {
@@ -232,6 +236,7 @@ impl Camera {
         ambient_occlusion: true,
         ambient_occlusion_intensity: 1.0,
         ambient_occlusion_radius: 0.5,
+        pixels: 0,
     };
 }
 
@@ -263,6 +268,8 @@ impl Describe for Camera {
                 .range(0.0, 4.0),
             Field::new("ambient_occlusion_radius", FieldKind::F32, Value::F32(D.ambient_occlusion_radius))
                 .range(0.0, 10.0),
+            // A whole number; a fraction is rounded.
+            Field::new("pixels", FieldKind::F32, Value::F32(D.pixels as f32)).range(0.0, 16384.0),
         ];
         FIELDS
     }
@@ -283,6 +290,7 @@ impl Describe for Camera {
             11 => Value::Bool(self.ambient_occlusion),
             12 => Value::F32(self.ambient_occlusion_intensity),
             13 => Value::F32(self.ambient_occlusion_radius),
+            14 => Value::F32(self.pixels as f32),
             _ => return None,
         })
     }
@@ -303,6 +311,7 @@ impl Describe for Camera {
             (11, Value::Bool(v)) => self.ambient_occlusion = v,
             (12, Value::F32(v)) => self.ambient_occlusion_intensity = v,
             (13, Value::F32(v)) => self.ambient_occlusion_radius = v,
+            (14, Value::F32(v)) => self.pixels = v.round() as u32,
             _ => unreachable!("validated by Describe::set"),
         }
     }

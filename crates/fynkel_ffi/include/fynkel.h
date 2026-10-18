@@ -346,6 +346,10 @@ typedef struct FyCamera {
   bool ambient_occlusion;
   float ambient_occlusion_intensity;
   float ambient_occlusion_radius;
+  // The pixel look: the scene drawn this many pixels high, then
+  // enlarged to the view with hard edges. 0 for the view's own size; up
+  // to 16384.
+  uint32_t pixels;
 } FyCamera;
 
 // `Default` is the engine's default light: a white sun of intensity 1,

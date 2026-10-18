@@ -287,9 +287,11 @@ final class Camera extends Component {
     this._showSky = true,
     this._bloom,
     this._ambientOcclusion,
+    this._pixels,
   }) : super._();
 
   double _fovY, _near, _far, _orthographicSize;
+  int? _pixels;
   Color _clearColor;
   bool _orthographic, _showSky;
   LayerMask _cullingMask;
@@ -434,6 +436,27 @@ final class Camera extends Component {
     }
   }
 
+  /// The pixel look: the game drawn this many pixels high (and as wide as
+  /// the view's shape makes it), then enlarged to the view with hard
+  /// edges, as `pixels = 240`. The camera is put on the nearest whole
+  /// pixel, so what's still doesn't shimmer as it moves: exactly when
+  /// [orthographic]; for a perspective camera, for what's where it looks
+  /// at the ground. Null (the default) for the view's own size; 1 to
+  /// 16,384, and never more than the view's height.
+  int? get pixels => _pixels;
+  set pixels(int? value) {
+    _checkChangeable();
+    if (value != null && (value < 1 || value > 16384)) {
+      throw RangeError.range(value, 1, 16384, 'pixels');
+    }
+    final old = _pixels;
+    _pixels = value;
+    if (_write() case final failed?) {
+      _pixels = old;
+      failed.raise();
+    }
+  }
+
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
   /// [World.raycast] to find what's drawn there (Unity's
@@ -519,7 +542,8 @@ final class Camera extends Component {
       'clearColor: $clearColor${cullingMask == LayerMask.all ? '' : ', cullingMask: $cullingMask'}'
       '${showSky ? '' : ', showSky: false'}'
       '${bloom == null ? '' : ', bloom: $bloom'}'
-      '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'})';
+      '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'}'
+      '${pixels == null ? '' : ', pixels: $pixels'})';
 }
 
 /// What kind of light a [Light] is.

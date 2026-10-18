@@ -135,6 +135,10 @@ pub struct FyCamera {
     pub ambient_occlusion: bool,
     pub ambient_occlusion_intensity: f32,
     pub ambient_occlusion_radius: f32,
+    /// The pixel look: the scene drawn this many pixels high, then
+    /// enlarged to the view with hard edges. 0 for the view's own size; up
+    /// to 16384.
+    pub pixels: u32,
 }
 
 /// `FyLight::kind`.
@@ -488,6 +492,7 @@ impl CComponent for FyCamera {
             ambient_occlusion: self.ambient_occlusion,
             ambient_occlusion_intensity: self.ambient_occlusion_intensity,
             ambient_occlusion_radius: self.ambient_occlusion_radius,
+            pixels: self.pixels,
         })
     }
     fn from_component(c: Camera) -> Self {
@@ -506,6 +511,7 @@ impl CComponent for FyCamera {
             ambient_occlusion: c.ambient_occlusion,
             ambient_occlusion_intensity: c.ambient_occlusion_intensity,
             ambient_occlusion_radius: c.ambient_occlusion_radius,
+            pixels: c.pixels,
         }
     }
 }

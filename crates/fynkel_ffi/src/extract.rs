@@ -293,6 +293,7 @@ impl Extract {
                 intensity: c.ambient_occlusion_intensity,
                 radius: c.ambient_occlusion_radius,
             }),
+            pixels: (c.pixels > 0).then_some(c.pixels),
         });
 
         scene.quality = self.quality;

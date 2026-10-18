@@ -761,6 +761,9 @@ final class FyCamera extends ffi.Struct {
 
   @ffi.Float()
   external double ambient_occlusion_radius;
+
+  @ffi.Uint32()
+  external int pixels;
 }
 
 final class FyColor extends ffi.Struct {

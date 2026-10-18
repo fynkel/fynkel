@@ -123,6 +123,15 @@ pub struct CameraView {
     /// don't. Only where the quality level draws it
     /// ([`Quality::ambient_occlusion`]).
     pub ambient_occlusion: Option<AmbientOcclusion>,
+    /// The pixel look: the scene drawn this many pixels high (and as wide
+    /// as the view's shape makes it), then enlarged to the view with hard
+    /// edges. The camera is moved to the nearest whole pixel of that
+    /// picture, so what's still doesn't shimmer as it moves: exactly for
+    /// an orthographic camera; for a perspective one, for what's where it
+    /// looks at the ground (y = 0), or where it looks 10 m away when it
+    /// doesn't. `None`, at the view's own size. At least 1, and no more
+    /// than the view's height.
+    pub pixels: Option<u32>,
 }
 
 /// Surfaces darkening where they meet, in corners and creases and under
@@ -185,6 +194,7 @@ impl CameraView {
             sky: true,
             bloom: None,
             ambient_occlusion: None,
+            pixels: None,
         }
     }
 }

@@ -585,7 +585,13 @@ pub struct Renderer {
     ao_params: ao::Params,
     /// The cubes (and image) of the last such sky, kept until another.
     environment: Option<Environment>,
+    /// What the scene is drawn at: the view's size, or with
+    /// [`CameraView::pixels`], smaller.
     size: (u32, u32),
+    /// The scene image's format this frame: the level's, or with the
+    /// pixel look the view's even at low; `None`, drawn straight to the
+    /// view.
+    image_format: Option<wgpu::TextureFormat>,
     /// This frame's level: the scene's, or the device's.
     quality: Quality,
 }
@@ -687,6 +693,7 @@ impl Renderer {
             ao_params: bytemuck::Zeroable::zeroed(),
             environment: None,
             size: (0, 0),
+            image_format: None,
             kit,
         }
     }
@@ -754,8 +761,10 @@ impl Renderer {
     /// for a `width` × `height` target. Makes no GPU calls, and allocates
     /// nothing once its buffers have grown to the scene's size.
     pub fn prepare(&mut self, scene: &RenderScene, width: u32, height: u32) -> FrameStats {
-        self.size = (width.max(1), height.max(1));
+        let view_size = (width.max(1), height.max(1));
+        self.size = view_size;
         self.quality = scene.quality.unwrap_or(self.kit.device_quality().quality());
+        self.image_format = self.quality.image_format();
         self.joints.clear();
         self.skinned.clear();
         self.looks.clear();
@@ -777,16 +786,24 @@ impl Renderer {
         self.behind = false;
         let mut stats = FrameStats::default();
 
-        let Some(camera) = scene.camera else {
+        let Some(mut camera) = scene.camera else {
             self.clear = wgpu::Color::BLACK;
             return stats;
         };
+        // The view's shape, whatever size the scene is drawn at.
+        let aspect = view_size.0 as f32 / view_size.1 as f32;
+        // The pixel look: drawn small, into an image even at low, and the
+        // camera on the picture's pixels.
+        if let Some(pixels) = camera.pixels.map(|p| p.clamp(1, view_size.1)) {
+            self.size = (((pixels as f32 * aspect).round() as u32).max(1), pixels);
+            self.image_format.get_or_insert(self.format);
+            snap_to_pixels(&mut camera, pixels);
+        }
         self.bloom = camera.bloom.filter(|b| self.quality.bloom && b.strength > 0.0);
         let [r, g, b] = camera.clear_color.map(f64::from);
         // Linear: the sRGB target encodes it like everything else.
         self.clear = wgpu::Color { r, g, b, a: 1.0 };
 
-        let aspect = self.size.0 as f32 / self.size.1 as f32;
         // Near and far swapped: reversed-Z.
         let projection = match camera.orthographic {
             Some(half) => glam::camera::rh::proj::directx::orthographic(
@@ -1063,7 +1080,7 @@ impl Renderer {
         self.behind_kept = self.behind || held && self.behind_idle <= KEEP_UNUSED_MAPS;
         stats.behind = self.behind;
         if self.behind_kept {
-            let format = self.quality.image_format().unwrap_or(self.format);
+            let format = self.image_format.unwrap_or(self.format);
             stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format);
         }
         stats.lines = scene.lines.len() as u32;
@@ -1220,7 +1237,7 @@ impl Renderer {
     /// `encode`.
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let (width, height) = self.size;
-        let image = self.quality.image_format();
+        let image = self.image_format;
         if self
             .targets
             .as_ref()
@@ -2499,6 +2516,30 @@ fn instance(draw: &crate::Draw, skinned: bool, values: u32) -> Instance {
         values: m.shader.map_or(0, |used| values + used.values),
         outline: m.outline.map_or([0.0; 4], |o| [o.color[0], o.color[1], o.color[2], o.width]),
     }
+}
+
+/// Moves `camera` across its view to the nearest whole pixel of a picture
+/// `pixels` high ([`CameraView::pixels`]): for a perspective camera, a
+/// pixel where it looks at the ground, or 10 m away.
+fn snap_to_pixels(camera: &mut crate::CameraView, pixels: u32) {
+    let world = camera.view.inverse();
+    let (right, up, forward) = (world.x_axis.truncate(), world.y_axis.truncate(), -world.z_axis.truncate());
+    let height = match camera.orthographic {
+        Some(half) => half * 2.0,
+        None => {
+            let ground = camera.position.y > 0.0 && forward.y < -1e-3;
+            let distance = if ground { camera.position.y / -forward.y } else { 10.0 };
+            2.0 * (camera.fov_y * 0.5).tan() * distance
+        }
+    };
+    let texel = height / pixels as f32;
+    if !(texel.is_finite() && texel > 0.0) {
+        return;
+    }
+    let snap = |along: f32| (along / texel).round() * texel - along;
+    let moved = right * snap(camera.position.dot(right)) + up * snap(camera.position.dot(up));
+    camera.position += moved;
+    camera.view *= Mat4::from_translation(-moved);
 }
 
 /// The six planes around what `view_proj` shows (left, right, bottom, top,

@@ -683,4 +683,34 @@ void main() {
       expect(view.position, Vec3.zero);
     });
   });
+
+  test('the pixel look draws the game small and enlarges it with hard edges', () {
+    final scene = stage1();
+    addTearDown(scene.world.dispose);
+    final view = HeadlessView(scene.world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    final camera = scene.world.camera!;
+    bool blocky(int block) {
+      final rgba = view.read(view.frame()).rgba;
+      for (var y = 0; y < 32; y++) {
+        for (var x = 0; x < 32; x++) {
+          for (var c = 0; c < 4; c++) {
+            final at = (y * 32 + x) * 4 + c, corner = ((y ~/ block * block) * 32 + x ~/ block * block) * 4 + c;
+            if (rgba[at] != rgba[corner]) return false;
+          }
+        }
+      }
+      return true;
+    }
+
+    expect(blocky(4), isFalse);
+    camera.pixels = 8;
+    expect(camera.pixels, 8);
+    expect(blocky(4), isTrue);
+    expect(camera.toString(), contains('pixels: 8'));
+    expect(() => camera.pixels = 0, throwsRangeError);
+    expect(camera.pixels, 8);
+    camera.pixels = null;
+    expect(blocky(4), isFalse);
+  });
 }

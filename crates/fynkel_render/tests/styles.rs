@@ -4,7 +4,9 @@
 //! shadow is passed to it; and a `light` that's wrong is told. Outlines
 //! ring an object in their colour, as wide as they say, follow a mesh a
 //! shader moves or a skeleton bends, and aren't drawn for see-through
-//! surfaces; and a toon scene at every level.
+//! surfaces; and a toon scene at every level. The pixel look draws the
+//! scene small and enlarges it with hard edges, and holds still as the
+//! camera moves less than a pixel, or moves by whole ones.
 
 mod common;
 
@@ -339,5 +341,118 @@ fn picture_toon() {
         }
         let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
         assert_golden(&format!("toon_{}", level_name(quality)), &image);
+    }
+}
+
+/// The pixel look's view: 40 pixels high in a 160-pixel view, each
+/// pixel 4 × 4 of the view's.
+fn pixelated(quality: QualityLevel, camera: CameraView) -> RenderScene {
+    let mut scene = stage(quality, None);
+    scene.camera = Some(CameraView { pixels: Some(40), ..camera });
+    scene
+}
+
+/// Whether every 4 × 4 block of `image` is one colour.
+fn blocky(image: &Image) -> bool {
+    (0..SIZE).all(|y| {
+        (0..SIZE).all(|x| {
+            let at = |x: u32, y: u32| &image.rgba[((y * SIZE + x) * 4) as usize..][..4];
+            at(x, y) == at(x & !3, y & !3)
+        })
+    })
+}
+
+/// At every level, every pixel of the small picture covers 4 × 4 of the
+/// view's, and the picture is the scene drawn 40 pixels high: as the
+/// scene drawn at 40 × 40, near enough.
+#[test]
+fn the_pixel_look_draws_the_scene_small_and_enlarges_it_with_hard_edges() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let camera = CameraView::looking_at(Vec3::new(0.6, 2.2, 4.4), Vec3::new(0.0, 0.5, 0.0));
+    for quality in LEVELS {
+        let (image, _) = render(&gpu, &mut r, &pixelated(quality, camera), SIZE, SIZE);
+        assert!(blocky(&image), "{}", level_name(quality));
+        let mut small = stage(quality, None);
+        small.camera = Some(camera);
+        let (drawn, _) = render(&gpu, &mut r, &small, 40, 40);
+        let mut off = 0;
+        for y in 0..40 {
+            for x in 0..40 {
+                let a = &drawn.rgba[((y * 40 + x) * 4) as usize..][..3];
+                let b = &image.rgba[((y * 4 * SIZE + x * 4) * 4) as usize..][..3];
+                off += usize::from(a.iter().zip(b).any(|(p, q)| p.abs_diff(*q) > 12));
+            }
+        }
+        // The camera moved by under half a pixel, at the edges of things.
+        assert!(off < 160, "{off} of 1600 pixels differ at {}", level_name(quality));
+    }
+}
+
+/// An orthographic camera moved less than half a pixel of the picture
+/// draws the same frame; moved a whole pixel, the same frame moved over
+/// by one (4 of the view's). A perspective one moved a fifth of a pixel
+/// draws the same frame.
+#[test]
+fn the_pixel_look_holds_still_as_the_camera_moves_slowly() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let eye = Vec3::new(0.6, 4.0, 4.4);
+    let ortho = |shift: f32| {
+        let mut camera = CameraView::looking_at(eye, Vec3::new(0.0, 0.5, 0.0));
+        camera.orthographic = Some(2.0);
+        let right = camera.view.inverse().x_axis.truncate();
+        // A texel is 4 m / 40.
+        let at = eye + right * (0.1 * shift + 0.013);
+        CameraView { view: camera.view * Mat4::from_translation(eye - at), position: at, ..camera }
+    };
+    for quality in LEVELS {
+        let at = level_name(quality);
+        let (still, _) = render(&gpu, &mut r, &pixelated(quality, ortho(0.0)), SIZE, SIZE);
+        for shift in [0.1, 0.2, 0.3, -0.2] {
+            let (moved, _) = render(&gpu, &mut r, &pixelated(quality, ortho(shift)), SIZE, SIZE);
+            assert_eq!(differing(&still, &moved, 0), 0, "moved {shift} of a pixel at {at}");
+        }
+        // A whole pixel to the right: everything 4 view pixels to the left.
+        let (moved, _) = render(&gpu, &mut r, &pixelated(quality, ortho(1.0)), SIZE, SIZE);
+        let mut off = 0;
+        for y in 0..SIZE {
+            for x in 0..SIZE - 4 {
+                let a = &still.rgba[((y * SIZE + x + 4) * 4) as usize..][..3];
+                let b = &moved.rgba[((y * SIZE + x) * 4) as usize..][..3];
+                off += usize::from(a.iter().zip(b).any(|(p, q)| p.abs_diff(*q) > 2));
+            }
+        }
+        // Shadows and lighting follow the world, not the picture: a few
+        // pixels where a shadow's edge falls differently.
+        assert!(off <= 64, "{off} pixels differ moved a pixel at {at}");
+
+        // Perspective: where it looks at the ground.
+        let looking = |shift: f32| {
+            let camera = CameraView::looking_at(eye, Vec3::new(0.0, 0.0, 0.0));
+            let right = camera.view.inverse().x_axis.truncate();
+            let texel = 2.0 * (camera.fov_y * 0.5).tan() * eye.length() / 40.0;
+            let at = eye + right * texel * shift;
+            CameraView { view: camera.view * Mat4::from_translation(eye - at), position: at, ..camera }
+        };
+        let (still, _) = render(&gpu, &mut r, &pixelated(quality, looking(0.0)), SIZE, SIZE);
+        let (moved, _) = render(&gpu, &mut r, &pixelated(quality, looking(0.2)), SIZE, SIZE);
+        assert_eq!(differing(&still, &moved, 0), 0, "perspective at {at}");
+    }
+}
+
+/// The pixel look, 48 pixels high, at every level: the stage with its
+/// lamp, sky and shadows, enlarged with hard edges.
+#[test]
+fn picture_pixels() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut camera = CameraView::looking_at(Vec3::new(0.6, 2.2, 4.4), Vec3::new(0.0, 0.5, 0.0));
+    camera.pixels = Some(48);
+    for quality in LEVELS {
+        let mut scene = stage(quality, None);
+        scene.camera = Some(camera);
+        let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+        assert_golden(&format!("pixels_{}", level_name(quality)), &image);
     }
 }
