@@ -33,6 +33,7 @@ fn floor_scene(
     RenderScene {
         camera: Some(camera),
         quality: Some(quality.quality()),
+        time: [0.0; 2],
         ambient: Vec3::splat(ambient),
         lights,
         draws,

@@ -118,6 +118,7 @@ fn light_units_match_the_documented_maths() {
     let facing_camera = Mat4::from_rotation_x(90f32.to_radians()) * Mat4::from_scale(Vec3::splat(4.0));
     let draw = Draw {
         skin: None,
+        own: [0.0; 4],
         mesh: PLANE,
         model: facing_camera,
         material: PbrMaterial {
@@ -138,6 +139,7 @@ fn light_units_match_the_documented_maths() {
             camera: Some(camera),
             lights: (sun > 0.0).then(|| Light::sun(Vec3::NEG_Z, Vec3::splat(sun))).into_iter().collect(),
             quality: None,
+            time: [0.0; 2],
             ambient: Vec3::splat(ambient),
             lines: Vec::new(),
             sky: None,
@@ -183,12 +185,14 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
             camera: Some(camera),
             lights: vec![Light::sun(direction, Vec3::ONE)],
             quality: None,
+            time: [0.0; 2],
             ambient: Vec3::splat(0.05),
             lines: Vec::new(),
             sky: None,
             fog: None,
             draws: vec![Draw {
                 skin: None,
+                own: [0.0; 4],
                 mesh: SPHERE,
                 model: Mat4::IDENTITY,
                 material: PbrMaterial {
@@ -261,6 +265,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
     scene.draws = vec![
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: at(-2.0, 0.0),
             material: material(0xFFE0613A, 0.0),
@@ -269,6 +274,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: SPHERE,
             model: at(-1.0, 1.0),
             material: material(0xFF3A8EE0, 0.0),
@@ -277,6 +283,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: at(0.0, 0.0),
             material: material(0xFF4CC26B, 1.0),
@@ -285,6 +292,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: SPHERE,
             model: at(1.0, 1.0),
             material: material(0xFFE0D23A, 1.0),
@@ -293,6 +301,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
         },
         Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: at(2.0, 0.0),
             material: material(0xFFB03AE0, 0.0),
@@ -325,6 +334,7 @@ fn an_orthographic_camera_keeps_sizes_at_any_distance() {
     scene.draws = [(-2.5, 0.0), (0.0, -5.0), (2.5, -20.0)]
         .map(|(x, z)| Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: Mat4::from_translation(Vec3::new(x, 0.0, z)),
             material,
@@ -369,6 +379,7 @@ fn draws_outside_the_view_are_culled() {
     camera.clear_color = [0.0; 3];
     let cube = |model: Mat4| Draw {
         skin: None,
+        own: [0.0; 4],
         mesh: CUBE,
         model,
         material: PbrMaterial::DEFAULT,
@@ -458,6 +469,7 @@ fn frames_in_flight_keep_their_own_data() {
     many.draws = (0..200)
         .map(|i| Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: if i % 2 == 0 { CUBE } else { SPHERE },
             model: Mat4::from_scale_rotation_translation(
                 Vec3::splat(0.5),
@@ -522,12 +534,14 @@ fn non_uniform_scale_keeps_normals_right() {
         camera: Some(camera),
         lights: vec![Light::sun(Vec3::NEG_Y, Vec3::ONE)],
         quality: None,
+        time: [0.0; 2],
         ambient: Vec3::ZERO,
         lines: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {
             skin: None,
+            own: [0.0; 4],
             mesh: CUBE,
             model: Mat4::from_scale(squash) * Mat4::from_quat(turn),
             material: PbrMaterial {

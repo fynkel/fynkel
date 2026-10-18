@@ -117,6 +117,8 @@ struct FrameUniforms {
     sky_light: [f32; 4],
     /// x, y: 1 / the view's width and height, in pixels.
     view_size: [f32; 4],
+    /// x: the game's time ([`RenderScene::time`]), y: its step this frame.
+    time: [f32; 4],
 }
 
 /// `Sky` in forward.wgsl and sky.wgsl.
@@ -183,7 +185,7 @@ struct LightUniform {
 const MAX_SUNS: usize = 4;
 pub(crate) const MAX_LIGHTS: usize = 64;
 
-/// The per-draw vertex data (instance step), locations 4–10.
+/// The per-draw vertex data (instance step), locations 4–12.
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct Instance {
@@ -197,6 +199,10 @@ struct Instance {
     emissive: [f32; 4],
     /// UV scale (xy), then offset (zw).
     uv: [f32; 4],
+    /// The object's own numbers ([`Draw::own`]), for a material's shader.
+    own: [f32; 4],
+    /// Where the material's values start among the joints: a shader's.
+    values: u32,
 }
 
 /// A debug line's end, as lines.wgsl reads it.
@@ -667,6 +673,7 @@ impl Renderer {
         u.camera_position = to_viewer.into();
         u.ambient = scene.ambient.extend(0.0).into();
         u.view_size = [1.0 / self.size.0 as f32, 1.0 / self.size.1 as f32, 0.0, 0.0];
+        u.time = [scene.time[0], scene.time[1], 0.0, 0.0];
 
         // The sky: a plain one is the clear colour and more ambient light;
         // a gradient or an image is drawn after the scene and lights it
@@ -1408,7 +1415,8 @@ impl Pipelines {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("forward"),
                 source: wgpu::ShaderSource::Wgsl(
-                    concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl")).into(),
+                    concat!(include_str!("skin.wgsl"), include_str!("forward.wgsl"), include_str!("standard.wgsl"))
+                        .into(),
                 ),
             });
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1429,6 +1437,7 @@ impl Pipelines {
         let instance_attributes = wgpu::vertex_attr_array![
             4 => Float32x4, 5 => Float32x4, 6 => Float32x4,
             7 => Float32x4, 8 => Float32x4, 9 => Float32x4, 10 => Float32x4,
+            11 => Float32x4, 12 => Uint32,
         ];
         let skin_attributes = SKIN_ATTRIBUTES;
         let buffers = [
@@ -1736,6 +1745,8 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
         params: [m.metallic, m.roughness, m.alpha_cutoff, if skinned { draw.skin.unwrap_or(0) as f32 } else { 0.0 }],
         emissive: [er, eg, eb, if draw.receive_shadows { 1.0 } else { 0.0 }],
         uv: [su, sv, ou, ov],
+        own: draw.own,
+        values: 0,
     });
 }
 

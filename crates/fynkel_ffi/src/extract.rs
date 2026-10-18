@@ -332,6 +332,7 @@ impl Extract {
                 material,
                 cast_shadows: r.cast_shadows,
                 receive_shadows: r.receive_shadows,
+            own: [0.0; 4],
             });
         });
 

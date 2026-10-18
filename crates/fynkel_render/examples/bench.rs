@@ -42,6 +42,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
             }))
             .collect(),
         quality: None,
+        time: [0.0; 2],
         sky: None,
         fog: None,
         ambient: Vec3::splat(0.15),
@@ -49,6 +50,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         draws: (0..n)
             .map(|i| Draw {
                 skin: None,
+                own: [0.0; 4],
                 mesh: MeshKey(1),
                 model: Mat4::from_rotation_translation(
                     Quat::from_rotation_y(t + i as f32 * 0.1),
@@ -132,6 +134,7 @@ fn main() {
                         RenderScene {
                             camera,
                             quality: Some(quality.quality()),
+                            time: [0.0; 2],
                             sky: sky.then(|| Sky { kind: day(Vec3::new(0.2, 0.4, 0.8)), lighting: 1.0 }),
                             fog: sky.then_some(Fog { color: None, start: 10.0, end: 80.0, height: Some(20.0) }),
                             ..base
@@ -175,6 +178,7 @@ fn main() {
                 for f in 0..60 {
                     let s = RenderScene {
                         quality: Some(quality.quality()),
+                        time: [0.0; 2],
                         sky: Some(Sky { kind: kinds[f % 2].clone(), lighting: 1.0 }),
                         ..scene(1_000, 0, false, false, 0.0)
                     };

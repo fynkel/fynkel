@@ -515,12 +515,15 @@ pub struct Draw {
     /// take them, and `model` doesn't move them (glTF's rule). `None`, or
     /// a mesh with no joints, draws it unbent, placed by `model`.
     pub skin: Option<u32>,
+    /// The object's own four numbers, which a material's shader reads as
+    /// its `PerObject` values (stage 10). Zeros for most.
+    pub own: [f32; 4],
 }
 
 impl Draw {
     /// `mesh` placed by `model`, casting and receiving shadows.
     pub fn new(mesh: MeshKey, model: Mat4, material: PbrMaterial) -> Self {
-        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None }
+        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None, own: [0.0; 4] }
     }
 }
 
@@ -722,6 +725,9 @@ pub struct RenderScene {
     /// What to draw, and how finely; `None` for the device's level's
     /// ([`Kit::device_quality`](crate::Kit::device_quality)).
     pub quality: Option<Quality>,
+    /// The game's time, in seconds, and this frame's step of it, as
+    /// shaders see it (`frame_time()`, `frame_delta()`).
+    pub time: [f32; 2],
 }
 
 impl RenderScene {
@@ -745,5 +751,6 @@ impl RenderScene {
         self.sky = None;
         self.fog = None;
         self.quality = None;
+        self.time = [0.0; 2];
     }
 }
