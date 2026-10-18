@@ -1,6 +1,6 @@
 # Stage 10 plan: shaders
 
-Status: proposed 2026-10-18. Scope and rules:
+Status: accepted 2026-10-18 ("let's go"), with the recommended answers to §4. Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 9 is done
 ([report](stage-9-report.md)).
 
