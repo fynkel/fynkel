@@ -64,7 +64,8 @@ void check(int status) {
         FynkelStatus.noComponent ||
         FynkelStatus.noMesh ||
         FynkelStatus.noMaterial ||
-        FynkelStatus.noTexture:
+        FynkelStatus.noTexture ||
+        FynkelStatus.noShader:
       throw StateError(message);
     case FynkelStatus.inUse:
       throw InUseError(message);
@@ -89,6 +90,7 @@ final class Scratch {
   final count2 = malloc<Size>();
   final mesh = malloc<Pointer<FyMesh>>();
   final texture = malloc<Pointer<FyTexture>>();
+  final shader = malloc<Pointer<FyShader>>();
   final model = malloc<Pointer<FyModel>>();
   final modelCounts = malloc<FyModelCounts>();
   final width = malloc<Uint32>();
@@ -117,7 +119,7 @@ final class Scratch {
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
-    all.addAll([number, numbers, animatorState, _events]);
+    all.addAll([number, numbers, animatorState, _events, shader]);
     all.forEach(malloc.free);
   }
 

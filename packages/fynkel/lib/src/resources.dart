@@ -402,6 +402,8 @@ final class Material {
     Texture2D? metallicRoughnessTexture,
     Texture2D? occlusionTexture,
     Texture2D? emissiveTexture,
+    Shader? shader,
+    Map<String, Object> values = const {},
   }) : _metallic = _unit(metallic, 'metallic'),
        _roughness = _unit(roughness, 'roughness'),
        _emissiveIntensity = _atLeast0(emissiveIntensity, 'emissiveIntensity'),
@@ -416,7 +418,14 @@ final class Material {
          _usable(metallicRoughnessTexture),
          _usable(occlusionTexture),
          _usable(emissiveTexture),
-       ];
+       ],
+       _shader = _usableShader(shader) {
+    if (values.isNotEmpty && shader == null) {
+      throw ArgumentError.value(values, 'values', 'are for a shader, and the material has none');
+    }
+    values.forEach(_setValue);
+    _pack();
+  }
 
   /// What it's called, for messages and finding it again: a loaded
   /// model's materials have the names the file gives them. Needn't be
@@ -437,6 +446,16 @@ final class Material {
   /// Base colour, normal, metallic-roughness, occlusion, emissive: the
   /// engine's order.
   final List<Texture2D?> _textures;
+
+  Shader? _shader;
+
+  /// What [set] set, by name: numbers, vectors, colours and textures.
+  final _values = <String, Object>{};
+
+  /// [_values] laid out as [_shader]'s `Values`, and the layout they were
+  /// laid out for: a shader's new code lays them out again.
+  Uint8List? _bytes;
+  _ShaderLayout? _packedFor;
 
   final _release = _Release(_Resource.material);
 
@@ -479,7 +498,98 @@ final class Material {
     metallicRoughnessTexture: _textures[2],
     occlusionTexture: _textures[3],
     emissiveTexture: _textures[4],
+    shader: _shader,
+    values: _values,
   );
+
+  /// Its own shader, or null for the engine's: see [Shader]. A new one
+  /// keeps the values [set] gave that it has too. A disposed shader throws
+  /// a [StateError].
+  Shader? get shader => _shader;
+  set shader(Shader? value) {
+    _shader = _usableShader(value);
+    if (value == null) _values.clear();
+    _pack();
+    _changed();
+  }
+
+  /// Sets its [shader]'s value or texture [name] for every object using
+  /// the material: a number (`double`, or `int` for an `i32` or `u32`), a
+  /// [Vec2], a [Vec3], a [Color] (for a `vec4<f32>`, or a `vec3<f32>`
+  /// without its alpha; picked in sRGB, as [color] is, and given to the
+  /// shader linear), a list of numbers, or a [Texture2D]. Throws an
+  /// [ArgumentError] for a name the shader doesn't have or a value that
+  /// isn't its kind, and a [StateError] without a shader. To tween one:
+  /// `tween(0.0, 1.0, seconds: 1, onUpdate: (v) => material.set('dissolve', v))`.
+  void set(String name, Object value) {
+    if (_shader == null) throw StateError('$this has no shader to set $name for');
+    _setValue(name, value);
+    _pack();
+    _changed();
+  }
+
+  /// What [set] last gave [name], or null.
+  Object? value(String name) => _values[name];
+
+  void _setValue(String name, Object value) {
+    final shader = _shader!;
+    final layout = shader._layout;
+    if (value is Texture2D) {
+      if (layout.texture(name) < 0) {
+        throw ArgumentError.value(name, 'name', 'is no texture of $shader, which has: ${layout.names}');
+      }
+      _values[name] = _usable(value)!;
+      return;
+    }
+    final v = layout.value(name);
+    if (v == null) throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
+    v.parse(value, shader);
+    _values[name] = value;
+  }
+
+  /// Lays [_values] out as the shader's `Values` are now. What its new
+  /// code doesn't have, or has as another kind, is left out.
+  void _pack() {
+    final shader = _shader;
+    if (shader == null || shader._layout.size == 0) {
+      _bytes = null;
+      _packedFor = shader?._layout;
+      return;
+    }
+    final layout = shader._layout;
+    final bytes = Uint8List(layout.size);
+    final data = ByteData.sublistView(bytes);
+    for (final MapEntry(key: name, :value) in _values.entries) {
+      final v = layout.value(name);
+      if (v == null || value is Texture2D) continue;
+      final List<num> parts;
+      try {
+        parts = v.parse(value, shader);
+      } on ArgumentError {
+        continue;
+      }
+      for (final (i, n) in parts.indexed) {
+        final at = v.offset + i * 4;
+        switch (v.kind) {
+          case 'f32':
+            data.setFloat32(at, n.toDouble(), Endian.little);
+          case 'i32':
+            data.setInt32(at, n.toInt(), Endian.little);
+          default:
+            data.setUint32(at, n.toInt(), Endian.little);
+        }
+      }
+    }
+    _bytes = bytes;
+    _packedFor = layout;
+  }
+
+  /// The texture its shader's texture [index] is given, or null.
+  Texture2D? _shaderTexture(int index) {
+    final layout = _shader?._layout;
+    if (layout == null || index >= layout.textures.length) return null;
+    return _values[layout.textures[index].name] as Texture2D?;
+  }
 
   /// The base colour (albedo). Its alpha is the [opacity].
   Color get color => _color;
@@ -603,7 +713,8 @@ final class Material {
     _changed();
   }
 
-  bool _uses(Texture2D texture) => _textures.any((t) => identical(t, texture));
+  bool _uses(Texture2D texture) =>
+      _textures.any((t) => identical(t, texture)) || _values.values.any((t) => identical(t, texture));
 
   void _changed() {
     _release.updateMaterial(this);
@@ -629,6 +740,11 @@ final class Material {
     return value;
   }
 
+  static Shader? _usableShader(Shader? shader) {
+    if (shader != null && shader.isDisposed) throw StateError('$shader was disposed');
+    return shader;
+  }
+
   static Texture2D? _usable(Texture2D? texture) {
     if (texture != null && texture.isDisposed) throw StateError('$texture was disposed');
     return texture;
@@ -650,12 +766,13 @@ final class Material {
       if (doubleSided) 'doubleSided',
       if (blending != Blending.opaque) 'blending: $blending',
       ...textures,
+      if (_shader case final shader?) 'shader: $shader',
     ];
     return 'Material(${fields.join(', ')})';
   }
 }
 
-enum _Resource { material, mesh, texture }
+enum _Resource { material, mesh, texture, shader }
 
 /// Which worlds have a mesh, material or texture, and its id in each.
 /// When the resource is garbage-collected, each world that's still there

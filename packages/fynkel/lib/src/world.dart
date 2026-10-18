@@ -30,6 +30,7 @@ part 'pointing.dart';
 part 'pool.dart';
 part 'resources.dart';
 part 'routines.dart';
+part 'shader.dart';
 part 'signals.dart';
 part 'sky.dart';
 part 'systems.dart';
@@ -69,6 +70,8 @@ final class World implements Finalizable {
   var _materialIds = Expando<int>();
   final _materials = <int, WeakReference<Material>>{};
   var _textureIds = Expando<int>();
+  var _shaderIds = Expando<int>();
+  final _shaders = <int, WeakReference<Shader>>{};
 
   // Garbage-collected resources to take out, at the end of the next update.
   // One the engine still uses stays here, and is tried again when another
@@ -151,6 +154,8 @@ final class World implements Finalizable {
     _materialIds = Expando();
     _materials.clear();
     _textureIds = Expando();
+    _shaderIds = Expando();
+    _shaders.clear();
     _collected.clear();
     _objects.clear();
     _byClass.clear();
@@ -170,6 +175,27 @@ final class World implements Finalizable {
     _free(owned, null);
     // What a disposed world reports from here goes to the zone.
     _errors.close();
+  }
+
+  /// Reads every shader [assets] loaded again from the world's source and
+  /// puts its new code in ([Shader.reload]): `FynkelGame` calls it on a hot
+  /// reload, so a shader's file can be changed while the game runs. One
+  /// that doesn't compile now keeps its old code, and its [ShaderError]
+  /// goes to [errors].
+  Future<void> reloadShaders() async {
+    final source = _source;
+    if (source == null) return;
+    for (final asset in [..._assets.values]) {
+      if (asset.value case final Shader shader) {
+        try {
+          final text = utf8.decode(await source(asset.name));
+          if (isDisposed || shader.isDisposed) return;
+          shader.reload(text);
+        } catch (error, stack) {
+          if (!isDisposed) _report(null, error, stack);
+        }
+      }
+    }
   }
 
   // --- Errors ---
@@ -636,6 +662,7 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
     _animate();
     if (_disposeAsked) return;
+    if (_shaders.isNotEmpty) check(fy_world_time_set(pointer, time._sinceStart, time._delta));
     _runSystems(_SystemHook.afterUpdate);
     if (_disposeAsked) return;
 

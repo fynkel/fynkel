@@ -8,7 +8,7 @@ extension _Resources on World {
   /// when that's garbage-collected; any other error is reported, not
   /// thrown, as this runs while objects are destroyed.
   void _free(Iterable<Object> things, GameObject? object) {
-    for (final kind in [Material, Mesh, Texture2D, Model]) {
+    for (final kind in [Material, Mesh, Texture2D, Shader, Model]) {
       for (final thing in things) {
         if (thing.runtimeType != kind) continue;
         try {
@@ -20,6 +20,8 @@ extension _Resources on World {
               material.dispose();
             case Mesh mesh:
               mesh.dispose();
+            case Shader shader:
+              shader.dispose();
             case Texture2D texture:
               _unloadMaterialsUsing(texture);
               texture.dispose();
@@ -79,6 +81,43 @@ extension _Resources on World {
     _textureIds[texture] = null;
   }
 
+  int _shaderId(Shader shader) {
+    final known = _shaderIds[shader];
+    if (known != null) return known;
+    check(fy_shader_add(pointer, shader._live, scratch.id));
+    final id = scratch.id.value;
+    _shaderIds[shader] = id;
+    _shaders[id] = WeakReference(shader);
+    shader._release.add(shader, this, id);
+    return id;
+  }
+
+  /// Takes [shader] out of this world, for [Shader.dispose]. Refused
+  /// while one of this world's materials uses it.
+  void _releaseShader(Shader shader) {
+    final id = _shaderIds[shader];
+    if (id == null || isDisposed) return;
+    for (final material in _materials.values.map((m) => m.target).nonNulls) {
+      if (identical(material._shader, shader)) {
+        throw InUseError('$shader is still used by $material');
+      }
+    }
+    check(fy_shader_remove(_pointer, id));
+    _shaderIds[shader] = null;
+    _shaders.remove(id);
+  }
+
+  /// Gives this world [shader]'s new code, and its materials' values laid
+  /// out for it.
+  void _reloadShader(Shader shader) {
+    final id = _shaderIds[shader];
+    if (id == null || isDisposed) return;
+    check(fy_shader_set(_pointer, id, shader._live));
+    for (final material in _materials.values.map((m) => m.target).nonNulls) {
+      if (identical(material._shader, shader)) _updateMaterial(material);
+    }
+  }
+
   int _materialId(Material material) {
     final known = _materialIds[material];
     if (known != null) return known;
@@ -86,6 +125,7 @@ extension _Resources on World {
     _writeMaterial(material);
     check(fy_material_add(pointer, scratch.material, scratch.id));
     final id = scratch.id.value;
+    _writeValues(material, id);
     _materialIds[material] = id;
     _materials[id] = WeakReference(material);
     material._release.add(material, this, id);
@@ -137,10 +177,12 @@ extension _Resources on World {
         _Resource.material => fy_material_remove(_pointer, id),
         _Resource.mesh => fy_mesh_remove(_pointer, id),
         _Resource.texture => fy_texture_remove(_pointer, id),
+        _Resource.shader => fy_shader_remove(_pointer, id),
       };
       if (status == FyStatus.FY_STATUS_IN_USE) return false;
       if (kind == _Resource.material) _materials.remove(id);
       if (kind == _Resource.mesh) _meshes.remove(id);
+      if (kind == _Resource.shader) _shaders.remove(id);
       return true;
     });
   }
@@ -152,7 +194,20 @@ extension _Resources on World {
     if (id == null || isDisposed) return false;
     _writeMaterial(material);
     check(fy_material_set(_pointer, id, scratch.material));
+    _writeValues(material, id);
     return true;
+  }
+
+  /// Sends [material]'s shader values to the engine, its material [id].
+  void _writeValues(Material material, int id) {
+    if (material._shader case final shader? when !identical(material._packedFor, shader._layout)) {
+      material._pack();
+    }
+    final bytes = material._bytes;
+    if (bytes == null) return;
+    final native = scratch.bytes(bytes.length);
+    native.asTypedList(bytes.length).setAll(0, bytes);
+    check(fy_material_values_set(_pointer, id, 0, native, bytes.length));
   }
 
   void _writeMaterial(Material material) {
@@ -163,7 +218,17 @@ extension _Resources on World {
     final metallicRoughness = _textureOrNone(textures[2]);
     final occlusion = _textureOrNone(textures[3]);
     final emissive = _textureOrNone(textures[4]);
+    final shader = material._shader == null ? 0 : _shaderId(material._shader!);
+    final own0 = _textureOrNone(material._shaderTexture(0));
+    final own1 = _textureOrNone(material._shaderTexture(1));
+    final own2 = _textureOrNone(material._shaderTexture(2));
+    final own3 = _textureOrNone(material._shaderTexture(3));
     final m = scratch.material.ref;
+    m.shader = shader;
+    m.shader_textures[0] = own0;
+    m.shader_textures[1] = own1;
+    m.shader_textures[2] = own2;
+    m.shader_textures[3] = own3;
     m.base_color.write(material.color);
     m.metallic = material.metallic;
     m.roughness = material.roughness;
