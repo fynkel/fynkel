@@ -480,7 +480,10 @@ class Beacon extends GameObject {
   change. To change one object alone, give its renderer a `color` of its
   own (Unity's `MaterialPropertyBlock`): it replaces the material's color
   for that object, and `null` gives it back. `material.copy()` makes a
-  material of its own to change every value.
+  material of its own to change every value. A material can also take a
+  `shader` of your own, a `.wgsl` file, for what these values can't do:
+  grass in the wind, water, a dissolve, a toon look; and an `outline`
+  round its objects (§14).
 - **Lights**: `Light.sun` (along the object's forward, which
   `Light.sun(direction: …)` turns the object to), `Light.ambient`,
   and lamps: `Light.point` and `Light.spot` (below), and their shadows. An object has at
