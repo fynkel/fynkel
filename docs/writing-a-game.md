@@ -1595,7 +1595,9 @@ class LavaPool extends GameObject {
   `i32` and `u32`. `values: {...}` and `material.set(name, value)` set them
   by name, with a `double`, an `int`, a `Vec2`, a `Vec3`, a `Color` (given
   to the shader in linear light, as the engine's own colours are) or a
-  list of numbers. A name the shader doesn't have, or a value of the wrong
+  list of numbers. An array, `colors: array<vec4<f32>, 8>`, takes a list
+  of those (`material.set('colors', [red, green])`), up to its length;
+  the rest are 0. A name the shader doesn't have, or a value of the wrong
   kind, is an `ArgumentError` that lists what it has. Tween one as above.
 - Textures: `var rock: color_texture;` (colours) or
   `var heights: texture_2d<f32>;` (data), read with `sample(rock, in.uv)`,
@@ -1793,7 +1795,7 @@ keeps it, and others pay nothing. The lab's effects page has both.
 ### Limits
 
 Four textures and four `PerObject` numbers to a shader, 512 bytes of
-`Values`, numbers and vectors only (no arrays or matrices yet, §21).
+`Values`: numbers, vectors and arrays of them (no matrices yet, §21).
 A shader can't use another's code.
 
 ## 15. Cameras, layers and debug drawing
@@ -3125,8 +3127,9 @@ What keeps a game fast:
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), particles, sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows.
-- **Shaders** (§14): no arrays or matrices in `Values`; no node graph
-  (Shader Graph): shaders are written in WGSL.
+- **Shaders** (§14): no matrices in `Values`; a shader can't use
+  another's code; no node graph (Shader Graph): shaders are written in
+  WGSL.
 - **Animation** (§13): morph targets (faces, blend shapes), 2D blends
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
@@ -3255,6 +3258,7 @@ For code written before: each change that breaks it, newest first.
   waits for them with `await world.shadersReady()` (§14). Screen
   effects can have textures (a colour grade's table) and read the
   scene's depth; `FyScreenEffect` has a `textures` field (ABI 37).
+  `Values` can have arrays.
 
 - **The iPhone draws straight to the screen** (2026-10-17):
   - A view draws to a layer of its own under Flutter's view, not to a

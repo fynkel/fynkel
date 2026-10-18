@@ -2324,7 +2324,8 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// What a shader takes, as UTF-8 lines, so a material can be given it by
 /// name: `lit` or `unlit`; `values <bytes>`; `value <name> <f32|i32|u32>
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
-/// offset in bytes) for each of its `Values`; `texture <name>
+/// offset in bytes) for each of its `Values`, an array's with `<count>
+/// <stride>` after (its length; the bytes from one to the next); `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
 /// `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
 /// has a `light`; `behind` if it reads what's behind it (`scene_depth`,
@@ -2364,7 +2365,11 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
             fynkel_render::ValueKind::I32 => "i32",
             fynkel_render::ValueKind::U32 => "u32",
         };
-        let _ = writeln!(text, "value {} {kind} {} {}", v.name, v.size, v.offset);
+        match v.count {
+            1 => writeln!(text, "value {} {kind} {} {}", v.name, v.size, v.offset),
+            count => writeln!(text, "value {} {kind} {} {} {count} {}", v.name, v.size, v.offset, v.stride),
+        }
+        .ok();
     }
     for t in &shader.textures {
         let space = if t.space == fynkel_render::ColorSpace::Srgb { "srgb" } else { "linear" };

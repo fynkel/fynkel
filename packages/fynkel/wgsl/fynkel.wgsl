@@ -14,7 +14,8 @@
 //   fn effect(in: EffectInput) -> vec4<f32>      each pixel of the finished picture
 //
 // Besides its functions, a shader's file may have:
-//   struct Values { … }       numbers and vectors (f32, i32, u32) the game sets by name
+//   struct Values { … }       numbers and vectors (f32, i32, u32), and arrays of them
+//                             (array<vec3<f32>, 8>), the game sets by name
 //                             (Material.set, ScreenEffect.set), read as `values.name`;
 //                             512 bytes at most
 //   struct PerObject { … }    up to four f32s each object sets on its own

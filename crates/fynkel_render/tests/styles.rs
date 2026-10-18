@@ -9,7 +9,8 @@
 //! camera moves less than a pixel, or moves by whole ones. Screen effects
 //! see the picture as it was and where, run in order, work at every level
 //! and with the pixel look, grade colour from a table, read the solid
-//! scene's depth, and an effect that's wrong is told.
+//! scene's depth, and an effect that's wrong is told. Arrays of values
+//! reach a material's shader and an effect's, each in its place.
 
 mod common;
 
@@ -788,3 +789,62 @@ fn an_effect_reads_the_scenes_depth() {
         assert_eq!(kept, Some(0), "{quality:?}: the depth is kept without an effect that reads it");
     }
 }
+
+// --- Arrays in Values (phase 4b) -------------------------------------------
+
+/// `words` (each value's 4 bytes) as the scene's values' blocks.
+fn blocks(words: &[f32]) -> Vec<[[f32; 4]; 3]> {
+    let mut words = words.to_vec();
+    words.resize(words.len().div_ceil(12) * 12, 0.0);
+    words.chunks(12).map(|c| [[c[0], c[1], c[2], c[3]], [c[4], c[5], c[6], c[7]], [c[8], c[9], c[10], c[11]]]).collect()
+}
+
+const PICKED: &str = "struct Values { colors: array<vec4<f32>, 4>, pick: i32 }
+
+fn unlit(in: SurfaceInput) -> vec4<f32> {
+    return values.colors[values.pick];
+}
+";
+const GAINS: &str = "struct Values { gains: array<f32, 3>, mix: array<vec2<f32>, 2> }
+
+fn effect(in: EffectInput) -> vec4<f32> {
+    let c = picture(in.uv).rgb;
+    return vec4<f32>(c.r * values.gains[0], c.g * values.gains[1] * values.mix[1].y, c.b * values.gains[2], 1.0);
+}
+";
+
+/// A material's shader picks a colour from an array by a number, and an
+/// effect reads arrays of numbers and vectors, each where its layout says.
+#[test]
+fn arrays_of_values_reach_a_shader() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let picked = shader(&mut r, ShaderKey(40), "picked.wgsl", PICKED);
+    let colors = &picked.values[0];
+    assert_eq!((colors.count, colors.stride, colors.size, picked.values[1].offset), (4, 16, 4, 64));
+    let palette = [[1.0, 0.0, 0.0, 1.0], [0.0, 1.0, 0.0, 1.0], [0.0, 0.0, 1.0, 1.0], [1.0, 1.0, 0.0, 1.0]];
+    for pick in 0..4 {
+        let mut scene = stage(QualityLevel::Medium, Some(ShaderKey(40)));
+        let mut words: Vec<f32> = palette.concat();
+        words.push(f32::from_bits(pick as u32));
+        scene.shader_values = blocks(&words);
+        let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+        let at = ((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize;
+        // Tone mapped, as an unlit colour is: full stays high, none low.
+        let got = &image.rgba[at..at + 3];
+        let right = (0..3).all(|c| if palette[pick][c] > 0.5 { got[c] > 200 } else { got[c] < 60 });
+        assert!(right, "pick {pick}: {got:?}");
+    }
+
+    let gains = shader(&mut r, GAINS_KEY, "gains.wgsl", GAINS);
+    let (g, m) = (&gains.values[0], &gains.values[1]);
+    assert_eq!((g.count, g.stride, m.count, m.stride, m.offset), (3, 4, 2, 8, 16));
+    let (plain, _) = render(&gpu, &mut r, &stage(QualityLevel::Medium, None), SIZE, SIZE);
+    let mut scene = with_effects(QualityLevel::Medium, &[GAINS_KEY]);
+    // gains 0.5, 1, 0.25 at 0, 4, 8; mix[0] at 16, mix[1] at 24.
+    scene.shader_values = blocks(&[0.5, 1.0, 0.25, 0.0, 9.0, 9.0, 0.0, 0.5]);
+    let (image, _) = render(&gpu, &mut r, &scene, SIZE, SIZE);
+    let off = differing(&image, &changed(&plain, |c| [c[0] * 0.5, c[1] * 0.5, c[2] * 0.25]), 3);
+    assert!(off < 40, "{off} pixels aren't as worked out");
+}
+const GAINS_KEY: ShaderKey = ShaderKey(41);

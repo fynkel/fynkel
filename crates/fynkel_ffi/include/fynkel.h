@@ -1101,7 +1101,8 @@ void fy_shader_free(struct FyShader *shader);
 // What a shader takes, as UTF-8 lines, so a material can be given it by
 // name: `lit` or `unlit`; `values <bytes>`; `value <name> <f32|i32|u32>
 // <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
-// offset in bytes) for each of its `Values`; `texture <name>
+// offset in bytes) for each of its `Values`, an array's with `<count>
+// <stride>` after (its length; the bytes from one to the next); `texture <name>
 // <srgb|linear>` for each texture, in order; `own <name>` for each of its
 // `PerObject`, in order; `moves` if it has a `vertex`; `lights` if it
 // has a `light`; `behind` if it reads what's behind it (`scene_depth`,

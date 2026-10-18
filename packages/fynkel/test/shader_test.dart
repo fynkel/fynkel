@@ -319,6 +319,44 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     invert.dispose();
   });
 
+  test('an array of values reaches the shader, each in its place', () {
+    final world = World();
+    final scene = stage1(world);
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    final picked = Shader(
+      'struct Values { colors: array<vec4<f32>, 4>, weights: array<f32, 3>, pick: i32 }\n'
+      'fn unlit(in: SurfaceInput) -> vec4<f32> {\n'
+      '    return values.colors[values.pick] * values.weights[values.pick % 3];\n}\n',
+      name: 'picked.wgsl',
+    );
+    expect(picked.values, ['colors', 'weights', 'pick']);
+    final material = Material(
+      shader: picked,
+      values: {
+        'colors': [const Color(0xFFFF0000), const Color(0xFF00FF00), const Color(0xFF0000FF)],
+        'weights': [1.0, 1.0, 1.0],
+        'pick': 1,
+      },
+    );
+    scene.cube.get<MeshRenderer>()!.material = material;
+    final green = _centre(view);
+    expect(green[1], greaterThan(200));
+    expect(green[0] + green[2], lessThan(80));
+    material.set('pick', 2);
+    expect(_centre(view)[2], greaterThan(200), reason: 'the third colour');
+    material.set('pick', 3);
+    expect(_centre(view), [0, 0, 0], reason: 'the fourth, left out, is 0');
+    material.set('weights', [1.0, 1.0, 0.0]);
+    material.set('pick', 2);
+    expect(_centre(view), [0, 0, 0], reason: 'weighed by the third weight');
+
+    expect(() => material.set('weights', [1.0, 1.0, 1.0, 1.0]), throwsArgumentError, reason: 'longer than the array');
+    expect(() => material.set('colors', const Color(0xFFFF0000)), throwsArgumentError, reason: 'an array takes a list');
+    expect(() => material.set('weights', [Vec3(1, 1, 1)]), throwsArgumentError, reason: 'of its own kind');
+  });
+
   test('shadersReady completes once the views have drawn and every shader is ready', () async {
     final world = World();
     final scene = stage1(world);

@@ -574,9 +574,11 @@ final class Material {
   /// the material: a number (`double`, or `int` for an `i32` or `u32`), a
   /// [Vec2], a [Vec3], a [Color] (for a `vec4<f32>`, or a `vec3<f32>`
   /// without its alpha; picked in sRGB, as [color] is, and given to the
-  /// shader linear), a list of numbers, or a [Texture2D]. Throws an
-  /// [ArgumentError] for a name the shader doesn't have or a value that
-  /// isn't its kind, and a [StateError] without a shader. To tween one:
+  /// shader linear), a list of numbers, or a [Texture2D]. An array
+  /// (`array<vec3<f32>, 8>`) takes a list of those, up to its length; the
+  /// rest are 0. Throws an [ArgumentError] for a name the shader doesn't
+  /// have or a value that isn't its kind, and a [StateError] without a
+  /// shader. To tween one:
   /// `tween(0.0, 1.0, seconds: 1, onUpdate: (v) => material.set('dissolve', v))`.
   void set(String name, Object value) {
     if (_shader == null) throw StateError('$this has no shader to set $name for');
@@ -600,7 +602,7 @@ final class Material {
     }
     final v = layout.value(name);
     if (v == null) throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
-    v.parse(value, shader);
+    v.parseAll(value, shader);
     _values[name] = value;
   }
 
