@@ -146,6 +146,14 @@ external int fy_apple_set_frame_ready(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_camera_active(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyScreenEffect>, ffi.Size)>(isLeaf: true)
+external int fy_camera_effects_set(
+  ffi.Pointer<FyWorld> world,
+  int object,
+  ffi.Pointer<FyScreenEffect> effects,
+  int count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyCamera>)>(isLeaf: true)
 external int fy_camera_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyCamera> out);
 
@@ -1091,6 +1099,26 @@ final class FyRayHit extends ffi.Struct {
 
   @ffi.Float()
   external double distance;
+}
+
+final class FyScreenEffect extends ffi.Struct {
+  @ffi.Uint64()
+  external int shader;
+
+  external ffi.Pointer<ffi.Uint8> values;
+
+  @ffi.Size()
+  external int values_len;
+
+  static ffi.Pointer<FyScreenEffect> $allocate(
+    ffi.Allocator $allocator, {
+    required int shader,
+    required ffi.Pointer<ffi.Uint8> values,
+    required int values_len,
+  }) => $allocator<FyScreenEffect>()
+    ..ref.shader = shader
+    ..ref.values = values
+    ..ref.values_len = values_len;
 }
 
 final class FyShader extends ffi.Opaque {}

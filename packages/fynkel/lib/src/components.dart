@@ -288,10 +288,17 @@ final class Camera extends Component {
     this._bloom,
     this._ambientOcclusion,
     this._pixels,
-  }) : super._();
+    List<ScreenEffect> effects = const [],
+  }) : super._() {
+    _useEffects(effects);
+  }
 
   double _fovY, _near, _far, _orthographicSize;
   int? _pixels;
+  List<ScreenEffect> _effects = const [];
+
+  /// Whether the engine was given effects, so taking them away is sent.
+  bool _effectsSent = false;
   Color _clearColor;
   bool _orthographic, _showSky;
   LayerMask _cullingMask;
@@ -457,6 +464,45 @@ final class Camera extends Component {
     }
   }
 
+  /// What runs over its picture once it's drawn, in order, each over what
+  /// the one before made: `[ScreenEffect(oldTv)]`. Empty (the default) for
+  /// the picture as it is. They run at every quality level; a frame with
+  /// none pays nothing for them. Set a new list to change them.
+  List<ScreenEffect> get effects => _effects;
+  set effects(List<ScreenEffect> value) {
+    _checkChangeable();
+    final old = _effects;
+    _useEffects(value);
+    if (_writeEffects() case final failed?) {
+      _useEffects(old);
+      failed.raise();
+    }
+  }
+
+  void _useEffects(List<ScreenEffect> value) {
+    for (final effect in _effects) {
+      effect._cameras.removeWhere((c) => identical(c.target, this));
+    }
+    for (final effect in value) {
+      if (effect.shader.isDisposed) throw StateError('${effect.shader} was disposed');
+    }
+    _effects = List.unmodifiable(value);
+    for (final effect in _effects) {
+      effect._cameras.add(WeakReference(this));
+    }
+  }
+
+  /// Sends its [effects] to the engine, as [_write] does the rest.
+  _Failure? _writeEffects() {
+    if (!_enabledFlag) return null;
+    try {
+      _live?._writeCameraEffects(this);
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
+    }
+  }
+
   /// The ray from this camera through [point] in a view showing it: from
   /// the point on the near plane, away from the camera. Cast it with
   /// [World.raycast] to find what's drawn there (Unity's
@@ -543,7 +589,8 @@ final class Camera extends Component {
       '${showSky ? '' : ', showSky: false'}'
       '${bloom == null ? '' : ', bloom: $bloom'}'
       '${ambientOcclusion == null ? '' : ', ambientOcclusion: $ambientOcclusion'}'
-      '${pixels == null ? '' : ', pixels: $pixels'})';
+      '${pixels == null ? '' : ', pixels: $pixels'}'
+      '${effects.isEmpty ? '' : ', effects: $effects'})';
 }
 
 /// What kind of light a [Light] is.

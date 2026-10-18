@@ -608,37 +608,8 @@ final class Material {
   /// code doesn't have, or has as another kind, is left out.
   void _pack() {
     final shader = _shader;
-    if (shader == null || shader._layout.size == 0) {
-      _bytes = null;
-      _packedFor = shader?._layout;
-      return;
-    }
-    final layout = shader._layout;
-    final bytes = Uint8List(layout.size);
-    final data = ByteData.sublistView(bytes);
-    for (final MapEntry(key: name, :value) in _values.entries) {
-      final v = layout.value(name);
-      if (v == null || value is Texture2D) continue;
-      final List<num> parts;
-      try {
-        parts = v.parse(value, shader);
-      } on ArgumentError {
-        continue;
-      }
-      for (final (i, n) in parts.indexed) {
-        final at = v.offset + i * 4;
-        switch (v.kind) {
-          case 'f32':
-            data.setFloat32(at, n.toDouble(), Endian.little);
-          case 'i32':
-            data.setInt32(at, n.toInt(), Endian.little);
-          default:
-            data.setUint32(at, n.toInt(), Endian.little);
-        }
-      }
-    }
-    _bytes = bytes;
-    _packedFor = layout;
+    _bytes = shader?._layout.pack(_values, shader);
+    _packedFor = shader?._layout;
   }
 
   /// The texture its shader's texture [index] is given, or null.
@@ -811,6 +782,9 @@ final class Material {
 
   static Shader? _usableShader(Shader? shader) {
     if (shader != null && shader.isDisposed) throw StateError('$shader was disposed');
+    if (shader != null && shader.isEffect) {
+      throw ArgumentError.value(shader, 'shader', 'is a screen effect, for a ScreenEffect, not a material');
+    }
     return shader;
   }
 

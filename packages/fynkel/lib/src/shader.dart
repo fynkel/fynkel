@@ -62,6 +62,10 @@ final class Shader implements Finalizable {
 
   final _release = _Release(_Resource.shader);
 
+  /// The screen effects using it, for [reload] to lay their values out
+  /// again.
+  final _effects = <WeakReference<ScreenEffect>>[];
+
   Pointer<FyShader> get _live {
     if (_pointer == nullptr) throw StateError('$this was disposed');
     return _pointer;
@@ -98,6 +102,10 @@ final class Shader implements Finalizable {
   /// Shadows, fog and the sky's light stay the engine's.
   bool get hasOwnLighting => _layout.lights;
 
+  /// Whether it has an `effect`, which runs over a camera's whole picture
+  /// ([ScreenEffect], [Camera.effects]) rather than drawing a material.
+  bool get isEffect => _layout.effect;
+
   /// Whether [dispose] was called; a disposed shader can't be used in a
   /// material (a StateError).
   bool get isDisposed => _pointer == nullptr;
@@ -115,6 +123,10 @@ final class Shader implements Finalizable {
     _finalizer.attach(this, pointer.cast(), detach: this);
     for (final world in _release.worlds) {
       world._reloadShader(this);
+    }
+    _effects.removeWhere((e) => e.target == null);
+    for (final effect in _effects) {
+      effect.target?._changed();
     }
     fy_shader_free(old);
   }
@@ -135,6 +147,78 @@ final class Shader implements Finalizable {
 
   @override
   String toString() => "Shader('$name')";
+}
+
+/// A shader run over a camera's whole picture once it's drawn: an old TV's
+/// lines, a palette, a flash when hit. Its shader has an `effect`
+/// function ([Shader.isEffect]), which gives each pixel's colour from the
+/// picture's (`picture(in.uv)`); its `struct Values` it sets by name, as a
+/// material's:
+///
+/// ```dart
+/// camera.effects = [ScreenEffect(await assets.shader('old_tv.wgsl'), values: {'lines': 240.0})];
+/// ```
+///
+/// A camera's effects run in order, each over what the one before made.
+/// One effect can be given to any number of cameras; [set] changes it for
+/// all of them.
+final class ScreenEffect {
+  /// [shader]'s effect, with [values] set as [set] sets them. Throws an
+  /// [ArgumentError] for a shader without an `effect`, and a [StateError]
+  /// for a disposed one.
+  ScreenEffect(this.shader, {Map<String, Object> values = const {}}) {
+    if (shader.isDisposed) throw StateError('$shader was disposed');
+    if (!shader.isEffect) {
+      throw ArgumentError.value(shader, 'shader', 'has no effect function, so is no screen effect');
+    }
+    values.forEach(_setValue);
+    _bytes = shader._layout.pack(_values, shader);
+    shader._effects.add(WeakReference(this));
+  }
+
+  /// Its shader.
+  final Shader shader;
+
+  final _values = <String, Object>{};
+  Uint8List? _bytes;
+
+  /// The cameras it's in, to send it to again when it changes.
+  final _cameras = <WeakReference<Camera>>[];
+
+  /// Sets its shader's value [name], as [Material.set] does: a number, a
+  /// [Vec2], a [Vec3], a [Color] or a list of numbers. Every camera with
+  /// it shows the change from the next frame. Throws an [ArgumentError]
+  /// for a name the shader doesn't have or a value that isn't its kind.
+  void set(String name, Object value) {
+    _setValue(name, value);
+    _changed();
+  }
+
+  /// What [set] last gave [name], or null.
+  Object? value(String name) => _values[name];
+
+  void _setValue(String name, Object value) {
+    final layout = shader._layout;
+    final v = layout.value(name);
+    if (v == null || value is Texture2D) {
+      throw ArgumentError.value(name, 'name', 'is no value of $shader, which has: ${layout.names}');
+    }
+    v.parse(value, shader);
+    _values[name] = value;
+  }
+
+  /// Lays its values out for its shader as it is now and sends them to
+  /// the cameras it's in.
+  void _changed() {
+    _bytes = shader._layout.pack(_values, shader);
+    _cameras.removeWhere((c) => c.target == null);
+    for (final camera in _cameras) {
+      camera.target?._writeEffects();
+    }
+  }
+
+  @override
+  String toString() => 'ScreenEffect(${shader.name})';
 }
 
 /// A shader that doesn't compile: where in its file, and what's wrong.
@@ -179,6 +263,7 @@ final class _ShaderLayout {
     this.moves = false,
     this.behind = false,
     this.lights = false,
+    this.effect = false,
   });
 
   factory _ShaderLayout.parse(String text) {
@@ -190,6 +275,7 @@ final class _ShaderLayout {
     var moves = false;
     var behind = false;
     var lights = false;
+    var effect = false;
     for (final line in const LineSplitter().convert(text)) {
       final words = line.split(' ');
       switch (words) {
@@ -211,9 +297,21 @@ final class _ShaderLayout {
           behind = true;
         case ['lights']:
           lights = true;
+        case ['effect']:
+          effect = true;
       }
     }
-    return _ShaderLayout(lit, size, values, textures, own, moves: moves, behind: behind, lights: lights);
+    return _ShaderLayout(
+      lit,
+      size,
+      values,
+      textures,
+      own,
+      moves: moves,
+      behind: behind,
+      lights: lights,
+      effect: effect,
+    );
   }
 
   final bool lit;
@@ -226,6 +324,7 @@ final class _ShaderLayout {
   final bool moves;
   final bool behind;
   final bool lights;
+  final bool effect;
 
   _ShaderValue? value(String name) {
     for (final v in values) {
@@ -235,6 +334,36 @@ final class _ShaderLayout {
   }
 
   int texture(String name) => textures.indexWhere((t) => t.name == name);
+
+  /// [given] laid out as its `Values`, or null when it has none. What it
+  /// doesn't have, or has as another kind, is left out.
+  Uint8List? pack(Map<String, Object> given, Shader shader) {
+    if (size == 0) return null;
+    final bytes = Uint8List(size);
+    final data = ByteData.sublistView(bytes);
+    for (final MapEntry(key: name, :value) in given.entries) {
+      final v = this.value(name);
+      if (v == null || value is Texture2D) continue;
+      final List<num> parts;
+      try {
+        parts = v.parse(value, shader);
+      } on ArgumentError {
+        continue;
+      }
+      for (final (i, n) in parts.indexed) {
+        final at = v.offset + i * 4;
+        switch (v.kind) {
+          case 'f32':
+            data.setFloat32(at, n.toDouble(), Endian.little);
+          case 'i32':
+            data.setInt32(at, n.toInt(), Endian.little);
+          default:
+            data.setUint32(at, n.toInt(), Endian.little);
+        }
+      }
+    }
+    return bytes;
+  }
 
   /// Every name a material sets, for messages.
   String get names {
