@@ -171,4 +171,75 @@ void main() {
     expect(mote.transform.position, isNot(moteAt));
     expect(swarm.children, hasLength(300));
   });
+
+  /// Every renderer in [o] and under it.
+  List<MeshRenderer> renderers(GameObject o) => [...o.getAll<MeshRenderer>(), ...o.children.expand(renderers)];
+
+  /// With `COINS_SHOTS=<dir>`, a picture of the level as it is now, in
+  /// [name].png there, to look at.
+  void shot(String name) {
+    final dir = Platform.environment['COINS_SHOTS'];
+    if (dir == null) return;
+    final view = HeadlessView(world, width: 960, height: 600);
+    addTearDown(view.dispose);
+    File('$dir/$name.png').writeAsBytesSync(view.png());
+  }
+
+  test('the coins are holograms: unlit, added to what is behind them', () async {
+    await game.loaded;
+    world.update(0);
+    for (final coin in world.all<Coin>()) {
+      final material = coin.get<MeshRenderer>()!.material!;
+      expect(material.shader, same(game.hologram));
+      expect(material.shader!.isLit, isFalse);
+      expect(material.blending, Blending.additive);
+    }
+    world.run(0.5);
+    shot('holograms');
+  });
+
+  test('the toon setting draws the whole game in bands, outlined, and back; a new level comes in the style', () async {
+    await game.loaded;
+    world.update(0);
+    world.run(0.5);
+    // What the style changes: the player, the props and the ground.
+    List<MeshRenderer> styled() => [
+      ...renderers(game.player),
+      ...renderers(world.first<Level>()!)
+          .where((r) => r.gameObject is! Coin && !r.gameObject.isPartOf(world.first<Swarm>()!)),
+    ];
+    final plain = {for (final r in styled()) r: r.material};
+    expect(plain.length, greaterThan(10));
+    expect(plain.values.every((m) => m?.shader == null), isTrue);
+
+    game.toon.value = true;
+    for (final r in styled()) {
+      expect(r.material!.shader?.hasOwnLighting, isTrue, reason: '${r.gameObject.name} in bands');
+      expect(r.material!.outline, isNotNull);
+      expect(r.material!.color, plain[r]!.color, reason: 'its own colours');
+    }
+    expect(
+      world.all<Coin>().first.get<MeshRenderer>()!.material!.shader,
+      same(game.hologram),
+      reason: 'still holograms',
+    );
+    expect(
+      world.first<Swarm>()!.children.first.get<MeshRenderer>()!.material!.shader,
+      isNull,
+      reason: 'the motes glow',
+    );
+    final shared = {for (final r in styled()) r.material};
+    expect(shared.length, lessThan(plain.length), reason: 'one toon copy for each material, shared');
+    shot('toon');
+
+    // The next level, and the flower the player carries there, load in it.
+    pickUp(world.all<Coin>());
+    await world.all<Level>().last.loaded;
+    world.run(0.5);
+    expect(styled().every((r) => r.material!.shader?.hasOwnLighting ?? false), isTrue);
+    shot('toon dusk');
+
+    game.toon.value = false;
+    expect(styled().every((r) => r.material!.shader == null), isTrue, reason: 'back as it was');
+  });
 }

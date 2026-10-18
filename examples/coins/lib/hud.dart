@@ -4,25 +4,56 @@ import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart';
 
 /// The player's score, top left, kept up to date by a
-/// [ValueListenableBuilder].
+/// [ValueListenableBuilder]; and, top right, the toon switch, when given.
 class Hud extends StatelessWidget {
-  const Hud(this.score, {super.key});
+  const Hud(this.score, {this.toon, super.key});
 
   final ValueListenable<int> score;
 
+  /// Whether the game is drawn in the toon style: a tap on the switch
+  /// turns it on and off.
+  final ValueNotifier<bool>? toon;
+
+  static const _gold = Color(0xFFFFC840);
+
   @override
-  Widget build(BuildContext context) => Align(
-    alignment: Alignment.topLeft,
-    child: SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: ValueListenableBuilder(
-          valueListenable: score,
-          builder: (context, score, _) => Text(
-            '● $score',
-            style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: Color(0xFFFFC840)),
+  Widget build(BuildContext context) => SafeArea(
+    child: Padding(
+      padding: const EdgeInsets.all(20),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          ValueListenableBuilder(
+            valueListenable: score,
+            builder: (context, score, _) => Text(
+              '● $score',
+              style: const TextStyle(fontSize: 32, fontWeight: FontWeight.bold, color: _gold),
+            ),
           ),
-        ),
+          const Spacer(),
+          if (toon case final toon?)
+            GestureDetector(
+              onTap: () => toon.value = !toon.value,
+              child: ValueListenableBuilder(
+                valueListenable: toon,
+                builder: (context, on, _) => Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                  decoration: BoxDecoration(
+                    color: on ? _gold : const Color(0x66000000),
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  child: Text(
+                    on ? 'Toon: on' : 'Toon: off',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: on ? const Color(0xFF1C1626) : _gold,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     ),
   );

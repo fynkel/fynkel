@@ -28,6 +28,13 @@ The game is `lib/coins.dart`, and each part shows one way of working:
   line: `FynkelApp(CoinsGame.new, overlay: (context, game) => Hud(...))`.
 - A `Swarm` moves 300 plain objects, motes with only a mesh, in its own
   `onUpdate`.
+- Its shaders (stage 10) are in `assets/shaders/`. The coins are
+  holograms (`hologram.wgsl`: unlit, drawn additive). The HUD's toon
+  switch (`CoinsGame.toon`) draws the whole game in flat bands of light,
+  outlined (`toon.wgsl`, its own `light`): `CoinsGame.style` swaps each
+  lit material for a toon copy (one per material, shared) and back, and
+  the levels, props and player style themselves as they load, so the
+  next level comes in the style too.
 
 ```sh
 flutter run -d macos

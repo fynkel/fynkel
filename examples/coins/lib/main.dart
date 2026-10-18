@@ -4,4 +4,4 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'coins.dart';
 import 'hud.dart';
 
-void main() => runApp(FynkelApp(CoinsGame.new, overlay: (context, game) => Hud(game.player.score)));
+void main() => runApp(FynkelApp(CoinsGame.new, overlay: (context, game) => Hud(game.player.score, toon: game.toon)));
