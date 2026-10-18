@@ -86,6 +86,13 @@ final class Shader implements Finalizable {
   /// [Material.reach].
   bool get movesVertices => _layout.moves;
 
+  /// Whether it reads what's behind its surface (`scene_depth`,
+  /// `scene_color`): water with a foaming shore, glass that bends what's
+  /// behind it. Its materials are drawn see-through, over the solid
+  /// scene, whatever their [Material.blending]. A frame with one in view
+  /// keeps the scene's depth and colour; other frames pay nothing.
+  bool get readsBehind => _layout.behind;
+
   /// Whether [dispose] was called; a disposed shader can't be used in a
   /// material (a StateError).
   bool get isDisposed => _pointer == nullptr;
@@ -158,7 +165,7 @@ final class ShaderError implements Exception {
 
 /// What a shader takes, as `fy_shader_describe` tells it.
 final class _ShaderLayout {
-  _ShaderLayout(this.lit, this.size, this.values, this.textures, this.own, {this.moves = false});
+  _ShaderLayout(this.lit, this.size, this.values, this.textures, this.own, {this.moves = false, this.behind = false});
 
   factory _ShaderLayout.parse(String text) {
     var lit = true;
@@ -167,6 +174,7 @@ final class _ShaderLayout {
     final textures = <({String name, bool srgb})>[];
     final own = <String>[];
     var moves = false;
+    var behind = false;
     for (final line in const LineSplitter().convert(text)) {
       final words = line.split(' ');
       switch (words) {
@@ -184,9 +192,11 @@ final class _ShaderLayout {
           own.add(name);
         case ['moves']:
           moves = true;
+        case ['behind']:
+          behind = true;
       }
     }
-    return _ShaderLayout(lit, size, values, textures, own, moves: moves);
+    return _ShaderLayout(lit, size, values, textures, own, moves: moves, behind: behind);
   }
 
   final bool lit;
@@ -197,6 +207,7 @@ final class _ShaderLayout {
   final List<({String name, bool srgb})> textures;
   final List<String> own;
   final bool moves;
+  final bool behind;
 
   _ShaderValue? value(String name) {
     for (final v in values) {

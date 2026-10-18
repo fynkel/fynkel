@@ -187,6 +187,25 @@ where the water is shallow, and the floor should bend through it.
 such a shader keeps no depth or copy (checked by the renderer's own
 counts).
 
+As built: `scene_depth(screen)` (metres along the view; the far end
+where there's only sky), `depth_behind(in)` (how far behind this point
+the scene is), `view_depth(p)` and `scene_color(screen)` (the scene as
+light, so returned as it is it shows the scene unchanged). A shader
+that reads either is drawn see-through, over the solid scene, whatever
+its blending, and casts no shadow. In a frame with one in view the
+scene pass splits in two: the solid scene and the sky, keeping its
+multisampled depth and resolving its colour into an image; one sample
+of the depth copied into another; then that colour put back and the
+see-through drawn over it. Cut-outs are in the depth, and everything
+else see-through draws as it would without the shader (a test checks
+it). `FrameStats::behind` and `behind_bytes` count it; the images go a
+second after the last frame that read them. The cost is 28 bytes a
+pixel at medium and high (16 of them the kept multisampled depth), 24
+at low: about 80 MB on an iPhone's full screen, less with its render
+scale. Phase 5 measures it on the phones; if it's too much, the depth
+can come from a depth-only pass of the solid scene instead (no
+multisampled depth kept, the geometry drawn twice).
+
 ### Phase 4: whole styles
 
 - **Lighting of your own**: `fn light(in: LightInput) -> vec3f` in a
@@ -277,6 +296,6 @@ say otherwise.
 
 - [x] Phase 1: surfaces
 - [x] Phase 2: movement (Mac: 2,000 swaying blades add about 0.1 ms a frame at every level; phones in phase 5)
-- [ ] Phase 3: what's behind
+- [x] Phase 3: what's behind (memory: 28 bytes a pixel while a reader is in view; phones in phase 5)
 - [ ] Phase 4: whole styles
 - [ ] Phase 5: games, the measure, the guide and the report

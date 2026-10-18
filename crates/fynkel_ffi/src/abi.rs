@@ -2231,8 +2231,9 @@ pub unsafe extern "C" fn fy_shader_free(shader: *mut FyShader) {
 /// <parts> <offset>` (parts: 1 for a number, 2 to 4 for a vector; the
 /// offset in bytes) for each of its `Values`; `texture <name>
 /// <srgb|linear>` for each texture, in order; `own <name>` for each of its
-/// `PerObject`, in order; `moves` if it has a `vertex`. Its length goes to `out_len`; it's copied into
-/// `buf` only when it fits in `cap`.
+/// `PerObject`, in order; `moves` if it has a `vertex`; `behind` if it reads what's behind it
+/// (`scene_depth`, `scene_color`). Its length goes to `out_len`; it's copied into `buf` only when it
+/// fits in `cap`.
 ///
 /// # Safety
 ///
@@ -2278,6 +2279,9 @@ fn describe_shader(shader: &fynkel_render::CustomShader) -> String {
     }
     if shader.moves {
         let _ = writeln!(text, "moves");
+    }
+    if shader.reads_behind {
+        let _ = writeln!(text, "behind");
     }
     text
 }

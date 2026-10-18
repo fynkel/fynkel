@@ -31,6 +31,9 @@ pub struct Kit {
     pub(crate) frame_layout: wgpu::BindGroupLayout,
     /// The last pass's input: the scene's half-float image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
+    /// The multisampled depth one sample of is copied from, for shaders
+    /// that read what's behind (behind.wgsl).
+    pub(crate) msaa_depth_layout: wgpu::BindGroupLayout,
     pub(crate) textures: TextureKit,
     /// Shadow maps' layouts, sampler and pipelines.
     pub(crate) shadows: ShadowKit,
@@ -185,6 +188,19 @@ impl Kit {
                 count: None,
             }],
         });
+        let msaa_depth_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("multisampled depth"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: true,
+                },
+                count: None,
+            }],
+        });
         let maker = PipelineMaker::new(gpu);
         let textures = TextureKit::new(gpu, &maker);
         Arc::new(Self {
@@ -197,6 +213,7 @@ impl Kit {
             quality: QualityLevel::for_adapter(&gpu.adapter.get_info()),
             frame_layout,
             image_layout,
+            msaa_depth_layout,
             textures,
             pipelines: Mutex::default(),
         })

@@ -140,6 +140,29 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     expect(renderer.material!.reach, 51);
   });
 
+  test('a shader that reads what is behind it shows the scene through its object', () {
+    final scene = stage1();
+    final world = scene.world;
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    const source = '''
+fn unlit(in: SurfaceInput) -> vec4<f32> {
+    return vec4<f32>(scene_color(in.screen), 1.0);
+}
+''';
+    final shader = Shader(source, name: 'clear.wgsl');
+    expect(shader.readsBehind, isTrue);
+    expect(Shader(_tint).readsBehind, isFalse);
+    final cube = scene.cube;
+    cube.get<MeshRenderer>()!.material = Material(color: const Color(0xFFFF0000));
+    final red = _centre(view);
+    expect(red[0] > 150 && red[1] < 30, isTrue, reason: 'the red cube is in the middle: $red');
+    // Opaque as it is, it's drawn over the scene, which shows through.
+    cube.get<MeshRenderer>()!.material = Material(shader: shader);
+    expect(_centre(view), isNot(_near(red)));
+  });
+
   test('a shader loaded as an asset takes its new code when the world reloads its shaders', () async {
     var code = 'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(1.0, 0.0, 0.0, 1.0);\n}\n';
     final world = World(source: (name) async => Uint8List.fromList(utf8.encode(code)));

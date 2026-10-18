@@ -3,6 +3,7 @@
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
+import 'scenes/behind.dart';
 import 'scenes/camera_basics.dart';
 import 'scenes/camera_rigs.dart';
 import 'scenes/character_basics.dart';
@@ -108,4 +109,5 @@ final List<LabScene Function()> scenes = [
   CrowdScene.new,
   ShadersScene.new,
   MovementScene.new,
+  BehindScene.new,
 ];
