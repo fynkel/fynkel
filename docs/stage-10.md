@@ -284,6 +284,39 @@ As built:
   look or not, the camera circling) and the garden ("Look: movement")
   with the pixel look and a drifting camera.
 
+### Phase 4b: the shader experience
+
+Added 2026-10-18, after phase 4, at the user's ask: how easy is it to
+write a shader, use it and control it from code, and does it perform?
+Writing and controlling one is short (one function in a `.wgsl` file,
+`Material(shader:, values:)`, `set`, `tween`), its errors point at its
+own lines and hot reload takes its new code. What isn't good enough:
+
+1. **A new shader freezes the game the first time it's drawn.** On the
+   Mac a shader the GPU's driver hasn't seen takes about 365 ms to build
+   (the forward pipeline: the driver compiling the joined shader); the
+   same again takes 1.2 ms, the OS keeping what it compiled. So a player
+   sees it once per shader and variant (shadowed, skinned, a quality
+   level) on each device: when a new look first appears. *Fix:* views on
+   screen build a missing shader's pipelines on a thread of their own and
+   draw the frame without those objects meanwhile (as Unreal's
+   precaching does); headless views and tests wait, so pictures stay
+   exact. `ViewStats.shadersWaiting` counts what's being built, and
+   `await world.shadersReady()` waits for it, for a loading screen.
+2. **What a shader can use is hard to find**: the guide's "Shaders"
+   chapter (phase 5's, brought forward), a file declaring the engine's
+   names so an editor's WGSL support stops marking them as errors, and a
+   starting point (`fynkel shader new` or a template).
+3. **Effects can't take a texture or read the scene's depth**: colour
+   grading from a look-up table, depth of field, fog of war and outlines
+   drawn as an effect need them.
+4. **Values are numbers and vectors only**: arrays of them too.
+
+*Done when* a new shader's first frame on screen takes no longer than
+any other (a test with a shader the driver hasn't seen), a loading
+screen can wait for its shaders, the chapter and the editor file exist,
+and an effect grades colour from a texture.
+
 ### Phase 5: games, the measure, the guide and the report
 
 - **Sheepdog**: grass in the wind, a pond, wolves that burn away when
@@ -351,4 +384,5 @@ say otherwise.
 - [x] Phase 2: movement (Mac: 2,000 swaying blades add about 0.1 ms a frame at every level; phones in phase 5)
 - [x] Phase 3: what's behind (memory: 28 bytes a pixel while a reader is in view; phones in phase 5)
 - [x] Phase 4: whole styles (outline lower edges hidden by the ground; pixel look keeps multisampled edges)
+- [ ] Phase 4b: the shader experience
 - [ ] Phase 5: games, the measure, the guide and the report
