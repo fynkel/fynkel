@@ -624,8 +624,9 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
 /// Edges are smoothed by as many samples as the quality asks (Unity's
 /// MSAA setting): a white square, turned, on black and unlit, shows only
 /// black and white with one sample, one shade between with two, and more
-/// with four. Each level draws the same, and a renderer changes count
-/// from one frame to the next.
+/// with four. A device that can't draw two (the iOS Simulator) draws one,
+/// the same picture. Each level draws the same, and a renderer changes
+/// count from one frame to the next.
 #[test]
 fn edges_are_smoothed_by_the_samples_asked_for() {
     let gpu = gpu();
@@ -665,11 +666,17 @@ fn edges_are_smoothed_by_the_samples_asked_for() {
         reds
     };
     for level in [QualityLevel::Low, QualityLevel::High] {
-        for (samples, between) in [(1, 0..=0), (2, 1..=1), (4, 2..=3), (1, 0..=0)] {
-            let (image, _) = render(&gpu, &mut r, &scene(Quality { samples, ..level.quality() }), 96, 96);
+        let draw =
+            |r: &mut Renderer, samples| render(&gpu, r, &scene(Quality { samples, ..level.quality() }), 96, 96).0;
+        let one = draw(&mut r, 1);
+        for (samples, between) in [(1, 0..=0), (2, 0..=1), (4, 2..=3), (1, 0..=0)] {
+            let image = draw(&mut r, samples);
             let shades = shades(&image);
             assert_eq!((shades[0], shades.len() > 1), (0, true), "{samples} samples at {level:?}: {shades:?}");
             assert!(between.contains(&(shades.len() - 2)), "{samples} samples at {level:?}: {shades:?}");
+            if shades.len() == 2 {
+                assert!(image.rgba == one.rgba, "{samples} samples at {level:?}: not as with one");
+            }
         }
     }
 }
