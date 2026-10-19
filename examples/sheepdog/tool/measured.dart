@@ -4,7 +4,8 @@
 // lifecycle check starts a new round again and again. The tool's app is
 // dark, so it's night in the field, the lamps on; `--define
 // SHEEPDOG_QUALITY=low` (or medium, high) draws it at that level, the
-// device's pick otherwise.
+// device's pick otherwise; `--define SHEEPDOG_SCALE=0.75` at that render
+// scale.
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
@@ -15,6 +16,7 @@ import 'package:sheepdog/hud.dart';
 
 const _quality = String.fromEnvironment('SHEEPDOG_QUALITY');
 const _probe = String.fromEnvironment('SHEEPDOG_PROBE');
+const _scale = String.fromEnvironment('SHEEPDOG_SCALE');
 
 SheepdogGame _make() {
   final game = SheepdogGame(
@@ -22,6 +24,11 @@ SheepdogGame _make() {
     quality: ValueNotifier(Quality.levels.where((q) => q.name == _quality).firstOrNull),
   );
   game.loaded.then((_) {
+    // Its level drawn at a render scale of its own (set on the world, so
+    // the game keeps what it picked for the level).
+    if (_scale.isNotEmpty) {
+      game.world.quality = (game.world.quality ?? Quality.device).copyWith(renderScale: double.parse(_scale));
+    }
     final camera = game.camera.camera;
     if (_probe.contains('noao')) camera.ambientOcclusion = null;
     if (_probe.contains('nobloom')) camera.bloom = null;
