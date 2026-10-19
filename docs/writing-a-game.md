@@ -1795,6 +1795,26 @@ keeps it, and others pay nothing. The lab's effects page has both.
   screen, let the view draw the level and `await world.shadersReady()`,
   so nothing pops in when the game shows.
 
+### What shaders cost
+
+Measured in stage 10 (docs/stage-10-report.md): the lab's shader
+scenes hold 60 fps on a Mac and an iPhone at every level, and 120 when
+asked; a Note10+ holds 60 at low in each.
+
+- **A surface or a vertex shader** costs about what the engine's own
+  material does: a few lines more of the same work. 2,000 blades of
+  grass swaying in the wind add about 0.1 ms a frame on a Mac.
+- **Reading what's behind** (`depth_behind`, `scene_color`) costs most:
+  the frame is drawn in three passes instead of one while such a
+  surface is in view. The lab's pond and glass ball hold 60 at low on
+  a Note10+, but 48 at medium and 41 at high. On a slower phone, give low quality a
+  material that doesn't read it: Sheepdog's pond is still water at low,
+  which took it from 40 back to 50 fps on the Note10+.
+- **A shader's first frame** on a device: on a Note10+ its pipelines
+  take up to a second to be ready, then the phone keeps them for every
+  run after. On an iPhone, up to about half a second. Wait for them
+  behind a loading screen (above).
+
 ### Limits
 
 Four textures and four `PerObject` numbers to a shader, 512 bytes of
@@ -3110,6 +3130,9 @@ What keeps a game fast:
   reaches, and the pixels it lights; one that reaches no further than it
   needs to costs least. Turn a lamp off with `enabled = false`: it's
   left out altogether.
+- **Shaders that read what's behind cost most** (§14): the frame takes
+  three passes while one is in view. On an older phone give low quality
+  a material that doesn't read it.
 - **Views on screen** (`onScreen`, on unless turned off; on Android with
   a `FynkelActivity`, §1), so Flutter neither waits for the game's
   frames nor copies them.
