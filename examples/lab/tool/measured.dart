@@ -15,7 +15,7 @@
 // The tool's own `--define FYNKEL_FRAME_RATE=120` asks for 120 fps.
 //
 // `--define TOUR=shaders` measures stage 10's scenes in place of the crowd
-// (or `TOUR=<title>,<title>`, the scenes whose titles start so): each at
+// (or `TOUR=<title>;<title>`, the scenes whose titles start so): each at
 // each quality level in `TOUR_LEVELS` (low,medium,high), for
 // `TOUR_SECONDS` (20) each, the first 5 to settle. It reports how long
 // each scene took to load and its shaders to be ready after (the cost of
@@ -49,7 +49,7 @@ const _shaderScenes = ['Look: shaders', 'Look: movement', "Look: what's behind",
 
 void main() {
   if (_tour.isNotEmpty) {
-    final titles = _tour == 'shaders' ? _shaderScenes : _tour.split(',');
+    final titles = _tour == 'shaders' ? _shaderScenes : _tour.split(RegExp('[,;]'));
     runApp(
       MeasuredApp(
         () => Tour(titles, _tourLevels.split(','), seconds: _tourSeconds),
