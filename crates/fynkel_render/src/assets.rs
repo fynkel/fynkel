@@ -190,13 +190,15 @@ impl Kit {
                 count: None,
             }],
         });
+        // Read as floats, not as depth: Mali's compiler (the Note10+'s)
+        // fails on a pipeline that reads multisampled depth as depth.
         let msaa_depth_layout = gpu.device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("multisampled depth"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
                 visibility: wgpu::ShaderStages::FRAGMENT,
                 ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Depth,
+                    sample_type: wgpu::TextureSampleType::Float { filterable: false },
                     view_dimension: wgpu::TextureViewDimension::D2,
                     multisampled: true,
                 },
