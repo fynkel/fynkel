@@ -8,7 +8,7 @@
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show Light, LightKind, Quality;
+import 'package:fynkel/fynkel.dart' show Blending, Color, GameObject, Light, LightKind, MeshRenderer, Quality;
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/hud.dart';
@@ -59,8 +59,29 @@ void main() => runApp(
       );
     },
     change: (game) => (game as SheepdogGame).restart(),
+    onStats: _shaderProbes,
   ),
 );
+
+/// The shaders' probes: `nograss` and `nopond` hide them, `noground`
+/// draws the field with the engine's own shader. Again each second, as a
+/// new round makes them again.
+void _shaderProbes(GameObject root, Object _) {
+  final game = root as SheepdogGame;
+  if (_probe.contains('noground')) game.grass.shader = null;
+  if (_probe.contains('plainpond') && game.water.shader != null) {
+    game.water
+      ..shader = null
+      ..color = const Color(0xA00C4868)
+      ..blending = Blending.transparent;
+  }
+  for (final r in game.world.all<MeshRenderer>()) {
+    if ((_probe.contains('nograss') && r.material == game.blades) ||
+        (_probe.contains('nopond') && r.material == game.water)) {
+      r.enabled = false;
+    }
+  }
+}
 
 /// Opens a dialog over the game once it's built, and leaves it open.
 class _Menu extends StatefulWidget {

@@ -530,4 +530,27 @@ void main() {
     quality.value = null;
     expect(other.quality, isNull);
   });
+
+  test('at low the pond is still water, which doesn\'t read what\'s behind', () async {
+    final quality = ValueNotifier<Quality?>(Quality.low);
+    final other = World(source: files);
+    addTearDown(other.dispose);
+    other.theme = sheepdogTheme(Brightness.light);
+    final game = other.add(SheepdogGame(seed: 1, quality: quality));
+    await game.loaded;
+    other.run(0.1);
+    MeshRenderer water() =>
+        other.all<MeshRenderer>().singleWhere((r) => r.material == game.water || r.material == game.stillWater);
+    expect(water().material, game.stillWater);
+    expect(game.stillWater.shader, isNull);
+    quality.value = Quality.medium;
+    expect(water().material, game.water, reason: 'the rippling pond from medium up');
+    quality.value = Quality.low;
+    expect(water().material, game.stillWater);
+    final restarting = game.restart();
+    other.run(0.1);
+    await restarting;
+    other.run(0.1);
+    expect(water().material, game.stillWater, reason: 'a new round keeps it');
+  });
 }

@@ -133,6 +133,19 @@ class SheepdogGame extends GameObject {
   /// under it, bent by its ripples.
   late final Material water;
 
+  /// The pond's water at low quality: see-through, without reading what's
+  /// behind it. Reading it costs a slower phone (a Note10+) about six
+  /// frames a second (docs/stage-10-report.md).
+  final stillWater = Material(
+    name: 'still water',
+    color: const Color(0xB00C4868),
+    roughness: 0.06,
+    blending: Blending.transparent,
+  );
+
+  /// The pond's water at the world's quality.
+  Material get pondWater => (world.quality ?? Quality.device) == Quality.low ? stillWater : water;
+
   /// The wolves' coat and eyes: each wolf burns away on its own when it's
   /// chased off (assets/shaders/burn.wgsl).
   late final Material wolfCoat, wolfEyes;
@@ -250,6 +263,16 @@ class SheepdogGame extends GameObject {
       );
       _lamps.add(lamp.get<Light>()!);
     }
+    // Before the round, which picks its pond's water by it.
+    if (quality case final quality?) {
+      world.quality = quality.value;
+      on(quality.changed, (_) {
+        world.quality = quality.value;
+        for (final r in world.all<MeshRenderer>().where((r) => r.material == water || r.material == stillWater)) {
+          r.material = pondWater;
+        }
+      });
+    }
     round = add(Round(this, math.Random(seed)));
     // The main camera is the first added; the minimap's comes after.
     camera = add(DogCamera(round.dog));
@@ -265,10 +288,6 @@ class SheepdogGame extends GameObject {
     );
     controls.bindTo(input);
     on(controls.changed, (_) => controls.bindTo(input));
-    if (quality case final quality?) {
-      world.quality = quality.value;
-      on(quality.changed, (_) => world.quality = quality.value);
-    }
     wear(world.theme);
     on(world.onThemeChanged, wear);
   }
@@ -486,7 +505,7 @@ class Round extends GameObject {
       GameObject(
         name: 'pond',
         transform: Transform(position: Vec3(pond.x, SheepdogGame.waterLevel, pond.z)),
-        components: [MeshRenderer(game.pondMesh, game.water)..castShadows = false],
+        components: [MeshRenderer(game.pondMesh, game.pondWater)..castShadows = false],
       ),
     );
     // A low fence around the field, and the pen's three sides.
