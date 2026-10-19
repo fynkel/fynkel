@@ -23,9 +23,13 @@ const size = 12.0;
 /// z behind penFront, with its gate the whole front.
 const penHalf = 4.5, penFront = -5.0;
 
-/// The layer of what's only for show, the bark's ring: the minimap leaves
-/// it out.
+/// The layer of what's only for show, the bark's ring and the grass: the
+/// minimap leaves it out.
 const effects = 1;
+
+/// The pond in the field's front left corner: its middle, and how far
+/// its water reaches. Nothing walks into it.
+const pond = Vec3(-8, 0, 7.5), pondRadius = 2.2;
 
 /// The flock's names, one per sheep.
 const names = ['Dolly', 'Shaun', 'Timmy', 'Flossie', 'Larry', 'Nuts', 'Hazel', 'Pidsley'];
@@ -57,10 +61,20 @@ bool inPen(Vec3 p) => p.x.abs() < penHalf && p.z < penFront;
 /// a wolf: [intoPen] false). Against a fence it slides along it.
 Vec3 walk(Vec3 from, Vec3 to, {bool intoPen = true}) {
   for (final p in [to, Vec3(to.x, 0, from.z), Vec3(from.x, 0, to.z)]) {
-    final at = Vec3(p.x.clamp(-size + 0.5, size - 0.5), from.y, p.z.clamp(-size + 0.5, size - 0.5));
+    final at = _dry(Vec3(p.x.clamp(-size + 0.5, size - 0.5), from.y, p.z.clamp(-size + 0.5, size - 0.5)));
     if (_mayStep(from, at, intoPen)) return at;
   }
   return from;
+}
+
+/// [p], or the nearest place to it on the pond's bank if it's in the
+/// water: what walks into the pond slides round it.
+Vec3 _dry(Vec3 p) {
+  final d = Vec3(p.x - pond.x, 0, p.z - pond.z);
+  final far = d.length;
+  if (far >= pondRadius) return p;
+  final out = far < 1e-6 ? Vec3(1, 0, 0) : d / far;
+  return Vec3(pond.x + out.x * pondRadius, p.y, pond.z + out.z * pondRadius);
 }
 
 bool _mayStep(Vec3 from, Vec3 to, bool intoPen) {
@@ -104,8 +118,53 @@ class SheepdogGame extends GameObject {
   /// or taken, or the time up); null while it's played.
   final result = ValueNotifier<int?>(null);
 
-  /// The floor and the fences, coloured by [wear].
+  /// The floor and the fences, coloured by [wear]. The floor turns to
+  /// sand where it dips under the pond (assets/shaders/ground.wgsl).
   final grass = Material(name: 'grass', roughness: 1), fence = Material(name: 'fence', roughness: 0.8);
+
+  /// How far the grass's tips bend in the wind, in metres.
+  static const wind = 0.12;
+
+  /// The grass's blades, swaying in the wind (assets/shaders/grass.wgsl),
+  /// the colour of the floor.
+  late final Material blades;
+
+  /// The pond's water (assets/shaders/pond.wgsl): it shows the sandy bed
+  /// under it, bent by its ripples.
+  late final Material water;
+
+  /// The pond's water at low quality: see-through, without reading what's
+  /// behind it. Reading it costs a slower phone (a Note10+) about six
+  /// frames a second (docs/stage-10-report.md).
+  final stillWater = Material(
+    name: 'still water',
+    color: const Color(0xB00C4868),
+    roughness: 0.06,
+    blending: Blending.transparent,
+  );
+
+  /// The pond's water at the world's quality.
+  Material get pondWater => (world.quality ?? Quality.device) == Quality.low ? stillWater : water;
+
+  /// The wolves' coat and eyes: each wolf burns away on its own when it's
+  /// chased off (assets/shaders/burn.wgsl).
+  late final Material wolfCoat, wolfEyes;
+
+  /// The floor, with its dip for the pond, and the grass's patches: made
+  /// once, for every round.
+  late final Mesh field = _field();
+  late final List<(Vec3, Mesh)> patches = _patches();
+
+  /// The pond's water: wider than the pond, its edges under the bank.
+  late final Mesh pondMesh = _waterMesh(2 * pondRadius + 1.6, 40);
+
+  late final Shader _flash;
+  final _flashing = <Material, Material>{};
+
+  /// A copy of a sheep's [plain] material that flashes when the sheep is
+  /// bitten (assets/shaders/flash.wgsl): one for each, shared by the
+  /// flock.
+  Material flashing(Material plain) => _flashing[plain] ??= plain.copy(name: '${plain.name} flash')..shader = _flash;
 
   /// The minimap's camera, high above the field and looking straight down:
   /// no glow and no darkened corners, which it's too small to show.
@@ -120,12 +179,58 @@ class SheepdogGame extends GameObject {
   late Round round;
 
   @override
-  void onLoad() {
-    super.onLoad();
+  Future<void> onLoad() async {
+    await super.onLoad();
     // The farm animals' models, held here for the whole game: each round's
     // sheep and dog take them from here, not from the files again. (Each
     // asks for its own, and hears of a failure there.)
     assets.preload(['sheep.glb', 'dog.glb']).ignore();
+    final (ground, grassShader, pondShader, burn, flash) = await (
+      assets.shader('shaders/ground.wgsl'),
+      assets.shader('shaders/grass.wgsl'),
+      assets.shader('shaders/pond.wgsl'),
+      assets.shader('shaders/burn.wgsl'),
+      assets.shader('shaders/flash.wgsl'),
+    ).wait;
+    grass
+      ..shader = ground
+      ..set('sand', const Color(0xFFC8B088));
+    // One material for every blade, both sides drawn.
+    blades = Material(
+      name: 'blades',
+      shader: grassShader,
+      roughness: 0.9,
+      doubleSided: true,
+      values: {'wind': wind},
+      reach: wind,
+    );
+    water = Material(
+      name: 'water',
+      shader: pondShader,
+      roughness: 0.06,
+      values: {'deep': const Color(0xFF0C4868), 'foam': 0.04, 'bend': 0.03},
+      reach: 0.03,
+    );
+    // Cut out where they've burnt, their shadows too.
+    final embers = {'edge': const Color(0xFFFF7A20)};
+    wolfCoat = Material(
+      name: 'wolf coat',
+      shader: burn,
+      color: Color(0xFF5A5F6B),
+      roughness: 0.9,
+      alphaCutoff: 0.5,
+      values: embers,
+    );
+    wolfEyes = Material(
+      name: 'wolf eyes',
+      shader: burn,
+      color: Color(0xFFFFD040),
+      emissive: Color(0xFFFFB000),
+      emissiveIntensity: 2,
+      alphaCutoff: 0.5,
+      values: embers,
+    );
+    _flash = flash;
     // The sun's (and the moon's) shadows: the sheep and the dog on the
     // grass, the fences across it.
     _sun = addWith(Light.sun(direction: Vec3(-0.4, -1, -0.6), shadows: true));
@@ -158,6 +263,16 @@ class SheepdogGame extends GameObject {
       );
       _lamps.add(lamp.get<Light>()!);
     }
+    // Before the round, which picks its pond's water by it.
+    if (quality case final quality?) {
+      world.quality = quality.value;
+      on(quality.changed, (_) {
+        world.quality = quality.value;
+        for (final r in world.all<MeshRenderer>().where((r) => r.material == water || r.material == stillWater)) {
+          r.material = pondWater;
+        }
+      });
+    }
     round = add(Round(this, math.Random(seed)));
     // The main camera is the first added; the minimap's comes after.
     camera = add(DogCamera(round.dog));
@@ -173,10 +288,6 @@ class SheepdogGame extends GameObject {
     );
     controls.bindTo(input);
     on(controls.changed, (_) => controls.bindTo(input));
-    if (quality case final quality?) {
-      world.quality = quality.value;
-      on(quality.changed, (_) => world.quality = quality.value);
-    }
     wear(world.theme);
     on(world.onThemeChanged, wear);
   }
@@ -201,6 +312,7 @@ class SheepdogGame extends GameObject {
       ..showSky = false
       ..clearColor = sky.ground;
     grass.color = (dark ? scheme.onPrimaryFixedVariant : scheme.primary).toFynkel();
+    blades.color = grass.color;
     fence.color = (dark ? scheme.outline : scheme.secondaryContainer).toFynkel();
     // The moon is pale blue.
     final light = dark ? Color.rgb(0.65, 0.75, 1) : Color.white;
@@ -231,6 +343,123 @@ class SheepdogGame extends GameObject {
     result.value = null;
     await round.loaded;
   }
+
+  /// How far the ground dips under the pond's middle, and how far round
+  /// it it starts to.
+  static const _dip = 0.8, _dipRadius = pondRadius + 0.4;
+
+  /// How high the ground is at [x], [z]: flat, but for the dip of the
+  /// pond, steepest at its bank.
+  static double groundAt(double x, double z) {
+    final d = Vec3(x - pond.x, 0, z - pond.z).length / _dipRadius;
+    if (d >= 1) return 0;
+    final t = 1 - d * d;
+    return -_dip * t * t;
+  }
+
+  /// The pond's water level: where it meets the dip is its bank, about
+  /// [pondRadius] from its middle.
+  static const waterLevel = -0.06;
+
+  /// The floor, the field's whole size, in quarter-metre squares, dipping
+  /// for the pond.
+  static Mesh _field() {
+    const across = 96;
+    final positions = <Vec3>[];
+    for (var j = 0; j <= across; j++) {
+      for (var i = 0; i <= across; i++) {
+        final x = (i / across * 2 - 1) * size, z = (j / across * 2 - 1) * size;
+        positions.add(Vec3(x, groundAt(x, z), z));
+      }
+    }
+    return Mesh.custom(positions: positions, indices: _squares(across, across));
+  }
+
+  /// The grass: a patch a mesh, each of many blades, 4 m across, with none
+  /// in the pond. The blades' places are the same every game.
+  static List<(Vec3, Mesh)> _patches() {
+    final random = math.Random(7);
+    const across = 6, side = 2 * size / across, perPatch = 200;
+    final patches = <(Vec3, Mesh)>[];
+    for (var pj = 0; pj < across; pj++) {
+      for (var pi = 0; pi < across; pi++) {
+        final middle = Vec3(-size + (pi + 0.5) * side, 0, -size + (pj + 0.5) * side);
+        final positions = <Vec3>[], uvs = <Vec2>[], indices = <int>[];
+        for (var b = 0; b < perPatch; b++) {
+          final at = Vec3((random.nextDouble() - 0.5) * side, 0, (random.nextDouble() - 0.5) * side);
+          final world = middle + at;
+          final angle = random.nextDouble() * math.pi, tall = 0.25 + random.nextDouble() * 0.25;
+          if ((world - pond).flat.length < pondRadius + 0.15 ||
+              world.x.abs() > size - 0.2 ||
+              world.z.abs() > size - 0.2) {
+            continue;
+          }
+          _blade(positions, uvs, indices, at, angle, tall);
+        }
+        if (indices.isEmpty) continue;
+        patches.add((
+          middle,
+          Mesh.custom(
+            positions: positions,
+            normals: List.filled(positions.length, Vec3.up),
+            uvs: uvs,
+            indices: indices,
+          ),
+        ));
+      }
+    }
+    return patches;
+  }
+
+  /// A blade [tall] metres high at [at], turned [angle] about up: 6 cm
+  /// wide at its foot, to a point, in three steps so it bends smoothly.
+  /// v is 1 at the foot.
+  static void _blade(List<Vec3> positions, List<Vec2> uvs, List<int> indices, Vec3 at, double angle, double tall) {
+    final first = positions.length;
+    final across = Vec3(math.cos(angle), 0, math.sin(angle));
+    for (var i = 0; i <= 3; i++) {
+      final y = i / 3, half = 0.03 * (1 - y);
+      positions
+        ..add(at + across * -half + Vec3(0, y * tall, 0))
+        ..add(at + across * half + Vec3(0, y * tall, 0));
+      uvs
+        ..add(Vec2(0, 1 - y))
+        ..add(Vec2(1, 1 - y));
+    }
+    for (var i = 0; i < 3; i++) {
+      final a = first + i * 2;
+      indices.addAll([a, a + 1, a + 3, a, a + 3, a + 2]);
+    }
+  }
+}
+
+/// A flat grid's triangles, [across] × [down] squares, facing up.
+List<int> _squares(int across, int down) {
+  final indices = <int>[];
+  for (var j = 0; j < down; j++) {
+    for (var i = 0; i < across; i++) {
+      final a = j * (across + 1) + i;
+      final b = a + across + 1;
+      indices.addAll([a, b, a + 1, a + 1, b, b + 1]);
+    }
+  }
+  return indices;
+}
+
+/// A flat square of water [width] metres across, in [across] × [across]
+/// squares: enough vertices for its waves.
+Mesh _waterMesh(double width, int across) {
+  final positions = <Vec3>[];
+  for (var j = 0; j <= across; j++) {
+    for (var i = 0; i <= across; i++) {
+      positions.add(Vec3((i / across - 0.5) * width, 0, (j / across - 0.5) * width));
+    }
+  }
+  return Mesh.custom(
+    positions: positions,
+    normals: List.filled(positions.length, Vec3.up),
+    indices: _squares(across, across),
+  );
 }
 
 /// One go: the field, the pen, the dog, the flock, the clock, and the
@@ -255,10 +484,28 @@ class Round extends GameObject {
     add(
       GameObject(
         name: 'field',
-        transform: Transform(scale: Vec3(2 * size, 1, 2 * size)),
-        // Flat on the ground: it shadows nothing, so it isn't drawn into
-        // the shadow maps.
-        components: [MeshRenderer(Mesh.plane(), game.grass)..castShadows = false],
+        // On the ground: it shadows nothing, so it isn't drawn into the
+        // shadow maps.
+        components: [MeshRenderer(game.field, game.grass)..castShadows = false],
+      ),
+    );
+    // The grass, only for show: the minimap leaves it out, and it casts no
+    // shadow (thousands of blades, for little).
+    for (final (i, (at, patch)) in game.patches.indexed) {
+      add(
+        GameObject(
+          name: 'grass $i',
+          transform: Transform(position: at),
+          layer: effects,
+          components: [MeshRenderer(patch, game.blades)..castShadows = false],
+        ),
+      );
+    }
+    add(
+      GameObject(
+        name: 'pond',
+        transform: Transform(position: Vec3(pond.x, SheepdogGame.waterLevel, pond.z)),
+        components: [MeshRenderer(game.pondMesh, game.pondWater)..castShadows = false],
       ),
     );
     // A low fence around the field, and the pen's three sides.
@@ -513,6 +760,7 @@ class Sheep extends GameObject {
   bool get isFree => !_home && !_taken;
 
   late final Animator _moves;
+  List<MeshRenderer> _parts = const [];
 
   @override
   Future<void> onLoad() async {
@@ -520,6 +768,13 @@ class Sheep extends GameObject {
     // A sheep (assets/CREDITS.md), a game's size, its feet on the grass.
     final model = add(await assets.instantiate('sheep.glb'));
     model.transform = _farmAnimal(lift: 0.4, scale: 0.2);
+    // Its materials, ready to flash when a wolf bites: made at the start,
+    // not at the bite, so nothing waits for its shader then.
+    final game = (parent! as Round).game;
+    _parts = _renderers(model).toList();
+    for (final part in _parts) {
+      part.material = game.flashing(part.material!);
+    }
     _moves = model.animator!..blend('move', _clips, thresholds: _sheepPaces, at: 0, duration: 0);
     // Its name over it: a Flutter widget, placed where the camera sees it
     // (labels.dart).
@@ -633,7 +888,7 @@ class Sheep extends GameObject {
       ..onEnd = (_) => _moves.crossFade('Idle');
   }
 
-  /// Taken by a wolf: gone.
+  /// Taken by a wolf: bitten, it flashes, then it's gone.
   void take() {
     if (!isFree) return;
     _taken = true;
@@ -641,7 +896,28 @@ class Sheep extends GameObject {
     removeComponent(get<WorldWidget>()!);
     taken.emit(this);
     _moves.crossFade('Death', duration: 0.05, loop: false);
-    scaleTo(Vec3.zero, seconds: 0.25, ease: Ease.inBack).then((_) => destroy());
+    tween(
+      1.0,
+      0.0,
+      seconds: biteFlash,
+      onUpdate: (v) {
+        for (final part in _parts) {
+          part.set('flash', v);
+        }
+      },
+    );
+    scaleTo(Vec3.zero, seconds: 0.25, delay: biteFlash * 0.6, ease: Ease.inBack).then((_) => destroy());
+  }
+
+  /// How long a bitten sheep flashes.
+  static const biteFlash = 0.4;
+}
+
+/// Every renderer in [o] and under it.
+Iterable<MeshRenderer> _renderers(GameObject o) sync* {
+  yield* o.getAll<MeshRenderer>();
+  for (final child in o.children) {
+    yield* _renderers(child);
   }
 }
 
@@ -704,8 +980,8 @@ class Wolf extends GameObject {
   /// How near a sheep it lunges, and for how long; then it rests.
   static const lungeFrom = 2.2, lungeFor = 0.6, rest = 1.5;
 
-  static final _coat = Material(color: Color(0xFF5A5F6B), roughness: 0.9);
-  static final _eyes = Material(color: Color(0xFFFFD040), emissive: Color(0xFFFFB000), emissiveIntensity: 2);
+  /// How long a wolf chased off takes to burn away.
+  static const burning = 0.9;
 
   final Round round;
   bool _ready = false, _leaving = false;
@@ -723,14 +999,14 @@ class Wolf extends GameObject {
     add(
       GameObject(
         transform: Transform(scale: Vec3(0.55, 0.55, 1.2)),
-        components: [MeshRenderer(Mesh.cube(), _coat)],
+        components: [MeshRenderer(Mesh.cube(), round.game.wolfCoat)],
       ),
     );
     for (final x in [-0.12, 0.12]) {
       add(
         GameObject(
           transform: Transform(position: Vec3(x, 0.12, -0.61), scale: Vec3.all(0.1)),
-          components: [MeshRenderer(Mesh.cube(), _eyes)],
+          components: [MeshRenderer(Mesh.cube(), round.game.wolfEyes)],
         ),
       );
     }
@@ -740,7 +1016,7 @@ class Wolf extends GameObject {
   void onStart() {
     super.onStart();
     scaleTo(Vec3.one, seconds: 0.4, ease: Ease.outBack).then((_) => _ready = true);
-    on(health.died, (_) => runOff());
+    on(health.died, (_) => _burnAway());
     // Its nerve over it (labels.dart).
     addComponent(
       WorldWidget((context) => HealthBar(health), offset: Vec3(0, 0.9, 0), alignment: Alignment.bottomCenter),
@@ -804,6 +1080,25 @@ class Wolf extends GameObject {
     if (_leaving) return;
     punchScale(Vec3.all(0.3), seconds: 0.25);
     health.damage(health.left);
+  }
+
+  /// Chased off: it runs, burning away as it goes, and is gone.
+  void _burnAway() {
+    runOff();
+    final parts = _renderers(this).toList();
+    tween(
+      0.0,
+      1.0,
+      seconds: burning,
+      ease: Ease.inQuad,
+      onUpdate: (v) {
+        for (final part in parts) {
+          part.set('burnt', v);
+        }
+      },
+    ).then((_) {
+      if (!isDestroyed) destroy();
+    });
   }
 
   /// Leaves the field, the nearest way out, and is gone.

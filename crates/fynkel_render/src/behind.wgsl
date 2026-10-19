@@ -11,11 +11,12 @@ fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
     return vec4<f32>(at * 2.0 - 1.0, 0.0, 1.0);
 }
 
-@group(0) @binding(0) var scene_depth: texture_depth_multisampled_2d;
+// As floats, not depth: Mali can't compile a read of multisampled depth.
+@group(0) @binding(0) var scene_depth: texture_multisampled_2d<f32>;
 
 @fragment
 fn fs_depth(@builtin(position) at: vec4<f32>) -> @builtin(frag_depth) f32 {
-    return textureLoad(scene_depth, vec2<i32>(at.xy), 0);
+    return textureLoad(scene_depth, vec2<i32>(at.xy), 0).r;
 }
 
 @group(0) @binding(0) var scene_color: texture_2d<f32>;

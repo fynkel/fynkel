@@ -373,6 +373,32 @@ As built:
   Shaders, URP's renderer features and their Fynkel equivalents);
   `docs/stage-10-report.md`.
 
+As built:
+
+- **Sheepdog**: 36 patches of swaying blades (one material, left off
+  the minimap and the shadows); a pond in a dip of the field, its sandy
+  bed seen through rippling water that foams at the bank, and nothing
+  walks into it; a wolf chased off burns away as it runs (its own
+  `burnt` number); a bitten sheep flashes. At low the pond is still
+  water that doesn't read what's behind (below).
+- **Coins**: hologram coins (unlit, additive) and a "Toon" switch on
+  the HUD that draws every level in outlined bands. *Known limit:* on a
+  device that hasn't seen the toon shader, the restyled objects are
+  missing for the frames its pipelines take.
+- **Measured** with the lab's tour (`--define TOUR=shaders`: each scene
+  at each level, with how long its shaders took to be ready) and
+  Sheepdog's measure; the numbers are in
+  [the report](stage-10-report.md). The Mac and the iPhone hold 60 and
+  120; the Note10+ holds 60 at low in every lab scene.
+- **Fixed on the way**: the Note10+ lost its GPU on the first frame
+  that read what's behind (Mali can't compile a read of multisampled
+  depth as depth; it's read as floats now), and reading what's behind
+  cost it 12 fps in Sheepdog at low, so Sheepdog's pond is still water
+  at low.
+- **The guide**: §5's materials point to §14; §14 has "What shaders
+  cost"; §20 a line on reading what's behind. §21 and §22 had their
+  shader lines from phase 4b.
+
 ## 4. Decisions
 
 Each has a recommendation. Accepting the plan accepts them, unless you
@@ -425,4 +451,4 @@ say otherwise.
 - [x] Phase 3: what's behind (memory: 28 bytes a pixel while a reader is in view; phones in phase 5)
 - [x] Phase 4: whole styles (outline lower edges hidden by the ground; pixel look keeps multisampled edges)
 - [x] Phase 4b: the shader experience
-- [ ] Phase 5: games, the measure, the guide and the report
+- [x] Phase 5: games, the measure, the guide and the report (Note10+: Sheepdog at low 50 fps, its stage 8 gap; still water at low)

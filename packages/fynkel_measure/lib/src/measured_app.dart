@@ -30,7 +30,7 @@ import 'on_screen.dart';
 /// The bench runs [bench] (this package's timings), then the game's own
 /// [timings], if any.
 class MeasuredApp extends StatelessWidget {
-  const MeasuredApp(this.make, {super.key, this.source, this.overlay, this.change, this.timings});
+  const MeasuredApp(this.make, {super.key, this.source, this.overlay, this.change, this.timings, this.onStats});
 
   /// Makes a new root, as `Garden.new` does.
   final GameObject Function() make;
@@ -48,6 +48,10 @@ class MeasuredApp extends StatelessWidget {
   /// The game's own timings for the bench, given its loaded root: each a
   /// line for [Measurement.report].
   final List<String> Function(GameObject root)? timings;
+
+  /// Told the view's stats each second, given the root, for a game that
+  /// works out rates of its own (a tour of scenes, each measured apart).
+  final void Function(GameObject root, FynkelViewStats stats)? onStats;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
@@ -208,7 +212,10 @@ class _MeasuredState extends State<_Measured> {
                       root: _root,
                       source: widget.app.source,
                       onFrame: _onFrame,
-                      onStats: _measurement.onStats,
+                      onStats: (stats) {
+                        _measurement.onStats(stats);
+                        widget.app.onStats?.call(_root, stats);
+                      },
                       onViewStats: onScreen.onViewStats,
                       resolutionScale: MeasureSettings.resolution,
                     ),

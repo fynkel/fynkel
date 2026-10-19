@@ -9,7 +9,7 @@ import 'package:fynkel_measure/fynkel_measure.dart';
 void main() => runApp(
   MeasuredApp(
     CoinsGame.new,
-    overlay: (game) => Hud((game as CoinsGame).player.score),
+    overlay: (game) => Hud((game as CoinsGame).player.score, toon: game.toon),
     change: (game) => (game as CoinsGame).nextLevel(),
   ),
 );

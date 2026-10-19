@@ -4,6 +4,9 @@
 // The player moves with its own clips: idle, walk and sprint blended by
 // its speed, its arm holding what it carries on a layer, and a bend to
 // pick each coin up on another, from the torso up, while its legs walk.
+// The coins are holograms (assets/shaders/hologram.wgsl), and the toon
+// setting draws the whole game in flat bands of light, outlined
+// (assets/shaders/toon.wgsl).
 
 import 'dart:math' as math;
 
@@ -18,13 +21,63 @@ class CoinsGame extends GameObject {
   int _level = -1;
   Level? _current;
 
+  /// Whether the whole game is drawn in the toon style: flat bands of
+  /// light and outlines. The HUD's switch sets it.
+  final toon = ValueNotifier(false);
+
+  /// The coins' shader.
+  late final Shader hologram;
+  late final Shader _toon;
+
+  // Each renderer's own material, and each material's toon copy: held no
+  // longer than they are, so a level's go with it.
+  final _plainOf = Expando<Material>('plain');
+  final _toonOf = Expando<Material>('toon');
+
   @override
-  void onLoad() {
-    super.onLoad();
+  Future<void> onLoad() async {
+    await super.onLoad();
+    final (toonShader, hologramShader) = await (
+      assets.shader('shaders/toon.wgsl'),
+      assets.shader('shaders/hologram.wgsl'),
+    ).wait;
+    _toon = toonShader;
+    hologram = hologramShader;
     add(player);
     add(FollowCamera(player));
     nextLevel();
+    toon.addListener(_restyle);
   }
+
+  @override
+  void onDestroy() {
+    toon.removeListener(_restyle);
+    super.onDestroy();
+  }
+
+  void _restyle() => style(this);
+
+  /// Draws [o] and everything under it in the game's style: each lit
+  /// material swapped for its toon copy while [toon] is on, and back
+  /// after. The coins (a shader of their own) and the motes (a glow) keep
+  /// theirs. What's added later is styled as it loads.
+  void style(GameObject o) {
+    for (final renderer in o.getAll<MeshRenderer>()) {
+      final plain = _plainOf[renderer] ?? renderer.material;
+      if (plain == null || plain.shader != null || plain.emissiveIntensity > 1) continue;
+      _plainOf[renderer] = plain;
+      renderer.material = toon.value ? (_toonOf[plain] ??= _toonCopy(plain)) : plain;
+    }
+    for (final child in o.children) {
+      style(child);
+    }
+  }
+
+  /// [plain], its colours and textures, lit in three bands and outlined.
+  Material _toonCopy(Material plain) => plain.copy(name: '${plain.name} toon')
+    ..shader = _toon
+    ..set('bands', 3.0)
+    ..outline = const Outline(width: 0.04, color: Color(0xFF1C1626));
 
   /// Adds the next level and, once it's there, destroys this one, so
   /// there's always a level on screen.
@@ -72,6 +125,7 @@ class Level extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
+    final game = ancestor<CoinsGame>()!;
     final random = math.Random(seed);
     Vec3 somewhere(double near, double far) {
       final angle = random.nextDouble() * 2 * math.pi, radius = near + random.nextDouble() * (far - near);
@@ -96,16 +150,20 @@ class Level extends GameObject {
         add(Prop(asset, at: somewhere(10, 16), turn: random.nextDouble() * 2 * math.pi));
       }
     }
+    // Holograms: added to what's behind them, so they glow.
     final gold = Material(
-      color: Color.rgb(1, 0.75, 0.2),
-      roughness: 0.3,
-      emissive: Color.rgb(1, 0.6, 0.1),
-      emissiveIntensity: 0.4,
+      name: 'coin',
+      shader: game.hologram,
+      color: Color.rgb(1, 0.7, 0.15),
+      blending: Blending.additive,
     );
     for (var i = 0; i < 8; i++) {
       add(Coin(somewhere(2, 8) + Vec3(0, 0.7, 0), gold));
     }
     add(Swarm(300, motes));
+    // Its ground in the game's style; the props style themselves as they
+    // load.
+    game.style(this);
   }
 
   @override
@@ -138,6 +196,7 @@ class Prop extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     add(await assets.instantiate('props/$asset.glb'));
+    ancestor<CoinsGame>()?.style(this);
   }
 }
 
@@ -204,6 +263,7 @@ class Player extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     final model = add(await assets.instantiate('character.glb'));
+    ancestor<CoinsGame>()?.style(model);
     _hand = model.find('arm-right')!;
     // Kinematic: it walks where it's told, and meets the coins' triggers.
     addComponent(CapsuleCollider(radius: 0.4, height: 1.6, center: Vec3(0, 0.8, 0)));

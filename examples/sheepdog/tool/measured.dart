@@ -4,17 +4,19 @@
 // lifecycle check starts a new round again and again. The tool's app is
 // dark, so it's night in the field, the lamps on; `--define
 // SHEEPDOG_QUALITY=low` (or medium, high) draws it at that level, the
-// device's pick otherwise.
+// device's pick otherwise; `--define SHEEPDOG_SCALE=0.75` at that render
+// scale.
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show Light, LightKind, Quality;
+import 'package:fynkel/fynkel.dart' show Blending, Color, GameObject, Light, LightKind, MeshRenderer, Quality;
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/hud.dart';
 
 const _quality = String.fromEnvironment('SHEEPDOG_QUALITY');
 const _probe = String.fromEnvironment('SHEEPDOG_PROBE');
+const _scale = String.fromEnvironment('SHEEPDOG_SCALE');
 
 SheepdogGame _make() {
   final game = SheepdogGame(
@@ -22,6 +24,11 @@ SheepdogGame _make() {
     quality: ValueNotifier(Quality.levels.where((q) => q.name == _quality).firstOrNull),
   );
   game.loaded.then((_) {
+    // Its level drawn at a render scale of its own (set on the world, so
+    // the game keeps what it picked for the level).
+    if (_scale.isNotEmpty) {
+      game.world.quality = (game.world.quality ?? Quality.device).copyWith(renderScale: double.parse(_scale));
+    }
     final camera = game.camera.camera;
     if (_probe.contains('noao')) camera.ambientOcclusion = null;
     if (_probe.contains('nobloom')) camera.bloom = null;
@@ -59,8 +66,29 @@ void main() => runApp(
       );
     },
     change: (game) => (game as SheepdogGame).restart(),
+    onStats: _shaderProbes,
   ),
 );
+
+/// The shaders' probes: `nograss` and `nopond` hide them, `noground`
+/// draws the field with the engine's own shader. Again each second, as a
+/// new round makes them again.
+void _shaderProbes(GameObject root, Object _) {
+  final game = root as SheepdogGame;
+  if (_probe.contains('noground')) game.grass.shader = null;
+  if (_probe.contains('plainpond') && game.water.shader != null) {
+    game.water
+      ..shader = null
+      ..color = const Color(0xA00C4868)
+      ..blending = Blending.transparent;
+  }
+  for (final r in game.world.all<MeshRenderer>()) {
+    if ((_probe.contains('nograss') && r.material == game.blades) ||
+        (_probe.contains('nopond') && r.material == game.water)) {
+      r.enabled = false;
+    }
+  }
+}
 
 /// Opens a dialog over the game once it's built, and leaves it open.
 class _Menu extends StatefulWidget {
