@@ -56,9 +56,14 @@ impl Gpu {
             // staging copy (frame_ring.rs). Every native backend has it.
             // And a pipeline cache where there is one (Vulkan), kept
             // between runs (assets.rs). And drawing into 32-bit float
-            // images where it can, for bloom's (bloom.rs).
+            // images where it can, for bloom's (bloom.rs). And sample
+            // counts beyond WebGPU's 1 and 4 where it draws them, for
+            // Quality::samples' 2.
             required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
-                | (adapter.features() & (wgpu::Features::PIPELINE_CACHE | wgpu::Features::RG11B10UFLOAT_RENDERABLE)),
+                | (adapter.features()
+                    & (wgpu::Features::PIPELINE_CACHE
+                        | wgpu::Features::RG11B10UFLOAT_RENDERABLE
+                        | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)),
             // WebGPU's defaults, lowered wherever this adapter offers less
             // (the iOS simulator sits below a few of them). The renderer
             // stays within the lower set.

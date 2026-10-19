@@ -620,3 +620,65 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
     assert_eq!(stats.lines, 0);
     assert_golden("cube", &image);
 }
+
+/// Edges are smoothed by as many samples as the quality asks (Unity's
+/// MSAA setting): a white square, turned, on black and unlit, shows only
+/// black and white with one sample, one shade between with two, and more
+/// with four. Each level draws the same, and a renderer changes count
+/// from one frame to the next.
+#[test]
+fn edges_are_smoothed_by_the_samples_asked_for() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let white = std::sync::Arc::new(
+        CustomShader::new("white.wgsl", "fn unlit(in: SurfaceInput) -> vec4<f32> { return vec4<f32>(1.0); }")
+            .unwrap_or_else(|e| panic!("{e}")),
+    );
+    r.upload_shader(ShaderKey(1), white);
+    let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 3.0), Vec3::ZERO);
+    camera.clear_color = [0.0; 3];
+    let square = Draw {
+        skin: None,
+        own: [0.0; 4],
+        mesh: PLANE,
+        model: Mat4::from_rotation_z(0.3) * Mat4::from_rotation_x(std::f32::consts::FRAC_PI_2),
+        material: PbrMaterial {
+            shader: Some(ShaderUse { shader: ShaderKey(1), values: 0, textures: [None; MAX_TEXTURES], reach: 0.0 }),
+            double_sided: true,
+            ..PbrMaterial::DEFAULT
+        },
+        cast_shadows: false,
+        receive_shadows: false,
+    };
+    let scene = |quality: Quality| RenderScene {
+        camera: Some(camera),
+        quality: Some(quality),
+        lights: Vec::new(),
+        draws: vec![square],
+        ..stage1_scene()
+    };
+    // The reds there are, and the white's.
+    let shades = |image: &Image| {
+        let mut reds: Vec<u8> = image.rgba.chunks(4).map(|p| p[0]).collect();
+        reds.sort_unstable();
+        reds.dedup();
+        reds
+    };
+    for level in [QualityLevel::Low, QualityLevel::High] {
+        for (samples, between) in [(1, 0..=0), (2, 1..=1), (4, 2..=3), (1, 0..=0)] {
+            let (image, _) = render(&gpu, &mut r, &scene(Quality { samples, ..level.quality() }), 96, 96);
+            let shades = shades(&image);
+            assert_eq!((shades[0], shades.len() > 1), (0, true), "{samples} samples at {level:?}: {shades:?}");
+            assert!(between.contains(&(shades.len() - 2)), "{samples} samples at {level:?}: {shades:?}");
+        }
+    }
+}
+
+/// A count other than 1, 2 or 4 isn't drawn.
+#[test]
+fn samples_are_1_2_or_4() {
+    for samples in [0, 3, 8] {
+        let invalid = Quality { samples, ..Quality::LOW }.invalid();
+        assert!(invalid.as_deref().is_some_and(|e| e.contains("1, 2 or 4")), "{samples}: {invalid:?}");
+    }
+}

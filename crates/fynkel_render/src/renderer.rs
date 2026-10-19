@@ -247,12 +247,16 @@ struct LineVertex {
 pub(crate) const FRAME_UNIFORMS_SIZE: u64 = std::mem::size_of::<FrameUniforms>() as u64;
 
 /// The multisampled colour and depth targets, and the scene image the
-/// colour resolves into above low quality. Remade when the size or the
-/// image's format ([`Quality::image_format`]) changes.
+/// colour resolves into above low quality. Remade when the size, the
+/// samples or the image's format ([`Quality::image_format`]) changes.
 struct Targets {
     width: u32,
     height: u32,
-    color: wgpu::TextureView,
+    /// Samples a pixel: [`Quality::samples`], as the device draws it.
+    samples: u32,
+    /// The multisampled colour, or `None` with one sample, which draws
+    /// straight into what it would resolve into.
+    color: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     image: Option<SceneImage>,
     /// Ambient occlusion's images, made the first frame a camera has it.
@@ -279,7 +283,7 @@ struct BehindImages {
 }
 
 impl BehindImages {
-    fn new(kit: &Kit, width: u32, height: u32, color_format: wgpu::TextureFormat) -> Self {
+    fn new(kit: &Kit, width: u32, height: u32, color_format: wgpu::TextureFormat, samples: u32) -> Self {
         static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let device = &kit.gpu.device;
         let make = |label, format, sample_count| {
@@ -296,7 +300,7 @@ impl BehindImages {
                 })
                 .create_view(&Default::default())
         };
-        let msaa_depth = make("msaa depth, kept", DEPTH_FORMAT, Renderer::SAMPLES);
+        let msaa_depth = make("msaa depth, kept", DEPTH_FORMAT, samples);
         let depth = make("scene depth", DEPTH_FORMAT, 1);
         let color = make("scene colour", color_format, 1);
         let one = |label, layout, view| {
@@ -308,7 +312,7 @@ impl BehindImages {
         };
         Self {
             id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
-            copy: one("scene depth", &kit.msaa_depth_layout, &msaa_depth),
+            copy: one("scene depth", if samples > 1 { &kit.msaa_depth_layout } else { &kit.image_layout }, &msaa_depth),
             restore: one("what's behind", &kit.image_layout, &color),
             effect_depth: one("scene depth, for effects", &kit.effects.depth_layout, &depth),
             msaa_depth,
@@ -318,9 +322,9 @@ impl BehindImages {
     }
 
     /// Their GPU memory, `width` × `height` with colour in `format`.
-    fn bytes(width: u32, height: u32, format: wgpu::TextureFormat) -> u64 {
+    fn bytes(width: u32, height: u32, format: wgpu::TextureFormat, samples: u32) -> u64 {
         let color = format.block_copy_size(None).unwrap_or(4);
-        u64::from(width) * u64::from(height) * u64::from(4 * Renderer::SAMPLES + 4 + color)
+        u64::from(width) * u64::from(height) * u64::from(4 * samples + 4 + color)
     }
 }
 
@@ -496,6 +500,8 @@ fn made<K: Eq + std::hash::Hash>(
 pub(crate) struct Pipelines {
     /// The format they draw into.
     format: wgpu::TextureFormat,
+    /// The samples a pixel of the scene they draw into has.
+    samples: u32,
     maker: PipelineMaker,
     device: wgpu::Device,
     frame_layout: wgpu::BindGroupLayout,
@@ -556,6 +562,9 @@ pub struct Renderer {
     /// The pipelines that draw into the scene image, got when its format
     /// is first used.
     image_pipelines: Option<Arc<Pipelines>>,
+    /// The samples the scene is drawn with this frame: its quality's, as
+    /// far as the device draws them.
+    samples: u32,
     /// Whether a frame waits for its own shaders' pipelines to be made,
     /// or goes without their draws till they are.
     wait_for_shaders: bool,
@@ -666,15 +675,13 @@ impl std::fmt::Debug for Renderer {
     }
 }
 
-const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 /// How many frames shadow maps a view stops using are kept: about a
 /// second.
 const KEEP_UNUSED_MAPS: u32 = 60;
 pub(crate) const INSTANCE_SIZE: u64 = std::mem::size_of::<Instance>() as u64;
 
 impl Renderer {
-    /// MSAA sample count.
-    pub const SAMPLES: u32 = 4;
     /// The most suns that light a frame: the first ones in the scene.
     pub const MAX_SUNS: usize = MAX_SUNS;
     /// The most point and spot lights in a frame: the ones in view nearest
@@ -704,7 +711,7 @@ impl Renderer {
         assert!(format.is_srgb(), "the renderer draws into sRGB views, got {format:?}");
         let kit = assets::lock(&assets).kit.clone();
         Self {
-            pipelines: kit.pipelines(format),
+            pipelines: kit.pipelines(format, Quality::LOW.samples),
             frame_data: FrameRing::new(
                 &kit.gpu.device,
                 (kit.frame_layout.clone(), FRAME_UNIFORMS_SIZE),
@@ -719,6 +726,7 @@ impl Renderer {
             quality: kit.device_quality().quality(),
             format,
             image_pipelines: None,
+            samples: Quality::LOW.samples,
             wait_for_shaders: true,
             assets,
             targets: None,
@@ -1204,7 +1212,7 @@ impl Renderer {
         stats.behind = self.behind;
         if self.behind_kept {
             let format = self.image_format.unwrap_or(self.format);
-            stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format);
+            stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format, self.samples);
         }
         // The effects' pictures: kept a while too.
         let count = self.effect_chain.len();
@@ -1369,17 +1377,19 @@ impl Renderer {
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
         let (width, height) = self.size;
         let image = self.image_format;
-        if self
-            .targets
-            .as_ref()
-            .is_none_or(|t| (t.width, t.height, t.image.as_ref().map(|i| i.format)) != (width, height, image))
-        {
+        self.samples = self.kit.samples(self.quality.samples, &[image.unwrap_or(self.format)]);
+        if self.pipelines.samples != self.samples {
+            self.pipelines = self.kit.pipelines(self.format, self.samples);
+        }
+        if self.targets.as_ref().is_none_or(|t| {
+            (t.width, t.height, t.samples, t.image.as_ref().map(|i| i.format)) != (width, height, self.samples, image)
+        }) {
             self.targets = Some(self.create_targets(width, height, image));
         }
         if let Some(format) = image
-            && self.image_pipelines.as_ref().is_none_or(|p| p.format != format)
+            && self.image_pipelines.as_ref().is_none_or(|p| (p.format, p.samples) != (format, self.samples))
         {
-            self.image_pipelines = Some(self.kit.pipelines(format));
+            self.image_pipelines = Some(self.kit.pipelines(format, self.samples));
         }
         let effects = self.effect_chain.len();
         if effects > 0 {
@@ -1414,7 +1424,7 @@ impl Renderer {
                 targets.behind = None;
             } else if targets.behind.is_none() {
                 let format = targets.image.as_ref().map_or(self.format, |i| i.format);
-                targets.behind = Some(BehindImages::new(&self.kit, width, height, format));
+                targets.behind = Some(BehindImages::new(&self.kit, width, height, format, targets.samples));
             }
             if let Some(maps) = &mut self.shadow_maps {
                 maps.read_ao(&self.kit.gpu.device, &self.kit.shadows, ao);
@@ -1620,6 +1630,9 @@ impl Renderer {
         let behind_group = behind.and(shadow_maps.behind_bind_group());
         // The solid scene's depth, for what's behind or a screen effect.
         let kept_depth = targets.behind.as_ref().filter(|_| self.behind || self.effect_depth);
+        // Where the solid scene ends up: what's behind's colour, when a
+        // shader reads it, or the scene image or the view.
+        let scene_resolve = behind.map_or(resolve, |b| &b.color);
         let sky_lit = self.sky_next.is_some();
         let ao = self.ao.is_some();
         let shadowed = self.shadow_maps_drawn != (0, 0);
@@ -1729,19 +1742,20 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &targets.color,
+                    view: targets.color.as_ref().unwrap_or(scene_resolve),
                     depth_slice: None,
-                    resolve_target: Some(behind.map_or(resolve, |b| &b.color)),
+                    resolve_target: targets.color.as_ref().map(|_| scene_resolve),
                     // The multisampled colour is only needed until it's
                     // resolved, so it's never stored. On tile GPUs it never
-                    // leaves the chip.
+                    // leaves the chip. With one sample it's drawn straight
+                    // where it would resolve.
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(match targets.image {
                             // Shown as picked: not light (above).
                             Some(_) => wgpu::Color { a: 0.0, ..self.clear },
                             None => self.clear,
                         }),
-                        store: wgpu::StoreOp::Discard,
+                        store: if targets.color.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 // Kept only for what's behind, or an effect.
@@ -1800,13 +1814,13 @@ impl Renderer {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("scene, see-through"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &targets.color,
+                    view: targets.color.as_ref().unwrap_or(resolve),
                     depth_slice: None,
-                    resolve_target: Some(resolve),
+                    resolve_target: targets.color.as_ref().map(|_| resolve),
                     // Every sample is written, by what's behind put back.
                     ops: wgpu::Operations {
                         load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT),
-                        store: wgpu::StoreOp::Discard,
+                        store: if targets.color.is_some() { wgpu::StoreOp::Discard } else { wgpu::StoreOp::Store },
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
@@ -1923,7 +1937,7 @@ impl Renderer {
                     label: Some(label),
                     size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
                     mip_level_count: 1,
-                    sample_count: Self::SAMPLES,
+                    sample_count: self.samples,
                     dimension: wgpu::TextureDimension::D2,
                     format,
                     // Cleared and thrown away in the one pass: on tiled
@@ -1960,7 +1974,8 @@ impl Renderer {
         Targets {
             width,
             height,
-            color: make("msaa colour", color_format),
+            samples: self.samples,
+            color: (self.samples > 1).then(|| make("msaa colour", color_format)),
             depth: make("msaa depth", DEPTH_FORMAT),
             image,
             ao: None,
@@ -1980,9 +1995,10 @@ impl Renderer {
 }
 
 impl Pipelines {
-    pub(crate) fn new(kit: &Kit, format: wgpu::TextureFormat) -> Self {
+    pub(crate) fn new(kit: &Kit, format: wgpu::TextureFormat, samples: u32) -> Self {
         Self {
             format,
+            samples,
             maker: kit.maker.clone(),
             device: kit.gpu.device.clone(),
             frame_layout: kit.frame_layout.clone(),
@@ -2294,7 +2310,7 @@ impl Pipelines {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+            multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &module,
                 entry_point: Some("fs_outline"),
@@ -2469,7 +2485,7 @@ impl Pipelines {
                 bias: Default::default(),
             }),
             multisample: wgpu::MultisampleState {
-                count: Renderer::SAMPLES,
+                count: self.samples,
                 alpha_to_coverage_enabled: cover == Cover::Cutout,
                 ..Default::default()
             },
@@ -2484,8 +2500,21 @@ impl Pipelines {
         })
     }
 
+    /// behind.wgsl, reading the kept depth as it's drawn: multisampled,
+    /// or with one sample, plain.
     fn behind_shader(&self) -> &wgpu::ShaderModule {
-        self.behind_shader.get_or_init(|| self.device.create_shader_module(wgpu::include_wgsl!("behind.wgsl")))
+        self.behind_shader.get_or_init(|| {
+            let source = include_str!("behind.wgsl");
+            let source = if self.samples > 1 {
+                source.into()
+            } else {
+                source.replace("texture_multisampled_2d<f32>", "texture_2d<f32>")
+            };
+            self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("behind.wgsl"),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            })
+        })
     }
 
     /// Copies one sample of the solid scene's multisampled depth into the
@@ -2495,7 +2524,11 @@ impl Pipelines {
             let shader = self.behind_shader();
             let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("scene depth"),
-                bind_group_layouts: &[Some(&self.msaa_depth_layout)],
+                bind_group_layouts: &[Some(if self.samples > 1 {
+                    &self.msaa_depth_layout
+                } else {
+                    &self.image_layout
+                })],
                 immediate_size: 0,
             });
             self.maker.make(wgpu::RenderPipelineDescriptor {
@@ -2556,7 +2589,7 @@ impl Pipelines {
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
-                multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+                multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
                 fragment: Some(wgpu::FragmentState {
                     module: shader,
                     entry_point: Some("fs_restore"),
@@ -2609,7 +2642,7 @@ impl Pipelines {
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
-            multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+            multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
             fragment: Some(wgpu::FragmentState {
                 module: &line_shader,
                 entry_point: Some("fs_main"),
@@ -2653,7 +2686,7 @@ impl Pipelines {
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
-                multisample: wgpu::MultisampleState { count: Renderer::SAMPLES, ..Default::default() },
+                multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some("fs_main"),

@@ -113,16 +113,16 @@ fn a_shader_that_reads_whats_behind_is_told_apart() {
 }
 
 /// A pane over most of the view that shows what's behind it as it is
-/// can't be seen, at every level: what's behind is the scene, lit, with
-/// its sky, shadows, occlusion and glow. Opaque or see-through, it's
-/// drawn over the scene.
+/// can't be seen, at every level and with 1, 2 or 4 samples a pixel: what's
+/// behind is the scene, lit, with its sky, shadows, occlusion and glow.
+/// Opaque or see-through, it's drawn over the scene.
 #[test]
 fn a_surface_showing_whats_behind_it_as_it_is_cant_be_seen() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
     shader(&mut r, ShaderKey(1), "clear.wgsl", CLEAR);
-    for quality in LEVELS {
-        let scene = stage(quality);
+    for (quality, samples) in LEVELS.into_iter().flat_map(|q| [4, 1, 2].map(|n| (q, n))) {
+        let scene = RenderScene { quality: Some(Quality { samples, ..quality.quality() }), ..stage(quality) };
         let (expected, stats) = render(&gpu, &mut r, &scene, SIZE, SIZE);
         assert!(!stats.behind);
         for blend in [Blend::Opaque, Blend::Transparent] {
@@ -132,7 +132,7 @@ fn a_surface_showing_whats_behind_it_as_it_is_cant_be_seen() {
             let (image, stats) = render(&gpu, &mut r, &covered, SIZE, SIZE);
             assert!(stats.behind, "{blend:?}");
             let off = differing(&image, &expected, 2);
-            assert!(off <= 20, "{off} pixels differ at {} ({blend:?})", level_name(quality));
+            assert!(off <= 20, "{off} pixels differ at {}, {samples} samples ({blend:?})", level_name(quality));
         }
     }
 }

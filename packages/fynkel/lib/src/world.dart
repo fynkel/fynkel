@@ -448,6 +448,9 @@ final class World implements Finalizable {
     if (value != null && !(value.renderScale > 0 && value.renderScale <= 2)) {
       throw ArgumentError.value(value.renderScale, 'renderScale', 'is not above 0 and at most 2');
     }
+    if (value != null && ![0, 2, 4].contains(value.antiAliasing)) {
+      throw ArgumentError.value(value.antiAliasing, 'antiAliasing', 'is not 0, 2 or 4');
+    }
     using((arena) {
       Pointer<FyQuality> q = nullptr;
       if (value != null) value._write((q = arena<FyQuality>()).ref);
@@ -932,11 +935,13 @@ final class Quality {
     this.spotShadows = 2,
     this.spotShadowResolution = 1024,
     this.renderScale = 1,
+    this.antiAliasing = 4,
   });
 
   /// The cheapest, for slow GPUs and ones not known: drawn straight to the
-  /// screen, hard shadows from the sun and one spot light, no bloom, no
-  /// ambient occlusion, lamps without highlights.
+  /// screen, at three quarters of its pixels across, hard shadows from the
+  /// sun and one spot light, no bloom, no ambient occlusion, lamps without
+  /// highlights.
   static const low = Quality(
     name: 'low',
     hdr: false,
@@ -948,6 +953,7 @@ final class Quality {
     shadowDistance: 40,
     spotShadows: 1,
     spotShadowResolution: 512,
+    renderScale: 0.75,
   );
 
   /// Between: bloom, and soft shadows in two cascades; no ambient
@@ -1032,11 +1038,20 @@ final class Quality {
   final int spotShadowResolution;
 
   /// Pixels drawn per pixel of the screen, as Unity's render scale: above
-  /// 0 and at most 2, and 1 at every level. Below 1 draws fewer pixels,
-  /// which is faster and keeps a phone cooler, and the picture is a little
-  /// softer: at 0.75, about half the pixels. Each view's own
+  /// 0 and at most 2; 0.75 at low, 1 at medium and high. Below 1 draws
+  /// fewer pixels, which is faster and keeps a phone cooler, and the
+  /// picture is a little softer: at 0.75, about half the pixels (a Galaxy
+  /// Note10+ draws Sheepdog at 55 fps, against 43 at 1). Each view's own
   /// `resolutionScale` multiplies it.
   final double renderScale;
+
+  /// How many samples each pixel is drawn with, which smooths the edges of
+  /// what's drawn (MSAA), as Unity's anti-aliasing setting: 0 (none), 2 or
+  /// 4, and 4 at every level. A device that can't draw 2 draws none. On
+  /// phones' GPUs the samples stay on the chip, so 4 costs less than it
+  /// sounds (a Note10+ at low gained nothing without it, at 0.75); without,
+  /// edges are jagged and shimmer as things move.
+  final int antiAliasing;
 
   /// A copy with the values given changed.
   Quality copyWith({
@@ -1053,6 +1068,7 @@ final class Quality {
     int? spotShadows,
     int? spotShadowResolution,
     double? renderScale,
+    int? antiAliasing,
   }) => Quality(
     name: name ?? this.name,
     hdr: hdr ?? this.hdr,
@@ -1067,6 +1083,7 @@ final class Quality {
     spotShadows: spotShadows ?? this.spotShadows,
     spotShadowResolution: spotShadowResolution ?? this.spotShadowResolution,
     renderScale: renderScale ?? this.renderScale,
+    antiAliasing: antiAliasing ?? this.antiAliasing,
   );
 
   void _write(FyQuality q) {
@@ -1081,7 +1098,8 @@ final class Quality {
       ..shadow_softness = shadowSoftness._value
       ..shadow_distance = shadowDistance
       ..spot_shadows = spotShadows
-      ..spot_shadow_resolution = spotShadowResolution;
+      ..spot_shadow_resolution = spotShadowResolution
+      ..samples = antiAliasing == 0 ? 1 : antiAliasing;
   }
 
   List<Object> get _fields => [
@@ -1098,6 +1116,7 @@ final class Quality {
     spotShadows,
     spotShadowResolution,
     renderScale,
+    antiAliasing,
   ];
 
   @override
@@ -1117,7 +1136,8 @@ final class Quality {
   String toString() =>
       'Quality($name: hdr $hdr, bloom $bloom, ambientOcclusion $ambientOcclusion, lampHighlights $lampHighlights, '
       'shadows ${shadows ? '$shadowCascades × $shadowResolution ${shadowSoftness.name} to ${shadowDistance}m, '
-                'spot $spotShadows × $spotShadowResolution' : 'off'}, renderScale $renderScale)';
+                'spot $spotShadows × $spotShadowResolution' : 'off'}, renderScale $renderScale, '
+      'antiAliasing $antiAliasing)';
 }
 
 /// How a shadow's edge is drawn ([Quality.shadowSoftness]).

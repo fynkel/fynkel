@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 37
+#define FY_ABI_VERSION 38
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -226,6 +226,9 @@ typedef struct FyQuality {
   uint32_t spot_shadows;
   // Each spot light's map's side, as `shadow_resolution`.
   uint32_t spot_shadow_resolution;
+  // Samples a pixel is drawn with, smoothing edges (MSAA): 1, 2 or 4.
+  // A device that can't draw a count draws the next below it.
+  uint32_t samples;
 } FyQuality;
 
 // sRGB, 0–1 per channel.
