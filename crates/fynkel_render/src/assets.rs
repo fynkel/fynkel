@@ -32,7 +32,8 @@ pub struct Kit {
     /// The last pass's input: the scene's half-float image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
     /// The multisampled depth one sample of is copied from, for shaders
-    /// that read what's behind (behind.wgsl).
+    /// that read what's behind (behind.wgsl). Drawn with one sample, it's
+    /// read through [`Kit::image_layout`].
     pub(crate) msaa_depth_layout: wgpu::BindGroupLayout,
     pub(crate) textures: TextureKit,
     /// Shadow maps' layouts, sampler and pipelines.
@@ -45,7 +46,8 @@ pub struct Kit {
     pub(crate) ao: AoKit,
     /// Screen effects' layout and sampler.
     pub(crate) effects: crate::effects::EffectKit,
-    pipelines: Mutex<HashMap<wgpu::TextureFormat, Arc<Pipelines>>>,
+    /// By the format they draw into and their samples.
+    pipelines: Mutex<HashMap<(wgpu::TextureFormat, u32), Arc<Pipelines>>>,
     pub(crate) maker: PipelineMaker,
 }
 
@@ -297,9 +299,27 @@ impl Kit {
     }
 
     /// The pipelines that draw into `format`, made on first use.
-    pub(crate) fn pipelines(&self, format: wgpu::TextureFormat) -> Arc<Pipelines> {
+    pub(crate) fn pipelines(&self, format: wgpu::TextureFormat, samples: u32) -> Arc<Pipelines> {
         let mut made = self.pipelines.lock().unwrap_or_else(PoisonError::into_inner);
-        made.entry(format).or_insert_with(|| Arc::new(Pipelines::new(self, format))).clone()
+        made.entry((format, samples)).or_insert_with(|| Arc::new(Pipelines::new(self, format, samples))).clone()
+    }
+
+    /// The most samples, up to `wanted`, that this device draws every one
+    /// of `formats` and the depth with: 1 and 4 everywhere WebGPU runs, 2
+    /// where the device has its adapter's own format features.
+    pub(crate) fn samples(&self, wanted: u32, formats: &[wgpu::TextureFormat]) -> u32 {
+        let adapter = &self.gpu.adapter;
+        let own = self.gpu.device.features().contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
+        let drawn = |n: u32| {
+            n == 1
+                || n == 4
+                || own
+                    && formats
+                        .iter()
+                        .chain([&crate::renderer::DEPTH_FORMAT])
+                        .all(|&f| adapter.get_texture_format_features(f).flags.sample_count_supported(n))
+        };
+        [4, 2, 1].into_iter().find(|&n| n <= wanted && drawn(n)).unwrap_or(1)
     }
 }
 

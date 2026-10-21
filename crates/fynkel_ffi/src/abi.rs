@@ -29,7 +29,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 37;
+pub const FY_ABI_VERSION: u32 = 38;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -197,6 +197,9 @@ pub struct FyQuality {
     pub spot_shadows: u32,
     /// Each spot light's map's side, as `shadow_resolution`.
     pub spot_shadow_resolution: u32,
+    /// Samples a pixel is drawn with, smoothing edges (MSAA): 1, 2 or 4.
+    /// A device that can't draw a count draws the next below it.
+    pub samples: u32,
 }
 
 impl FyQuality {
@@ -218,6 +221,7 @@ impl FyQuality {
             shadow_distance: s.distance,
             spot_shadows: s.spot_maps as u32,
             spot_shadow_resolution: s.spot_map_size,
+            samples: q.samples,
         }
     }
 
@@ -243,6 +247,7 @@ impl FyQuality {
                 spot_map_size: self.spot_shadow_resolution,
                 distance: self.shadow_distance,
             }),
+            samples: self.samples,
         };
         match quality.invalid() {
             Some(why) => Err(Error::new(FyStatus::InvalidValue, format!("quality: {why}"))),

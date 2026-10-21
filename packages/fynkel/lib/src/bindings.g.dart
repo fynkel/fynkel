@@ -610,7 +610,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 37;
+const int FY_ABI_VERSION = 38;
 
 const int FY_APPLE_MORE = 2;
 
@@ -1033,6 +1033,9 @@ final class FyQuality extends ffi.Struct {
   @ffi.Uint32()
   external int spot_shadow_resolution;
 
+  @ffi.Uint32()
+  external int samples;
+
   static ffi.Pointer<FyQuality> $allocate(
     ffi.Allocator $allocator, {
     required bool hdr,
@@ -1046,6 +1049,7 @@ final class FyQuality extends ffi.Struct {
     required double shadow_distance,
     required int spot_shadows,
     required int spot_shadow_resolution,
+    required int samples,
   }) => $allocator<FyQuality>()
     ..ref.hdr = hdr
     ..ref.bloom = bloom
@@ -1057,7 +1061,8 @@ final class FyQuality extends ffi.Struct {
     ..ref.shadow_softness = shadow_softness
     ..ref.shadow_distance = shadow_distance
     ..ref.spot_shadows = spot_shadows
-    ..ref.spot_shadow_resolution = spot_shadow_resolution;
+    ..ref.spot_shadow_resolution = spot_shadow_resolution
+    ..ref.samples = samples;
 }
 
 final class FyQuat extends ffi.Struct {

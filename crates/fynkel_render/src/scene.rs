@@ -300,12 +300,18 @@ pub struct Quality {
     /// How lights' shadows are drawn, or `None` for none at all, whatever
     /// the lights ask.
     pub shadows: Option<ShadowLevel>,
+    /// How many samples each pixel is drawn with, which smooths edges
+    /// (MSAA): 1 (none), 2 or 4. A device that can't draw a count draws the
+    /// next below it. On phones' GPUs the samples stay on the chip, so 4
+    /// costs less than it sounds.
+    pub samples: u32,
 }
 
 impl Quality {
     /// The cheapest: straight to the screen, hard shadows from the sun and
     /// one spot light, no effects.
     pub const LOW: Self = Self {
+        samples: 4,
         hdr: false,
         bloom: false,
         ambient_occlusion: false,
@@ -323,6 +329,7 @@ impl Quality {
     /// Between: the scene image, bloom, soft shadows in two cascades. For
     /// a phone that keeps up with it; no device picks it itself.
     pub const MEDIUM: Self = Self {
+        samples: 4,
         hdr: true,
         bloom: true,
         ambient_occlusion: false,
@@ -340,6 +347,7 @@ impl Quality {
     /// Apple's GPUs, and desktops': everything, with softer shadows in
     /// three cascades.
     pub const HIGH: Self = Self {
+        samples: 4,
         hdr: true,
         bloom: true,
         ambient_occlusion: true,
@@ -363,6 +371,9 @@ impl Quality {
 
     /// Why it can't be drawn, if it can't: a shadow level out of range.
     pub fn invalid(&self) -> Option<String> {
+        if ![1, 2, 4].contains(&self.samples) {
+            return Some(format!("{} samples: 1, 2 or 4", self.samples));
+        }
         let s = self.shadows?;
         let size = |n: u32| (256..=4096).contains(&n) && n.is_power_of_two();
         if !(1..=3).contains(&s.cascades) {

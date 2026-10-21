@@ -89,12 +89,18 @@ void main() {
       Quality.high.copyWith(shadowDistance: 0),
       Quality.high.copyWith(renderScale: 0),
       Quality.high.copyWith(renderScale: 2.5),
+      Quality.high.copyWith(antiAliasing: 1),
+      Quality.high.copyWith(antiAliasing: 8),
     ]) {
       expect(() => world.quality = bad, throwsArgumentError, reason: '$bad');
       expect(world.quality, Quality.high);
     }
     world.quality = Quality.high.copyWith(shadows: false, shadowCascades: 0);
     expect(beside(view), greaterThan(20), reason: 'still glowing');
+    for (final antiAliasing in [0, 2, 4]) {
+      world.quality = Quality.high.copyWith(antiAliasing: antiAliasing);
+      expect(beside(view), greaterThan(20), reason: 'glowing with antiAliasing $antiAliasing');
+    }
   });
 
   test('the levels are what the engine has, and copies compare by value', () {
@@ -102,8 +108,8 @@ void main() {
     expect(const Quality(name: 'medium'), Quality.medium, reason: 'the default is medium');
     expect(Quality.low.copyWith(), Quality.low);
     expect(Quality.low.copyWith(bloom: true), isNot(Quality.low));
-    expect(Quality.low.copyWith(renderScale: 0.75), isNot(Quality.low));
-    expect(Quality.levels.map((q) => q.renderScale), everyElement(1));
+    expect(Quality.low.copyWith(renderScale: 1), isNot(Quality.low));
+    expect(Quality.levels.map((q) => (q.renderScale, q.antiAliasing)), [(0.75, 4), (1, 4), (1, 4)]);
     expect(Quality.low.copyWith(bloom: true).hashCode, Quality.low.copyWith(bloom: true).hashCode);
     expect(
       (Quality.low.ambientOcclusion, Quality.medium.ambientOcclusion, Quality.high.ambientOcclusion),
@@ -129,6 +135,9 @@ void main() {
           shadowDistance: e.shadow_distance,
           spotShadows: e.spot_shadows,
           spotShadowResolution: e.spot_shadow_resolution,
+          antiAliasing: e.samples == 1 ? 0 : e.samples,
+          // The views' to draw at, not the engine's.
+          renderScale: level.renderScale,
         );
         expect(engine, level);
       });

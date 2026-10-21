@@ -12,6 +12,7 @@ fn vs_main(@builtin(vertex_index) i: u32) -> @builtin(position) vec4<f32> {
 }
 
 // As floats, not depth: Mali can't compile a read of multisampled depth.
+// Drawn with one sample, it's a texture_2d<f32> (renderer.rs).
 @group(0) @binding(0) var scene_depth: texture_multisampled_2d<f32>;
 
 @fragment

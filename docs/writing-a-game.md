@@ -524,7 +524,8 @@ from:
 | `shadowSoftness` | hard | soft | softer |
 | `shadowDistance` | 40 m | 60 m | 100 m |
 | `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
-| `renderScale`: pixels drawn per pixel of the screen | 1 | 1 | 1 |
+| `renderScale`: pixels drawn per pixel of the screen | 0.75 | 1 | 1 |
+| `antiAliasing`: samples a pixel, smoothing edges (MSAA) | 4 | 4 | 4 |
 
 When the game doesn't choose, the device picks a level: high on Apple's
 GPUs and desktops', low on Android phones (Mali, Adreno and the rest), on a
@@ -559,9 +560,17 @@ Quality chooseQuality(World world, Quality? chosen) {
 - **Fewer pixels: `renderScale`**, as Unity's render scale. At 0.75 the
   views draw about half the pixels and stretch the picture to fit: a
   little softer, and much cheaper on a big screen (an iPhone 16 Pro Max is
-  1320 × 2868). Put it on the settings page beside the levels:
-  `world.quality = Quality.high.copyWith(renderScale: 0.75)`. A view's own
-  `FynkelView(resolutionScale:)` multiplies it, for one view (a minimap).
+  1320 × 2868). Low draws at 0.75: on a Galaxy Note10+, Sheepdog at low
+  went from 43 fps to 55. Put it on the settings page beside the levels:
+  `world.quality = Quality.high.copyWith(renderScale: 0.75)`, or
+  `Quality.low.copyWith(renderScale: 1)` for low at every pixel. A view's
+  own `FynkelView(resolutionScale:)` multiplies it, for one view (a
+  minimap).
+- **Smoother edges: `antiAliasing`**, as Unity's anti-aliasing (MSAA): 4
+  samples a pixel at every level, or 2, or 0 for none. On phones' GPUs the
+  samples stay on the chip, so 4 costs little: on the Note10+ at low,
+  Sheepdog gained nothing without them, and its sheep's edges were jagged.
+  A device that can't draw 2 draws none.
 - **A camera asks, the quality decides.** A camera's bloom and ambient
   occlusion (below) are drawn only where the quality has them on, so a
   cheaper quality for older phones can turn bloom off without touching
@@ -3183,6 +3192,7 @@ What keeps a game fast:
 | `Time.timeScale = 0` for a pause menu | `world.paused = true`: time and input stop |
 | `Application.targetFrameRate` | `world.targetFrameRate` (60 unless set) |
 | The render scale (URP), `QualitySettings` | `Quality.renderScale`, `world.quality` |
+| Anti Aliasing (MSAA) | `Quality.antiAliasing`: 0, 2 or 4 |
 | On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | a Flutter widget calling `input.setAxis2` and `action.press()`/`release()` |
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `StopAllCoroutines`, `yield return new WaitForSeconds(1)` | `startRoutine(() async {...})`, `stopAllRoutines()`, `await wait(1)` |
@@ -3276,6 +3286,13 @@ What keeps a game fast:
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Low draws fewer pixels** (2026-10-19): `Quality.low` has a
+  `renderScale` of 0.75, so a phone that picks low (Android's) draws at
+  three quarters of its pixels across, a little softer and about a
+  quarter faster. `Quality.low.copyWith(renderScale: 1)` draws as before.
+  `Quality` has `antiAliasing` (4 at every level, as before);
+  `FyQuality` has `samples` (ABI 38).
 
 - **A new shader doesn't hold the frame up** (2026-10-18): a view on
   screen draws without a material's objects the first time its shader is
