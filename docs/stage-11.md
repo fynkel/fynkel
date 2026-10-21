@@ -1,6 +1,6 @@
 # Stage 11 plan: sound
 
-Status: proposed 2026-10-21. Scope and rules:
+Status: accepted 2026-10-21 ("let's go with your recommendation"), with the recommended answer to each decision (§7). Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 10 is done
 ([report](stage-10-report.md)).
 

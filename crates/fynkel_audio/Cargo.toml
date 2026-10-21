@@ -1,0 +1,19 @@
+[package]
+name = "fynkel_audio"
+description = "Fynkel's sound: clips decoded from WAV, OGG Vorbis and MP3, a mixer that never waits on the audio thread, and the device it plays through."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[dependencies]
+cpal.workspace = true
+rtrb.workspace = true
+symphonia.workspace = true
+
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-avf-audio.workspace = true
