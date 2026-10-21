@@ -92,7 +92,7 @@ read again for this plan):
 |---|---|
 | Audio is built in. | A package, `fynkel_audio`: add it to `pubspec.yaml`; leave it out and nothing of it is built. |
 | `AudioClip`, imported from WAV, OGG, MP3; load types *Decompress On Load*, *Compressed In Memory*, *Streaming*. | `AudioClip` from `assets.audio('coin.ogg')`: WAV, OGG Vorbis, MP3. Short clips are decoded when loaded; long ones (music) stream (`assets.audio(name, stream: true)`, and by default for clips over 10 s). |
-| `AudioSource`: `clip`, `volume`, `pitch`, `loop`, `playOnAwake`, `mute`, `priority`, `stereoPan`, `spatialBlend`, rolloff, `minDistance`, `maxDistance`, `outputAudioMixerGroup`. | The same, as a behaviour; `group` instead of the mixer group. |
+| `AudioSource`: `clip`, `volume`, `pitch`, `loop`, `playOnAwake`, `mute`, `priority`, `panStereo`, `spatialBlend`, rolloff, `minDistance`, `maxDistance`, `outputAudioMixerGroup`. | The same, as a behaviour; `group` instead of the mixer group. |
 | `Play`, `Pause`, `UnPause`, `Stop`, `PlayOneShot(clip, volumeScale)`, `PlayDelayed`, `isPlaying`, `time`. | The same, plus `playOneShot(clip, volume:, pitch:)`, since varying the pitch of repeated sounds is what every game does. |
 | `AudioSource.PlayClipAtPoint(clip, position)`. | `audio.playAt(clip, position)`. |
 | `AudioListener`, usually on the main camera; one at a time. | The same; without one, the world's camera listens. |
@@ -137,8 +137,8 @@ read again for this plan):
 - **`spatialBlend`** 0 (2D: same in both ears, for music and the UI) to 1
   (3D), as Unity.
 - **Fading with distance**: Unity's logarithmic rolloff by default (full
-  volume within `minDistance`, falling as 1/distance, silent past
-  `maxDistance`), and linear.
+  volume within `minDistance`, falling as 1/distance, and no lower past
+  `maxDistance`, as Unity's is), and linear (silent at `maxDistance`).
 - **Left and right** from where the source is around the listener,
   with equal-power panning. A sound just behind is a little quieter and
   duller, so front and back aren't the same.
@@ -209,7 +209,7 @@ a device; and a world without sound is unchanged.
 ### Phase 2: 3D sound
 
 - `AudioListener`, the camera's by default; `spatialBlend`, rolloff,
-  `minDistance`, `maxDistance`, `stereoPan`, panning.
+  `minDistance`, `maxDistance`, `panStereo`, panning.
 - `audio.playAt(clip, position)`.
 - Positions sent once a frame for every playing 3D source (one call),
   smoothed in the mixer.
@@ -219,6 +219,29 @@ a device; and a world without sound is unchanged.
 *Done when* the audio goldens of a source left, right, near and far
 match; a fast source doesn't crackle (checked in its golden); and 32
 moving 3D voices cost the frame less than 0.1 ms on the Note10+.
+
+*As built* (branch stage-11-3d, sound ABI 3):
+
+- The mixer gets each voice's four gains (each side of the clip to each
+  ear) and how dull it is, and slides to them across one callback; a
+  one-pole low pass at 5 kHz makes behind duller, and behind is 30%
+  quieter. Equal-power panning, the centre at full volume in both ears.
+- Logarithmic rolloff stops falling at `maxDistance` rather than going
+  silent, as Unity's does (the plan said silent); linear is silent there.
+- Each frame, after the cameras move, one `readWorldTransforms` reads
+  every playing 3D source and the listener, and one `fa_audio_place`
+  sends them. The listener is the last enabled `AudioListener`, else the
+  world's camera, else the origin looking along -Z.
+- Goldens: crates/fynkel_audio/tests/goldens/spatial_{left,right,near,
+  far,behind,fly_past}.wav. Without the slide, the fly-past jumps 0.098
+  between samples; with it, under 0.035.
+- The Note10+, 32 bees circling (the lab's swarm): 0.086–0.102 ms a
+  frame, of which about 0.035 ms is reading the camera, which sends the
+  frame's moves to the engine early (drawing would send them anyway).
+  Sound's own share is about 0.05 ms. The 0.1 ms bar is met for sound's
+  share, and is at the edge counted the stricter way.
+- The guide's §13b has the 3D part; the dart allocation tests play,
+  move, turn and playAt with no garbage.
 
 ### Phase 3: music and the mix
 

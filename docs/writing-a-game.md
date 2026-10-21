@@ -1637,6 +1637,70 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   with no device: `world.update` steps it, a clip ends after its length,
   and `onEnd` is called.
 
+**In 3D.** A source is 2D unless told otherwise: the same in both ears
+wherever it is, as music and clicks should be. Give it a `spatialBlend`
+of 1 and it's heard from where its object is, as Unity's:
+
+- **Left and right** from where it is around whoever hears, and a little
+  quieter and duller right behind, so behind isn't in front.
+- **Fading with distance**: full within `minDistance` (1 m unless set),
+  then by `rolloffMode`. `AudioRolloffMode.logarithmic` (the default)
+  halves with each doubling of the distance, as sound does, and stops
+  falling at `maxDistance` (500 m); `linear` falls in a straight line to
+  silence at `maxDistance`, which is easier to place.
+- **Who hears** is the camera, unless an object has an `AudioListener`
+  (the player, in a game whose camera flies far behind). With more than
+  one, the last enabled hears.
+- **It moves** with its object. Once a frame, after the cameras move,
+  where every playing 3D source and the listener are is read in one call,
+  and the mixer slides each sound to its new place over a few
+  milliseconds, so one that flies past doesn't crackle.
+- `spatialBlend` between 0 and 1 blends the two; `panStereo` (-1 left to
+  1 right) places the 2D part.
+- `audio.playAt(clip, position)` plays a one-shot at a place that belongs
+  to no object (Unity's `PlayClipAtPoint`): an explosion, a coin picked
+  up. It stays where it was played.
+- `audio.drawSources = true` draws each 3D source's `minDistance` and
+  `maxDistance` as spheres with the debug lines (§13), to see where
+  each can be heard.
+
+```dart
+// lib/hive.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_audio/fynkel_audio.dart';
+
+/// A hive that hums, heard from where it is, and bursts with a pop.
+class Hive extends Behaviour {
+  late final AudioClip pop;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    pop = await assets.audio('pop.wav');
+    gameObject.addComponent(
+      AudioSource(
+        clip: await assets.audio('hum.ogg'),
+        loop: true,
+        spatialBlend: 1,
+        maxDistance: 25,
+        rolloffMode: AudioRolloffMode.linear,
+      ),
+    );
+  }
+
+  void burst() {
+    audio.playAt(pop, gameObject.position);
+    gameObject.destroy();
+  }
+}
+```
+
+Sound in 3D costs the frame little: on the Note10+, 32 sounds moving
+take under a tenth of a millisecond.
+
+In a test, `audio.render(frames)` makes the mix as a speaker would have
+played it, left and right, to check what plays and where it's heard.
+
 Values out of range (a volume over 1, a pitch of 0) throw an
 `ArgumentError`; a file that isn't sound throws a `FormatException` with
 its name.
@@ -3261,11 +3325,12 @@ What keeps a game fast:
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
   (Unity's Humanoid), and clips made in code.
-- **Sound** (§13b): 3D sound (by distance, and left or right), music
-  that streams and crossfades, and groups with their own volume come in
-  the next phases of stage 11. Not planned yet: effects on the sound
-  (reverb, echo, a low-pass for under water), Doppler, sound blocked by
-  walls, ducking, the microphone, and sound made in code as it plays.
+- **Sound** (§13b): music that streams and crossfades, and groups with
+  their own volume, come in the next phase of stage 11. Not planned yet:
+  effects on the sound (reverb, echo, a low-pass for under water),
+  Doppler, 3D over headphones (HRTF), a custom rolloff curve, sound
+  blocked by walls, ducking, the microphone, and sound made in code as it
+  plays.
   Android's audio focus (another app's sound pausing the game's) isn't
   handled yet.
 - **Input:** gamepads.
@@ -3341,6 +3406,10 @@ What keeps a game fast:
 | `AudioClip` in the project | `await assets.audio('bark.ogg')` (`.wav`, `.ogg`, `.mp3`) |
 | `AudioListener.volume`, `AudioListener.pause` | `audio.volume`; `world.paused` holds the game's sounds |
 | `ignoreListenerPause` | `ignorePause` |
+| `spatialBlend`, `panStereo`, `minDistance`, `maxDistance`, `rolloffMode` | The same names on `AudioSource` (no custom rolloff curve) |
+| An `AudioListener` on the camera | `AudioListener`; without one, the world's camera hears |
+| `AudioSource.PlayClipAtPoint(clip, position)` | `audio.playAt(clip, position)` |
+| The 3D sound gizmos of a selected source | `audio.drawSources = true` |
 | `AudioSettings`' Mute Other Audio Sources (iOS) | `audio.session = AudioSession.playback` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
