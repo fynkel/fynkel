@@ -24,14 +24,21 @@ AudioClip bell(double hertz, {double seconds = 1.2}) {
   return AudioClip.fromSamples(samples, rate: rate, name: 'bell ${hertz.round()} Hz');
 }
 
-/// A low hum, a second long and a whole number of waves of each of its
-/// notes, so it loops without a seam.
+/// A hum, a second long and a whole number of waves of each of its notes
+/// (and of its wobble), so it loops without a seam. A phone's speaker
+/// plays almost nothing below 300 Hz, so its notes are a chord from 220 Hz
+/// up, not a low drone.
 AudioClip hum() {
   const rate = 48000;
+  const notes = [(220, 0.12), (330, 0.09), (440, 0.07), (660, 0.05), (880, 0.03)];
   final samples = Float32List(rate);
   for (var i = 0; i < rate; i++) {
     final t = i / rate;
-    samples[i] = 0.12 * math.sin(2 * math.pi * 110 * t) + 0.06 * math.sin(2 * math.pi * 165 * t);
+    var sum = 0.0;
+    for (final (hertz, level) in notes) {
+      sum += level * math.sin(2 * math.pi * hertz * t);
+    }
+    samples[i] = sum * (0.8 + 0.2 * math.sin(2 * math.pi * 2 * t));
   }
   return AudioClip.fromSamples(samples, name: 'hum');
 }
@@ -55,7 +62,8 @@ class SoundBasicsScene extends LabScene {
   String get about =>
       'Each bell is an object with an AudioSource: ring one, or all three at once. Chime plays one-shots over '
       'the cube\'s own bell, a little higher each time. The hum loops; pause the game and it holds where it '
-      'is, while the click, which ignores the pause, still plays. In slow motion the hum goes lower and slower, '
+      'is, while the click, which ignores the pause, still plays; a bell rung while paused waits, and starts when '
+      'the game goes on (as in Unity). In slow motion the hum goes lower and slower, '
       'as it follows the time scale. The readout shows the voices the mixer has.';
 
   final _clips = <AudioClip>[];
@@ -103,7 +111,7 @@ class SoundBasicsScene extends LabScene {
   void _ring(int i) {
     final (object, source) = _bells[i];
     source.play();
-    log.add('${object.name}: play()');
+    log.add('${object.name}: play()${world.paused ? ', which waits for the game to go on' : ''}');
   }
 
   @override
@@ -148,7 +156,10 @@ class SoundBasicsScene extends LabScene {
     Button('chime (one-shot)', () {
       final pitch = math.pow(2, (_chimes++ % 8) / 12).toDouble();
       _bells[0].$2.playOneShot(_chime, pitch: pitch);
-      log.add('cube: playOneShot(chime, pitch: ${pitch.toStringAsFixed(2)})');
+      log.add(
+        'cube: playOneShot(chime, pitch: ${pitch.toStringAsFixed(2)})'
+        '${world.paused ? ', which waits for the game to go on' : ''}',
+      );
     }),
     Button('click (ignores the pause)', () {
       world.audio.playOneShot(_click, ignorePause: true);
