@@ -1,0 +1,21 @@
+[package]
+name = "fynkel_audio_ffi"
+description = "The C interface package:fynkel_audio calls: clips, voices, and the device they play through."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
+
+[lib]
+crate-type = ["rlib", "cdylib"]
+
+[dependencies]
+fynkel_cabi.workspace = true
+fynkel_audio.workspace = true
+
+[dev-dependencies]
+cbindgen.workspace = true

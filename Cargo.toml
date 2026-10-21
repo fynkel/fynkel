@@ -20,6 +20,7 @@ fynkel_load = { path = "crates/fynkel_load" }
 fynkel_physics = { path = "crates/fynkel_physics" }
 fynkel_physics_ffi = { path = "crates/fynkel_physics_ffi" }
 fynkel_audio = { path = "crates/fynkel_audio" }
+fynkel_audio_ffi = { path = "crates/fynkel_audio_ffi" }
 hecs = "0.11.2"
 glam = { version = "0.34.1", features = ["bytemuck"] }
 wgpu = "30.0.1"

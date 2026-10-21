@@ -409,6 +409,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_audio_ffi"
+version = "0.1.0"
+dependencies = [
+ "cbindgen",
+ "fynkel_audio",
+ "fynkel_cabi",
+]
+
+[[package]]
 name = "fynkel_cabi"
 version = "0.1.0"
 
