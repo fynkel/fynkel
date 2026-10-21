@@ -106,6 +106,14 @@ abstract class WorldSystem {
   /// make what has no mesh tappable (physics: its colliders).
   RayHit? pointerHit(Ray ray, LayerMask layers) => null;
 
+  /// Called once, when the world is first shown on screen (by a
+  /// `FynkelView`; a [HeadlessView] doesn't count): audio opens the sound
+  /// output here, so a test makes no sound. A system made after that isn't
+  /// called; [WorldSystems.isOnScreen] says so.
+  @protected
+  @mustCallSuper
+  void viewStarted() {}
+
   /// Called when [World.applicationPaused] changes, before the objects'
   /// [GameObject.onApplicationPause]: audio stops while the app is away.
   @protected
@@ -184,6 +192,9 @@ extension WorldSystems on World {
     }
     _assetKinds.add(kind);
   }
+
+  /// Whether the world has been shown on screen ([WorldSystem.viewStarted]).
+  bool get isOnScreen => _onScreen;
 
   /// The world's system of type [T], or null if it has none yet.
   T? maybeSystem<T extends WorldSystem>() => _systemsByType[T] as T?;

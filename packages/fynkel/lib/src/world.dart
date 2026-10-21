@@ -463,7 +463,7 @@ final class World implements Finalizable {
   // Whether a camera has asked for bloom or ambient occlusion, whether a
   // view draws the world, and whether the world has said its quality
   // doesn't draw what was asked ([_checkEffects]).
-  var _bloomAsked = false, _aoAsked = false, _viewed = false;
+  var _bloomAsked = false, _aoAsked = false, _viewed = false, _onScreen = false;
   var _warnedBloom = false, _warnedAo = false;
 
   /// Says once, in a debug build, for each of bloom and ambient occlusion,
@@ -901,9 +901,23 @@ extension WorldPointer on World {
   Pointer<FyWorld> get pointer => _engineWorld;
 
   /// A view now draws the world: what it draws at is known.
-  void viewStarted() {
+  /// [onScreen] for one the player sees, not a [HeadlessView]: the first
+  /// tells the systems ([WorldSystem.viewStarted]).
+  void viewStarted({required bool onScreen}) {
     _viewed = true;
     _checkEffects();
+    if (!onScreen || _onScreen) return;
+    _onScreen = true;
+    final systems = _systems;
+    for (var i = 0; i < systems.length; i++) {
+      final system = systems[i];
+      if (system._off) continue;
+      try {
+        system.viewStarted();
+      } catch (error, stack) {
+        _systemThrew(system, error, stack);
+      }
+    }
   }
 }
 
