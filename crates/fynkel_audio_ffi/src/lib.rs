@@ -16,10 +16,10 @@
 use std::ffi::c_char;
 use std::sync::Arc;
 
-use fynkel_audio::{Audio, Clip, Play, Session, Settings};
+use fynkel_audio::{Audio, Clip, Listener, Play, Rolloff, Session, Settings, Spatial};
 
 /// Bumped on any change to the functions or types in this file.
-pub const FA_ABI_VERSION: u32 = 2;
+pub const FA_ABI_VERSION: u32 = 3;
 
 /// What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 /// Those the engine's interface has too have its numbers
@@ -74,9 +74,35 @@ pub struct FaSettings {
     pub looping: u32,
 }
 
+/// How a 3D sound fades with distance, as Unity's rolloff modes.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaRolloff {
+    /// Full within the min distance, then as 1 over the distance, until
+    /// the max distance, where it stops falling.
+    Logarithmic = 0,
+    /// Full within the min distance, falling in a line to silence at the
+    /// max distance.
+    Linear = 1,
+}
+
+/// Whether a voice is 2D or 3D: `blend` 0 (2D) to 1 (3D); `pan` -1 (left)
+/// to 1 (right) for its 2D part; `min_distance` above 0, within which it's
+/// full; `max_distance` above that; `rolloff` an `FaRolloff`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FaSpatial {
+    pub blend: f32,
+    pub pan: f32,
+    pub min_distance: f32,
+    pub max_distance: f32,
+    pub rolloff: u32,
+}
+
 /// How to play a clip: its settings; `priority` 0 (kept longest) to 256
 /// (given up first); `pausable` 1 to hold while the game is paused; whose
-/// it is (`owner`, 0 for no one's); and where to start, in seconds.
+/// it is (`owner`, 0 for no one's); where to start, in seconds; whether
+/// it's 3D, and where it is.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaPlay {
@@ -85,6 +111,25 @@ pub struct FaPlay {
     pub pausable: u32,
     pub owner: u64,
     pub from: f64,
+    pub spatial: FaSpatial,
+    pub position: [f32; 3],
+}
+
+/// Who hears: where, and which way they face (a quaternion x, y, z, w,
+/// looking along its -Z with +X on its right).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FaListener {
+    pub position: [f32; 3],
+    pub rotation: [f32; 4],
+}
+
+/// Where a voice is now.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FaPlace {
+    pub voice: u64,
+    pub position: [f32; 3],
 }
 
 /// A voice that stopped without being told to: it reached its clip's end
@@ -224,6 +269,15 @@ fn flag(value: u32, what: &str) -> Result<bool, Error> {
 
 fn settings(s: FaSettings) -> Result<Settings, Error> {
     Ok(Settings { volume: s.volume, pitch: s.pitch, looping: flag(s.looping, "looping")? })
+}
+
+fn spatial(s: FaSpatial) -> Result<Spatial, Error> {
+    let rolloff = match s.rolloff {
+        0 => Rolloff::Logarithmic,
+        1 => Rolloff::Linear,
+        other => return Err(invalid(format!("rolloff {other} isn't an FaRolloff"))),
+    };
+    Ok(Spatial { blend: s.blend, pan: s.pan, min_distance: s.min_distance, max_distance: s.max_distance, rolloff })
 }
 
 // --- The library -----------------------------------------------------------------
@@ -527,6 +581,8 @@ pub unsafe extern "C" fn fa_audio_play(
                         pausable: flag(p.pausable, "pausable")?,
                         owner: p.owner,
                         from: p.from,
+                        spatial: spatial(p.spatial)?,
+                        position: p.position,
                     },
                 )
                 .map_err(invalid)?;
@@ -572,6 +628,57 @@ pub unsafe extern "C" fn fa_voice_set(audio: *mut FaAudio, voice: u64, settings:
                 return Err(Error::null("settings"));
             }
             a.audio.set(voice, self::settings(*settings)?).map_err(invalid)
+        })
+    }
+}
+
+/// Changes a playing voice's 2D or 3D settings to `spatial`'s, heard at
+/// once.
+///
+/// # Safety
+///
+/// `audio` is null or live; `spatial` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fa_voice_spatial_set(audio: *mut FaAudio, voice: u64, spatial: *const FaSpatial) -> FaStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_audio(audio, |a| {
+            if spatial.is_null() {
+                return Err(Error::null("spatial"));
+            }
+            a.audio.set_spatial(voice, self::spatial(*spatial)?).map_err(invalid)
+        })
+    }
+}
+
+/// The frame's moves, in one call: the listener, at `listener`, and
+/// `count` voices at `places`, each where it is now. Heard from the next
+/// `fa_audio_update`. A voice that ended is skipped.
+///
+/// # Safety
+///
+/// `audio` is null or live; `listener` is null or readable; `places` is
+/// readable for `count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fa_audio_place(
+    audio: *mut FaAudio,
+    listener: *const FaListener,
+    places: *const FaPlace,
+    count: usize,
+) -> FaStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_audio(audio, |a| {
+            if listener.is_null() {
+                return Err(Error::null("listener"));
+            }
+            let places = slice(places, count, "places")?;
+            let l = *listener;
+            a.audio.set_listener(Listener { position: l.position, rotation: l.rotation }).map_err(invalid)?;
+            for place in places {
+                a.audio.place(place.voice, place.position).map_err(invalid)?;
+            }
+            Ok(())
         })
     }
 }

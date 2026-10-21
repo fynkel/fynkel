@@ -31,7 +31,15 @@ fn clip(rate: u32, samples: &[f32]) -> *mut FaClip {
 }
 
 fn play(volume: f32) -> FaPlay {
-    FaPlay { settings: FaSettings { volume, pitch: 1.0, looping: 0 }, priority: 128, pausable: 1, owner: 3, from: 0.0 }
+    FaPlay {
+        settings: FaSettings { volume, pitch: 1.0, looping: 0 },
+        priority: 128,
+        pausable: 1,
+        owner: 3,
+        from: 0.0,
+        spatial: FaSpatial { blend: 0.0, pan: 0.0, min_distance: 1.0, max_distance: 500.0, rolloff: 0 },
+        position: [0.0; 3],
+    }
 }
 
 #[test]
@@ -168,6 +176,84 @@ fn stopping_pausing_and_the_owners_reach_their_voices() {
     // SAFETY: live audio.
     assert_eq!(unsafe { fa_voice_stop(audio.0, handles[0]) }, FaStatus::Ok);
     assert_eq!(state(handles[0]).playing, 0);
+    // SAFETY: made above, not used after.
+    unsafe { fa_clip_free(clip) };
+}
+
+#[test]
+fn a_3d_voice_is_heard_from_where_the_frames_moves_put_it() {
+    let audio = Audio(fa_audio_new());
+    let clip = clip(48_000, &[0.5; 48_000]);
+    let spatial = FaSpatial { blend: 1.0, pan: 0.0, min_distance: 1.0, max_distance: 50.0, rolloff: 0 };
+    let p = FaPlay { spatial, position: [-3.0, 0.0, 0.0], ..play(1.0) };
+    let mut handle = 0;
+    // SAFETY: live audio and clip, a readable play and a writable out.
+    assert_eq!(unsafe { fa_audio_play(audio.0, clip, &p, &mut handle) }, FaStatus::Ok, "{}", last_error());
+    let mut out = vec![0.0f32; 2_048 * 2];
+    let ears = |out: &[f32]| (out[out.len() - 2], out[out.len() - 1]);
+    // SAFETY: live audio, and room for 2,048 stereo frames.
+    assert_eq!(unsafe { fa_audio_render(audio.0, out.as_mut_ptr(), 2_048) }, FaStatus::Ok);
+    let (l, r) = ears(&out);
+    assert!(l > 0.1 && r.abs() < 1e-4, "{l} {r}");
+
+    // The listener turns to face it (a half turn about +Y faces +Z; a
+    // quarter to the left faces -X), and it's in front.
+    let half = std::f32::consts::FRAC_PI_4;
+    let listener = FaListener { position: [0.0; 3], rotation: [0.0, half.sin(), 0.0, half.cos()] };
+    let seconds = 0.0;
+    let mut stopped = 0;
+    // SAFETY: live audio, a readable listener, none to place, and readable
+    // and writable outs.
+    unsafe {
+        assert_eq!(fa_audio_place(audio.0, &listener, ptr::null(), 0), FaStatus::Ok, "{}", last_error());
+        assert_eq!(fa_audio_update(audio.0, &seconds, &mut stopped), FaStatus::Ok);
+        assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_048), FaStatus::Ok);
+    }
+    let (l, r) = ears(&out);
+    assert!((l - r).abs() < 1e-4 && l > 0.1, "{l} {r}");
+
+    // Moved to the listener's right.
+    let place = FaPlace { voice: handle, position: [0.0, 0.0, -3.0] };
+    // SAFETY: as above, with one place.
+    unsafe {
+        assert_eq!(fa_audio_place(audio.0, &listener, &place, 1), FaStatus::Ok);
+        assert_eq!(fa_audio_update(audio.0, &seconds, &mut stopped), FaStatus::Ok);
+        assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_048), FaStatus::Ok);
+    }
+    let (l, r) = ears(&out);
+    assert!(r > 0.1 && l.abs() < 1e-4, "{l} {r}");
+
+    // And made 2D, panned hard left, at once.
+    let flat = FaSpatial { blend: 0.0, pan: -1.0, ..spatial };
+    // SAFETY: live audio and a readable spatial.
+    unsafe {
+        assert_eq!(fa_voice_spatial_set(audio.0, handle, &flat), FaStatus::Ok);
+        assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_048), FaStatus::Ok);
+    }
+    let (l, r) = ears(&out);
+    assert!((l - 0.5).abs() < 1e-3 && r.abs() < 1e-4, "{l} {r}");
+    // SAFETY: made above, not used after.
+    unsafe { fa_clip_free(clip) };
+}
+
+#[test]
+fn bad_3d_values_are_refused_and_say_why() {
+    let audio = Audio(fa_audio_new());
+    let clip = clip(48_000, &[0.1; 480]);
+    let mut handle = 0;
+    let bad = FaPlay { spatial: FaSpatial { rolloff: 9, ..play(1.0).spatial }, ..play(1.0) };
+    // SAFETY: live audio and clip, a readable play and a writable out.
+    assert_eq!(unsafe { fa_audio_play(audio.0, clip, &bad, &mut handle) }, FaStatus::InvalidValue);
+    assert!(last_error().contains("rolloff 9"), "{}", last_error());
+    let listener = FaListener { position: [f32::INFINITY, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0] };
+    // SAFETY: live audio, a readable listener, none to place.
+    assert_eq!(unsafe { fa_audio_place(audio.0, &listener, ptr::null(), 0) }, FaStatus::InvalidValue);
+    // SAFETY: a null listener and spatial are refused, not read.
+    unsafe {
+        assert_eq!(fa_audio_place(audio.0, ptr::null(), ptr::null(), 0), FaStatus::NullPointer);
+        assert_eq!(fa_audio_place(audio.0, &FaListener::default(), ptr::null(), 2), FaStatus::NullPointer);
+        assert_eq!(fa_voice_spatial_set(audio.0, 1, ptr::null()), FaStatus::NullPointer);
+    }
     // SAFETY: made above, not used after.
     unsafe { fa_clip_free(clip) };
 }
