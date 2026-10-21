@@ -1,6 +1,7 @@
 // Frames with sound allocate nothing (docs/stage-11.md): a clip looping,
 // one-shots starting and ending, sources reading where they are, slow
-// motion and the game's pause going on and off. Counted by the VM
+// motion and the game's pause going on and off, and 3D sources moving
+// around a camera that turns, with sounds played at places. Counted by the VM
 // service's allocation profile (see allocations.dart).
 
 // Counted alone, a file at a time: see dart_test.yaml.
@@ -51,6 +52,46 @@ class _Player extends Behaviour {
   }
 }
 
+/// Flies its object around in a circle, turns the camera, and plays a
+/// sound at a place now and then: 3D sound's frames.
+class _Flyer extends Behaviour {
+  _Flyer(this.camera, this.blip);
+
+  final GameObject camera;
+  final AudioClip blip;
+  final at = Vec3(2, 0, -3);
+  var frame = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    frame++;
+    // Set from a few constant transforms, by the frame: making one with a
+    // computed position each frame would be the test's own garbage.
+    switch (frame % 4) {
+      case 0:
+        transform = _places[0];
+        camera.transform = _turns[0];
+      case 1:
+        transform = _places[1];
+      case 2:
+        transform = _places[2];
+        camera.transform = _turns[1];
+      default:
+        transform = _places[3];
+    }
+    if (frame % 11 == 0) audio.playAt(blip, at, volume: 0.5);
+  }
+}
+
+final _places = [
+  Transform(position: Vec3(-5, 0, -2)),
+  Transform(position: Vec3(0, 1, -6)),
+  Transform(position: Vec3(5, 0, -2)),
+  Transform(position: Vec3(0, -1, 3)),
+];
+final _turns = [Transform(rotation: Quat.axisAngle(Vec3.up, 0.4)), Transform(rotation: Quat.axisAngle(Vec3.up, -0.4))];
+
 void main() {
   final madeEachFrame = allocations();
 
@@ -65,6 +106,10 @@ void main() {
     var ends = 0;
     shot.onEnd = (_) => ends++;
     world.add(GameObject(components: [loop, shot, player]));
+    final camera = world.add(GameObject(name: 'camera', components: [Camera()]));
+    final hum = AudioSource(clip: music, loop: true, spatialBlend: 1, maxDistance: 20);
+    final buzz = AudioSource(clip: blip, loop: true, spatialBlend: 0.5, rolloffMode: AudioRolloffMode.linear);
+    world.add(GameObject(name: 'flyer', components: [hum, buzz, _Flyer(camera, blip)]));
 
     expect(await madeEachFrame(world, 20000), isEmpty);
     expect(player.frame, greaterThan(50000));

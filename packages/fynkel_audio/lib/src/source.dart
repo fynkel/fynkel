@@ -1,5 +1,17 @@
 part of 'audio.dart';
 
+/// How a 3D sound fades with distance, as Unity's `AudioRolloffMode`.
+enum AudioRolloffMode {
+  /// Full within [AudioSource.minDistance], then falling as 1 over the
+  /// distance (twice as far, half as loud), until
+  /// [AudioSource.maxDistance], where it stops falling: as sound does.
+  logarithmic,
+
+  /// Full within [AudioSource.minDistance], falling in a straight line to
+  /// silence at [AudioSource.maxDistance]: easier to place.
+  linear,
+}
+
 /// Plays sounds from its object, as Unity's `AudioSource`: [clip] with
 /// [play], and any clip on top with [playOneShot] (footsteps, hits).
 ///
@@ -13,6 +25,13 @@ part of 'audio.dart';
 /// Disabling it, or destroying its object, stops all its sounds. While the
 /// game is [World.paused] its sounds hold where they are, unless it
 /// [ignorePause]s (a pause menu's).
+///
+/// It's 2D unless given a [spatialBlend]: the same in both ears wherever
+/// it is, as music and a menu's clicks should be. At a [spatialBlend] of
+/// 1 it's 3D, heard from where its object is: louder in the ear it's on
+/// the side of, fading with distance ([minDistance], [maxDistance],
+/// [rolloffMode]), a little quieter and duller behind, as the
+/// [AudioListener] (or the camera) hears it, as it moves.
 final class AudioSource extends Behaviour {
   /// A source of [clip], with Unity's defaults. A bad value throws an
   /// [ArgumentError].
@@ -26,12 +45,24 @@ final class AudioSource extends Behaviour {
     int priority = 128,
     this.ignorePause = false,
     this._followTimeScale = false,
+    double spatialBlend = 0,
+    double panStereo = 0,
+    double minDistance = 1,
+    double maxDistance = 500,
+    this._rolloffMode = AudioRolloffMode.logarithmic,
   }) : _volume = volume,
        _pitch = pitch,
-       _priority = priority {
+       _priority = priority,
+       _spatialBlend = spatialBlend,
+       _panStereo = panStereo,
+       _minDistance = minDistance,
+       _maxDistance = maxDistance {
     _checkUnit(volume, 'volume');
     _checkPitch(pitch);
     _checkPriority(priority);
+    _checkUnit(spatialBlend, 'spatialBlend');
+    _checkPan(panStereo);
+    _checkDistances(minDistance, maxDistance);
   }
 
   /// What [play] plays. Setting it doesn't change what's playing: the next
@@ -108,6 +139,60 @@ final class AudioSource extends Behaviour {
 
   bool _followTimeScale;
 
+  /// 0 for 2D (the same wherever it is), 1 for 3D (heard from where its
+  /// object is), or between for a blend, as Unity's. Its sounds follow it
+  /// at once.
+  double get spatialBlend => _spatialBlend;
+  set spatialBlend(double value) {
+    _checkUnit(value, 'spatialBlend');
+    _spatialBlend = value;
+    _sendSpatial();
+  }
+
+  double _spatialBlend;
+
+  /// Left (-1) to right (1), for the 2D part of its sound: Unity's
+  /// `panStereo`. 0 unless set.
+  double get panStereo => _panStereo;
+  set panStereo(double value) {
+    _checkPan(value);
+    _panStereo = value;
+    _sendSpatial();
+  }
+
+  double _panStereo;
+
+  /// Within this many metres a 3D sound is at full volume; 1 unless set.
+  /// Above 0, and below [maxDistance].
+  double get minDistance => _minDistance;
+  set minDistance(double value) {
+    _checkDistances(value, _maxDistance);
+    _minDistance = value;
+    _sendSpatial();
+  }
+
+  double _minDistance;
+
+  /// Where a 3D sound stops fading ([AudioRolloffMode.logarithmic]) or
+  /// falls silent ([AudioRolloffMode.linear]); 500 unless set.
+  double get maxDistance => _maxDistance;
+  set maxDistance(double value) {
+    _checkDistances(_minDistance, value);
+    _maxDistance = value;
+    _sendSpatial();
+  }
+
+  double _maxDistance;
+
+  /// How a 3D sound fades between [minDistance] and [maxDistance].
+  AudioRolloffMode get rolloffMode => _rolloffMode;
+  set rolloffMode(AudioRolloffMode value) {
+    _rolloffMode = value;
+    _sendSpatial();
+  }
+
+  AudioRolloffMode _rolloffMode;
+
   /// Called when [clip], played with [play], reaches its end; not when it's
   /// stopped, or gives way to a more important sound.
   void Function(AudioClip clip)? onEnd;
@@ -178,6 +263,7 @@ final class AudioSource extends Behaviour {
       ..[0] = _effectiveVolume
       ..[1] = _effectivePitch;
     audio._playFrom.value = _from < clip.length ? _from : clip.length;
+    audio._writeSpatial(this);
     _voice = audio._start(clip, looping: _loop, priority: _priority, pausable: !ignorePause, owner: _owner);
     _from = 0;
     _playing = _voice == 0 ? null : clip;
@@ -227,6 +313,7 @@ final class AudioSource extends Behaviour {
       ..[0] = _effectiveVolume * gain
       ..[1] = _clampPitch(_effectivePitch * speed);
     audio._playFrom.value = 0;
+    audio._writeSpatial(this);
     final handle = audio._start(clip, looping: false, priority: _priority, pausable: !ignorePause, owner: _owner);
     if (handle == 0) return;
     // Full only when it took a voice of its own whose loss it hears of
@@ -281,6 +368,17 @@ final class AudioSource extends Behaviour {
     _hold();
   }
 
+  /// Sends its 2D and 3D settings to its sounds.
+  void _sendSpatial() {
+    final audio = _audio;
+    if (audio == null || (_voice == 0 && _shotCount == 0)) return;
+    audio._fillSpatial(this);
+    if (_voice != 0) _check(fa_voice_spatial_set(audio._native, _voice, audio._spatial));
+    for (var i = 0; i < _shotCount; i++) {
+      _check(fa_voice_spatial_set(audio._native, _shots[i], audio._spatial));
+    }
+  }
+
   /// [handle], one of its voices, stopped on its own.
   void _ended(int handle, {required bool stolen}) {
     if (handle == _voice) {
@@ -311,7 +409,7 @@ final class AudioSource extends Behaviour {
   @override
   void onEnable() {
     super.onEnable();
-    _system;
+    _system._enabled.add(this);
     if (playOnAwake && clip != null && _voice == 0) play();
   }
 
@@ -320,7 +418,10 @@ final class AudioSource extends Behaviour {
     super.onDisable();
     stop();
     final audio = _audio;
-    if (audio != null && !audio._disposed) audio._sources.remove(_owner);
+    if (audio != null && !audio._disposed) {
+      audio._sources.remove(_owner);
+      audio._enabled.remove(this);
+    }
     _audio = null;
   }
 
@@ -331,3 +432,12 @@ final class AudioSource extends Behaviour {
 /// [pitch] within what the mixer plays, without boxing (`num.clamp` does).
 @pragma('vm:prefer-inline')
 double _clampPitch(double pitch) => pitch < 0.05 ? 0.05 : (pitch > 8 ? 8 : pitch);
+
+void _checkPan(double value) {
+  if (!(value >= -1 && value <= 1)) throw ArgumentError.value(value, 'panStereo', 'is not between -1 and 1');
+}
+
+void _checkDistances(double min, double max) {
+  if (!(min > 0 && min.isFinite)) throw ArgumentError.value(min, 'minDistance', 'is not above 0');
+  if (!(max > min && max.isFinite)) throw ArgumentError.value(max, 'maxDistance', 'is not above minDistance ($min)');
+}
