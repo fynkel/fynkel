@@ -1,0 +1,22 @@
+name: pocket_hole
+description: A complete touch-first Fynkel block collecting game.
+publish_to: none
+version: 1.0.0+1
+environment:
+  sdk: ^3.13.0
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../packages/fynkel
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
+  fynkel_physics:
+    path: ../../packages/fynkel_physics
+  shared_preferences: ^2.5.3
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+flutter:
+  uses-material-design: true
