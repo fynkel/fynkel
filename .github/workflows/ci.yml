@@ -76,6 +76,22 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
+      # package:fynkel_audio (docs/stage-11.md): its build hook compiles
+      # fynkel_audio_ffi, its tests play and time sound from Dart without a
+      # device (none opens unless a world is on screen), its frames make no
+      # garbage, and its bindings must match the header as package:fynkel's
+      # do.
+      - name: dart (package:fynkel_audio)
+        working-directory: packages/fynkel_audio
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          dart pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool hook
+          dart analyze --fatal-infos
+          dart run tool/ffigen.dart
+          git diff --exit-code lib/src/bindings.g.dart
+          dart test -x alloc
+          dart test -t alloc --concurrency=1
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the games'
       # and the lab's tests (their real assets, drawn headless, and real

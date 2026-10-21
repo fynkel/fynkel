@@ -121,9 +121,12 @@ final class AudioSource extends Behaviour {
   AudioClip? _playing;
   var _paused = false;
   var _held = false;
-  final _shots = <int>[];
-  final _shotVolumes = <double>[];
-  final _shotPitches = <double>[];
+  // Fixed room for as many as the mixer has voices: a list that grows and
+  // shrinks as shots come and go would make garbage each time.
+  final _shots = Int64List(Audio.maxVoices);
+  final _shotVolumes = Float64List(Audio.maxVoices);
+  final _shotPitches = Float64List(Audio.maxVoices);
+  var _shotCount = 0;
   double _from = 0;
 
   /// Whether [clip] is playing: started with [play], not paused, stopped
@@ -140,7 +143,7 @@ final class AudioSource extends Behaviour {
   double get playTime {
     final audio = _audio;
     if (audio == null || _voice == 0) return _from;
-    return audio._read(_voice) ? audio._voice.ref.time : 0;
+    return audio._timeOf(_voice);
   }
 
   set playTime(double value) {
@@ -171,16 +174,11 @@ final class AudioSource extends Behaviour {
     if (clip == null) throw StateError('$this has no clip to play');
     final audio = _system;
     if (_voice != 0) fa_voice_stop(audio._native, _voice);
-    _voice = audio._start(
-      clip,
-      volume: _effectiveVolume,
-      pitch: _effectivePitch,
-      looping: _loop,
-      priority: _priority,
-      pausable: !ignorePause,
-      owner: _owner,
-      from: _from.clamp(0, clip.length),
-    );
+    audio._playFloats
+      ..[0] = _effectiveVolume
+      ..[1] = _effectivePitch;
+    audio._playFrom.value = _from < clip.length ? _from : clip.length;
+    _voice = audio._start(clip, looping: _loop, priority: _priority, pausable: !ignorePause, owner: _owner);
     _from = 0;
     _playing = _voice == 0 ? null : clip;
     _paused = false;
@@ -210,31 +208,34 @@ final class AudioSource extends Behaviour {
     _voice = 0;
     _playing = null;
     _paused = false;
-    _shots.clear();
-    _shotVolumes.clear();
-    _shotPitches.clear();
+    _shotCount = 0;
   }
 
   /// Plays [clip] once, over whatever else plays (Unity's `PlayOneShot`):
-  /// at [volume] times this source's, and [pitch] times its. It can't be
-  /// paused or stopped on its own; [stop] stops it.
-  void playOneShot(AudioClip clip, {double volume = 1, double pitch = 1}) {
-    _checkUnit(volume, 'volume');
-    if (!(pitch > 0 && pitch <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not above 0 and up to 8');
+  /// at [volume] times this source's, and [pitch] times its (each 1
+  /// unless given). It can't be paused or stopped on its own; [stop] stops
+  /// it.
+  void playOneShot(AudioClip clip, {double? volume, double? pitch}) {
+    // Nullable, not defaulted, and checked here, the error given the
+    // value passed: the JIT boxes a double with a default, one passed to a
+    // call it doesn't inline, or one an error is made with, at every call.
+    final gain = volume ?? 1.0, speed = pitch ?? 1.0;
+    if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
+    if (!(speed > 0 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not above 0 and up to 8');
     final audio = _system;
-    final handle = audio._start(
-      clip,
-      volume: _effectiveVolume * volume,
-      pitch: (_effectivePitch * pitch).clamp(0.05, 8),
-      looping: false,
-      priority: _priority,
-      pausable: !ignorePause,
-      owner: _owner,
-    );
+    audio._playFloats
+      ..[0] = _effectiveVolume * gain
+      ..[1] = _clampPitch(_effectivePitch * speed);
+    audio._playFrom.value = 0;
+    final handle = audio._start(clip, looping: false, priority: _priority, pausable: !ignorePause, owner: _owner);
     if (handle == 0) return;
-    _shots.add(handle);
-    _shotVolumes.add(volume);
-    _shotPitches.add(pitch);
+    // Full only when it took a voice of its own whose loss it hears of
+    // after the frame: this one plays on, at the volume it started with.
+    if (_shotCount == Audio.maxVoices) return;
+    _shots[_shotCount] = handle;
+    _shotVolumes[_shotCount] = gain;
+    _shotPitches[_shotCount] = speed;
+    _shotCount++;
     if (_held) _check(fa_voice_pause(audio._native, handle, 1));
   }
 
@@ -242,7 +243,10 @@ final class AudioSource extends Behaviour {
 
   double get _scale => _followTimeScale ? (_audio?.world ?? gameObject.world).time.scale : 1.0;
 
-  double get _effectivePitch => (_pitch * _scale).clamp(0.05, 8);
+  // Inlined: the JIT boxes a double returned from a call it doesn't
+  // inline.
+  @pragma('vm:prefer-inline')
+  double get _effectivePitch => _clampPitch(_pitch * _scale);
 
   /// Holds its sounds while it follows a time scale too slow to hear, and
   /// lets them go after.
@@ -252,8 +256,8 @@ final class AudioSource extends Behaviour {
     _held = held;
     final audio = _system;
     if (_voice != 0 && !_paused) _check(fa_voice_pause(audio._native, _voice, held ? 1 : 0));
-    for (final shot in _shots) {
-      _check(fa_voice_pause(audio._native, shot, held ? 1 : 0));
+    for (var i = 0; i < _shotCount; i++) {
+      _check(fa_voice_pause(audio._native, _shots[i], held ? 1 : 0));
     }
   }
 
@@ -261,14 +265,18 @@ final class AudioSource extends Behaviour {
     final audio = _audio;
     if (audio == null) return;
     final volume = _effectiveVolume, pitch = _effectivePitch;
-    if (_voice != 0) audio._set(_voice, volume: volume, pitch: pitch, looping: _loop);
-    for (var i = 0; i < _shots.length; i++) {
-      audio._set(
-        _shots[i],
-        volume: volume * _shotVolumes[i],
-        pitch: (pitch * _shotPitches[i]).clamp(0.05, 8),
-        looping: false,
-      );
+    final settings = audio._settingsFloats;
+    if (_voice != 0) {
+      settings
+        ..[0] = volume
+        ..[1] = pitch;
+      audio._set(_voice, looping: _loop);
+    }
+    for (var i = 0; i < _shotCount; i++) {
+      settings
+        ..[0] = volume * _shotVolumes[i]
+        ..[1] = _clampPitch(pitch * _shotPitches[i]);
+      audio._set(_shots[i], looping: false);
     }
     _hold();
   }
@@ -289,11 +297,15 @@ final class AudioSource extends Behaviour {
       }
       return;
     }
-    final i = _shots.indexOf(handle);
-    if (i < 0) return;
-    _shots.removeAt(i);
-    _shotVolumes.removeAt(i);
-    _shotPitches.removeAt(i);
+    for (var i = 0; i < _shotCount; i++) {
+      if (_shots[i] != handle) continue;
+      // The last takes its place: their order doesn't matter.
+      _shotCount--;
+      _shots[i] = _shots[_shotCount];
+      _shotVolumes[i] = _shotVolumes[_shotCount];
+      _shotPitches[i] = _shotPitches[_shotCount];
+      return;
+    }
   }
 
   @override
@@ -315,3 +327,7 @@ final class AudioSource extends Behaviour {
   @override
   String toString() => 'AudioSource(${clip?.name ?? 'no clip'})';
 }
+
+/// [pitch] within what the mixer plays, without boxing (`num.clamp` does).
+@pragma('vm:prefer-inline')
+double _clampPitch(double pitch) => pitch < 0.05 ? 0.05 : (pitch > 8 ? 8 : pitch);

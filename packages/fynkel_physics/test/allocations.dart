@@ -5,7 +5,8 @@
 // The profile is asked for by allocation_counter.dart, in an isolate of
 // its own group, so decoding the answers isn't counted (see there); here
 // the window between a reset and a count holds the frames and two small
-// port messages. package:fynkel_physics/test has a copy of both files.
+// port messages. package:fynkel_physics/test and package:fynkel_audio/test
+// have a copy of both files.
 
 import 'dart:async';
 import 'dart:developer';

@@ -125,6 +125,7 @@ final class Audio extends WorldSystem implements Finalizable {
     _audio = fa_audio_new();
     _finalizer.attach(this, _audio.cast(), detach: this);
     world.addAssetKind(AudioClip.kind);
+    _checkLayout();
     if (world.isOnScreen) viewStarted();
   }
 
@@ -141,11 +142,31 @@ final class Audio extends WorldSystem implements Finalizable {
 
   // Scratch for calls, kept: one each, allocated once.
   final _play = calloc<FaPlay>();
+  final _settings = calloc<FaSettings>();
   final _voice = calloc<FaVoice>();
   final _count = calloc<Size>();
+  final _seconds = calloc<Double>();
   final _handle = calloc<Uint64>();
   var _stopped = calloc<FaStopped>(8);
   var _stoppedRoom = 8;
+
+  // The scratch structs as memory, written and read on each frame without
+  // `.ref`, which makes an object each time, or the generated accessors,
+  // which box a double in the JIT; `Pointer` reads and writes do neither.
+  // FaPlay and FaSettings: volume and pitch, floats 0 and 1; looping,
+  // word 2; then FaPlay's priority and pausable, words 3 and 4, owner at
+  // byte 24 and start at byte 32. FaVoice: playing, word 0; time at byte 8.
+  // Checked against the accessors when made. The volume and pitch to play
+  // or set, and the start, are written by the caller of [_start] and
+  // [_set], as a double passed to a call the JIT doesn't inline is boxed.
+  late final _playFloats = _play.cast<Float>();
+  late final _playWords = _play.cast<Uint32>();
+  late final _playOwner = (_play.cast<Uint8>() + 24).cast<Uint64>();
+  late final _playFrom = (_play.cast<Uint8>() + 32).cast<Double>();
+  late final _settingsFloats = _settings.cast<Float>();
+  late final _settingsWords = _settings.cast<Uint32>();
+  late final _voicePlaying = _voice.cast<Uint32>();
+  late final _voiceTime = (_voice.cast<Uint8>() + 8).cast<Double>();
 
   // The sources whose voices are playing, by their owner id.
   final _sources = <int, AudioSource>{};
@@ -198,59 +219,95 @@ final class Audio extends WorldSystem implements Finalizable {
   }
 
   /// Plays [clip] once, belonging to no object: a button's click, say.
-  /// [volume] (0 to 1) and [pitch] (0.05 to 8) are its own; it holds while
-  /// the game is paused unless [ignorePause]. Nothing plays it if every
-  /// voice is busy with something more important than [priority].
-  void playOneShot(
-    AudioClip clip, {
-    double volume = 1,
-    double pitch = 1,
-    bool ignorePause = false,
-    int priority = 128,
-  }) {
-    _checkUnit(volume, 'volume');
-    _checkPitch(pitch);
+  /// [volume] (0 to 1, 1 unless given) and [pitch] (0.05 to 8, 1 unless
+  /// given) are its own; it holds while the game is paused unless
+  /// [ignorePause]. Nothing plays it if every voice is busy with something
+  /// more important than [priority].
+  void playOneShot(AudioClip clip, {double? volume, double? pitch, bool ignorePause = false, int priority = 128}) {
+    // Nullable, not defaulted, and checked here, the error given the
+    // value passed: the JIT boxes a double with a default, one passed to a
+    // call it doesn't inline, or one an error is made with, at every call.
+    final gain = volume ?? 1.0, speed = pitch ?? 1.0;
+    if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
+    if (!(speed >= 0.05 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not between 0.05 and 8');
     _checkPriority(priority);
-    _start(clip, volume: volume, pitch: pitch, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
+    _playFloats
+      ..[0] = gain
+      ..[1] = speed;
+    _playFrom.value = 0;
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
   }
 
-  /// Plays [clip] as told; its voice's handle, or 0 if none was free.
+  /// Fails if the memory views above don't fall on the fields they're for.
+  void _checkLayout() {
+    _play.ref
+      ..settings.volume = 0.25
+      ..settings.pitch = 0.5
+      ..settings.looping = 3
+      ..priority = 4
+      ..pausable = 5
+      ..owner = 6
+      ..from = 0.75;
+    _settings.ref
+      ..volume = 0.125
+      ..pitch = 2
+      ..looping = 8;
+    _voice.ref
+      ..playing = 7
+      ..time = 1.25;
+    final seen = [
+      _playFloats[0],
+      _playFloats[1],
+      _playWords[2],
+      _playWords[3],
+      _playWords[4],
+      _playOwner.value,
+      _playFrom.value,
+      _settingsFloats[0],
+      _settingsFloats[1],
+      _settingsWords[2],
+      _voicePlaying.value,
+      _voiceTime.value,
+    ];
+    if (seen.join(' ') != '0.25 0.5 3 4 5 6 0.75 0.125 2.0 8 7 1.25') {
+      throw StateError('package:fynkel_audio reads its structs at the wrong places: $seen');
+    }
+  }
+
+  /// Plays [clip] at the volume, pitch and start written to [_playFloats]
+  /// and [_playFrom]; its voice's handle, or 0 if none was free.
   int _start(
     AudioClip clip, {
-    required double volume,
-    required double pitch,
     required bool looping,
     required int priority,
     required bool pausable,
     required int owner,
-    double from = 0,
   }) {
-    final play = _play.ref;
-    play.settings
-      ..volume = volume
-      ..pitch = pitch
-      ..looping = looping ? 1 : 0;
-    play
-      ..priority = priority
-      ..pausable = pausable ? 1 : 0
-      ..owner = owner
-      ..from = from;
+    _playWords
+      ..[2] = looping ? 1 : 0
+      ..[3] = priority
+      ..[4] = pausable ? 1 : 0;
+    _playOwner.value = owner;
     _check(fa_audio_play(_native, clip._native, _play, _handle));
     return _handle.value;
   }
 
-  void _set(int handle, {required double volume, required double pitch, required bool looping}) {
-    final settings = _play.ref.settings
-      ..volume = volume
-      ..pitch = pitch
-      ..looping = looping ? 1 : 0;
-    _check(fa_voice_set(_native, handle, settings));
+  /// Sets [handle] to the volume and pitch written to [_settingsFloats].
+  void _set(int handle, {required bool looping}) {
+    _settingsWords[2] = looping ? 1 : 0;
+    _check(fa_voice_set(_native, handle, _settings));
+  }
+
+  /// Where [handle] is, in seconds; 0 once it doesn't play.
+  double _timeOf(int handle) {
+    _check(fa_voice_get(_native, handle, _voice));
+    return _voicePlaying.value == 1 ? _voiceTime.value : 0.0;
   }
 
   /// Whether [handle] plays, and where: its time in [_voice].
   bool _read(int handle) {
     _check(fa_voice_get(_native, handle, _voice));
-    return _voice.ref.playing == 1;
+    return _voicePlaying.value == 1;
   }
 
   @override
@@ -273,7 +330,9 @@ final class Audio extends WorldSystem implements Finalizable {
   @override
   void afterFrame() {
     super.afterFrame();
-    _check(fa_audio_update(_native, world.time.unscaledDelta, _count));
+    // Through memory: a double passed to a native call is boxed in the JIT.
+    _seconds.value = world.time.unscaledDelta;
+    _check(fa_audio_update(_native, _seconds, _count));
     final count = _count.value;
     if (count == 0) return;
     if (count > _stoppedRoom) {
@@ -318,8 +377,10 @@ final class Audio extends WorldSystem implements Finalizable {
     fa_audio_free(_audio);
     calloc
       ..free(_play)
+      ..free(_settings)
       ..free(_voice)
       ..free(_count)
+      ..free(_seconds)
       ..free(_handle)
       ..free(_stopped);
   }

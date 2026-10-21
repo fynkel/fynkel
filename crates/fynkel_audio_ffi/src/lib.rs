@@ -19,7 +19,7 @@ use std::sync::Arc;
 use fynkel_audio::{Audio, Clip, Play, Session, Settings};
 
 /// Bumped on any change to the functions or types in this file.
-pub const FA_ABI_VERSION: u32 = 1;
+pub const FA_ABI_VERSION: u32 = 2;
 
 /// What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 /// Those the engine's interface has too have its numbers
@@ -432,23 +432,29 @@ pub unsafe extern "C" fn fa_audio_session_set(audio: *mut FaAudio, session: u32)
     }
 }
 
-/// Once a frame, with the frame's real time in seconds: takes back the
-/// voices that ended, makes the sound of that time when no device plays,
-/// and opens a lost device again. Writes how many voices stopped on their
-/// own to `stopped`: read them with `fa_stopped_read`.
+/// Once a frame, with the frame's real time in seconds at `seconds` (by
+/// pointer, as a double passed to a native call is an allocation in Dart's
+/// JIT): takes back the voices that ended, makes the sound of that time
+/// when no device plays, and opens a lost device again. Writes how many
+/// voices stopped on their own to `stopped`: read them with
+/// `fa_stopped_read`.
 ///
 /// # Safety
 ///
-/// `audio` is null or live; `stopped` is null or writable.
+/// `audio` is null or live; `seconds` is null or readable; `stopped` is
+/// null or writable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fa_audio_update(audio: *mut FaAudio, seconds: f64, stopped: *mut usize) -> FaStatus {
+pub unsafe extern "C" fn fa_audio_update(audio: *mut FaAudio, seconds: *const f64, stopped: *mut usize) -> FaStatus {
     // SAFETY: as this function's.
     unsafe {
         with_audio(audio, |a| {
+            if seconds.is_null() {
+                return Err(Error::null("seconds"));
+            }
             if stopped.is_null() {
                 return Err(Error::null("stopped"));
             }
-            a.audio.update(seconds);
+            a.audio.update(*seconds);
             a.stopped.clear();
             a.stopped.extend(a.audio.stopped().iter().map(|s| FaStopped {
                 handle: s.handle,
@@ -551,15 +557,23 @@ pub unsafe extern "C" fn fa_voice_pause(audio: *mut FaAudio, voice: u64, paused:
     unsafe { with_audio(audio, |a| a.audio.pause(voice, flag(paused, "paused")?).map_err(invalid)) }
 }
 
-/// Changes a playing voice's volume, pitch or looping.
+/// Changes a playing voice's volume, pitch or looping to `settings`'s (by
+/// pointer, as a struct passed by value is an allocation in Dart).
 ///
 /// # Safety
 ///
-/// `audio` is null or live.
+/// `audio` is null or live; `settings` is null or readable.
 #[unsafe(no_mangle)]
-pub unsafe extern "C" fn fa_voice_set(audio: *mut FaAudio, voice: u64, settings: FaSettings) -> FaStatus {
+pub unsafe extern "C" fn fa_voice_set(audio: *mut FaAudio, voice: u64, settings: *const FaSettings) -> FaStatus {
     // SAFETY: as this function's.
-    unsafe { with_audio(audio, |a| a.audio.set(voice, self::settings(settings)?).map_err(invalid)) }
+    unsafe {
+        with_audio(audio, |a| {
+            if settings.is_null() {
+                return Err(Error::null("settings"));
+            }
+            a.audio.set(voice, self::settings(*settings)?).map_err(invalid)
+        })
+    }
 }
 
 /// Writes whether a voice plays, and where it is, to `out`.

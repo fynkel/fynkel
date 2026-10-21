@@ -49,8 +49,12 @@ external int fa_audio_stats(ffi.Pointer<FaAudio> audio, ffi.Pointer<FaStats> out
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint32)>(isLeaf: true)
 external int fa_audio_suspend(ffi.Pointer<FaAudio> audio, int suspended);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Double, ffi.Pointer<ffi.Size>)>(isLeaf: true)
-external int fa_audio_update(ffi.Pointer<FaAudio> audio, double seconds, ffi.Pointer<ffi.Size> stopped);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Pointer<ffi.Double>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fa_audio_update(
+  ffi.Pointer<FaAudio> audio,
+  ffi.Pointer<ffi.Double> seconds,
+  ffi.Pointer<ffi.Size> stopped,
+);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Float)>(isLeaf: true)
 external int fa_audio_volume_set(ffi.Pointer<FaAudio> audio, double volume);
@@ -104,13 +108,13 @@ external int fa_voice_get(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaV
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Uint32)>(isLeaf: true)
 external int fa_voice_pause(ffi.Pointer<FaAudio> audio, int voice, int paused);
 
-@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, FaSettings)>(isLeaf: true)
-external int fa_voice_set(ffi.Pointer<FaAudio> audio, int voice, FaSettings settings);
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Pointer<FaSettings>)>(isLeaf: true)
+external int fa_voice_set(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaSettings> settings);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64)>(isLeaf: true)
 external int fa_voice_stop(ffi.Pointer<FaAudio> audio, int voice);
 
-const int FA_ABI_VERSION = 1;
+const int FA_ABI_VERSION = 2;
 
 final class FaAudio extends ffi.Opaque {}
 

@@ -80,7 +80,7 @@ fn a_decoded_clip_plays_to_its_end_and_says_so() {
 
     let mut count = 0;
     // SAFETY: live audio and a writable out.
-    assert_eq!(unsafe { fa_audio_update(audio.0, 0.2, &mut count) }, FaStatus::Ok);
+    assert_eq!(unsafe { fa_audio_update(audio.0, &0.2, &mut count) }, FaStatus::Ok);
     assert_eq!(count, 1);
     let mut stopped = vec![FaStopped::default(); count];
     // SAFETY: room for count.
@@ -127,6 +127,9 @@ fn bad_values_are_refused_and_say_why() {
     assert_eq!(unsafe { fa_audio_session_set(audio.0, 5) }, FaStatus::InvalidValue);
     // SAFETY: a null clip is refused, not read.
     assert_eq!(unsafe { fa_audio_play(audio.0, ptr::null(), &play(1.0), &mut handle) }, FaStatus::NullPointer);
+    // SAFETY: null settings are refused, not read.
+    assert_eq!(unsafe { fa_voice_set(audio.0, 1, ptr::null()) }, FaStatus::NullPointer);
+    assert_eq!(last_error(), "settings is null");
     // SAFETY: a null audio is refused, not read.
     assert_eq!(unsafe { fa_audio_volume_set(ptr::null_mut(), 1.0) }, FaStatus::NullPointer);
     assert_eq!(last_error(), "audio is null");
@@ -153,7 +156,10 @@ fn stopping_pausing_and_the_owners_reach_their_voices() {
     // SAFETY: live audio.
     unsafe {
         assert_eq!(fa_voice_pause(audio.0, handles[0], 1), FaStatus::Ok);
-        assert_eq!(fa_voice_set(audio.0, handles[0], FaSettings { volume: 0.5, pitch: 2.0, looping: 1 }), FaStatus::Ok);
+        assert_eq!(
+            fa_voice_set(audio.0, handles[0], &FaSettings { volume: 0.5, pitch: 2.0, looping: 1 }),
+            FaStatus::Ok
+        );
         assert_eq!(fa_owner_stop(audio.0, 2), FaStatus::Ok);
         assert_eq!(fa_audio_game_paused_set(audio.0, 1), FaStatus::Ok);
     }

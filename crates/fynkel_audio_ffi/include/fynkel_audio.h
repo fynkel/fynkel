@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FA_ABI_VERSION 1
+#define FA_ABI_VERSION 2
 
 // What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 // Those the engine's interface has too have its numbers
@@ -230,15 +230,18 @@ FaStatus fa_audio_suspend(struct FaAudio *audio, uint32_t suspended);
 // `audio` is null or live.
 FaStatus fa_audio_session_set(struct FaAudio *audio, uint32_t session);
 
-// Once a frame, with the frame's real time in seconds: takes back the
-// voices that ended, makes the sound of that time when no device plays,
-// and opens a lost device again. Writes how many voices stopped on their
-// own to `stopped`: read them with `fa_stopped_read`.
+// Once a frame, with the frame's real time in seconds at `seconds` (by
+// pointer, as a double passed to a native call is an allocation in Dart's
+// JIT): takes back the voices that ended, makes the sound of that time
+// when no device plays, and opens a lost device again. Writes how many
+// voices stopped on their own to `stopped`: read them with
+// `fa_stopped_read`.
 //
 // # Safety
 //
-// `audio` is null or live; `stopped` is null or writable.
-FaStatus fa_audio_update(struct FaAudio *audio, double seconds, size_t *stopped);
+// `audio` is null or live; `seconds` is null or readable; `stopped` is
+// null or writable.
+FaStatus fa_audio_update(struct FaAudio *audio, const double *seconds, size_t *stopped);
 
 // Copies the last `fa_audio_update`'s stopped voices to `out`, `len` of
 // them (its count).
@@ -274,12 +277,13 @@ FaStatus fa_voice_stop(struct FaAudio *audio, uint64_t voice);
 // `audio` is null or live.
 FaStatus fa_voice_pause(struct FaAudio *audio, uint64_t voice, uint32_t paused);
 
-// Changes a playing voice's volume, pitch or looping.
+// Changes a playing voice's volume, pitch or looping to `settings`'s (by
+// pointer, as a struct passed by value is an allocation in Dart).
 //
 // # Safety
 //
-// `audio` is null or live.
-FaStatus fa_voice_set(struct FaAudio *audio, uint64_t voice, struct FaSettings settings);
+// `audio` is null or live; `settings` is null or readable.
+FaStatus fa_voice_set(struct FaAudio *audio, uint64_t voice, const struct FaSettings *settings);
 
 // Writes whether a voice plays, and where it is, to `out`.
 //
