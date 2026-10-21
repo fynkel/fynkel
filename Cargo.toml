@@ -34,6 +34,7 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # nothing is read from files.
 gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_texture_transform", "KHR_materials_emissive_strength", "extensions"] }
 jni-sys = "0.3.1"
+ndk-context = "0.1.1"
 bevy_mikktspace = { version = "1.0.0", default-features = false, features = ["std"] }
 # Physics (packages/fynkel_physics): single-threaded, 32-bit floats.
 rapier3d = "0.36.1"

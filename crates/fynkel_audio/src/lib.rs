@@ -4,6 +4,10 @@
 //! allocating, freeing or waiting ([`Mixer`]). `crates/fynkel_audio_ffi` is
 //! its C interface, and `package:fynkel_audio` the Dart one.
 
+// JNI and dlsym, which are unsafe by nature, to give cpal the app's Java VM.
+#[cfg(target_os = "android")]
+#[allow(unsafe_code)]
+mod android;
 mod audio;
 mod clip;
 mod device;

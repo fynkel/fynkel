@@ -29,8 +29,23 @@ impl std::fmt::Debug for Device {
 }
 
 impl Device {
-    /// Opens the default output and starts it, playing `mixer`.
+    /// Opens the default output and starts it, playing `mixer`. A panic in
+    /// the system's sound (cpal) is an error here, as no device: the mixer
+    /// isn't touched by it, so sound goes on without one.
     pub(crate) fn open(mixer: &Arc<Mutex<Mixer>>) -> Result<Self, String> {
+        #[cfg(target_os = "android")]
+        crate::android::prepare()?;
+        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| Self::open_now(mixer))).unwrap_or_else(|payload| {
+            let message = payload
+                .downcast_ref::<&str>()
+                .map(|s| (*s).to_owned())
+                .or_else(|| payload.downcast_ref::<String>().cloned())
+                .unwrap_or_else(|| "a panic".to_owned());
+            Err(format!("the sound output failed: {message}"))
+        })
+    }
+
+    fn open_now(mixer: &Arc<Mutex<Mixer>>) -> Result<Self, String> {
         let host = cpal::default_host();
         let device = host.default_output_device().ok_or("there's no sound output")?;
         let default = device.default_output_config().map_err(|e| format!("the sound output: {e}"))?;
