@@ -57,6 +57,7 @@ import 'scenes/signals.dart';
 import 'scenes/skinned.dart';
 import 'scenes/sound_3d.dart';
 import 'scenes/sound_basics.dart';
+import 'scenes/sound_mix.dart';
 import 'scenes/time.dart';
 import 'scenes/toon.dart';
 
@@ -118,4 +119,5 @@ final List<LabScene Function()> scenes = [
   EffectsScene.new,
   SoundBasicsScene.new,
   Sound3dScene.new,
+  SoundMixScene.new,
 ];

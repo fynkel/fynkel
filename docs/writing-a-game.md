@@ -1631,7 +1631,9 @@ for a sound that belongs to no object (a button's click), `audio.stats`
 - **The iPhone's silent switch** mutes the game and the player's own
   music plays on under it, as most games do. `audio.session =
   AudioSession.playback` plays through the switch and stops their music,
-  for a game whose sound is the point.
+  for a game whose sound is the point; on Android it takes the audio
+  focus, which stops their music the same way. On both, the game's sound
+  waits while a call rings or is on.
 - **The sound starts** when the world is first shown on screen. In a
   test, which shows nothing, the sound is made and timed the same way
   with no device: `world.update` steps it, a clip ends after its length,
@@ -1697,6 +1699,67 @@ class Hive extends Behaviour {
 
 Sound in 3D costs the frame little: on the Note10+, 32 sounds moving
 take under a tenth of a millisecond.
+
+**Music** is `audio.music`: one track at a time, looping unless told
+not to, playing on through a pause (as a pause menu's music should), and
+never given up for other sounds. `play(clip, fadeIn:)` starts a track
+(the one already playing plays on, so a level that starts its music
+again doesn't restart it), `crossFade(clip, seconds)` fades the next in
+as the last fades out, and `stop(fadeOut:)` ends it. Its `onEnd` is
+called when a track that doesn't `loop` reaches its end.
+
+**A long clip streams.** A file over 10 seconds is decoded as it plays,
+a second ahead, on a thread of its own, so a three-minute song takes its
+file's memory rather than 30 MB of samples. `AudioClip.streamed` says
+which; `AudioClip.decode(bytes, stream: true)` streams a short one, and
+`stream: false` decodes a long one whole. It plays as it would decoded,
+from any `time`, looping without a gap; `audio.stats.starved` counts the
+times a stream wasn't ready (it should stay 0).
+
+**Groups** are a settings screen's "music" and "effects" (a group of
+Unity's `AudioMixer`): `audio.group('effects')` is made the first time
+it's asked for, and up to 15 can be. Each has a `volume` and `mute`
+under `audio.volume`, and `fade(to, seconds)`, all heard within a few
+milliseconds, without a click. A source joins one with `group`, a
+one-shot with `playOneShot(clip, group:)` or `playAt(..., group:)`, and
+the music plays in `audio.group('music')`.
+
+```dart
+// lib/sound_settings.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_audio/fynkel_audio.dart';
+
+/// Calm music that turns to a chase when an enemy sees the player, and
+/// sliders' values for the settings screen.
+class Soundtrack extends Behaviour {
+  late final AudioClip calm, chase;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    calm = await assets.audio('music/calm.ogg');
+    chase = await assets.audio('music/chase.ogg');
+    audio.music.play(calm, fadeIn: 2);
+  }
+
+  void seen() => audio.music.crossFade(chase, 1.5);
+  void lost() => audio.music.crossFade(calm, 4);
+
+  /// From the settings screen's sliders, 0 to 1.
+  void settings({required double music, required double effects}) {
+    audio.group('music').volume = music;
+    audio.group('effects').volume = effects;
+  }
+
+  /// Quieter music while a character speaks.
+  void speaking(bool on) => audio.group('music').fade(on ? 0.25 : 1, 0.5);
+}
+```
+
+**Hot reload** reads a changed sound file again: the clip sounds as the
+file now does from the next time it's played (what plays plays on). A
+file that's no longer sound keeps the old, and the error goes to
+`world.errors`.
 
 In a test, `audio.render(frames)` makes the mix as a speaker would have
 played it, left and right, to check what plays and where it's heard.
@@ -3410,7 +3473,10 @@ What keeps a game fast:
 | An `AudioListener` on the camera | `AudioListener`; without one, the world's camera hears |
 | `AudioSource.PlayClipAtPoint(clip, position)` | `audio.playAt(clip, position)` |
 | The 3D sound gizmos of a selected source | `audio.drawSources = true` |
-| `AudioSettings`' Mute Other Audio Sources (iOS) | `audio.session = AudioSession.playback` |
+| `AudioSettings`' Mute Other Audio Sources (iOS) | `audio.session = AudioSession.playback` (on Android too, by the audio focus) |
+| An `AudioMixer`'s groups, their volume and mute; `outputAudioMixerGroup` | `audio.group('music')`: `volume`, `mute`, `fade(to, seconds)`; a source's `group` |
+| Music on a looping `AudioSource`, crossfades by hand | `audio.music`: `play(clip, fadeIn:)`, `crossFade(clip, seconds)`, `stop(fadeOut:)` |
+| An `AudioClip`'s Load Type: Streaming | Clips over 10 s stream; `AudioClip.decode(bytes, stream:)` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |

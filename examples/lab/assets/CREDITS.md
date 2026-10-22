@@ -11,5 +11,7 @@
   unchanged but for their names; `kaykit/sword.glb` is its `sword_1handed.gltf` (with its
   `.bin` and `knight_texture.png`) packed into one `.glb` by Blender, unchanged otherwise.
   `kaykit/LICENSE.txt` is the pack's licence file.
+- `music/calm.ogg`, `music/chase.ogg`: made for the lab by `tool/music.py` from sines and
+  noise, CC0.
 
 CC0: https://creativecommons.org/publicdomain/zero/1.0/
