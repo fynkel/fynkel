@@ -3,12 +3,17 @@
 //! Only an app started from Rust (`android-activity`) has them there, and
 //! without them cpal panics. A Flutter app's process has a VM all the same:
 //! this finds it and the app's `Application`, and hands them over, once.
+//!
+//! The same VM and app give the sound its audio focus (docs/stage-11.md
+//! §3.4): asked for with `Session::Playback`, so the player's music stops,
+//! as on iOS; and whether a call is on (or ringing), so the game's sound
+//! waits for it to end. Through JNI, so a game needs no Java of its own.
 
 use std::ffi::{c_char, c_int, c_void};
 use std::ptr;
 use std::sync::OnceLock;
 
-use jni_sys::{JNI_OK, JNI_VERSION_1_6, JNIEnv, JavaVM, jint, jobject, jsize};
+use jni_sys::{JNI_OK, JNI_VERSION_1_6, JNIEnv, JavaVM, jint, jmethodID, jobject, jsize, jvalue};
 
 unsafe extern "C" {
     fn dlopen(filename: *const c_char, flags: c_int) -> *mut c_void;
@@ -19,13 +24,177 @@ unsafe extern "C" {
 const RTLD_DEFAULT: *mut c_void = ptr::null_mut();
 const RTLD_NOW: c_int = 2;
 
-static READY: OnceLock<Result<(), String>> = OnceLock::new();
+static READY: OnceLock<Result<Java, String>> = OnceLock::new();
+static MANAGER: OnceLock<Result<Manager, String>> = OnceLock::new();
+
+/// The VM and the app, for the process's life (as addresses, to be shared).
+#[derive(Clone, Copy, Debug)]
+struct Java {
+    vm: usize,
+    app: usize,
+}
+
+/// The app's `AudioManager`, a global reference, and the methods used.
+#[derive(Debug)]
+struct Manager {
+    object: usize,
+    get_mode: usize,
+    request: usize,
+    abandon: usize,
+}
+
+/// `AudioManager`'s constants.
+const STREAM_MUSIC: jint = 3;
+const AUDIOFOCUS_GAIN: jint = 1;
+const MODE_RINGTONE: jint = 1;
+const MODE_IN_CALL: jint = 2;
+const MODE_IN_COMMUNICATION: jint = 3;
 
 /// Gives `ndk-context` the VM and the app, the first time; then says how
 /// that went.
 pub(crate) fn prepare() -> Result<(), String> {
     // SAFETY: run once, before cpal asks for the context.
-    READY.get_or_init(|| unsafe { hand_over() }).clone()
+    READY.get_or_init(|| unsafe { hand_over() }).clone().map(|_| ())
+}
+
+/// Asks for the audio focus, for good, when `wanted`, so other apps'
+/// sound stops; gives it up when not. Fails only when it can't be asked.
+pub(crate) fn focus(wanted: bool) -> Result<(), String> {
+    let manager = manager()?;
+    // SAFETY: a live env, the manager's methods on it, and a null
+    // listener, which the deprecated forms take: the focus is the
+    // manager's, given up with the same null.
+    with_env(|env| unsafe {
+        let jni = &**env;
+        if wanted {
+            let call = jni.CallIntMethodA.ok_or("no CallIntMethodA")?;
+            let args = [jvalue { l: ptr::null_mut() }, jvalue { i: STREAM_MUSIC }, jvalue { i: AUDIOFOCUS_GAIN }];
+            call(env, manager.object as jobject, manager.request as jmethodID, args.as_ptr());
+        } else {
+            let call = jni.CallIntMethodA.ok_or("no CallIntMethodA")?;
+            let args = [jvalue { l: ptr::null_mut() }];
+            call(env, manager.object as jobject, manager.abandon as jmethodID, args.as_ptr());
+        }
+        thrown(env, "the audio focus")
+    })
+}
+
+/// Whether a call is on, or ringing: the game's sound waits for it.
+pub(crate) fn in_call() -> bool {
+    let Ok(manager) = manager() else { return false };
+    // SAFETY: a live env, and the manager's getMode on it.
+    with_env(|env| unsafe {
+        let call = (**env).CallIntMethodA.ok_or("no CallIntMethodA")?;
+        let mode = call(env, manager.object as jobject, manager.get_mode as jmethodID, ptr::null());
+        thrown(env, "the phone's mode")?;
+        Ok(matches!(mode, MODE_RINGTONE | MODE_IN_CALL | MODE_IN_COMMUNICATION))
+    })
+    .unwrap_or(false)
+}
+
+fn manager() -> Result<&'static Manager, String> {
+    let java = READY.get_or_init(|| unsafe { hand_over() }).clone()?;
+    // SAFETY: a live env; the app is a global reference.
+    MANAGER
+        .get_or_init(|| with_env(|env| unsafe { find_manager(env, java.app as jobject) }))
+        .as_ref()
+        .map_err(Clone::clone)
+}
+
+/// The app's `getSystemService("audio")`, and its methods.
+///
+/// # Safety
+///
+/// `env` is the current thread's; `app` a live `Context`.
+unsafe fn find_manager(env: *mut JNIEnv, app: jobject) -> Result<Manager, String> {
+    // SAFETY: per this function's contract; each call checked for a Java
+    // exception, and local references deleted.
+    unsafe {
+        let jni = &**env;
+        let missing = || "the Java VM is missing a JNI function".to_owned();
+        let get_class = jni.GetObjectClass.ok_or_else(missing)?;
+        let find_class = jni.FindClass.ok_or_else(missing)?;
+        let method = jni.GetMethodID.ok_or_else(missing)?;
+        let call = jni.CallObjectMethodA.ok_or_else(missing)?;
+        let new_string = jni.NewStringUTF.ok_or_else(missing)?;
+        let (new_global, delete_local) =
+            (jni.NewGlobalRef.ok_or_else(missing)?, jni.DeleteLocalRef.ok_or_else(missing)?);
+        let context = get_class(env, app);
+        let service =
+            method(env, context, c"getSystemService".as_ptr(), c"(Ljava/lang/String;)Ljava/lang/Object;".as_ptr());
+        delete_local(env, context);
+        thrown(env, "Context.getSystemService")?;
+        let name = new_string(env, c"audio".as_ptr());
+        let args = [jvalue { l: name }];
+        let object = call(env, app, service, args.as_ptr());
+        delete_local(env, name);
+        thrown(env, "the audio service")?;
+        if object.is_null() {
+            return Err("the app has no audio service".to_owned());
+        }
+        let class = find_class(env, c"android/media/AudioManager".as_ptr());
+        thrown(env, "AudioManager")?;
+        let listener = c"(Landroid/media/AudioManager$OnAudioFocusChangeListener;II)I";
+        let get_mode = method(env, class, c"getMode".as_ptr(), c"()I".as_ptr());
+        let request = method(env, class, c"requestAudioFocus".as_ptr(), listener.as_ptr());
+        let abandon = method(
+            env,
+            class,
+            c"abandonAudioFocus".as_ptr(),
+            c"(Landroid/media/AudioManager$OnAudioFocusChangeListener;)I".as_ptr(),
+        );
+        delete_local(env, class);
+        thrown(env, "AudioManager's methods")?;
+        let global = new_global(env, object);
+        delete_local(env, object);
+        if global.is_null() || get_mode.is_null() || request.is_null() || abandon.is_null() {
+            return Err("AudioManager isn't as expected".to_owned());
+        }
+        Ok(Manager {
+            object: global as usize,
+            get_mode: get_mode as usize,
+            request: request as usize,
+            abandon: abandon as usize,
+        })
+    }
+}
+
+/// An error, the exception cleared, if the last JNI call threw.
+///
+/// # Safety
+///
+/// `env` is the current thread's.
+unsafe fn thrown(env: *mut JNIEnv, what: &str) -> Result<(), String> {
+    // SAFETY: per this function's contract.
+    unsafe {
+        let jni = &**env;
+        let (Some(check), Some(clear)) = (jni.ExceptionCheck, jni.ExceptionClear) else { return Ok(()) };
+        if check(env) != 0 {
+            clear(env);
+            return Err(format!("{what} threw"));
+        }
+    }
+    Ok(())
+}
+
+/// Runs `f` with this thread's env, joining it to the VM first if it
+/// isn't (for good: the game's thread asks again each half second).
+fn with_env<T>(f: impl FnOnce(*mut JNIEnv) -> Result<T, String>) -> Result<T, String> {
+    let java = READY.get().ok_or("no Java VM yet")?.clone()?;
+    let vm = java.vm as *mut JavaVM;
+    // SAFETY: a live VM, for the process's life.
+    let invoke = unsafe { &**vm };
+    let mut env: *mut JNIEnv = ptr::null_mut();
+    let get_env = invoke.GetEnv.ok_or("the Java VM has no GetEnv")?;
+    // SAFETY: as JNI says.
+    if unsafe { get_env(vm, (&raw mut env).cast(), JNI_VERSION_1_6) } != JNI_OK {
+        let attach = invoke.AttachCurrentThreadAsDaemon.ok_or("the Java VM has no AttachCurrentThreadAsDaemon")?;
+        // SAFETY: as JNI says; a daemon thread doesn't keep the VM up.
+        if unsafe { attach(vm, (&raw mut env).cast(), ptr::null_mut()) } != JNI_OK {
+            return Err("this thread can't join the Java VM".to_owned());
+        }
+    }
+    f(env)
 }
 
 type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut JavaVM, jsize, *mut jsize) -> jint;
@@ -33,7 +202,7 @@ type GetCreatedJavaVms = unsafe extern "system" fn(*mut *mut JavaVM, jsize, *mut
 /// # Safety
 ///
 /// Called once, as [`prepare`] does.
-unsafe fn hand_over() -> Result<(), String> {
+unsafe fn hand_over() -> Result<Java, String> {
     let name = c"JNI_GetCreatedJavaVMs".as_ptr();
     // SAFETY: looking a symbol up, by its C name; libnativehelper is where
     // the NDK puts it from Android 12, and the process has it loaded.
@@ -80,7 +249,7 @@ unsafe fn hand_over() -> Result<(), String> {
     // SAFETY: the VM and a global reference to the app, both for the
     // process's life; ndk-context is given them once.
     unsafe { ndk_context::initialize_android_context(vm.cast(), app.cast()) };
-    Ok(())
+    Ok(Java { vm: vm as usize, app: app as usize })
 }
 
 /// A global reference to the app's `Application`, from

@@ -155,7 +155,21 @@ abstract class AssetKind<T extends Object> {
   /// reported to [World.errors].
   void free(World world, T value) {}
 
+  /// Whether a hot reload reads this kind's files again ([reload]): false
+  /// unless a kind says so.
+  bool get reloads => false;
+
+  /// Puts [bytes], the file [name]'s as it is now, into [value], which was
+  /// loaded from it ([World.reloadAssets], on a hot reload): a sound whose
+  /// file was changed plays the new sound. Only for a kind that [reloads].
+  /// What it throws is reported to [World.errors], and [value] stays as it
+  /// was.
+  Future<void> reload(World world, String name, T value, Uint8List bytes) async {}
+
   void _free(World world, Object value) => free(world, value as T);
+
+  Future<void> _reload(World world, String name, Object value, Uint8List bytes) =>
+      reload(world, name, value as T, bytes);
 }
 
 /// Models and textures, which the world frees itself ([_Resources._free]).

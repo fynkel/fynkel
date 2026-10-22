@@ -26,7 +26,10 @@ fn a_chord_plays_through_the_default_output() {
         audio
             .play(
                 &clip,
-                Play { settings: fynkel_audio::Settings { volume: 0.5, pitch, looping: false }, ..Play::default() },
+                Play {
+                    settings: fynkel_audio::Settings { volume: 0.5, pitch, looping: false, group: 0 },
+                    ..Play::default()
+                },
             )
             .unwrap();
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -38,4 +41,31 @@ fn a_chord_plays_through_the_default_output() {
     eprintln!("{stats:?}");
     assert!(stats.callbacks > 10, "{stats:?}");
     assert_eq!(stats.voices, 0, "{stats:?}");
+}
+
+/// The lab's chase track, streamed and looping, through the speaker for
+/// `FYNKEL_STREAM_SECONDS` (600 unless set), quietly: never starved.
+#[test]
+#[ignore = "plays through the speaker, for ten minutes"]
+fn a_streamed_track_plays_without_a_gap() {
+    let path = concat!(env!("CARGO_MANIFEST_DIR"), "/../../examples/lab/assets/music/chase.ogg");
+    let clip = Arc::new(Clip::decode(&std::fs::read(path).unwrap(), "chase.ogg").unwrap());
+    assert!(clip.streamed());
+    let seconds: u64 = std::env::var("FYNKEL_STREAM_SECONDS").ok().and_then(|s| s.parse().ok()).unwrap_or(600);
+    let mut audio = Audio::new();
+    audio.open_device().unwrap();
+    let settings = fynkel_audio::Settings { volume: 0.05, pitch: 1.0, looping: true, group: 0 };
+    let handle = audio.play(&clip, Play { settings, ..Play::default() }).unwrap().unwrap();
+    // As a game would: an update a frame.
+    let start = std::time::Instant::now();
+    while start.elapsed().as_secs() < seconds {
+        std::thread::sleep(std::time::Duration::from_millis(16));
+        audio.update(0.016);
+    }
+    let stats = audio.stats();
+    eprintln!("{seconds} s: {stats:?}");
+    assert!(audio.playing(handle));
+    assert!(stats.callbacks > seconds * 20, "{stats:?}");
+    assert_eq!(stats.starved, 0, "{stats:?}");
+    assert_eq!(stats.underruns, 0, "{stats:?}");
 }

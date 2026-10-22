@@ -14,18 +14,20 @@ import 'bindings.g.dart';
 
 part 'clip.dart';
 part 'listener.dart';
+part 'mix.dart';
 part 'source.dart';
 
-/// How the game's sound sits with the phone's, on iOS (elsewhere it
-/// changes nothing): [AudioSession.ambient] unless set.
+/// How the game's sound sits with the phone's, on iOS and Android
+/// (elsewhere it changes nothing): [AudioSession.ambient] unless set.
+/// Either way the game's sound waits for a phone call.
 enum AudioSession {
-  /// The silent switch mutes the game, and the player's own music keeps
-  /// playing under it: what most games do.
+  /// The silent switch mutes the game (iOS), and the player's own music
+  /// keeps playing under it: what most games do.
   ambient,
 
-  /// The game plays with the silent switch on, and the player's music
-  /// stops (Unity's *Mute Other Audio Sources*): for a game whose sound is
-  /// the point.
+  /// The game plays with the silent switch on (iOS), and the player's
+  /// music stops: on Android, the game takes the audio focus (Unity's
+  /// *Mute Other Audio Sources*). For a game whose sound is the point.
   playback,
 }
 
@@ -81,7 +83,8 @@ final class AudioStats {
       stolen = s.stolen,
       refused = s.refused,
       callbacks = s.callbacks,
-      underruns = s.underruns;
+      underruns = s.underruns,
+      starved = s.starved;
 
   /// Whether a sound output plays it. Not in tests, nor before the world
   /// is shown on screen.
@@ -102,6 +105,11 @@ final class AudioStats {
   /// time (a crackle).
   final int callbacks, underruns;
 
+  /// Times the output asked for sound and a [AudioClip.streamed] clip
+  /// hadn't been decoded far enough (a gap): never, while its decoding
+  /// keeps up.
+  final int starved;
+
   /// What sound costs the game's frame, in milliseconds, averaged over
   /// about the last second: reading where the 3D sources and the listener
   /// are, and telling the mixer. Reading them first sends the frame's
@@ -113,16 +121,16 @@ final class AudioStats {
   @override
   String toString() =>
       'AudioStats(${device ? 'device' : 'no device'} $rate Hz × $channels, $voices voices, started $started, '
-      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns, '
+      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns, starved $starved, '
       '${frameMilliseconds.toStringAsFixed(3)} ms a frame)';
 }
 
 /// A world's sound, as Unity's `AudioListener` and `AudioSettings` are:
-/// [volume] for everything, [playOneShot] for a sound that belongs to no
-/// object (a click), [playAt] for one at a place in the world (an
-/// explosion), and [session]. Every object and behaviour has it as
-/// `audio`; it's made the first time it's asked for, or by the first
-/// [AudioSource].
+/// [volume] for everything, [group]s under it (music, effects), [music],
+/// [playOneShot] for a sound that belongs to no object (a click), [playAt]
+/// for one at a place in the world (an explosion), and [session]. Every
+/// object and behaviour has it as `audio`; it's made the first time it's
+/// asked for, or by the first [AudioSource].
 ///
 /// Sounds play through the device once the world is shown on screen, and
 /// stop while the app is away. While the game is [World.paused], its
@@ -173,6 +181,7 @@ final class Audio extends WorldSystem implements Finalizable {
   var _stoppedRoom = 8;
   final _spatial = calloc<FaSpatial>();
   final _listener = calloc<FaListener>();
+  final _fade = calloc<FaFade>();
   // Room for every voice's place each frame, and the ids and transforms
   // read for them: the listener's object, then the 3D sources'.
   static const _placeRoom = 2 * maxVoices;
@@ -185,8 +194,9 @@ final class Audio extends WorldSystem implements Finalizable {
   // `.ref`, which makes an object each time, or the generated accessors,
   // which box a double in the JIT; `Pointer` reads and writes do neither.
   // FaPlay and FaSettings: volume and pitch, floats 0 and 1; looping,
-  // word 2; then FaPlay's priority and pausable, words 3 and 4, owner at
-  // byte 24 and start at byte 32. FaVoice: playing, word 0; time at byte 8.
+  // word 2; group, word 3; then FaPlay's priority and pausable, words 4
+  // and 5, owner at byte 24 and start at byte 32. FaVoice: playing, word
+  // 0; time at byte 8.
   // Checked against the accessors when made. The volume and pitch to play
   // or set, and the start, are written by the caller of [_start] and
   // [_set], as a double passed to a call the JIT doesn't inline is boxed.
@@ -199,10 +209,13 @@ final class Audio extends WorldSystem implements Finalizable {
   late final _voicePlaying = _voice.cast<Uint32>();
   late final _voiceTime = (_voice.cast<Uint8>() + 8).cast<Double>();
   // FaPlay's spatial: blend, pan, min and max distance, floats 10 to 13;
-  // rolloff, word 14; position, floats 15 to 17. FaSpatial the same from
+  // rolloff, word 14; position, floats 15 to 17; fade in, float 18.
+  // FaSpatial the same from
   // 0. FaListener: position, floats 0 to 2; rotation, 3 to 6. FaPlace, 24
   // bytes each: its voice, word (64-bit) 3 × i; its position, floats
   // 6 × i + 2 to 4.
+  // FaFade: to and seconds, floats 0 and 1.
+  late final _fadeFloats = _fade.cast<Float>();
   late final _spatialFloats = _spatial.cast<Float>();
   late final _spatialWords = _spatial.cast<Uint32>();
   late final _listenerFloats = _listener.cast<Float>();
@@ -215,6 +228,7 @@ final class Audio extends WorldSystem implements Finalizable {
   final _enabled = <AudioSource>[];
   final _listeners = <AudioListener>[];
   var _nextOwner = 1;
+  final _groups = <String, AudioGroup>{};
 
   var _gamePaused = false;
   var _timeScale = 1.0;
@@ -237,7 +251,25 @@ final class Audio extends WorldSystem implements Finalizable {
 
   var _volume = 1.0;
 
-  /// How the game's sound sits with the phone's, on iOS.
+  /// The group called [name], made the first time it's asked for: its
+  /// sounds' volume set together ([AudioGroup]). There's room for 15.
+  AudioGroup group(String name) {
+    final known = _groups[name];
+    if (known != null) return known;
+    if (_groups.length == maxGroups) {
+      throw StateError('there are $maxGroups sound groups already (${_groups.keys.join(', ')}): no room for $name');
+    }
+    return _groups[name] = AudioGroup._(this, name, _groups.length + 1);
+  }
+
+  /// How many [group]s there may be.
+  static const maxGroups = 15;
+
+  /// The world's music: one track at a time, crossfaded ([AudioMusic]).
+  AudioMusic get music => _music ??= AudioMusic._(this);
+  AudioMusic? _music;
+
+  /// How the game's sound sits with the phone's, on iOS and Android.
   AudioSession get session => _session;
   set session(AudioSession value) {
     _check(fa_audio_session_set(_native, value.index));
@@ -271,9 +303,17 @@ final class Audio extends WorldSystem implements Finalizable {
   /// Plays [clip] once, belonging to no object: a button's click, say.
   /// [volume] (0 to 1, 1 unless given) and [pitch] (0.05 to 8, 1 unless
   /// given) are its own; it holds while the game is paused unless
-  /// [ignorePause]. Nothing plays it if every voice is busy with something
-  /// more important than [priority].
-  void playOneShot(AudioClip clip, {double? volume, double? pitch, bool ignorePause = false, int priority = 128}) {
+  /// [ignorePause], and is under [group]'s volume, if given. Nothing plays
+  /// it if every voice is busy with something more important than
+  /// [priority].
+  void playOneShot(
+    AudioClip clip, {
+    double? volume,
+    double? pitch,
+    bool ignorePause = false,
+    int priority = 128,
+    AudioGroup? group,
+  }) {
     // Nullable, not defaulted, and checked here, the error given the
     // value passed: the JIT boxes a double with a default, one passed to a
     // call it doesn't inline, or one an error is made with, at every call.
@@ -283,9 +323,14 @@ final class Audio extends WorldSystem implements Finalizable {
     _checkPriority(priority);
     _playFloats
       ..[0] = gain
-      ..[1] = speed;
+      ..[1] = speed
+      ..[10] = 0
+      ..[11] = 0
+      ..[12] = 1
+      ..[13] = 500;
+    _playWords[14] = 0;
     _playFrom.value = 0;
-    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: _indexOf(group));
   }
 
   /// Plays [clip] once at [position] in the world, a 3D sound that belongs
@@ -293,7 +338,7 @@ final class Audio extends WorldSystem implements Finalizable {
   /// a coin picked up. It stays where it was played, heard from there as
   /// the listener moves, fading between [minDistance] and [maxDistance]
   /// (1 and 500 unless given) as [rolloffMode] says. [volume], [pitch],
-  /// [ignorePause] and [priority] are as [playOneShot]'s.
+  /// [ignorePause], [priority] and [group] are as [playOneShot]'s.
   void playAt(
     AudioClip clip,
     Vec3 position, {
@@ -304,6 +349,7 @@ final class Audio extends WorldSystem implements Finalizable {
     AudioRolloffMode rolloffMode = AudioRolloffMode.logarithmic,
     bool ignorePause = false,
     int priority = 128,
+    AudioGroup? group,
   }) {
     // Nullable and checked here, for the reason playOneShot's are.
     final gain = volume ?? 1.0, speed = pitch ?? 1.0, near = minDistance ?? 1.0, far = maxDistance ?? 500.0;
@@ -327,7 +373,7 @@ final class Audio extends WorldSystem implements Finalizable {
     _playWords[14] = rolloffMode.index;
     _playFrom.value = 0;
     _hear();
-    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: _indexOf(group));
   }
 
   /// Makes [frames] frames of the sound (48,000 a second, interleaved
@@ -481,6 +527,8 @@ final class Audio extends WorldSystem implements Finalizable {
       ..settings.volume = 0.25
       ..settings.pitch = 0.5
       ..settings.looping = 3
+      ..settings.group = 13
+      ..fade_in = 1.5
       ..priority = 4
       ..pausable = 5
       ..owner = 6
@@ -505,21 +553,28 @@ final class Audio extends WorldSystem implements Finalizable {
     _settings.ref
       ..volume = 0.125
       ..pitch = 2
-      ..looping = 8;
+      ..looping = 8
+      ..group = 14;
     _voice.ref
       ..playing = 7
       ..time = 1.25;
+    _fade.ref
+      ..to = 0.375
+      ..seconds = 4;
     final seen = [
       _playFloats[0],
       _playFloats[1],
       _playWords[2],
-      _playWords[3],
       _playWords[4],
+      _playWords[5],
       _playOwner.value,
       _playFrom.value,
       _settingsFloats[0],
       _settingsFloats[1],
       _settingsWords[2],
+      _playWords[3],
+      _playFloats[18],
+      _settingsWords[3],
       _voicePlaying.value,
       _voiceTime.value,
       _playFloats[10],
@@ -536,34 +591,59 @@ final class Audio extends WorldSystem implements Finalizable {
       _listenerFloats[6],
       _placeVoices[3],
       _placeFloats[6 + 4],
+      _fadeFloats[0],
+      _fadeFloats[1],
     ];
     if (seen.join(' ') !=
-        '0.25 0.5 3 4 5 6 0.75 0.125 2.0 8 7 1.25 0.5 -0.5 2.0 3.0 9 10.0 12.0 1.0 40.0 7 21.0 22.0 31 32.0') {
+        '0.25 0.5 3 4 5 6 0.75 0.125 2.0 8 13 1.5 14 7 1.25 0.5 -0.5 2.0 3.0 9 10.0 12.0 1.0 40.0 7 21.0 22.0 31 32.0 0.375 4.0') {
       throw StateError('package:fynkel_audio reads its structs at the wrong places: $seen');
     }
   }
 
   /// Plays [clip] at the volume, pitch and start written to [_playFloats]
-  /// and [_playFrom]; its voice's handle, or 0 if none was free.
+  /// and [_playFrom], and the fade in written there too when [fading]; its
+  /// voice's handle, or 0 if none was free.
   int _start(
     AudioClip clip, {
     required bool looping,
     required int priority,
     required bool pausable,
     required int owner,
+    required int group,
+    bool fading = false,
   }) {
+    if (!fading) _playFloats[18] = 0;
     _playWords
       ..[2] = looping ? 1 : 0
-      ..[3] = priority
-      ..[4] = pausable ? 1 : 0;
+      ..[3] = group
+      ..[4] = priority
+      ..[5] = pausable ? 1 : 0;
     _playOwner.value = owner;
     _check(fa_audio_play(_native, clip._native, _play, _handle));
     return _handle.value;
   }
 
+  /// Fades [handle] to [to] over [seconds], stopping it there if [stop].
+  void _fadeVoice(int handle, double to, double seconds, {required bool stop}) {
+    _fadeFloats
+      ..[0] = to
+      ..[1] = seconds;
+    _check(fa_voice_fade(_native, handle, _fade, stop ? 1 : 0));
+  }
+
+  /// Fades [group] to [to] over [seconds].
+  void _fadeGroup(int group, double to, double seconds) {
+    _fadeFloats
+      ..[0] = to
+      ..[1] = seconds;
+    _check(fa_group_set(_native, group, _fade));
+  }
+
   /// Sets [handle] to the volume and pitch written to [_settingsFloats].
-  void _set(int handle, {required bool looping}) {
-    _settingsWords[2] = looping ? 1 : 0;
+  void _set(int handle, {required bool looping, required int group}) {
+    _settingsWords
+      ..[2] = looping ? 1 : 0
+      ..[3] = group;
     _check(fa_voice_set(_native, handle, _settings));
   }
 
@@ -621,10 +701,12 @@ final class Audio extends WorldSystem implements Finalizable {
       _stopped = calloc<FaStopped>(count);
     }
     _check(fa_stopped_read(_native, _stopped, count));
+    final music = _music;
     for (var i = 0; i < count; i++) {
       final stopped = _stopped[i];
       final source = _sources[stopped.owner];
       if (source != null) source._ended(stopped.handle, stolen: stopped.stolen == 1);
+      if (music != null && stopped.owner == music._owner) music._ended(stopped.handle);
     }
   }
 
@@ -665,6 +747,7 @@ final class Audio extends WorldSystem implements Finalizable {
       ..free(_stopped)
       ..free(_spatial)
       ..free(_listener)
+      ..free(_fade)
       ..free(_places)
       ..free(_ids)
       ..free(_transforms);
@@ -678,6 +761,9 @@ void _checkUnit(double value, String name) {
 void _checkPitch(double value) {
   if (!(value >= 0.05 && value <= 8)) throw ArgumentError.value(value, 'pitch', 'is not between 0.05 and 8');
 }
+
+/// [group]'s number for the mixer: 0 for none.
+int _indexOf(AudioGroup? group) => group == null ? 0 : group._index;
 
 void _checkPriority(int value) {
   if (value < 0 || value > 256) throw ArgumentError.value(value, 'priority', 'is not between 0 and 256');

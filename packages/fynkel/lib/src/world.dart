@@ -226,6 +226,30 @@ final class World implements Finalizable {
     }
   }
 
+  /// Reads again, from the world's source, every shader [assets] loaded
+  /// ([reloadShaders]) and every asset of a package's kind that
+  /// [AssetKind.reloads], such as sounds, and puts the new files in:
+  /// `FynkelGame` calls it on a hot reload. One that fails keeps what it
+  /// had, and the error goes to [errors].
+  Future<void> reloadAssets() async {
+    await reloadShaders();
+    final source = _source;
+    if (source == null) return;
+    for (final asset in [..._assets.values]) {
+      final (kind, value) = (asset.kind, asset.value);
+      if (value == null || kind is _BuiltInKind || !kind.reloads) continue;
+      try {
+        final bytes = await source(asset.name);
+        if (isDisposed) return;
+        // Freed while it was read: nothing to put it in.
+        if (!identical(asset.value, value)) continue;
+        await kind._reload(this, asset.name, value, bytes);
+      } catch (error, stack) {
+        if (!isDisposed) _report(null, error, stack);
+      }
+    }
+  }
+
   // --- Errors ---
 
   final _errors = StreamController<ObjectError>.broadcast();

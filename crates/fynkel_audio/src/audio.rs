@@ -10,9 +10,10 @@ use std::time::{Duration, Instant};
 
 use crate::clip::Clip;
 use crate::device::Device;
-use crate::mixer::{COMMANDS, Command, Ended, MAX_VOICES, Mixer, RETURNS, Settings, Shared};
+use crate::mixer::{COMMANDS, Command, Ended, MAX_GROUPS, MAX_VOICES, Mixer, RETURNS, Settings, Shared};
 use crate::session::{self, Session};
 use crate::spatial::{self, Listener, Mix, Spatial};
+use crate::stream::{self, Streamer};
 
 /// The rate and channels sound is made at without a device.
 pub const QUIET_RATE: u32 = 48_000;
@@ -25,6 +26,16 @@ pub const MAX_PITCH: f32 = 8.0;
 
 /// The lowest pitch.
 pub const MIN_PITCH: f32 = 0.05;
+
+/// The longest fade, in seconds.
+pub const MAX_FADE: f32 = 3_600.0;
+
+/// How much is rendered at once without a device: streams are decoded
+/// between, as a device's thread would.
+const CHUNK: usize = 1024;
+
+/// How often a phone's call is looked for, with a device.
+const CALL_CHECK: Duration = Duration::from_millis(500);
 
 /// A playing voice, for as long as it plays: its slot and which use of
 /// that slot it is. Never 0.
@@ -47,6 +58,8 @@ pub struct Play {
     pub spatial: Spatial,
     /// Where it is, for a 3D sound; see [`Audio::place`].
     pub position: [f32; 3],
+    /// Seconds it fades in over, from silence; 0 for none.
+    pub fade_in: f32,
 }
 
 impl Default for Play {
@@ -59,6 +72,7 @@ impl Default for Play {
             from: 0.0,
             spatial: Spatial::default(),
             position: [0.0; 3],
+            fade_in: 0.0,
         }
     }
 }
@@ -92,6 +106,9 @@ pub struct Stats {
     pub underruns: u64,
     /// Times the device was lost and opened again.
     pub reopened: u64,
+    /// Callbacks in which a streamed clip's voice ran out of decoded sound
+    /// (a gap): never, while its decoder keeps up.
+    pub starved: u64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -142,6 +159,7 @@ pub struct Audio {
     returns: rtrb::Consumer<Ended>,
     shared: Arc<Shared>,
     mixer: Arc<Mutex<Mixer>>,
+    streamer: Streamer,
     session: Session,
     listener: Listener,
     /// The listener or a 3D voice moved since the last update.
@@ -150,6 +168,9 @@ pub struct Audio {
     /// The device was asked for: opened again when it's lost.
     wants_device: bool,
     suspended: bool,
+    /// A phone call is on: the device waits for it, as when suspended.
+    in_call: bool,
+    last_call_check: Option<Instant>,
     last_try: Option<Instant>,
     stopped: Vec<Stopped>,
     /// Without a device: frames of time not yet rendered, and where.
@@ -182,17 +203,20 @@ impl Audio {
             returns,
             shared,
             mixer,
+            streamer: Streamer::default(),
             session: Session::default(),
             listener: Listener::default(),
             moved: false,
             device: None,
             wants_device: false,
             suspended: false,
+            in_call: false,
+            last_call_check: None,
             last_try: None,
             // A steal per command, and an end per return, at most.
             stopped: Vec::with_capacity(COMMANDS + RETURNS),
             owed: 0.0,
-            scratch: vec![0.0; 1024 * 2],
+            scratch: vec![0.0; CHUNK * 2],
             stats: Stats::default(),
         }
     }
@@ -211,8 +235,16 @@ impl Audio {
     fn try_device(&mut self) -> Result<(), String> {
         self.last_try = Some(Instant::now());
         session::apply(self.session)?;
-        let device = Device::open(&self.mixer)?;
-        if self.suspended {
+        self.streamer.pump();
+        self.streamer.start()?;
+        let device = match Device::open(&self.mixer) {
+            Ok(device) => device,
+            Err(e) => {
+                self.streamer.stop();
+                return Err(e);
+            }
+        };
+        if self.suspended || self.in_call {
             device.suspend(true)?;
         }
         self.device = Some(device);
@@ -230,6 +262,7 @@ impl Audio {
         if let Some(device) = self.device.take() {
             self.stats.underruns += device.underruns.load(Ordering::Relaxed);
             drop(device);
+            self.streamer.stop();
             if let Ok(mut mixer) = self.mixer.lock() {
                 mixer.set_output(QUIET_RATE, 2);
             }
@@ -240,7 +273,7 @@ impl Audio {
     pub fn suspend(&mut self, suspended: bool) -> Result<(), String> {
         self.suspended = suspended;
         match &self.device {
-            Some(device) => device.suspend(suspended),
+            Some(device) => device.suspend(suspended || self.in_call),
             None => Ok(()),
         }
     }
@@ -274,6 +307,7 @@ impl Audio {
     /// important; a stolen voice is in the next [`Audio::stopped`].
     pub fn play(&mut self, clip: &Arc<Clip>, play: Play) -> Result<Option<Handle>, String> {
         check_settings(play.settings)?;
+        check_fade(play.fade_in)?;
         if play.priority > LOWEST_PRIORITY {
             return Err(format!("priority {} isn't between 0 and {LOWEST_PRIORITY}", play.priority));
         }
@@ -321,14 +355,21 @@ impl Audio {
             mix,
         };
         let from = play.from * f64::from(clip.rate());
+        let stream = clip.streamed().then(|| {
+            let (tap, feed) = stream::open(clip, from as u64, play.settings.looping);
+            self.streamer.add(feed);
+            tap
+        });
         self.send(Command::Start {
             slot: slot as u8,
             generation,
             clip: clip.clone(),
+            stream,
             settings: play.settings,
             pausable: play.pausable,
             from,
             mix,
+            fade_in: play.fade_in,
         })?;
         self.stats.started += 1;
         Ok(Some(self.handle(slot)))
@@ -355,6 +396,35 @@ impl Audio {
             }
         }
         Ok(())
+    }
+
+    /// Fades a voice to `to` (0 to 1, times its volume) over `seconds`,
+    /// then, when `stop`, stops it: it isn't [`Audio::playing`] from now.
+    pub fn fade(&mut self, handle: Handle, to: f32, seconds: f32, stop: bool) -> Result<(), String> {
+        check_unit(to, "a fade's volume")?;
+        check_fade(seconds)?;
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        if self.slots[slot].stopped {
+            return Ok(());
+        }
+        let generation = self.slots[slot].generation;
+        self.send(Command::Fade { slot: slot as u8, generation, to, seconds, stop })?;
+        if stop {
+            self.slots[slot].stopped = true;
+        }
+        Ok(())
+    }
+
+    /// A group's volume (0 to 1), faded to over `seconds`, or over the next
+    /// callback for 0: every voice in it follows. Groups are 1 to
+    /// [`MAX_GROUPS`] - 1, each at 1 until set.
+    pub fn set_group(&mut self, group: u8, volume: f32, seconds: f32) -> Result<(), String> {
+        if group == 0 || usize::from(group) >= MAX_GROUPS {
+            return Err(format!("group {group} isn't between 1 and {}", MAX_GROUPS - 1));
+        }
+        check_unit(volume, "a group's volume")?;
+        check_fade(seconds)?;
+        self.send(Command::Group { group, to: volume, seconds })
     }
 
     /// Pauses a voice where it is, or plays it on.
@@ -447,9 +517,7 @@ impl Audio {
 
     /// Every voice's gain, 0 to 1.
     pub fn set_volume(&mut self, volume: f32) -> Result<(), String> {
-        if !(0.0..=1.0).contains(&volume) {
-            return Err(format!("volume {volume} isn't between 0 and 1"));
-        }
+        check_unit(volume, "volume")?;
         self.send(Command::Volume(volume))
     }
 
@@ -481,6 +549,18 @@ impl Audio {
         {
             self.stats.reopened += 1;
         }
+        if self.device.is_some() && self.last_call_check.is_none_or(|at| at.elapsed() >= CALL_CHECK) {
+            self.last_call_check = Some(Instant::now());
+            let in_call = session::in_call();
+            if in_call != self.in_call {
+                self.in_call = in_call;
+                if let Some(device) = &self.device {
+                    // A device that can't pause or play again is lost, and
+                    // opened again.
+                    let _ = device.suspend(self.suspended || in_call);
+                }
+            }
+        }
         if self.device.is_none() && !self.suspended && seconds.is_finite() && seconds > 0.0 {
             self.owed += seconds.min(1.0) * f64::from(QUIET_RATE);
             let frames = self.owed.floor() as usize;
@@ -496,6 +576,7 @@ impl Audio {
         let chunk = self.scratch.len() / channels;
         while frames > 0 {
             let n = frames.min(chunk);
+            self.streamer.pump();
             mixer.render(&mut self.scratch[..n * channels]);
             frames -= n;
         }
@@ -512,8 +593,10 @@ impl Audio {
                     self.stopped.push(Stopped { handle, owner: s.owner, stolen: false });
                 }
             }
-            // The clip is dropped here, off the audio thread.
+            // The clip and a stream's ring are dropped here, off the audio
+            // thread; the ring's decoder sees it's gone and stops.
             drop(ended.clip);
+            drop(ended.stream);
         }
     }
 
@@ -529,8 +612,39 @@ impl Audio {
         if self.device.is_some() {
             return Err("a device plays the sound".into());
         }
-        self.mixer.lock().map_err(|_| "the mixer panicked")?.render(out);
+        {
+            let mut mixer = self.mixer.lock().map_err(|_| "the mixer panicked")?;
+            if self.streamer.busy() {
+                // In pieces, decoding streams between, as with a device.
+                for piece in out.chunks_mut(CHUNK * 2) {
+                    self.streamer.pump();
+                    mixer.render(piece);
+                }
+            } else {
+                mixer.render(out);
+            }
+        }
         self.take_returns();
+        Ok(())
+    }
+
+    /// Decodes what every streamed voice needs next, as [`Audio::render`]
+    /// does first: for a test of the mixer alone, with
+    /// [`Audio::render_mixer`].
+    #[doc(hidden)]
+    pub fn decode_streams(&mut self) {
+        self.streamer.pump();
+    }
+
+    /// Renders as [`Audio::render`], but without decoding streams first
+    /// or taking back the voices that ended: the mixer alone, as the audio
+    /// thread runs it.
+    #[doc(hidden)]
+    pub fn render_mixer(&mut self, out: &mut [f32]) -> Result<(), String> {
+        if self.device.is_some() {
+            return Err("a device plays the sound".into());
+        }
+        self.mixer.lock().map_err(|_| "the mixer panicked")?.render(out);
         Ok(())
     }
 
@@ -547,6 +661,7 @@ impl Audio {
             voices: self.shared.playing.load(Ordering::Relaxed),
             callbacks: self.shared.callbacks.load(Ordering::Relaxed),
             underruns: self.stats.underruns + underruns,
+            starved: self.shared.starved.load(Ordering::Relaxed),
             ..self.stats
         }
     }
@@ -556,9 +671,22 @@ fn check_position(position: [f32; 3]) -> Result<(), String> {
     if position.iter().all(|v| v.is_finite()) { Ok(()) } else { Err(format!("a sound can't be at {position:?}")) }
 }
 
+fn check_unit(value: f32, what: &str) -> Result<(), String> {
+    if (0.0..=1.0).contains(&value) { Ok(()) } else { Err(format!("{what} {value} isn't between 0 and 1")) }
+}
+
+fn check_fade(seconds: f32) -> Result<(), String> {
+    if (0.0..=MAX_FADE).contains(&seconds) {
+        Ok(())
+    } else {
+        Err(format!("a fade of {seconds} s isn't between 0 and {MAX_FADE}"))
+    }
+}
+
 fn check_settings(settings: Settings) -> Result<(), String> {
-    if !(0.0..=1.0).contains(&settings.volume) {
-        return Err(format!("volume {} isn't between 0 and 1", settings.volume));
+    check_unit(settings.volume, "volume")?;
+    if usize::from(settings.group) >= MAX_GROUPS {
+        return Err(format!("group {} isn't between 0 and {}", settings.group, MAX_GROUPS - 1));
     }
     if !(MIN_PITCH..=MAX_PITCH).contains(&settings.pitch) {
         return Err(format!("pitch {} isn't between {MIN_PITCH} and {MAX_PITCH}", settings.pitch));

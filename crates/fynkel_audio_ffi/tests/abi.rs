@@ -32,13 +32,14 @@ fn clip(rate: u32, samples: &[f32]) -> *mut FaClip {
 
 fn play(volume: f32) -> FaPlay {
     FaPlay {
-        settings: FaSettings { volume, pitch: 1.0, looping: 0 },
+        settings: FaSettings { volume, pitch: 1.0, looping: 0, group: 0 },
         priority: 128,
         pausable: 1,
         owner: 3,
         from: 0.0,
         spatial: FaSpatial { blend: 0.0, pan: 0.0, min_distance: 1.0, max_distance: 500.0, rolloff: 0 },
         position: [0.0; 3],
+        fade_in: 0.0,
     }
 }
 
@@ -59,12 +60,12 @@ fn a_decoded_clip_plays_to_its_end_and_says_so() {
     let name = "beep.wav";
     let mut clip = ptr::null_mut();
     // SAFETY: readable bytes and name, and a writable out.
-    let status = unsafe { fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), &mut clip) };
+    let status = unsafe { fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), 0, &mut clip) };
     assert_eq!(status, FaStatus::Ok, "{}", last_error());
     let mut info = FaClipInfo::default();
     // SAFETY: a live clip and a writable out.
     assert_eq!(unsafe { fa_clip_info(clip, &mut info) }, FaStatus::Ok);
-    assert_eq!((info.rate, info.channels, info.frames, info.bytes), (24_000, 1, 2_400, 9_600));
+    assert_eq!((info.rate, info.channels, info.frames, info.bytes, info.streamed), (24_000, 1, 2_400, 9_600, 0));
     assert!((info.seconds - 0.1).abs() < 1e-9);
 
     let mut handle = 0;
@@ -107,9 +108,9 @@ fn a_decoded_clip_plays_to_its_end_and_says_so() {
 fn bytes_that_arent_sound_cant_be_decoded_and_say_whose_they_are() {
     let bytes = b"hello";
     let name = "music/theme.mp3";
-    let mut clip = ptr::null_mut();
+    let mut clip: *mut FaClip = ptr::null_mut();
     // SAFETY: readable bytes and name, and a writable out.
-    let status = unsafe { fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), &mut clip) };
+    let status = unsafe { fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), 0, &mut clip) };
     assert_eq!(status, FaStatus::CantDecode);
     assert!(last_error().starts_with("music/theme.mp3: "), "{}", last_error());
     assert!(clip.is_null());
@@ -165,7 +166,7 @@ fn stopping_pausing_and_the_owners_reach_their_voices() {
     unsafe {
         assert_eq!(fa_voice_pause(audio.0, handles[0], 1), FaStatus::Ok);
         assert_eq!(
-            fa_voice_set(audio.0, handles[0], &FaSettings { volume: 0.5, pitch: 2.0, looping: 1 }),
+            fa_voice_set(audio.0, handles[0], &FaSettings { volume: 0.5, pitch: 2.0, looping: 1, group: 0 }),
             FaStatus::Ok
         );
         assert_eq!(fa_owner_stop(audio.0, 2), FaStatus::Ok);
@@ -256,4 +257,66 @@ fn bad_3d_values_are_refused_and_say_why() {
     }
     // SAFETY: made above, not used after.
     unsafe { fa_clip_free(clip) };
+}
+
+#[test]
+fn a_streamed_clip_fades_in_a_group_and_fades_out_to_its_stop() {
+    let audio = Audio(fa_audio_new());
+    let bytes = fynkel_audio::wav(48_000, 1, &[0.5; 48_000]);
+    let name = "music.wav";
+    let mut clip = ptr::null_mut();
+    // SAFETY: readable bytes and name, and a writable out.
+    let status = unsafe {
+        fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), FaStreaming::Always as u32, &mut clip)
+    };
+    assert_eq!(status, FaStatus::Ok, "{}", last_error());
+    let mut info = FaClipInfo::default();
+    // SAFETY: a live clip and a writable out.
+    assert_eq!(unsafe { fa_clip_info(clip, &mut info) }, FaStatus::Ok);
+    assert_eq!((info.frames, info.streamed, info.bytes), (48_000, 1, bytes.len() as u64));
+
+    let mut handle = 0;
+    let music =
+        FaPlay { settings: FaSettings { looping: 1, group: 2, ..play(1.0).settings }, fade_in: 0.1, ..play(1.0) };
+    let mut out = vec![0.0f32; 2_400 * 2];
+    // SAFETY: live audio and clip, readable plays and writable outs.
+    unsafe {
+        assert_eq!(fa_audio_play(audio.0, clip, &music, &mut handle), FaStatus::Ok, "{}", last_error());
+        assert_eq!(fa_group_set(audio.0, 2, &FaFade { to: 0.5, seconds: 0.0 }), FaStatus::Ok);
+        assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_400), FaStatus::Ok);
+    }
+    // Half way into its fade in, and its group at half.
+    assert!((out[out.len() - 1] - 0.125).abs() < 0.01, "{}", out[out.len() - 1]);
+    // SAFETY: live audio.
+    unsafe {
+        assert_eq!(fa_voice_fade(audio.0, handle, &FaFade { to: 0.0, seconds: 0.05 }, 1), FaStatus::Ok);
+        for _ in 0..4 {
+            assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_400), FaStatus::Ok);
+        }
+    }
+    assert!(out.iter().all(|s| s.abs() < 1e-6));
+    let mut voice = FaVoice::default();
+    let mut stats = FaStats::default();
+    // SAFETY: live audio and writable outs.
+    unsafe {
+        assert_eq!(fa_voice_get(audio.0, handle, &mut voice), FaStatus::Ok);
+        assert_eq!(fa_audio_stats(audio.0, &mut stats), FaStatus::Ok);
+    }
+    assert_eq!((voice.playing, stats.voices, stats.starved), (0, 0, 0));
+
+    // SAFETY: live audio; bad values are refused, not used.
+    unsafe {
+        assert_eq!(fa_group_set(audio.0, FA_MAX_GROUPS, &FaFade { to: 0.5, seconds: 0.0 }), FaStatus::InvalidValue);
+        assert_eq!(fa_group_set(audio.0, 0, &FaFade { to: 0.5, seconds: 0.0 }), FaStatus::InvalidValue);
+        assert_eq!(fa_voice_fade(audio.0, handle, &FaFade { to: 2.0, seconds: 0.0 }, 0), FaStatus::InvalidValue);
+        assert_eq!(fa_voice_fade(audio.0, handle, ptr::null(), 0), FaStatus::NullPointer);
+        assert_eq!(fa_group_set(audio.0, 1, ptr::null()), FaStatus::NullPointer);
+        let bad = FaPlay { settings: FaSettings { group: FA_MAX_GROUPS, ..music.settings }, ..music };
+        assert_eq!(fa_audio_play(audio.0, clip, &bad, &mut handle), FaStatus::InvalidValue);
+        assert!(last_error().contains("group 16"), "{}", last_error());
+        let mut other = ptr::null_mut();
+        let status = fa_clip_decode(bytes.as_ptr(), bytes.len(), name.as_ptr(), name.len(), 3, &mut other);
+        assert_eq!(status, FaStatus::InvalidValue);
+        fa_clip_free(clip);
+    }
 }

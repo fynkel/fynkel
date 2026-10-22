@@ -206,7 +206,7 @@ fn a_sound_can_start_part_way_and_its_settings_change_while_it_plays() {
     let handle = play(&mut audio, &clip, Play { from: 0.9, ..Play::default() });
     render(&mut audio, 16);
     assert!((audio.time(handle).unwrap() - 0.9).abs() < 0.001);
-    audio.set(handle, Settings { volume: 0.25, pitch: 1.0, looping: false }).unwrap();
+    audio.set(handle, Settings { volume: 0.25, pitch: 1.0, looping: false, group: 0 }).unwrap();
     let out = render(&mut audio, 1024);
     assert!((out[out.len() - 1] - 0.125).abs() < 0.005, "{}", out[out.len() - 1]);
     let frames = frames_until_done(&mut audio, handle);
@@ -227,7 +227,8 @@ fn the_whole_volume_scales_every_voice() {
 fn values_out_of_range_are_refused() {
     let mut audio = Audio::new();
     let clip = level(QUIET_RATE, 1.0, 0.5);
-    let with = |volume, pitch| Play { settings: Settings { volume, pitch, looping: false }, ..Play::default() };
+    let with =
+        |volume, pitch| Play { settings: Settings { volume, pitch, looping: false, group: 0 }, ..Play::default() };
     assert!(audio.play(&clip, with(1.5, 1.0)).unwrap_err().contains("volume 1.5"));
     assert!(audio.play(&clip, with(f32::NAN, 1.0)).unwrap_err().contains("volume NaN"));
     assert!(audio.play(&clip, with(1.0, 0.0)).unwrap_err().contains("pitch 0"));

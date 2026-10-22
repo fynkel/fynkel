@@ -15,9 +15,10 @@ mod device;
 mod mixer;
 mod session;
 mod spatial;
+mod stream;
 
-pub use audio::{Audio, Handle, LOWEST_PRIORITY, MAX_PITCH, MIN_PITCH, Play, QUIET_RATE, Stats, Stopped};
-pub use clip::{Clip, MAX_CHANNELS, wav};
-pub use mixer::{MAX_VOICES, Mixer, Settings};
+pub use audio::{Audio, Handle, LOWEST_PRIORITY, MAX_FADE, MAX_PITCH, MIN_PITCH, Play, QUIET_RATE, Stats, Stopped};
+pub use clip::{Clip, MAX_CHANNELS, STREAM_SECONDS, Streaming, wav};
+pub use mixer::{MAX_GROUPS, MAX_VOICES, Mixer, Settings};
 pub use session::Session;
 pub use spatial::{Listener, Mix, Rolloff, Spatial, mix, rolloff};

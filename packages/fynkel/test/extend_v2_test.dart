@@ -20,7 +20,7 @@ final log = <String>[];
 final class Note {
   Note(this.text);
 
-  final String text;
+  String text;
   var freed = false;
 }
 
@@ -47,6 +47,16 @@ final class NoteKind extends AssetKind<Note> {
     expect(value.freed, isFalse, reason: 'freed once');
     value.freed = true;
     log.add('free ${value.text}');
+  }
+
+  @override
+  bool get reloads => true;
+
+  @override
+  Future<void> reload(World world, String name, Note value, Uint8List bytes) async {
+    final text = String.fromCharCodes(bytes);
+    if (text == 'broken') throw const FormatException('not a note');
+    value.text = text;
   }
 }
 
@@ -248,6 +258,27 @@ void main() {
       );
       world.addAssetKind(const NoteKind());
       expect(() => world.addAssetKind(const _OtherTextKind()), throwsArgumentError);
+    });
+
+    test('a kind that reloads reads its files again; one that doesn\'t isn\'t read', () async {
+      final world = newWorld(source: source);
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      final hello = await world.assets.load('hello.txt', const NoteKind());
+      final bye = await world.assets.load('bye.txt', const _OtherTextKind());
+      files = {'hello.txt': 'hello again', 'bye.txt': 'bye again'};
+      reads.clear();
+      await world.reloadAssets();
+      expect(hello.text, 'hello again');
+      expect(bye.text, 'bye', reason: "its kind doesn't reload");
+      expect(reads, ['hello.txt']);
+
+      // A file that won't load keeps what it had, and says why.
+      files['hello.txt'] = 'broken';
+      await world.reloadAssets();
+      await pumpEventQueue();
+      expect(hello.text, 'hello again');
+      expect(errors.single.error, isA<FormatException>());
     });
 
     test('what a kind\'s free throws goes to the errors, for the object that held it', () async {
