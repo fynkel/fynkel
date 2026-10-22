@@ -296,6 +296,11 @@ a group's volume reaches its voices within one callback.
   music and effects sliders, mutes, a duck, fades, over two tracks of
   ours (examples/lab/tool/music.py, 24 s and 16 s, streamed), with the
   starved count in the readout.
+- Ten minutes streamed, 2026-10-22: the Mac (`cargo test -p fynkel_audio
+  --test device -- --ignored a_streamed`, chase looping) 56,251
+  callbacks, none starved or underrun; the iPhone 16 Pro Max and the
+  Note10+ (the lab's scene with `--dart-define=LAB_SOUND=true`, a
+  crossfade every 30 s) 600 s each, none starved or underrun.
 
 ### Phase 4: the games, and measuring
 

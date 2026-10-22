@@ -11,6 +11,11 @@ import 'package:fynkel_audio/fynkel_audio.dart';
 
 import '../lab.dart';
 
+/// `--dart-define=LAB_SOUND=true`: every 30 seconds the scene prints its
+/// sound's stats and crossfades to the other track, for a long run on a
+/// device (stage 11's "10 minutes without a gap").
+const _report = bool.fromEnvironment('LAB_SOUND');
+
 /// A tick: a short click of a high tone, as a footstep or a menu's.
 AudioClip tick() {
   const rate = 48000;
@@ -40,7 +45,7 @@ class SoundMixScene extends LabScene {
   late final AudioClip _tick;
   late final AudioGroup _music, _effects;
   late final GameObject _ticker;
-  var _ticking = true, _since = 0.0, _ducked = false;
+  var _ticking = true, _since = 0.0, _ducked = false, _running = 0.0, _reported = 0.0;
 
   @override
   void build() {
@@ -83,6 +88,16 @@ class SoundMixScene extends LabScene {
     }
     final music = world.audio.music;
     final stats = world.audio.stats;
+    _running += time.unscaledDelta;
+    if (_report && _running - _reported >= 30) {
+      _reported = _running;
+      print(
+        'LAB_SOUND ${_running.round()} s: starved ${stats.starved}, underruns ${stats.underruns}, '
+        'device ${stats.device}, voices ${stats.voices}, '
+        'music ${music.clip?.name} streamed ${music.clip?.streamed}',
+      );
+      _crossFade();
+    }
     readout.value = [
       stats.device
           ? 'playing through the device at ${stats.rate} Hz'
