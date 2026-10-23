@@ -1,7 +1,7 @@
 # Stage 12 plan: particles
 
-Status: proposed 2026-10-23, awaiting the user's OK and the decisions
-in §7. Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
+Status: accepted 2026-10-23 ("let's go with how Unity works"), with the
+recommended answer to each decision (§7). Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 Stage 11 is done ([report](stage-11-report.md)).
 
 A Fynkel game today has no smoke, dust, sparks, fire, rain or bursts of
