@@ -101,17 +101,21 @@ void main() {
       // the drops, so the lowest of the later rounds is held against the
       // lowest of the earlier. Malloc's count is steady (half a MB either
       // way), so it's held to far less: a leak in the engine shows there.
-      // It dips now and then (a MB below, for one round), so its halves
-      // are compared by their middle value, which one dip doesn't move.
+      // It sits at one of two levels a MB apart, round by round (9.7 or
+      // 10.8 MB), in a mix that shifts: the middle value jumps a whole MB
+      // when a few more rounds land high, though nothing grew (2026-10-23:
+      // 40 % high in one half, 52 % in the other). So its halves are
+      // compared by their mean, which a round's dip moves by under 1 KB a
+      // round, and a leak of 20 KB a round still fails.
       final warm = rounds ~/ 3;
       final half = warm + (rounds - warm) ~/ 2;
       double growth(List<int> values, int Function(List<int>) pick) =>
           (pick(values.sublist(half)) - pick(values.sublist(warm, half))) / (rounds - half);
       int lowest(List<int> values) => values.reduce(math.min);
-      int middle(List<int> values) => (values.toList()..sort())[values.length ~/ 2];
+      int mean(List<int> values) => values.reduce((a, b) => a + b) ~/ values.length;
 
       expect(growth(footprint, lowest), lessThan(250e3), reason: 'process: ${footprint.map(mb)}');
-      expect(growth(malloced, middle), lessThan(20e3), reason: 'malloc: ${malloced.map(mb)}');
+      expect(growth(malloced, mean), lessThan(20e3), reason: 'malloc: ${malloced.map(mb)}');
     },
     skip: rounds < 10 ? 'set FYNKEL_SOAK_ROUNDS (10 or more) to run it' : false,
     timeout: Timeout.none,
