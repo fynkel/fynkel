@@ -135,7 +135,7 @@ external int fa_voice_spatial_set(ffi.Pointer<FaAudio> audio, int voice, ffi.Poi
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64)>(isLeaf: true)
 external int fa_voice_stop(ffi.Pointer<FaAudio> audio, int voice);
 
-const int FA_ABI_VERSION = 4;
+const int FA_ABI_VERSION = 5;
 
 final class FaAudio extends ffi.Opaque {}
 
@@ -238,6 +238,7 @@ sealed class FaRolloff {
 sealed class FaSession {
   static const FA_SESSION_AMBIENT = 0;
   static const FA_SESSION_PLAYBACK = 1;
+  static const FA_SESSION_VOICE_CHAT = 2;
 }
 
 final class FaSettings extends ffi.Struct {

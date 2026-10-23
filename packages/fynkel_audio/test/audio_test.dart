@@ -254,6 +254,17 @@ void main() {
     expect((source.volume, source.pitch, source.priority, world.audio.volume), (1.0, 1.0, 128, 1.0));
   });
 
+  test('every session can be set, voice chat too, while sound plays', () {
+    final world = newWorld();
+    world.add(GameObject(components: [AudioSource(clip: tone(1))]));
+    run(world);
+    for (final session in AudioSession.values) {
+      world.audio.session = session;
+      run(world);
+      expect(world.audio.session, session);
+    }
+  });
+
   test('a world disposed while sounds play lets them go, and its audio then refuses', () {
     final world = World();
     final source = AudioSource(clip: tone(1));

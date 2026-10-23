@@ -14,6 +14,11 @@ pub enum Session {
     /// The game plays with the silent switch on, and the player's music
     /// stops (`playback`): for a game whose sound is the point.
     Playback,
+    /// The game talks and listens at once, like a call: the mic works
+    /// alongside the game's sound (iOS's `playAndRecord`), which plays from
+    /// the loudspeaker, not the earpiece, and ignores the silent switch. On
+    /// Android, as `Playback`.
+    VoiceChat,
 }
 
 /// Puts `session` into effect, before the device opens and whenever it
@@ -21,30 +26,51 @@ pub enum Session {
 #[cfg(target_os = "ios")]
 #[allow(unsafe_code)]
 pub(crate) fn apply(session: Session) -> Result<(), String> {
-    use objc2_avf_audio::{AVAudioSession, AVAudioSessionCategoryAmbient, AVAudioSessionCategoryPlayback};
+    use objc2_avf_audio::{
+        AVAudioSession, AVAudioSessionCategoryAmbient, AVAudioSessionCategoryOptions,
+        AVAudioSessionCategoryPlayAndRecord, AVAudioSessionCategoryPlayback, AVAudioSessionModeDefault,
+    };
 
-    // SAFETY: the categories are constants the framework defines, and the
-    // shared session may be used from any thread.
+    // SAFETY: the categories and mode are constants the framework defines,
+    // and the shared session may be used from any thread.
     unsafe {
-        let category = match session {
-            Session::Ambient => AVAudioSessionCategoryAmbient,
-            Session::Playback => AVAudioSessionCategoryPlayback,
-        }
-        .ok_or("the audio session has no such category")?;
         let shared = AVAudioSession::sharedInstance();
-        shared.setCategory_error(category).map_err(|e| format!("the audio session's category: {e}"))?;
+        let missing = "the audio session has no such category";
+        match session {
+            Session::Ambient | Session::Playback => {
+                let category = match session {
+                    Session::Ambient => AVAudioSessionCategoryAmbient,
+                    _ => AVAudioSessionCategoryPlayback,
+                }
+                .ok_or(missing)?;
+                shared.setCategory_error(category)
+            }
+            // The default mode: `voiceChat` would turn the game's sound
+            // down and colour it. Without `DefaultToSpeaker` the sound goes
+            // to the earpiece. No preferred sample rate: the mic's reader
+            // converts to its own.
+            Session::VoiceChat => shared.setCategory_mode_options_error(
+                AVAudioSessionCategoryPlayAndRecord.ok_or(missing)?,
+                AVAudioSessionModeDefault.ok_or("the audio session has no default mode")?,
+                AVAudioSessionCategoryOptions::DefaultToSpeaker
+                    | AVAudioSessionCategoryOptions::AllowBluetoothHFP
+                    | AVAudioSessionCategoryOptions::AllowBluetoothA2DP,
+            ),
+        }
+        .map_err(|e| format!("the audio session's category: {e}"))?;
         shared.setActive_error(true).map_err(|e| format!("the audio session: {e}"))?;
     }
     Ok(())
 }
 
-/// Asks for the audio focus for `Playback`, so the player's music stops;
-/// gives it up for `Ambient`, so it plays on under the game.
+/// Asks for the audio focus for `Playback` and `VoiceChat`, so the
+/// player's music stops; gives it up for `Ambient`, so it plays on under
+/// the game. The mic works next to the game's sound either way.
 #[cfg(target_os = "android")]
 pub(crate) fn apply(session: Session) -> Result<(), String> {
     crate::android::prepare()?;
     // Sound without the focus is still sound: not a reason to go without.
-    let _ = crate::android::focus(session == Session::Playback);
+    let _ = crate::android::focus(session != Session::Ambient);
     Ok(())
 }
 

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FA_ABI_VERSION 4
+#define FA_ABI_VERSION 5
 
 
 
@@ -60,6 +60,10 @@ enum FaSession
   FA_SESSION_AMBIENT = 0,
   // The game plays with the silent switch on; the player's music stops.
   FA_SESSION_PLAYBACK = 1,
+  // The game talks and listens at once: the mic works alongside the
+  // game's sound, which plays from the loudspeaker and ignores the
+  // silent switch.
+  FA_SESSION_VOICE_CHAT = 2,
 };
 #ifndef __cplusplus
 #if __STDC_VERSION__ >= 202311L

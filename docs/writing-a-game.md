@@ -1633,8 +1633,13 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   music plays on under it, as most games do. `audio.session =
   AudioSession.playback` plays through the switch and stops their music,
   for a game whose sound is the point; on Android it takes the audio
-  focus, which stops their music the same way. On both, the game's sound
-  waits while a call rings or is on.
+  focus, which stops their music the same way. A game that listens on
+  the mic while it plays, like a call, sets `AudioSession.voiceChat`
+  before its first sound: the mic works alongside the game's sound,
+  which plays from the loudspeaker through the switch, and the mic's
+  plugin is told to leave the session alone (`record`'s
+  `IosRecordConfig(manageAudioSession: false)`). On both, the game's
+  sound waits while a call rings or is on.
 - **The sound starts** when the world is first shown on screen. In a
   test, which shows nothing, the sound is made and timed the same way
   with no device: `world.update` steps it, a clip ends after its length,

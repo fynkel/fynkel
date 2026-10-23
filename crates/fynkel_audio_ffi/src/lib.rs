@@ -19,7 +19,7 @@ use std::sync::Arc;
 use fynkel_audio::{Audio, Clip, Listener, Play, Rolloff, Session, Settings, Spatial, Streaming};
 
 /// Bumped on any change to the functions or types in this file.
-pub const FA_ABI_VERSION: u32 = 4;
+pub const FA_ABI_VERSION: u32 = 5;
 
 /// How many groups there are: a voice's `group` is 0 (none) or one of 1 to
 /// this less one.
@@ -66,6 +66,10 @@ pub enum FaSession {
     Ambient = 0,
     /// The game plays with the silent switch on; the player's music stops.
     Playback = 1,
+    /// The game talks and listens at once: the mic works alongside the
+    /// game's sound, which plays from the loudspeaker and ignores the
+    /// silent switch.
+    VoiceChat = 2,
 }
 
 /// Whether a clip is decoded whole as it loads, or as it plays.
@@ -522,6 +526,7 @@ pub unsafe extern "C" fn fa_audio_session_set(audio: *mut FaAudio, session: u32)
             let session = match session {
                 0 => Session::Ambient,
                 1 => Session::Playback,
+                2 => Session::VoiceChat,
                 _ => return Err(invalid(format!("session {session} isn't an FaSession"))),
             };
             a.audio.set_session(session).map_err(|e| Error::new(FaStatus::NoDevice, e))
