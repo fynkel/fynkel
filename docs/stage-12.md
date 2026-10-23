@@ -319,6 +319,48 @@ all three devices at low.
 *Done when* the fireworks' sub emitters and the bounces match their
 goldens, and the scene holds 60 on all three devices at low.
 
+*As built* (branch stage-12-world, ABI 41):
+
+- crates/fynkel_world: emission over distance (by how far the object
+  moved since the last frame), inherit velocity (initial or current,
+  from the object's speed); collision with up to 6 planes, each an
+  object's position and up, with bounce, dampen, lifetime loss, a
+  kill speed and a radius scale, and a count of hits per plane a
+  frame; sub emitters (up to 4) on birth (made along the particle,
+  at the sub system's rate), death and collision (its bursts), with
+  colour, size and rotation inherited and a probability. A sub system
+  never runs its own timeline; links are rebuilt when systems come or
+  go. trails.rs: `TrailRenderer`'s points in a ring (512 at most), the
+  tail sliding smoothly as the last point ages out. Tests for each.
+- Drawing: a trail is a strip of camera-facing quads between its
+  points, the same 128-byte instances read twice (this point and the
+  next), the side computed on the CPU; one draw per trail, with the
+  particles' material path. `Quality.softParticles`, off at low.
+  Golden: trail_arc.
+- The C interface: `FyParticleInherit`, `FyParticleCollision`,
+  `FyParticleSubEmitter`, `FyParticleEvent` (done or collision),
+  `FyTrailSettings` and `fy_trail_set/remove/clear/count`.
+- Dart: `Emission.rateOverDistance`, `InheritVelocity`,
+  `ParticleCollision`, `SubEmitter`, `onParticleCollision`,
+  `TrailRenderer`, `Quality.softParticles`, `debug.drawShapes` (each
+  system's shape and its planes; golden debug_particle_shapes). A
+  system whose planes or sub systems aren't in the world yet waits for
+  them. A ball with collision, sub emitters and a trail, moving, makes
+  no garbage (test/particles_alloc_test.dart).
+- The lab: "Particles and the world", fireworks (a shell, sparks on
+  its birth, a burst in its colour on its death), a ball rolling round
+  (dust by the metre thrown back from its speed, and a tapering
+  trail), sparks off a grinder bouncing on the floor and flashing where
+  some hit; switches for each, "show shapes", bounce and trail time.
+  Goldens particles_world_fireworks, _ball and _sparks.
+- Frame rates at low, the lab's page (profile, `LAB_SCENE="Particles
+  and the world" LAB_QUALITY=low LAB_RATES=true`): Note10+ 59.9 (the
+  step 0.06–0.08 ms a frame, at most 0.8), the Mac 60 (its display's
+  rate; the step 0.02 ms). The iPhone is still to measure: its run
+  started but sent nothing back over the wireless link.
+- The guide's §13c "Particles and the world", the quality table's
+  `softParticles`, `debug.drawShapes`, §22's rows.
+
 ### Phase 4: a game, and measuring
 
 - **Sheepdog**: dust under the dog and the sheep as they run, embers as
