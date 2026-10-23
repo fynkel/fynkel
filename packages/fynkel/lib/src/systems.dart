@@ -235,10 +235,19 @@ extension WorldSystems on World {
   void readWorldTransforms(Pointer<Uint64> ids, int count, Pointer<Float> out) {
     if (count == 0) return;
     _sendTransforms();
-    // The same buffer each time, as a rule: its cast is kept, since making
-    // one each call allocates.
-    if (out.address != _manyOut.address) _manyOut = out.cast();
-    final status = fy_world_transform_get_many(pointer, ids, count, _manyOut);
+    // Each system reads into its own buffer, the same each time, as a
+    // rule: each buffer's cast is kept, since making one each call
+    // allocates.
+    Pointer<FyTransform>? cast;
+    for (var i = 0; i < _manyOuts.length; i++) {
+      if (_manyOuts[i].address == out.address) cast = _manyOuts[i];
+    }
+    if (cast == null) {
+      if (_manyOuts.length == 8) _manyOuts.removeAt(0);
+      cast = out.cast();
+      _manyOuts.add(cast);
+    }
+    final status = fy_world_transform_get_many(pointer, ids, count, cast);
     if (status == FyStatus.FY_STATUS_NO_OBJECT) {
       throw ArgumentError.value(ids, 'ids', fy_last_error().cast<Utf8>().toDartString());
     }

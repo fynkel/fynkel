@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 
 use crate::clip::Clip;
+use crate::spatial::Mix;
 
 /// How many sounds play at once, as Unity's 32 real voices.
 pub const MAX_VOICES: usize = 32;
@@ -28,6 +29,10 @@ const RAMP_SECONDS: f32 = 0.005;
 
 /// A gain below this is silence: a stopping voice ends there.
 const SILENT: f32 = 1e-4;
+
+/// Where a sound right behind ([`Mix::dull`] 1) is cut: above it, the
+/// highs fall away, so behind doesn't sound like in front.
+const DULL_HERTZ: f32 = 5_000.0;
 
 /// How a voice plays: its own volume (0 to 1), its pitch (1 is the clip's
 /// own speed), and whether it loops.
@@ -54,6 +59,7 @@ pub(crate) enum Command {
         settings: Settings,
         pausable: bool,
         from: f64,
+        mix: Mix,
     },
     Stop {
         slot: u8,
@@ -68,6 +74,13 @@ pub(crate) enum Command {
         slot: u8,
         generation: u32,
         settings: Settings,
+    },
+    /// Where a voice is heard: ramped to over the next callback, so one
+    /// that moves doesn't click.
+    Mix {
+        slot: u8,
+        generation: u32,
+        mix: Mix,
     },
     /// Whether the game is paused: voices that follow it fall silent and
     /// hold.
@@ -152,6 +165,12 @@ struct Voice {
     place: f64,
     /// The gain applied, ramping to the target.
     gain: f32,
+    /// The mix applied ([`Mix::gains`], then [`Mix::dull`]), and the one
+    /// to ramp to over the next callback.
+    mix: [f32; 5],
+    target: [f32; 5],
+    /// The high cut's state, left and right.
+    low: [f32; 2],
 }
 
 impl Voice {
@@ -164,7 +183,17 @@ impl Voice {
         stopping: false,
         place: 0.0,
         gain: 0.0,
+        mix: STRAIGHT,
+        target: STRAIGHT,
+        low: [0.0; 2],
     };
+}
+
+const STRAIGHT: [f32; 5] = flat(Mix::STRAIGHT);
+
+const fn flat(mix: Mix) -> [f32; 5] {
+    let g = mix.gains;
+    [g[0], g[1], g[2], g[3], mix.dull]
 }
 
 /// The audio thread's half. Made with every table it'll need.
@@ -173,6 +202,8 @@ pub struct Mixer {
     rate: u32,
     channels: usize,
     ramp: f32,
+    /// The high cut's coefficient for a sound right behind.
+    dull: f32,
     voices: [Voice; MAX_VOICES],
     game_paused: bool,
     volume: f32,
@@ -195,6 +226,7 @@ impl Mixer {
             rate: 1,
             channels: 1,
             ramp: 1.0,
+            dull: 1.0,
             voices: [Voice::IDLE; MAX_VOICES],
             game_paused: false,
             volume: 1.0,
@@ -213,6 +245,7 @@ impl Mixer {
         self.channels = channels.max(1);
         // A one-pole ramp that's within 1% of its target after RAMP_SECONDS.
         self.ramp = 1.0 - (0.01f32.ln() / (RAMP_SECONDS * self.rate as f32)).exp();
+        self.dull = 1.0 - (-std::f32::consts::TAU * DULL_HERTZ / self.rate as f32).exp();
     }
 
     pub(crate) fn channels(&self) -> usize {
@@ -249,7 +282,7 @@ impl Mixer {
     fn take_commands(&mut self) {
         while let Ok(command) = self.commands.pop() {
             match command {
-                Command::Start { slot, generation, clip, settings, pausable, from } => {
+                Command::Start { slot, generation, clip, settings, pausable, from, mix } => {
                     let i = usize::from(slot);
                     if i >= MAX_VOICES {
                         self.give_back(Ended { slot: 0, generation, clip, finished: false });
@@ -265,6 +298,9 @@ impl Mixer {
                         stopping: false,
                         place: from.max(0.0),
                         gain: 0.0,
+                        mix: flat(mix),
+                        target: flat(mix),
+                        low: [0.0; 2],
                     };
                 }
                 Command::Stop { slot, generation } => {
@@ -280,6 +316,11 @@ impl Mixer {
                 Command::Set { slot, generation, settings } => {
                     if let Some(voice) = self.voice(slot, generation) {
                         voice.settings = settings;
+                    }
+                }
+                Command::Mix { slot, generation, mix } => {
+                    if let Some(voice) = self.voice(slot, generation) {
+                        voice.target = flat(mix);
                     }
                 }
                 Command::GamePaused(paused) => self.game_paused = paused,
@@ -309,6 +350,7 @@ impl Mixer {
             let target = if voice.stopping || held { 0.0 } else { voice.settings.volume * self.volume };
             if held && !voice.stopping && voice.gain < SILENT {
                 voice.gain = 0.0;
+                voice.mix = voice.target;
                 playing += 1;
                 continue;
             }
@@ -318,6 +360,18 @@ impl Mixer {
             let mut place = voice.place;
             let mut gain = voice.gain;
             let mut finished = length == 0;
+            // The mix ramps in a straight line to its target over this
+            // callback.
+            let mut mix = voice.mix;
+            let mut mix_step = [0.0f32; 5];
+            let ramping = mix != voice.target;
+            if ramping {
+                for k in 0..5 {
+                    mix_step[k] = (voice.target[k] - mix[k]) / frames.max(1) as f32;
+                }
+            }
+            let [mut low_l, mut low_r] = voice.low;
+            let full_dull = self.dull;
             for f in 0..frames {
                 if finished {
                     break;
@@ -334,8 +388,19 @@ impl Mixer {
                     at
                 };
                 let (l1, r1) = clip.frame(next);
+                if ramping {
+                    for k in 0..5 {
+                        mix[k] += mix_step[k];
+                    }
+                }
                 let l = (l0 + (l1 - l0) * fraction) * gain;
                 let r = (r0 + (r1 - r0) * fraction) * gain;
+                let (l, r) = (l * mix[0] + r * mix[1], l * mix[2] + r * mix[3]);
+                // A one-pole low pass, open (1) unless the sound is behind.
+                let a = 1.0 + (full_dull - 1.0) * mix[4];
+                low_l += (l - low_l) * a;
+                low_r += (r - low_r) * a;
+                let (l, r) = (low_l, low_r);
                 let o = f * channels;
                 if channels == 1 {
                     out[o] += (l + r) * 0.5;
@@ -357,6 +422,8 @@ impl Mixer {
             }
             voice.place = place;
             voice.gain = gain;
+            voice.mix = voice.target;
+            voice.low = [low_l, low_r];
             let (generation, stopping) = (voice.generation, voice.stopping);
             self.shared.voices[slot].write(generation, place);
             if finished {

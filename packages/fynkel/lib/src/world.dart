@@ -342,7 +342,8 @@ final class World implements Finalizable {
   var _movedReadTo = 0;
   final _movedReaders = <MovedReader>[];
   // readWorldTransforms' last buffer, as the engine's type.
-  Pointer<FyTransform> _manyOut = nullptr;
+  // readWorldTransforms' buffers, cast once each: physics', audio's.
+  final _manyOuts = <Pointer<FyTransform>>[];
 
   // How many suns and lamps the world has, and whether it has said that
   // it has more than a frame takes ([_countLight]).

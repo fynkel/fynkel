@@ -12,6 +12,7 @@ use crate::clip::Clip;
 use crate::device::Device;
 use crate::mixer::{COMMANDS, Command, Ended, MAX_VOICES, Mixer, RETURNS, Settings, Shared};
 use crate::session::{self, Session};
+use crate::spatial::{self, Listener, Mix, Spatial};
 
 /// The rate and channels sound is made at without a device.
 pub const QUIET_RATE: u32 = 48_000;
@@ -42,11 +43,23 @@ pub struct Play {
     pub owner: u64,
     /// Where in the clip to start, in seconds.
     pub from: f64,
+    /// 2D or 3D, and how it fades.
+    pub spatial: Spatial,
+    /// Where it is, for a 3D sound; see [`Audio::place`].
+    pub position: [f32; 3],
 }
 
 impl Default for Play {
     fn default() -> Self {
-        Self { settings: Settings::default(), priority: 128, pausable: true, owner: 0, from: 0.0 }
+        Self {
+            settings: Settings::default(),
+            priority: 128,
+            pausable: true,
+            owner: 0,
+            from: 0.0,
+            spatial: Spatial::default(),
+            position: [0.0; 3],
+        }
     }
 }
 
@@ -81,7 +94,7 @@ pub struct Stats {
     pub reopened: u64,
 }
 
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 struct Slot {
     generation: u32,
     /// The mixer has it: from its start until its end comes back.
@@ -93,6 +106,31 @@ struct Slot {
     /// When it started, to steal the oldest of equals.
     order: u64,
     rate: u32,
+    spatial: Spatial,
+    position: [f32; 3],
+    /// The mix the mixer was last sent.
+    mix: Mix,
+}
+
+impl Slot {
+    const FREE: Self = Self {
+        generation: 0,
+        busy: false,
+        stopped: false,
+        priority: 0,
+        owner: 0,
+        order: 0,
+        rate: 1,
+        spatial: Spatial {
+            blend: 0.0,
+            pan: 0.0,
+            min_distance: 1.0,
+            max_distance: 500.0,
+            rolloff: spatial::Rolloff::Logarithmic,
+        },
+        position: [0.0; 3],
+        mix: Mix::STRAIGHT,
+    };
 }
 
 /// The game's side of the sound.
@@ -105,6 +143,9 @@ pub struct Audio {
     shared: Arc<Shared>,
     mixer: Arc<Mutex<Mixer>>,
     session: Session,
+    listener: Listener,
+    /// The listener or a 3D voice moved since the last update.
+    moved: bool,
     device: Option<Device>,
     /// The device was asked for: opened again when it's lost.
     wants_device: bool,
@@ -135,13 +176,15 @@ impl Audio {
         // here, not on the audio thread.
         drop(mixer.try_lock());
         Self {
-            slots: [Slot::default(); MAX_VOICES],
+            slots: [Slot::FREE; MAX_VOICES],
             order: 0,
             commands,
             returns,
             shared,
             mixer,
             session: Session::default(),
+            listener: Listener::default(),
+            moved: false,
             device: None,
             wants_device: false,
             suspended: false,
@@ -237,6 +280,8 @@ impl Audio {
         if !(play.from.is_finite() && play.from >= 0.0) {
             return Err(format!("a sound can't start at {} s", play.from));
         }
+        play.spatial.check()?;
+        check_position(play.position)?;
         if self.commands.slots() == 0 {
             return Err(format!("more than {COMMANDS} sound commands in one frame"));
         }
@@ -262,6 +307,7 @@ impl Audio {
         };
         let generation = self.slots[slot].generation.wrapping_add(1).max(1);
         self.order += 1;
+        let mix = spatial::mix(&play.spatial, play.position, &self.listener);
         self.slots[slot] = Slot {
             generation,
             busy: true,
@@ -270,6 +316,9 @@ impl Audio {
             owner: play.owner,
             order: self.order,
             rate: clip.rate(),
+            spatial: play.spatial,
+            position: play.position,
+            mix,
         };
         let from = play.from * f64::from(clip.rate());
         self.send(Command::Start {
@@ -279,6 +328,7 @@ impl Audio {
             settings: play.settings,
             pausable: play.pausable,
             from,
+            mix,
         })?;
         self.stats.started += 1;
         Ok(Some(self.handle(slot)))
@@ -322,6 +372,57 @@ impl Audio {
         self.send(Command::Set { slot: slot as u8, generation, settings })
     }
 
+    /// Changes a playing voice's 2D or 3D settings: heard at once.
+    pub fn set_spatial(&mut self, handle: Handle, spatial: Spatial) -> Result<(), String> {
+        spatial.check()?;
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        self.slots[slot].spatial = spatial;
+        self.remix(slot)
+    }
+
+    /// Moves a 3D voice to `position`: heard from the next
+    /// [`Audio::update`], when every move of the frame is sent at once.
+    pub fn place(&mut self, handle: Handle, position: [f32; 3]) -> Result<(), String> {
+        check_position(position)?;
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        if self.slots[slot].position != position {
+            self.slots[slot].position = position;
+            self.moved |= self.slots[slot].spatial.blend > 0.0;
+        }
+        Ok(())
+    }
+
+    /// Who hears, from the next [`Audio::update`]; at the origin looking
+    /// along -Z until set.
+    pub fn set_listener(&mut self, listener: Listener) -> Result<(), String> {
+        listener.check()?;
+        if self.listener != listener {
+            self.listener = listener;
+            self.moved = true;
+        }
+        Ok(())
+    }
+
+    pub fn listener(&self) -> Listener {
+        self.listener
+    }
+
+    /// How a playing voice is heard now: the mix last sent for it.
+    pub fn mix(&self, handle: Handle) -> Option<Mix> {
+        self.slot(handle).map(|slot| self.slots[slot].mix)
+    }
+
+    /// Works out a voice's mix again, and sends it if it changed.
+    fn remix(&mut self, slot: usize) -> Result<(), String> {
+        let s = self.slots[slot];
+        let mix = spatial::mix(&s.spatial, s.position, &self.listener);
+        if mix == s.mix {
+            return Ok(());
+        }
+        self.slots[slot].mix = mix;
+        self.send(Command::Mix { slot: slot as u8, generation: s.generation, mix })
+    }
+
     /// Whether the voice plays: started, not stopped, not ended.
     pub fn playing(&self, handle: Handle) -> bool {
         self.slot(handle).is_some_and(|slot| !self.slots[slot].stopped)
@@ -358,6 +459,16 @@ impl Audio {
     /// second).
     pub fn update(&mut self, seconds: f64) {
         self.stopped.clear();
+        if self.moved {
+            self.moved = false;
+            for slot in 0..MAX_VOICES {
+                let s = &self.slots[slot];
+                if s.busy && !s.stopped && s.spatial.blend > 0.0 && self.remix(slot).is_err() {
+                    // The ring is full this frame: tried again next frame.
+                    self.moved = true;
+                }
+            }
+        }
         if let Some(device) = &self.device
             && device.lost.load(Ordering::Relaxed)
         {
@@ -439,6 +550,10 @@ impl Audio {
             ..self.stats
         }
     }
+}
+
+fn check_position(position: [f32; 3]) -> Result<(), String> {
+    if position.iter().all(|v| v.is_finite()) { Ok(()) } else { Err(format!("a sound can't be at {position:?}")) }
 }
 
 fn check_settings(settings: Settings) -> Result<(), String> {

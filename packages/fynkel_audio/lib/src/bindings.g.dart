@@ -27,6 +27,16 @@ external ffi.Pointer<FaAudio> fa_audio_new();
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>)>(isLeaf: true)
 external int fa_audio_open_device(ffi.Pointer<FaAudio> audio);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Pointer<FaListener>, ffi.Pointer<FaPlace>, ffi.Size)>(
+  isLeaf: true,
+)
+external int fa_audio_place(
+  ffi.Pointer<FaAudio> audio,
+  ffi.Pointer<FaListener> listener,
+  ffi.Pointer<FaPlace> places,
+  int count,
+);
+
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Pointer<FaClip>, ffi.Pointer<FaPlay>, ffi.Pointer<ffi.Uint64>)
 >(isLeaf: true)
@@ -111,10 +121,13 @@ external int fa_voice_pause(ffi.Pointer<FaAudio> audio, int voice, int paused);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Pointer<FaSettings>)>(isLeaf: true)
 external int fa_voice_set(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaSettings> settings);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Pointer<FaSpatial>)>(isLeaf: true)
+external int fa_voice_spatial_set(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaSpatial> spatial);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64)>(isLeaf: true)
 external int fa_voice_stop(ffi.Pointer<FaAudio> audio, int voice);
 
-const int FA_ABI_VERSION = 2;
+const int FA_ABI_VERSION = 3;
 
 final class FaAudio extends ffi.Opaque {}
 
@@ -151,6 +164,22 @@ final class FaClipInfo extends ffi.Struct {
     ..ref.bytes = bytes;
 }
 
+final class FaListener extends ffi.Struct {
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> position;
+
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Float> rotation;
+}
+
+final class FaPlace extends ffi.Struct {
+  @ffi.Uint64()
+  external int voice;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> position;
+}
+
 final class FaPlay extends ffi.Struct {
   external FaSettings settings;
 
@@ -165,6 +194,16 @@ final class FaPlay extends ffi.Struct {
 
   @ffi.Double()
   external double from;
+
+  external FaSpatial spatial;
+
+  @ffi.Array.multi([3])
+  external ffi.Array<ffi.Float> position;
+}
+
+sealed class FaRolloff {
+  static const FA_ROLLOFF_LOGARITHMIC = 0;
+  static const FA_ROLLOFF_LINEAR = 1;
 }
 
 sealed class FaSession {
@@ -191,6 +230,37 @@ final class FaSettings extends ffi.Struct {
     ..ref.volume = volume
     ..ref.pitch = pitch
     ..ref.looping = looping;
+}
+
+final class FaSpatial extends ffi.Struct {
+  @ffi.Float()
+  external double blend;
+
+  @ffi.Float()
+  external double pan;
+
+  @ffi.Float()
+  external double min_distance;
+
+  @ffi.Float()
+  external double max_distance;
+
+  @ffi.Uint32()
+  external int rolloff;
+
+  static ffi.Pointer<FaSpatial> $allocate(
+    ffi.Allocator $allocator, {
+    required double blend,
+    required double pan,
+    required double min_distance,
+    required double max_distance,
+    required int rolloff,
+  }) => $allocator<FaSpatial>()
+    ..ref.blend = blend
+    ..ref.pan = pan
+    ..ref.min_distance = min_distance
+    ..ref.max_distance = max_distance
+    ..ref.rolloff = rolloff;
 }
 
 final class FaStats extends ffi.Struct {

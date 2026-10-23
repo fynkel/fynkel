@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FA_ABI_VERSION 2
+#define FA_ABI_VERSION 3
 
 // What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 // Those the engine's interface has too have its numbers
@@ -67,6 +67,27 @@ typedef uint32_t FaSession;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+// How a 3D sound fades with distance, as Unity's rolloff modes.
+enum FaRolloff
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // Full within the min distance, then as 1 over the distance, until
+  // the max distance, where it stops falling.
+  FA_ROLLOFF_LOGARITHMIC = 0,
+  // Full within the min distance, falling in a line to silence at the
+  // max distance.
+  FA_ROLLOFF_LINEAR = 1,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FaRolloff FaRolloff;
+#else
+typedef uint32_t FaRolloff;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 // The sound of one world. Made by `fa_audio_new`, freed by
 // `fa_audio_free`.
 typedef struct FaAudio FaAudio;
@@ -101,16 +122,43 @@ typedef struct FaSettings {
   uint32_t looping;
 } FaSettings;
 
+// Whether a voice is 2D or 3D: `blend` 0 (2D) to 1 (3D); `pan` -1 (left)
+// to 1 (right) for its 2D part; `min_distance` above 0, within which it's
+// full; `max_distance` above that; `rolloff` an `FaRolloff`.
+typedef struct FaSpatial {
+  float blend;
+  float pan;
+  float min_distance;
+  float max_distance;
+  uint32_t rolloff;
+} FaSpatial;
+
 // How to play a clip: its settings; `priority` 0 (kept longest) to 256
 // (given up first); `pausable` 1 to hold while the game is paused; whose
-// it is (`owner`, 0 for no one's); and where to start, in seconds.
+// it is (`owner`, 0 for no one's); where to start, in seconds; whether
+// it's 3D, and where it is.
 typedef struct FaPlay {
   struct FaSettings settings;
   uint32_t priority;
   uint32_t pausable;
   uint64_t owner;
   double from;
+  struct FaSpatial spatial;
+  float position[3];
 } FaPlay;
+
+// Who hears: where, and which way they face (a quaternion x, y, z, w,
+// looking along its -Z with +X on its right).
+typedef struct FaListener {
+  float position[3];
+  float rotation[4];
+} FaListener;
+
+// Where a voice is now.
+typedef struct FaPlace {
+  uint64_t voice;
+  float position[3];
+} FaPlace;
 
 // A voice now: `playing` 0 or 1, and where it is in its clip, in seconds
 // (0 when it isn't playing).
@@ -284,6 +332,29 @@ FaStatus fa_voice_pause(struct FaAudio *audio, uint64_t voice, uint32_t paused);
 //
 // `audio` is null or live; `settings` is null or readable.
 FaStatus fa_voice_set(struct FaAudio *audio, uint64_t voice, const struct FaSettings *settings);
+
+// Changes a playing voice's 2D or 3D settings to `spatial`'s, heard at
+// once.
+//
+// # Safety
+//
+// `audio` is null or live; `spatial` is null or readable.
+FaStatus fa_voice_spatial_set(struct FaAudio *audio,
+                              uint64_t voice,
+                              const struct FaSpatial *spatial);
+
+// The frame's moves, in one call: the listener, at `listener`, and
+// `count` voices at `places`, each where it is now. Heard from the next
+// `fa_audio_update`. A voice that ended is skipped.
+//
+// # Safety
+//
+// `audio` is null or live; `listener` is null or readable; `places` is
+// readable for `count`.
+FaStatus fa_audio_place(struct FaAudio *audio,
+                        const struct FaListener *listener,
+                        const struct FaPlace *places,
+                        size_t count);
 
 // Writes whether a voice plays, and where it is, to `out`.
 //

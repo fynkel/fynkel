@@ -13,6 +13,7 @@ import 'package:fynkel/fynkel.dart';
 import 'bindings.g.dart';
 
 part 'clip.dart';
+part 'listener.dart';
 part 'source.dart';
 
 /// How the game's sound sits with the phone's, on iOS (elsewhere it
@@ -71,7 +72,7 @@ void _check(int status) {
 /// The sound at a glance: whether an output plays it, at what rate, the
 /// voices the mixer has now (paused ones too) and counts since the start.
 final class AudioStats {
-  AudioStats._(FaStats s)
+  AudioStats._(FaStats s, this.frameMilliseconds)
     : device = s.device == 1,
       rate = s.rate,
       channels = s.channels,
@@ -101,15 +102,25 @@ final class AudioStats {
   /// time (a crackle).
   final int callbacks, underruns;
 
+  /// What sound costs the game's frame, in milliseconds, averaged over
+  /// about the last second: reading where the 3D sources and the listener
+  /// are, and telling the mixer. Reading them first sends the frame's
+  /// moves to the engine, which drawing would do anyway; that's counted
+  /// here too. The mixing itself runs on the output's
+  /// own thread (or, without an output, in this frame too).
+  final double frameMilliseconds;
+
   @override
   String toString() =>
       'AudioStats(${device ? 'device' : 'no device'} $rate Hz × $channels, $voices voices, started $started, '
-      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns)';
+      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns, '
+      '${frameMilliseconds.toStringAsFixed(3)} ms a frame)';
 }
 
 /// A world's sound, as Unity's `AudioListener` and `AudioSettings` are:
 /// [volume] for everything, [playOneShot] for a sound that belongs to no
-/// object (a click), and [session]. Every object and behaviour has it as
+/// object (a click), [playAt] for one at a place in the world (an
+/// explosion), and [session]. Every object and behaviour has it as
 /// `audio`; it's made the first time it's asked for, or by the first
 /// [AudioSource].
 ///
@@ -119,6 +130,12 @@ final class AudioStats {
 /// ([AudioSource.ignorePause]). In a test, where no world is shown, sound
 /// is made and timed the same way, without a device: sounds still end
 /// when they would.
+///
+/// Once a frame, after the cameras move, it reads where every 3D
+/// [AudioSource] that's playing is, and where the [AudioListener] (or the
+/// camera) is and faces, in one call, and the mixer moves each sound
+/// there over its next few milliseconds, so one that flies past doesn't
+/// crackle.
 final class Audio extends WorldSystem implements Finalizable {
   Audio._(super.world) {
     _library;
@@ -126,6 +143,11 @@ final class Audio extends WorldSystem implements Finalizable {
     _finalizer.attach(this, _audio.cast(), detach: this);
     world.addAssetKind(AudioClip.kind);
     _checkLayout();
+    // Whoever hears stands at the origin, looking along -Z, until there's
+    // a listener or a camera.
+    for (var i = 0; i < 7; i++) {
+      _listenerFloats[i] = i == 6 ? 1 : 0;
+    }
     if (world.isOnScreen) viewStarted();
   }
 
@@ -149,6 +171,15 @@ final class Audio extends WorldSystem implements Finalizable {
   final _handle = calloc<Uint64>();
   var _stopped = calloc<FaStopped>(8);
   var _stoppedRoom = 8;
+  final _spatial = calloc<FaSpatial>();
+  final _listener = calloc<FaListener>();
+  // Room for every voice's place each frame, and the ids and transforms
+  // read for them: the listener's object, then the 3D sources'.
+  static const _placeRoom = 2 * maxVoices;
+  final _places = calloc<FaPlace>(_placeRoom);
+  var _ids = calloc<Uint64>(8);
+  var _transforms = calloc<Float>(8 * 10);
+  var _idRoom = 8;
 
   // The scratch structs as memory, written and read on each frame without
   // `.ref`, which makes an object each time, or the generated accessors,
@@ -167,9 +198,22 @@ final class Audio extends WorldSystem implements Finalizable {
   late final _settingsWords = _settings.cast<Uint32>();
   late final _voicePlaying = _voice.cast<Uint32>();
   late final _voiceTime = (_voice.cast<Uint8>() + 8).cast<Double>();
+  // FaPlay's spatial: blend, pan, min and max distance, floats 10 to 13;
+  // rolloff, word 14; position, floats 15 to 17. FaSpatial the same from
+  // 0. FaListener: position, floats 0 to 2; rotation, 3 to 6. FaPlace, 24
+  // bytes each: its voice, word (64-bit) 3 × i; its position, floats
+  // 6 × i + 2 to 4.
+  late final _spatialFloats = _spatial.cast<Float>();
+  late final _spatialWords = _spatial.cast<Uint32>();
+  late final _listenerFloats = _listener.cast<Float>();
+  late final _placeVoices = _places.cast<Uint64>();
+  late final _placeFloats = _places.cast<Float>();
 
-  // The sources whose voices are playing, by their owner id.
+  // The sources whose voices are playing, by their owner id; the enabled
+  // ones, in order; the enabled listeners, the last of them hearing.
   final _sources = <int, AudioSource>{};
+  final _enabled = <AudioSource>[];
+  final _listeners = <AudioListener>[];
   var _nextOwner = 1;
 
   var _gamePaused = false;
@@ -207,12 +251,18 @@ final class Audio extends WorldSystem implements Finalizable {
   /// without it, and it's tried again each second.
   String? get outputError => _outputError;
 
+  /// Draws each 3D [AudioSource]'s [AudioSource.minDistance] (the inner
+  /// sphere) and [AudioSource.maxDistance] (the outer) with the world's
+  /// debug lines, every frame while it's on: to see where sounds can be
+  /// heard. Off unless set.
+  bool drawSources = false;
+
   /// The sound at a glance.
   AudioStats get stats {
     final out = calloc<FaStats>();
     try {
       _check(fa_audio_stats(_native, out));
-      return AudioStats._(out.ref);
+      return AudioStats._(out.ref, _frameMicros / 1000);
     } finally {
       calloc.free(out);
     }
@@ -238,6 +288,193 @@ final class Audio extends WorldSystem implements Finalizable {
     _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
   }
 
+  /// Plays [clip] once at [position] in the world, a 3D sound that belongs
+  /// to no object, as Unity's `AudioSource.PlayClipAtPoint`: an explosion,
+  /// a coin picked up. It stays where it was played, heard from there as
+  /// the listener moves, fading between [minDistance] and [maxDistance]
+  /// (1 and 500 unless given) as [rolloffMode] says. [volume], [pitch],
+  /// [ignorePause] and [priority] are as [playOneShot]'s.
+  void playAt(
+    AudioClip clip,
+    Vec3 position, {
+    double? volume,
+    double? pitch,
+    double? minDistance,
+    double? maxDistance,
+    AudioRolloffMode rolloffMode = AudioRolloffMode.logarithmic,
+    bool ignorePause = false,
+    int priority = 128,
+  }) {
+    // Nullable and checked here, for the reason playOneShot's are.
+    final gain = volume ?? 1.0, speed = pitch ?? 1.0, near = minDistance ?? 1.0, far = maxDistance ?? 500.0;
+    if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
+    if (!(speed >= 0.05 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not between 0.05 and 8');
+    if (!(near > 0 && near.isFinite)) throw ArgumentError.value(minDistance, 'minDistance', 'is not above 0');
+    if (!(far > near && far.isFinite)) {
+      throw ArgumentError.value(maxDistance, 'maxDistance', 'is not above minDistance ($near)');
+    }
+    _checkPriority(priority);
+    _playFloats
+      ..[0] = gain
+      ..[1] = speed
+      ..[10] = 1
+      ..[11] = 0
+      ..[12] = near
+      ..[13] = far
+      ..[15] = position.x
+      ..[16] = position.y
+      ..[17] = position.z;
+    _playWords[14] = rolloffMode.index;
+    _playFrom.value = 0;
+    _hear();
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0);
+  }
+
+  /// Makes [frames] frames of the sound (48,000 a second, interleaved
+  /// left and right) as a speaker would have played them: for a test to
+  /// listen to what plays, and compare it with what it should be. The
+  /// sound moves on by that much. Throws a [StateError] while a device
+  /// plays, as on screen.
+  Float32List render(int frames) {
+    RangeError.checkNotNegative(frames, 'frames');
+    final out = calloc<Float>(frames * 2);
+    try {
+      final status = fa_audio_render(_native, out, frames);
+      if (status == FaStatus.FA_STATUS_NO_DEVICE) throw StateError(_lastError());
+      _check(status);
+      return Float32List.fromList(out.asTypedList(frames * 2));
+    } finally {
+      calloc.free(out);
+    }
+  }
+
+  /// The object that hears: the last [AudioListener] enabled, or the
+  /// camera, or none.
+  GameObject? get _hearer {
+    final listeners = _listeners;
+    if (listeners.isNotEmpty) return listeners[listeners.length - 1].gameObject;
+    return world.camera?.gameObject;
+  }
+
+  /// Room for [count] ids and their transforms, keeping the ids written.
+  void _room(int count) {
+    if (count <= _idRoom) return;
+    final ids = calloc<Uint64>(count * 2);
+    for (var i = 0; i < _idRoom; i++) {
+      ids[i] = _ids[i];
+    }
+    calloc
+      ..free(_ids)
+      ..free(_transforms);
+    _idRoom = count * 2;
+    _ids = ids;
+    _transforms = calloc<Float>(_idRoom * 10);
+  }
+
+  /// Writes [source]'s 2D and 3D settings to the next play, and, for a 3D
+  /// one, where its object is, telling the mixer where the listener is
+  /// first, so it starts where it should be heard.
+  void _writeSpatial(AudioSource source) {
+    _playFloats
+      ..[10] = source._spatialBlend
+      ..[11] = source._panStereo
+      ..[12] = source._minDistance
+      ..[13] = source._maxDistance;
+    _playWords[14] = source._rolloffMode.index;
+    if (source._spatialBlend > 0) {
+      _ids[0] = source.gameObject.id;
+      world.readWorldTransforms(_ids, 1, _transforms);
+      _playFloats
+        ..[15] = _transforms[0]
+        ..[16] = _transforms[1]
+        ..[17] = _transforms[2];
+      _hear();
+    } else {
+      _playFloats
+        ..[15] = 0
+        ..[16] = 0
+        ..[17] = 0;
+    }
+  }
+
+  /// Writes [source]'s 2D and 3D settings to [_spatial].
+  void _fillSpatial(AudioSource source) {
+    _spatialFloats
+      ..[0] = source._spatialBlend
+      ..[1] = source._panStereo
+      ..[2] = source._minDistance
+      ..[3] = source._maxDistance;
+    _spatialWords[4] = source._rolloffMode.index;
+  }
+
+  /// Tells the mixer where the hearer is now.
+  void _hear() {
+    final hearer = _hearer;
+    if (hearer == null) return;
+    _ids[0] = hearer.id;
+    world.readWorldTransforms(_ids, 1, _transforms);
+    _readListener(0);
+    _check(fa_audio_place(_native, _listener, _places, 0));
+  }
+
+  /// [_listener] from the transform read at [index].
+  void _readListener(int index) {
+    final t = index * 10;
+    for (var i = 0; i < 7; i++) {
+      _listenerFloats[i] = _transforms[t + i];
+    }
+  }
+
+  /// The frame's moves, in one call: the hearer, and every 3D source that
+  /// plays (or, with [drawSources], is enabled), each of its voices.
+  void _place() {
+    // Asked once a frame: finding the camera is a call into the engine.
+    final hearer = _hearer;
+    final enabled = _enabled;
+    final draw = drawSources;
+    var count = 0;
+    if (hearer != null) {
+      _room(1);
+      _ids[count++] = hearer.id;
+    }
+    final first = count;
+    for (var i = 0; i < enabled.length; i++) {
+      final source = enabled[i];
+      if (source._spatialBlend > 0 && (draw || source._voice != 0 || source._shotCount > 0)) {
+        _room(count + 1);
+        _ids[count++] = source.gameObject.id;
+      }
+    }
+    if (count == 0) return;
+    world.readWorldTransforms(_ids, count, _transforms);
+    if (hearer != null) _readListener(0);
+    var places = 0;
+    var at = first;
+    for (var i = 0; i < enabled.length; i++) {
+      final source = enabled[i];
+      if (!(source._spatialBlend > 0 && (draw || source._voice != 0 || source._shotCount > 0))) continue;
+      final t = at++ * 10;
+      if (draw) {
+        final centre = Vec3(_transforms[t], _transforms[t + 1], _transforms[t + 2]);
+        world.debug
+          ..sphere(centre, source._minDistance, color: const Color(0xFF66CCFF))
+          ..sphere(centre, source._maxDistance, color: const Color(0xFF3366AA));
+      }
+      for (var v = -1; v < source._shotCount; v++) {
+        final voice = v < 0 ? source._voice : source._shots[v];
+        if (voice == 0 || places == _placeRoom) continue;
+        _placeVoices[places * 3] = voice;
+        final p = places * 6 + 2;
+        _placeFloats
+          ..[p] = _transforms[t]
+          ..[p + 1] = _transforms[t + 1]
+          ..[p + 2] = _transforms[t + 2];
+        places++;
+      }
+    }
+    _check(fa_audio_place(_native, _listener, _places, places));
+  }
+
   /// Fails if the memory views above don't fall on the fields they're for.
   void _checkLayout() {
     _play.ref
@@ -247,7 +484,24 @@ final class Audio extends WorldSystem implements Finalizable {
       ..priority = 4
       ..pausable = 5
       ..owner = 6
-      ..from = 0.75;
+      ..from = 0.75
+      ..spatial.blend = 0.5
+      ..spatial.pan = -0.5
+      ..spatial.min_distance = 2
+      ..spatial.max_distance = 3
+      ..spatial.rolloff = 9
+      ..position[0] = 10
+      ..position[2] = 12;
+    _spatial.ref
+      ..blend = 1
+      ..max_distance = 40
+      ..rolloff = 7;
+    _listener.ref
+      ..position[1] = 21
+      ..rotation[3] = 22;
+    (_places + 1).ref
+      ..voice = 31
+      ..position[2] = 32;
     _settings.ref
       ..volume = 0.125
       ..pitch = 2
@@ -268,8 +522,23 @@ final class Audio extends WorldSystem implements Finalizable {
       _settingsWords[2],
       _voicePlaying.value,
       _voiceTime.value,
+      _playFloats[10],
+      _playFloats[11],
+      _playFloats[12],
+      _playFloats[13],
+      _playWords[14],
+      _playFloats[15],
+      _playFloats[17],
+      _spatialFloats[0],
+      _spatialFloats[3],
+      _spatialWords[4],
+      _listenerFloats[1],
+      _listenerFloats[6],
+      _placeVoices[3],
+      _placeFloats[6 + 4],
     ];
-    if (seen.join(' ') != '0.25 0.5 3 4 5 6 0.75 0.125 2.0 8 7 1.25') {
+    if (seen.join(' ') !=
+        '0.25 0.5 3 4 5 6 0.75 0.125 2.0 8 7 1.25 0.5 -0.5 2.0 3.0 9 10.0 12.0 1.0 40.0 7 21.0 22.0 31 32.0') {
       throw StateError('package:fynkel_audio reads its structs at the wrong places: $seen');
     }
   }
@@ -327,9 +596,20 @@ final class Audio extends WorldSystem implements Finalizable {
     }
   }
 
+  // What the last frames' sound cost, in microseconds, smoothed.
+  final _clock = Stopwatch()..start();
+  var _frameMicros = 0.0;
+
   @override
   void afterFrame() {
     super.afterFrame();
+    final start = _clock.elapsedMicroseconds;
+    _frame();
+    _frameMicros += ((_clock.elapsedMicroseconds - start) - _frameMicros) * 0.02;
+  }
+
+  void _frame() {
+    _place();
     // Through memory: a double passed to a native call is boxed in the JIT.
     _seconds.value = world.time.unscaledDelta;
     _check(fa_audio_update(_native, _seconds, _count));
@@ -382,7 +662,12 @@ final class Audio extends WorldSystem implements Finalizable {
       ..free(_count)
       ..free(_seconds)
       ..free(_handle)
-      ..free(_stopped);
+      ..free(_stopped)
+      ..free(_spatial)
+      ..free(_listener)
+      ..free(_places)
+      ..free(_ids)
+      ..free(_transforms);
   }
 }
 
