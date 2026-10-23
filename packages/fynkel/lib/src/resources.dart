@@ -17,7 +17,7 @@ part of 'world.dart';
 /// The changes of a frame go to the worlds that have the mesh together,
 /// at the end of the frame. Until the game sets its own, the normals and
 /// tangents are worked out again when the positions, UVs or triangles
-/// change. For a mesh that changes every frame, call [markDynamic].
+/// change (the tangents once it has UVs). For a mesh that changes every frame, call [markDynamic].
 final class Mesh implements Finalizable {
   Mesh._(this._pointer, this._name, {this._shape = false, bool ownNormals = true, bool ownTangents = true})
     // Private fields can't be named parameters.
@@ -34,7 +34,7 @@ final class Mesh implements Finalizable {
     ensureEngine();
     final out = scratch.mesh;
     check(fy_mesh_new_empty(out));
-    return Mesh._(out.value, 'Mesh()', ownNormals: false, ownTangents: false);
+    return Mesh._(out.value, 'Mesh()', ownNormals: false, ownTangents: false).._hasUvs = false;
   }
 
   static final _finalizer = NativeFinalizer(
@@ -50,6 +50,8 @@ final class Mesh implements Finalizable {
   // are out of date.
   bool _ownNormals, _ownTangents;
   bool _staleNormals = false, _staleTangents = false;
+  // Whether it has UVs: tangents are worked out from them, so not before.
+  bool _hasUvs = true;
 
   // Changed since the worlds that have it were last given it; how many
   // times they've been given a change; whether it's dynamic.
@@ -264,6 +266,7 @@ final class Mesh implements Finalizable {
   void setUvs(Float32List uvs) {
     _changeable();
     check(fy_mesh_set_uvs(_live, uvs.address, _per(uvs.length, 2, 'uvs')));
+    _hasUvs = true;
     _staleTangents = !_ownTangents;
   }
 
@@ -304,7 +307,7 @@ final class Mesh implements Finalizable {
     _changeable();
     check(fy_mesh_set_triangles(_live, nullptr, 0, nullptr, 0));
     check(fy_mesh_set_positions(_live, nullptr, 0));
-    _ownNormals = _ownTangents = _staleNormals = _staleTangents = false;
+    _ownNormals = _ownTangents = _staleNormals = _staleTangents = _hasUvs = false;
   }
 
   /// Works out each vertex's normal from the faces around it, weighted by
@@ -359,9 +362,10 @@ final class Mesh implements Finalizable {
   /// Works out the normals and tangents out of date.
   void _settle() {
     if (!_staleNormals && !_staleTangents) return;
-    final what = (_staleNormals ? FY_MESH_NORMALS : 0) | (_staleTangents ? FY_MESH_TANGENTS : 0);
+    // Without UVs tangents mean nothing: they wait for them.
+    final what = (_staleNormals ? FY_MESH_NORMALS : 0) | (_staleTangents && _hasUvs ? FY_MESH_TANGENTS : 0);
     _staleNormals = _staleTangents = false;
-    check(fy_mesh_recalculate(_live, what));
+    if (what != 0) check(fy_mesh_recalculate(_live, what));
   }
 
   /// Gives every changed mesh to the worlds that have it, at the end of a

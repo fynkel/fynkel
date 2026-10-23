@@ -357,6 +357,14 @@ final class World implements Finalizable {
   /// last frame: what Unity's Profiler shows as ParticleSystem.Update.
   /// Zero in a world without particle systems.
   Duration get particleStepTime => Duration(microseconds: _particleWatch.elapsedMicroseconds);
+  final _meshWatch = Stopwatch();
+
+  /// How long the last frame took to send the meshes the game changed to
+  /// the worlds that have them: their normals and tangents worked out, and
+  /// each handed to the engine (the GPU's copy is written as it draws).
+  /// With several worlds, the first to update sends them all. Zero when no
+  /// mesh changed.
+  Duration get meshChangeTime => Duration(microseconds: _meshWatch.elapsedMicroseconds);
   final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
@@ -749,7 +757,11 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
 
     cameras._run();
+    _meshWatch
+      ..reset()
+      ..start();
     Mesh._publishChanges();
+    _meshWatch.stop();
     _debug?._flush();
     _runSystems(_SystemHook.afterFrame);
   }

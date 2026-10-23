@@ -181,10 +181,7 @@ void main() {
       world.add(
         GameObject(
           transform: Transform(position: const Vec3(10, 0, 0)),
-          components: [
-            MeshRenderer(mesh),
-            MeshCollider(),
-          ],
+          components: [MeshRenderer(mesh), MeshCollider()],
         ),
       );
       world.update(1 / 60);

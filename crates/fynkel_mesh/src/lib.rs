@@ -58,7 +58,7 @@ const _: () = assert!(std::mem::size_of::<SkinVertex>() == 16);
 
 /// A checked triangle list: every index points at a vertex, and every
 /// vertex has a unit normal and tangent.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MeshData {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
@@ -72,6 +72,55 @@ pub struct MeshData {
     /// Changed often: the GPU's copy has room to grow and is written in
     /// place ([`MeshData::mark_dynamic`]).
     dynamic: bool,
+    /// Which setting of the indices it has, so a copy into a mesh that has
+    /// the same ones already leaves them.
+    indices_made: Made,
+}
+
+/// A number for each time a mesh's indices are set, never the same twice;
+/// two meshes are equal whatever theirs are.
+#[derive(Clone, Copy, Debug, Default)]
+struct Made(u64);
+
+impl Made {
+    fn next() -> Self {
+        static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Made(LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
+    }
+}
+
+impl PartialEq for Made {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Clone for MeshData {
+    fn clone(&self) -> Self {
+        MeshData {
+            vertices: self.vertices.clone(),
+            indices: self.indices.clone(),
+            skin: self.skin.clone(),
+            submeshes: self.submeshes.clone(),
+            bounds: self.bounds,
+            dynamic: self.dynamic,
+            indices_made: self.indices_made,
+        }
+    }
+
+    /// Into the room it already has, so a copy kept for the next change
+    /// allocates nothing.
+    fn clone_from(&mut self, source: &Self) {
+        self.vertices.clone_from(&source.vertices);
+        if self.indices_made.0 == 0 || self.indices_made.0 != source.indices_made.0 {
+            self.indices.clone_from(&source.indices);
+            self.indices_made = source.indices_made;
+        }
+        self.skin.clone_from(&source.skin);
+        self.submeshes.clone_from(&source.submeshes);
+        self.bounds = source.bounds;
+        self.dynamic = source.dynamic;
+    }
 }
 
 /// What [`MeshData::new`] takes. Only positions and indices are required.
@@ -255,6 +304,7 @@ impl MeshData {
             submeshes,
             bounds: bounds(positions.iter().copied()),
             dynamic: false,
+            indices_made: Made::next(),
         };
 
         match (tangents, uvs) {
@@ -409,12 +459,16 @@ impl MeshData {
         {
             return Err(MeshError::NotTriangles(indices.len()));
         }
-        in_range(indices.map_or(&self.indices[..], |(i, _)| i), n)?;
+        // The triangles it has already point at its vertices: they're
+        // looked at again only when new, or the count changes.
+        if indices.is_some() || n != self.vertices.len() {
+            in_range(indices.map_or(&self.indices[..], |(i, _)| i), n)?;
+        }
         let submeshes = match indices {
             Some((indices, starts)) => Some(submesh_ranges(indices.len(), starts)?),
             None => None,
         };
-        finite("position", positions.unwrap_or_default().iter().flatten().copied(), 3)?;
+        let position_bounds = positions.map(checked_bounds).transpose()?;
         finite("normal", normals.unwrap_or_default().iter().flatten().copied(), 3)?;
         finite("tangent", tangents.unwrap_or_default().iter().flatten().copied(), 4)?;
         finite("uv", uvs.unwrap_or_default().iter().flatten().copied(), 2)?;
@@ -449,7 +503,7 @@ impl MeshData {
             for (v, &p) in self.vertices.iter_mut().zip(positions) {
                 v.position = p;
             }
-            self.bounds = bounds(positions.iter().copied());
+            self.bounds = position_bounds.unwrap_or_default();
         }
         if let Some(normals) = normals {
             for (v, &m) in self.vertices.iter_mut().zip(normals) {
@@ -474,6 +528,7 @@ impl MeshData {
         if let (Some((indices, _)), Some(submeshes)) = (indices, submeshes) {
             self.indices.clear();
             self.indices.extend_from_slice(indices);
+            self.indices_made = Made::next();
             self.submeshes = submeshes;
         }
         if change.recalculate_normals || (resized && normals.is_none()) {
@@ -501,17 +556,22 @@ impl MeshData {
     /// Each vertex's normal from the faces around it, weighted by their
     /// area. A vertex no face with an area touches faces +Y.
     pub fn recalculate_normals(&mut self) {
-        let mut sums = vec![Vec3::ZERO; self.vertices.len()];
+        // Summed in the normals themselves, so nothing is allocated.
+        for v in &mut self.vertices {
+            v.normal = [0.0; 3];
+        }
+        let vertices = &mut self.vertices;
         for tri in self.indices.chunks_exact(3) {
-            let p = [0, 1, 2].map(|k| Vec3::from(self.vertices[tri[k] as usize].position));
+            let p = [0, 1, 2].map(|k| Vec3::from(vertices[tri[k] as usize].position));
             // Twice the triangle's area long, so bigger faces count more.
             let face = (p[1] - p[0]).cross(p[2] - p[0]);
             for &i in tri {
-                sums[i as usize] += face;
+                let n = &mut vertices[i as usize].normal;
+                *n = (Vec3::from(*n) + face).into();
             }
         }
-        for (v, sum) in self.vertices.iter_mut().zip(sums) {
-            v.normal = sum.try_normalize().unwrap_or(FALLBACK_NORMAL).into();
+        for v in vertices {
+            v.normal = Vec3::from(v.normal).try_normalize().unwrap_or(FALLBACK_NORMAL).into();
         }
     }
 
@@ -581,6 +641,20 @@ fn submesh_ranges(count: usize, starts: &[u32]) -> Result<Vec<Range<u32>>, MeshE
 
 /// The smallest and largest corner of the box around `positions`; the
 /// origin for none.
+/// The box around `positions`, refusing one that isn't finite: one pass
+/// for both.
+fn checked_bounds(positions: &[[f32; 3]]) -> Result<(Vec3, Vec3), MeshError> {
+    let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for (at, &p) in positions.iter().enumerate() {
+        let p = Vec3::from(p);
+        if !p.is_finite() {
+            return Err(MeshError::NotFinite { what: "position", at });
+        }
+        (lo, hi) = (lo.min(p), hi.max(p));
+    }
+    Ok(if lo.x > hi.x { (Vec3::ZERO, Vec3::ZERO) } else { (lo, hi) })
+}
+
 fn bounds(positions: impl Iterator<Item = [f32; 3]>) -> (Vec3, Vec3) {
     let (lo, hi) = positions
         .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), p| (lo.min(Vec3::from(p)), hi.max(Vec3::from(p))));

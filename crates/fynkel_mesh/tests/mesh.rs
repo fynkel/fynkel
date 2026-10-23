@@ -522,3 +522,57 @@ fn recalculated_tangents_point_along_u_with_the_bitangent_up_the_image() {
     mesh.change(MeshChange { uvs: Some(&mirrored), recalculate_tangents: true, ..Default::default() }).unwrap();
     check_tangents(&mesh);
 }
+
+/// What changing a 101 × 101 grid costs, part by part: `cargo test
+/// --release -p fynkel_mesh --test mesh -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement"]
+fn what_changing_a_grid_costs() {
+    let n = 101_u32;
+    let positions: Vec<[f32; 3]> = (0..n * n).map(|i| [(i % n) as f32, 0.0, (i / n) as f32]).collect();
+    let mut indices = Vec::new();
+    for z in 0..n - 1 {
+        for x in 0..n - 1 {
+            let a = z * n + x;
+            indices.extend([a, a + n, a + 1, a + 1, a + n, a + n + 1]);
+        }
+    }
+    let mut mesh = MeshData::empty();
+    mesh.change(MeshChange { positions: Some(&positions), indices: Some((&indices, &[])), ..MeshChange::default() })
+        .unwrap();
+    let rounds = 200;
+    let time = |name: &str, f: &mut dyn FnMut()| {
+        let start = std::time::Instant::now();
+        for _ in 0..rounds {
+            f();
+        }
+        println!("{name}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds));
+    };
+    let shared = std::sync::Arc::new(mesh.clone());
+    time("clone", &mut || drop(std::hint::black_box((*shared).clone())));
+    time("positions", &mut || {
+        mesh.change(MeshChange { positions: Some(&positions), ..MeshChange::default() }).unwrap();
+    });
+    time("normals", &mut || mesh.recalculate_normals());
+    time("tangents", &mut || mesh.recalculate_tangents());
+}
+
+#[test]
+fn a_copy_written_into_an_older_one_has_the_new_triangles() {
+    let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]];
+    let mut mesh = MeshData::empty();
+    mesh.change(MeshChange { positions: Some(&positions), indices: Some((&[0, 2, 1], &[])), ..MeshChange::default() })
+        .unwrap();
+    let mut older = mesh.clone();
+    mesh.change(MeshChange { indices: Some((&[0, 2, 1, 1, 2, 3], &[3])), ..MeshChange::default() }).unwrap();
+    older.clone_from(&mesh);
+    assert_eq!(older, mesh);
+    assert_eq!(older.indices(), &[0, 2, 1, 1, 2, 3]);
+    assert_eq!(older.submeshes().len(), 2);
+
+    // Only the positions changed since: the same triangles stay.
+    let mut same = mesh.clone();
+    mesh.change(MeshChange { positions: Some(&[[0.0, 1.0, 0.0]; 4]), ..MeshChange::default() }).unwrap();
+    same.clone_from(&mesh);
+    assert_eq!(same, mesh);
+}

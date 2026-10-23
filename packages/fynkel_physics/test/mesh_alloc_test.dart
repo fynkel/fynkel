@@ -25,6 +25,7 @@ final class _Ground extends GameObject {
 
   @override
   void onLoad() {
+    super.onLoad();
     final n = size + 1;
     final indices = Uint32List(size * size * 6);
     var at = 0;
@@ -58,6 +59,7 @@ final class _Ground extends GameObject {
 
   @override
   void onUpdate() {
+    super.onUpdate();
     _frame++;
     _shape();
     mesh.setPositions(_positions);

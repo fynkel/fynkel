@@ -1116,17 +1116,21 @@ class GameObject with _Moving {
       r.own[i] = own == null ? 0 : own[i];
     }
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
-    final more = value._more;
-    if (more != null || value._moreSent) {
-      using((arena) {
-        final ids = arena<Uint64>(more?.length ?? 0);
-        for (var i = 0; i < (more?.length ?? 0); i++) {
-          ids[i] = w._materialId(more![i]);
-        }
-        check(fy_submesh_materials_set(w.pointer, id, more == null ? nullptr : ids, more?.length ?? 0));
-      });
-      value._moreSent = more != null;
-    }
+    if (value._more != null || value._moreSent) _writeSubmeshMaterials(value);
+  }
+
+  // Apart from [_writeMeshRenderer], whose every call would otherwise make
+  // the closure's context, submeshes or not.
+  void _writeSubmeshMaterials(MeshRenderer value) {
+    final (w, more) = (world, value._more);
+    using((arena) {
+      final ids = arena<Uint64>(more?.length ?? 0);
+      for (var i = 0; i < (more?.length ?? 0); i++) {
+        ids[i] = w._materialId(more![i]);
+      }
+      check(fy_submesh_materials_set(w.pointer, id, more == null ? nullptr : ids, more?.length ?? 0));
+    });
+    value._moreSent = more != null;
   }
 
   void _writeTrail(TrailRenderer value) {

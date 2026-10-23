@@ -1965,7 +1965,42 @@ pub unsafe extern "C" fn fy_light_remove(world: *const FyWorld, id: u64) -> FySt
 /// `fy_mesh_free`. Worlds that add it share its data, so freeing it
 /// doesn't take it from them.
 #[derive(Debug)]
-pub struct FyMesh(Arc<MeshData>);
+pub struct FyMesh(Arc<MeshData>, Vec<Arc<MeshData>>);
+
+/// How many copies a mesh that changes keeps from before, for its next
+/// changes to be written into: a world, and frames on their way to the
+/// GPU, hold the last few.
+const SPARE_MESHES: usize = 4;
+
+impl FyMesh {
+    fn new(data: Arc<MeshData>) -> Self {
+        FyMesh(data, Vec::new())
+    }
+
+    /// Its data, to change. While another holds it (a world, a frame on its
+    /// way to the GPU) the data is copied first: into a copy from before
+    /// that nothing holds any longer, so a mesh changed each frame
+    /// allocates nothing once it has a few, or else into a new one.
+    fn own(&mut self) -> &mut MeshData {
+        if Arc::get_mut(&mut self.0).is_none() {
+            let free = self.1.iter_mut().position(|spare| Arc::get_mut(spare).is_some());
+            let next = match free {
+                Some(i) => {
+                    let mut spare = self.1.swap_remove(i);
+                    Arc::get_mut(&mut spare).expect("nothing else holds it").clone_from(&self.0);
+                    spare
+                }
+                None => Arc::new((*self.0).clone()),
+            };
+            let held = std::mem::replace(&mut self.0, next);
+            if self.1.len() == SPARE_MESHES {
+                self.1.remove(0);
+            }
+            self.1.push(held);
+        }
+        Arc::get_mut(&mut self.0).expect("only this mesh holds it")
+    }
+}
 
 /// Writes a new mesh handle to `out`.
 ///
@@ -1977,7 +2012,7 @@ unsafe fn new_mesh(data: MeshData, out: *mut *mut FyMesh) -> Result<(), Error> {
         return Err(Error::null("out"));
     }
     // SAFETY: not null, and the caller promises it's writable.
-    unsafe { out.write(Box::into_raw(Box::new(FyMesh(Arc::new(data))))) };
+    unsafe { out.write(Box::into_raw(Box::new(FyMesh::new(Arc::new(data))))) };
     Ok(())
 }
 
@@ -2099,7 +2134,8 @@ pub unsafe extern "C" fn fy_mesh_new_empty(out: *mut *mut FyMesh) -> FyStatus {
 /// Changes `mesh`'s own data, as `change` says. Worlds that have it keep
 /// what they had until `fy_mesh_update`. The data is copied when another
 /// holds it (a world, a frame on its way to the GPU), so the first change
-/// after an update copies the mesh and the rest change it in place.
+/// after an update copies the mesh and the rest change it in place; the
+/// copy goes into one from before when nothing holds that any longer.
 ///
 /// # Safety
 ///
@@ -2107,7 +2143,7 @@ pub unsafe extern "C" fn fy_mesh_new_empty(out: *mut *mut FyMesh) -> FyStatus {
 unsafe fn change_mesh(mesh: *mut FyMesh, change: fynkel_world::MeshChange<'_>) -> Result<(), Error> {
     // SAFETY: the caller promises it's null or live, and only theirs.
     let mesh = unsafe { mesh.as_mut() }.ok_or_else(|| Error::null("mesh"))?;
-    Arc::make_mut(&mut mesh.0).change(change).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+    mesh.own().change(change).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
 }
 
 /// Sets the vertices' positions, three floats each (x, y, z). A different
@@ -2258,7 +2294,7 @@ pub unsafe extern "C" fn fy_mesh_mark_dynamic(mesh: *mut FyMesh) -> FyStatus {
         // SAFETY: per this function's contract.
         let mesh = unsafe { mesh.as_mut() }.ok_or_else(|| Error::null("mesh"))?;
         if !mesh.0.is_dynamic() {
-            Arc::make_mut(&mut mesh.0).mark_dynamic();
+            mesh.own().mark_dynamic();
         }
         Ok(())
     })
@@ -3094,7 +3130,7 @@ pub unsafe extern "C" fn fy_model_mesh(model: *const FyModel, index: usize, out:
         let model = &unsafe { handle(model, "model") }?.0;
         let mesh = Arc::clone(nth(model.meshes(), index, "meshes")?);
         // SAFETY: per this function's contract.
-        unsafe { write(out, Box::into_raw(Box::new(FyMesh(mesh))), "out") }
+        unsafe { write(out, Box::into_raw(Box::new(FyMesh::new(mesh))), "out") }
     })
 }
 
