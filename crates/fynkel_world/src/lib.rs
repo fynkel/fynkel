@@ -30,9 +30,11 @@ pub use hierarchy::WorldMatrices;
 pub use id::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 pub use model::ModelIds;
 pub use particles::{
-    Burst, BySpeed, Curve as ParticleCurve, DrawnParticle, GRAVITY, LimitVelocity, MAX_BURSTS, MAX_PARTICLES,
-    Noise as ParticleNoise, ParticleCommand, ParticleEvent, ParticleSettings, ParticleSystem, Range as ParticleRange,
-    RenderMode, Shape, ShapeKind, Space, StopAction, TABLE, TextureSheet, VectorOverLifetime,
+    Burst, BySpeed, Collision as ParticleCollision, Curve as ParticleCurve, DrawnParticle, GRAVITY, INHERIT_COLOR,
+    INHERIT_ROTATION, INHERIT_SIZE, InheritMode, InheritVelocity, LimitVelocity, MAX_BURSTS, MAX_PARTICLES, MAX_PLANES,
+    MAX_SUB_EMITTERS, Noise as ParticleNoise, ParticleCommand, ParticleEvent, ParticleEventKind, ParticleSettings,
+    ParticleSystem, Range as ParticleRange, RenderMode, Shape, ShapeKind, Space, StopAction, SubEmitter,
+    SubEmitterKind, TABLE, TextureSheet, VectorOverLifetime,
 };
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, ScreenEffect, Shader};

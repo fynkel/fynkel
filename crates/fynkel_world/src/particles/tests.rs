@@ -58,7 +58,7 @@ fn particles_die_at_their_lifetime_and_the_system_is_done_once() {
     // particles long gone.
     let events = step(&mut world, 0.7, 0.01);
     assert_eq!(world.particles(id).unwrap().count(), 0);
-    assert_eq!(events, [ParticleEvent { object: id, action: StopAction::Destroy }]);
+    assert_eq!(events, [ParticleEvent { object: id, kind: ParticleEventKind::Done(StopAction::Destroy) }]);
     assert!(!world.particles(id).unwrap().is_playing());
     assert!(step(&mut world, 1.0, 0.01).is_empty(), "said once");
 }
@@ -622,4 +622,294 @@ fn a_steady_frame_with_every_module_allocates_nothing() {
     }
     assert_eq!(pointer, world.particles(id).unwrap().random.as_ptr());
     assert!(out.capacity() == 1000);
+}
+
+/// `id` moved to `position`.
+fn put(world: &mut World, id: ObjectId, position: Vec3) {
+    world.insert(id, Transform { position, ..Transform::default() }).unwrap();
+}
+
+fn velocities(world: &World, id: ObjectId) -> Vec<Vec3> {
+    let mut out = Vec::new();
+    world.particles(id).unwrap().drawn(world.world_matrix(id).unwrap(), &mut out);
+    out.iter().map(|p| p.velocity).collect()
+}
+
+/// A floor: an object at the origin, its up the plane's normal.
+fn floor(world: &mut World) -> ObjectId {
+    let id = world.spawn();
+    world.insert(id, Transform::default()).unwrap();
+    id
+}
+
+#[test]
+fn rate_over_distance_leaves_particles_along_the_way_it_went() {
+    let (mut world, id) = world_with(ParticleSettings {
+        rate_over_time: 0.0,
+        rate_over_distance: 10.0,
+        start_speed: Range::constant(0.0),
+        space: Space::World,
+        shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+        seed: Some(1),
+        ..ParticleSettings::default()
+    });
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    assert_eq!(world.particles(id).unwrap().count(), 0, "standing still, none");
+    for k in 1..=20 {
+        put(&mut world, id, Vec3::new(k as f32 * 0.1, 0.0, 0.0));
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    }
+    let xs: Vec<f32> = positions(&world, id).iter().map(|p| p.x).collect();
+    // Two metres, ten a metre (a hair short of 2 in adding up the tenths).
+    assert!((19..=20).contains(&xs.len()), "{}", xs.len());
+    assert!(xs.iter().all(|x| (0.0..=2.0).contains(x)));
+    let spread = xs.iter().fold(0.0f32, |m, x| m.max(*x)) - xs.iter().fold(2.0f32, |m, x| m.min(*x));
+    assert!(spread > 1.8, "left along the way: {xs:?}");
+}
+
+#[test]
+fn particles_inherit_their_objects_velocity_at_birth_or_as_it_goes() {
+    let settings = |mode| ParticleSettings {
+        rate_over_time: 60.0,
+        start_speed: Range::constant(0.0),
+        space: Space::World,
+        shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+        inherit_velocity: Some(InheritVelocity { mode, curve: Curve::constant(1.0) }),
+        seed: Some(1),
+        ..ParticleSettings::default()
+    };
+    let (mut world, id) = world_with(settings(InheritMode::Initial));
+    for k in 0..30 {
+        put(&mut world, id, Vec3::new(k as f32 * 0.05, 0.0, 0.0));
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    }
+    // 0.05 m a 60th: 3 m/s; the first ones were made standing still.
+    let fast = velocities(&world, id).iter().filter(|v| (v.x - 3.0).abs() < 1e-3).count();
+    assert!(fast >= 25, "{:?}", velocities(&world, id));
+
+    // Current: carried along while the object moves, left when it stops.
+    let (mut world, id) = world_with(settings(InheritMode::Current));
+    for k in 0..30 {
+        put(&mut world, id, Vec3::new(k as f32 * 0.05, 0.0, 0.0));
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    }
+    let before = positions(&world, id);
+    step(&mut world, 0.5, 1.0 / 60.0);
+    let after = positions(&world, id);
+    assert!(velocities(&world, id).iter().all(|v| *v == Vec3::ZERO), "their own velocity untouched");
+    assert!(after.iter().zip(&before).all(|(a, b)| (a.x - b.x).abs() < 1e-4), "stopped, so they stay");
+}
+
+#[test]
+fn particles_bounce_off_a_plane_losing_what_the_collision_says() {
+    let mut world = World::new();
+    let ground = floor(&mut world);
+    let id = world.spawn();
+    put(&mut world, id, Vec3::new(0.0, 2.0, 0.0));
+    let settings = |collision: Collision| ParticleSettings {
+        rate_over_time: 0.0,
+        start_speed: Range::constant(0.0),
+        start_size: Range::constant(0.2),
+        start_lifetime: Range::constant(10.0),
+        gravity_modifier: 1.0,
+        space: Space::World,
+        shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+        collision: Some(Collision { planes: vec![ground], ..collision }),
+        ..ParticleSettings::default()
+    };
+    world.set_particles(id, settings(Collision { bounce: Curve::constant(0.5), ..Collision::default() })).unwrap();
+    world.particle_command(id, ParticleCommand::Emit(1)).unwrap();
+    // Falling 2 m from rest: about 6.2 m/s when it meets the floor.
+    let mut lowest = f32::INFINITY;
+    let mut up = 0.0f32;
+    for _ in 0..90 {
+        step(&mut world, 1.0 / 120.0, 1.0 / 120.0);
+        lowest = lowest.min(positions(&world, id)[0].y);
+        up = up.max(velocities(&world, id)[0].y);
+    }
+    assert!(lowest >= 0.1 - 1e-4, "never below its radius: {lowest}");
+    assert!((2.9..3.3).contains(&up), "half its speed back: {up}");
+
+    // Losing all its lifetime, it dies when it hits; so does one slower
+    // than the kill speed.
+    for collision in [
+        Collision { lifetime_loss: Curve::constant(1.0), ..Collision::default() },
+        Collision { bounce: Curve::constant(0.1), min_kill_speed: 1.0, ..Collision::default() },
+    ] {
+        world.set_particles(id, settings(collision)).unwrap();
+        world.particle_command(id, ParticleCommand::Clear).unwrap();
+        world.particle_command(id, ParticleCommand::Emit(1)).unwrap();
+        step(&mut world, 0.5, 1.0 / 120.0);
+        assert_eq!(world.particles(id).unwrap().count(), 1, "still falling");
+        step(&mut world, 0.3, 1.0 / 120.0);
+        assert_eq!(world.particles(id).unwrap().count(), 0);
+    }
+}
+
+#[test]
+fn hits_are_told_by_plane_with_send_messages_and_a_tilted_plane_bounces_its_way() {
+    let mut world = World::new();
+    let wall = world.spawn();
+    // A wall at x = 1, facing back along -x: its up turned to -x.
+    world
+        .insert(
+            wall,
+            Transform {
+                position: Vec3::new(1.0, 0.0, 0.0),
+                rotation: Quat::from_rotation_z(std::f32::consts::FRAC_PI_2),
+                ..Transform::default()
+            },
+        )
+        .unwrap();
+    let (id, settings) = (
+        world.spawn(),
+        ParticleSettings {
+            rate_over_time: 0.0,
+            start_speed: Range::constant(4.0),
+            start_size: Range::constant(0.0),
+            start_lifetime: Range::constant(10.0),
+            space: Space::Local,
+            shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+            collision: Some(Collision { planes: vec![wall], send_messages: true, ..Collision::default() }),
+            ..ParticleSettings::default()
+        },
+    );
+    // Emitting along +x: the object turned so its up is +x.
+    world
+        .insert(id, Transform { rotation: Quat::from_rotation_z(-std::f32::consts::FRAC_PI_2), ..Transform::default() })
+        .unwrap();
+    world
+        .set_particles(
+            id,
+            ParticleSettings {
+                shape: Shape { kind: ShapeKind::Cone, angle: 0.0, radius: 0.0, ..Shape::default() },
+                ..settings
+            },
+        )
+        .unwrap();
+    world.particle_command(id, ParticleCommand::Emit(5)).unwrap();
+    // 4 m/s: at the wall in a quarter of a second.
+    let events = step(&mut world, 0.4, 1.0 / 120.0);
+    assert_eq!(events, [ParticleEvent { object: id, kind: ParticleEventKind::Collision { plane: wall, count: 5 } }]);
+    for v in velocities(&world, id) {
+        assert!((v - Vec3::new(-4.0, 0.0, 0.0)).length() < 1e-3, "straight back: {v}");
+    }
+    assert!(positions(&world, id).iter().all(|p| p.x <= 1.0 + 1e-4));
+}
+
+/// A parent bursting `count` at the origin, each living `lifetime`, and a
+/// sub system that bursts 10 (and would emit 100 a second on its own).
+fn parent_and_sub(kind: SubEmitterKind, count: f32, lifetime: f32) -> (World, ObjectId, ObjectId) {
+    let mut world = World::new();
+    let sub = world.spawn();
+    world.insert(sub, Transform::default()).unwrap();
+    world
+        .set_particles(
+            sub,
+            ParticleSettings {
+                rate_over_time: 100.0,
+                bursts: vec![Burst { count: Range::constant(10.0), ..Burst::default() }],
+                start_lifetime: Range::constant(5.0),
+                start_speed: Range::constant(0.0),
+                space: Space::World,
+                shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+                seed: Some(2),
+                ..ParticleSettings::default()
+            },
+        )
+        .unwrap();
+    let parent = world.spawn();
+    world.insert(parent, Transform::default()).unwrap();
+    world
+        .set_particles(
+            parent,
+            ParticleSettings {
+                start_speed: Range::constant(2.0),
+                space: Space::World,
+                sub_emitters: vec![SubEmitter { system: sub, kind, inherit: 0, probability: 1.0 }],
+                ..burst(count, lifetime)
+            },
+        )
+        .unwrap();
+    (world, parent, sub)
+}
+
+#[test]
+fn a_death_sub_emitter_bursts_where_each_particle_dies_and_never_on_its_own() {
+    let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Death, 5.0, 0.5);
+    step(&mut world, 0.4, 0.01);
+    assert_eq!(world.particles(sub).unwrap().count(), 0, "a sub emitter emits only for its parent");
+    let ends = positions(&world, parent);
+    step(&mut world, 0.2, 0.01);
+    assert_eq!(world.particles(parent).unwrap().count(), 0);
+    let made = positions(&world, sub);
+    assert_eq!(made.len(), 50, "ten for each of five");
+    // Each where a parent was, a little further on.
+    for p in &made {
+        assert!(ends.iter().any(|e| (*p - *e).length() < 0.3), "{p} from {ends:?}");
+    }
+    // Its own particles going doesn't stop or destroy anything.
+    let events = step(&mut world, 6.0, 0.05);
+    assert!(events.is_empty(), "{events:?}");
+}
+
+#[test]
+fn a_birth_sub_emitter_emits_from_each_particle_all_its_life() {
+    let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Birth, 3.0, 2.0);
+    step(&mut world, 0.5, 0.01);
+    assert_eq!(world.particles(parent).unwrap().count(), 3);
+    // 100 a second from each of three, for half a second.
+    let n = world.particles(sub).unwrap().count();
+    assert!((140..=152).contains(&n), "{n}");
+}
+
+#[test]
+fn a_collision_sub_emitter_bursts_where_they_hit_and_inherits_what_it_takes() {
+    let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Collision, 4.0, 5.0);
+    let ground = world.spawn();
+    world.insert(ground, Transform { position: Vec3::new(0.0, -1.0, 0.0), ..Transform::default() }).unwrap();
+    let mut settings = world.particles(parent).unwrap().settings().clone();
+    settings.start_speed = Range::constant(0.0);
+    settings.start_size = Range::constant(0.5);
+    settings.start_color = [Color::rgb(1.0, 0.0, 0.0); 2];
+    settings.gravity_modifier = 1.0;
+    // Dying as they hit, so each hits once.
+    settings.collision =
+        Some(Collision { planes: vec![ground], lifetime_loss: Curve::constant(1.0), ..Collision::default() });
+    settings.sub_emitters[0].inherit = INHERIT_COLOR | INHERIT_SIZE;
+    world.set_particles(parent, settings).unwrap();
+    world.particle_command(parent, ParticleCommand::Play).unwrap();
+    step(&mut world, 0.3, 0.01);
+    assert_eq!(world.particles(sub).unwrap().count(), 0, "still falling");
+    step(&mut world, 0.3, 0.01);
+    assert_eq!(world.particles(sub).unwrap().count(), 40, "ten where each of four hit");
+    let mut drawn = Vec::new();
+    world.particles(sub).unwrap().drawn(Mat4::IDENTITY, &mut drawn);
+    for p in &drawn {
+        assert!((p.position.y - -0.75).abs() < 0.05, "on the floor, a radius up: {}", p.position.y);
+        assert_eq!((p.color, p.size), ([1.0, 0.0, 0.0, 1.0], 0.5), "its parent's colour and size");
+    }
+}
+
+#[test]
+fn sub_emitters_and_planes_are_refused_when_they_cant_be() {
+    let mut world = World::new();
+    let id = world.spawn();
+    let gone = world.spawn();
+    world.despawn(gone).unwrap();
+    let sub = |system| SubEmitter { system, kind: SubEmitterKind::Death, inherit: 0, probability: 1.0 };
+    assert!(world.set_particles(id, ParticleSettings { sub_emitters: vec![sub(id)], ..Default::default() }).is_err());
+    assert!(world.set_particles(id, ParticleSettings { sub_emitters: vec![sub(gone)], ..Default::default() }).is_err());
+    let planes = |planes: Vec<ObjectId>| ParticleSettings {
+        collision: Some(Collision { planes, ..Collision::default() }),
+        ..ParticleSettings::default()
+    };
+    assert!(world.set_particles(id, planes(vec![gone])).is_err());
+    assert!(world.set_particles(id, planes(vec![id; 7])).is_err());
+    assert!(world.set_particles(id, planes(vec![id; 6])).is_ok());
+    let bad = ParticleSettings {
+        collision: Some(Collision { dampen: Curve::constant(2.0), ..Collision::default() }),
+        ..ParticleSettings::default()
+    };
+    assert!(world.set_particles(id, bad).is_err());
 }

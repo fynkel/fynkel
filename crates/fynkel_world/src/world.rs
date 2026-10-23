@@ -198,6 +198,9 @@ pub struct World {
     pub(crate) particles: IdMap<ObjectId, crate::particles::ParticleSystem>,
     /// The next new system's own seed.
     pub(crate) particle_seeds: u64,
+    /// Each system's sub emitters: (the system, which of its sub
+    /// emitters, the sub emitter's system).
+    pub(crate) particle_links: Vec<(ObjectId, usize, ObjectId)>,
 }
 
 impl std::fmt::Debug for World {
@@ -243,6 +246,7 @@ impl World {
             camera_effects: IdMap::default(),
             particles: IdMap::default(),
             particle_seeds: 1,
+            particle_links: Vec::new(),
         }
     }
 
@@ -262,6 +266,7 @@ impl World {
     pub fn despawn(&mut self, id: ObjectId) -> Result<()> {
         self.entity(id)?;
         let below = self.take_subtree(id);
+        let mut unlinked = false;
         for id in std::iter::once(id).chain(below.into_iter().flatten()) {
             let entity = self.entities.remove(&id).expect("the hierarchy only holds live objects");
             if !self.animators.is_empty() {
@@ -273,10 +278,13 @@ impl World {
             if !self.camera_effects.is_empty() {
                 self.camera_effects.remove(&id);
             }
-            if !self.particles.is_empty() {
-                self.particles.remove(&id);
+            if !self.particles.is_empty() && self.particles.remove(&id).is_some() {
+                unlinked = true;
             }
             self.ecs.despawn(entity).expect("the id map only holds live entities");
+        }
+        if unlinked {
+            self.relink_particles();
         }
         Ok(())
     }
