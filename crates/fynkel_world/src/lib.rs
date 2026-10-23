@@ -12,6 +12,7 @@ mod describe;
 mod hierarchy;
 mod id;
 mod model;
+mod particles;
 pub mod raycast;
 mod resources;
 mod skin;
@@ -28,6 +29,10 @@ pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
 pub use id::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 pub use model::ModelIds;
+pub use particles::{
+    Burst, DrawnParticle, GRAVITY, MAX_BURSTS, MAX_PARTICLES, ParticleCommand, ParticleEvent, ParticleSettings,
+    ParticleSystem, Range as ParticleRange, Shape, ShapeKind, Space, StopAction, TABLE,
+};
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, ScreenEffect, Shader};
 pub use skin::Skin;

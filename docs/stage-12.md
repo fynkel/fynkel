@@ -192,6 +192,58 @@ tests find nothing in a frame with systems playing and bursting; 10,000
 particles step within §6's bar on the Note10+; and a world without
 particles is unchanged.
 
+*As built* (branch stage-12, ABI 39):
+
+- crates/fynkel_world/src/particles.rs: each system's particles in
+  arrays of their own (position, velocity, life, size, colour, turn), a
+  seeded random number per system, the shapes facing +Y, gravity down the
+  world in either space; size and colour over lifetime as 64-step tables
+  sampled from Dart's function and gradient. `World::step_particles`
+  once a frame, after the animators; a hidden object's system stops and
+  clears, and plays from the start when shown, if it plays on awake. A
+  material a system draws with can't be removed. 20 tests.
+- The C interface: `fy_particles_set` (one `FyParticleSettings`, with
+  8 bursts and both tables in it), `fy_particles_remove`,
+  `fy_particles_command` (play, stop, stop and clear, pause, clear,
+  emit), `fy_particles_simulate`, `fy_particles_get`,
+  `fy_world_particles_step` and `fy_particle_events_get` for the stop
+  actions. Times go by pointer, as a double passed straight is boxed by
+  Dart's JIT.
+- Drawing: one instanced draw per system, 6 vertices a particle from a
+  48-byte instance, among the see-through surfaces by its bounds' centre;
+  a transparent system's particles sorted back to front, an additive
+  one's not. Unlit, fogged and tone mapped as forward's blended surfaces
+  are; the base colour texture is read only when the material has one. A
+  material that isn't blended draws as transparent; its own shader isn't
+  used yet (phase 2). Goldens: particles_ring (the renderer) and
+  particles_fountain (through the C interface).
+- Dart: `ParticleSystem` with Unity's defaults, every setting written to
+  the engine when set and kept as it was when refused; `Range`,
+  `ColorRange`, `ColorGradient` (`fadeOut`, `fadeInOut`), `Burst`,
+  `Emission`, `ParticleShape`, `ParticleSpace`, `StopAction`;
+  `world.particleStepTime` for the profiler's number. `Color` is now a
+  `ParticleColor`, so `startColor` takes either.
+- No garbage: crates/fynkel_ffi/tests/alloc.rs steps and draws systems
+  with nothing allocated on the calling thread, and
+  test/particles_alloc_test.dart plays and bursts 20 systems for 2000
+  frames with no garbage.
+- Stepping 10,000 (ten systems of 1000, size and colour over lifetime,
+  gravity): the Mac (crates/fynkel_world/examples/particles_bench.rs,
+  release) 0.025 ms a frame, and 0.055 ms more for extraction's copy for
+  the renderer; the iPhone 16 Pro Max (the lab, profile, `LAB_SCENE=Particles
+  LAB_RATES=true`) 0.11 ms median over two-second windows, the slowest
+  frame of a window under 0.5 ms but for the first (2.9 ms, starting)
+  and one of 1.1 ms. **The Note10+ is still to measure**; at the
+  iPhone's ten times the Mac, it should be well under 1 ms.
+- A world without particles: `step_particles` and Dart's step return at
+  once, extraction adds nothing, and every golden from before is the
+  same.
+- The lab: "Particles: the basics", the fountain's rate, speed, size,
+  gravity and spread as sliders, playing, paused, moving, world space
+  and additive as switches, a burst that destroys its object, and ten
+  thousand with the step's time in the readout.
+- The guide's §13c, and §22's rows; §21 lists what's to come.
+
 ### Phase 2: the look
 
 - Texture sheets; stretched, horizontal, vertical and mesh particles.

@@ -596,6 +596,36 @@ pub struct Line {
     pub color: [f32; 4],
 }
 
+/// A particle: a square facing the camera.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Particle {
+    /// Its centre, in the world.
+    pub position: Vec3,
+    /// Across, in metres.
+    pub size: f32,
+    /// Linear RGBA, times the material's base colour.
+    pub color: [f32; 4],
+    /// Its turn round the way to the camera, in radians.
+    pub rotation: f32,
+}
+
+/// A particle system's particles, drawn with `material`: unlit, its
+/// texture and base colour times each particle's colour, plus its
+/// emission. They're drawn among the blended draws, furthest first by
+/// their bounds' centre; a transparent system's particles furthest first
+/// among themselves too. A material that doesn't blend draws them as
+/// transparent; its own shader isn't used.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ParticleDraw {
+    pub material: PbrMaterial,
+    /// Its first particle in [`RenderScene::particles`], and how many.
+    pub first: u32,
+    pub count: u32,
+    /// A ball round them all, for culling and sorting.
+    pub center: Vec3,
+    pub radius: f32,
+}
+
 /// What is seen behind everything, and lights it: every surface takes its
 /// light from the sky around it, a rough one its colour, a shiny one its
 /// mirror image.
@@ -778,6 +808,10 @@ pub struct RenderScene {
     pub joints: Vec<Mat4>,
     /// Drawn after the draws, over them, one pixel wide.
     pub lines: Vec<Line>,
+    /// Every particle system's particles, each system's together.
+    pub particles: Vec<Particle>,
+    /// The particle systems drawn: each its run of [`Self::particles`].
+    pub particle_draws: Vec<ParticleDraw>,
     /// Behind everything, and lighting it, as well as [`Self::ambient`].
     /// `None`: the camera's clear colour, and the ambient light alone.
     pub sky: Option<Sky>,
@@ -826,6 +860,8 @@ impl RenderScene {
         self.draws.clear();
         self.joints.clear();
         self.lines.clear();
+        self.particles.clear();
+        self.particle_draws.clear();
         self.sky = None;
         self.fog = None;
         self.quality = None;

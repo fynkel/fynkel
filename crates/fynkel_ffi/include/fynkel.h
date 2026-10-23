@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 38
+#define FY_ABI_VERSION 39
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -86,6 +86,59 @@
 // `FySky::kind`: `image`, an equirectangular `.hdr`, tone mapped as the
 // scene is.
 #define FY_SKY_IMAGE 3
+
+// `FyParticleSettings::space`: particles move with the object.
+#define FY_PARTICLE_SPACE_LOCAL 0
+
+// Particles stay where they were made as the object moves.
+#define FY_PARTICLE_SPACE_WORLD 1
+
+// `FyParticleSettings::stop_action`, and `FyParticleEvent::action`.
+#define FY_PARTICLE_STOP_NONE 0
+
+#define FY_PARTICLE_STOP_DISABLE 1
+
+#define FY_PARTICLE_STOP_DESTROY 2
+
+#define FY_PARTICLE_STOP_CALLBACK 3
+
+// `FyParticleShape::kind`.
+#define FY_PARTICLE_SHAPE_POINT 0
+
+#define FY_PARTICLE_SHAPE_SPHERE 1
+
+#define FY_PARTICLE_SHAPE_HEMISPHERE 2
+
+#define FY_PARTICLE_SHAPE_CONE 3
+
+#define FY_PARTICLE_SHAPE_BOX 4
+
+#define FY_PARTICLE_SHAPE_CIRCLE 5
+
+#define FY_PARTICLE_SHAPE_EDGE 6
+
+// The steps of `FyParticleSettings`' curves over a particle's life.
+#define FY_PARTICLE_TABLE 64
+
+// The most bursts in `FyParticleSettings`.
+#define FY_PARTICLE_MAX_BURSTS 8
+
+// `fy_particles_command`: plays from the start (or on from a pause).
+#define FY_PARTICLES_PLAY 0
+
+// Emits no more; its particles live out their lives.
+#define FY_PARTICLES_STOP 1
+
+// Emits no more, and its particles go at once.
+#define FY_PARTICLES_STOP_AND_CLEAR 2
+
+#define FY_PARTICLES_PAUSE 3
+
+// Its particles go; it plays on.
+#define FY_PARTICLES_CLEAR 4
+
+// Makes `count` particles now, playing or not.
+#define FY_PARTICLES_EMIT 5
 
 // `fy_apple_acquire`: a surface was written to `out_surface`.
 #define FY_APPLE_SHOWN 1
@@ -490,6 +543,101 @@ typedef struct FyAnimationEvent {
   float to;
   bool ended;
 } FyAnimationEvent;
+
+// A number for each particle: `min` when they're the same, else one at
+// random from `min` to `max`.
+typedef struct FyRange {
+  float min;
+  float max;
+} FyRange;
+
+// `count` particles at once, `time` seconds into the timeline, `cycles`
+// times (0 for as long as it plays) every `interval` seconds, each time
+// with `probability`.
+typedef struct FyParticleBurst {
+  float time;
+  struct FyRange count;
+  uint32_t cycles;
+  float interval;
+  float probability;
+} FyParticleBurst;
+
+// Where particles are made and which way they go. Shapes face up (+Y).
+// Angles are radians.
+typedef struct FyParticleShape {
+  // `FY_PARTICLE_SHAPE_*`.
+  uint32_t kind;
+  float radius;
+  // 0 on the rim alone to 1 all through.
+  float radius_thickness;
+  // A cone's, from up to its side: 0 to under π/2.
+  float angle;
+  // Up to 2π.
+  float arc;
+  // A box's.
+  struct FyVec3 size;
+  // 0 to 1.
+  float random_direction;
+} FyParticleShape;
+
+// A particle system's settings: Unity's main, emission and shape
+// modules, and size and colour over a particle's life. Sent when they
+// change, not each frame. Seconds, metres and radians; colours sRGB.
+typedef struct FyParticleSettings {
+  float duration;
+  bool looping;
+  bool prewarm;
+  bool play_on_awake;
+  bool unscaled_time;
+  float start_delay;
+  struct FyRange start_lifetime;
+  struct FyRange start_speed;
+  struct FyRange start_size;
+  struct FyRange start_rotation;
+  // Each particle's is between the two at random.
+  struct FyColor start_color[2];
+  float gravity_modifier;
+  // `FY_PARTICLE_SPACE_*`.
+  uint32_t space;
+  float simulation_speed;
+  uint32_t max_particles;
+  // `FY_PARTICLE_STOP_*`.
+  uint32_t stop_action;
+  // The same particles each play when `seeded`.
+  bool seeded;
+  uint32_t seed;
+  float rate_over_time;
+  // How many of `bursts` there are.
+  uint32_t burst_count;
+  struct FyParticleBurst bursts[FY_PARTICLE_MAX_BURSTS];
+  struct FyParticleShape shape;
+  // A particle's size times `size_table` over its life, when set.
+  bool has_size_table;
+  float size_table[FY_PARTICLE_TABLE];
+  // A particle's colour times `color_table` over its life, when set.
+  bool has_color_table;
+  struct FyColor color_table[FY_PARTICLE_TABLE];
+  // What it's drawn with, or 0 for nothing drawn.
+  uint64_t material;
+} FyParticleSettings;
+
+// What a particle system is doing, from `fy_particles_get`.
+typedef struct FyParticleState {
+  // How many particles it has.
+  uint32_t count;
+  // From play until it's stopped and its last particle is gone.
+  bool playing;
+  bool paused;
+  bool emitting;
+} FyParticleState;
+
+// A system that was done in the last `fy_world_particles_step` (stopped,
+// its last particle gone), with a stop action for the game to do.
+typedef struct FyParticleEvent {
+  uint64_t object;
+  // `FY_PARTICLE_STOP_*`, not `FY_PARTICLE_STOP_NONE`.
+  uint32_t action;
+} FyParticleEvent;
 
 // What a view did since it was made.
 typedef struct FyViewStats {
@@ -1501,6 +1649,77 @@ FyStatus fy_animation_events_get(const struct FyWorld *world,
                                  struct FyAnimationEvent *buf,
                                  size_t cap,
                                  size_t *out_count);
+
+// Gives the object a particle system with `settings`, or changes the one
+// it has, keeping its particles and where it is. A new one plays when
+// it's first stepped, if it plays on awake. Settings that can't be are
+// `FY_STATUS_INVALID_VALUE` and change nothing.
+//
+// # Safety
+//
+// `world` is null or live; `settings` is null or readable.
+FyStatus fy_particles_set(const struct FyWorld *world,
+                          uint64_t id,
+                          const struct FyParticleSettings *settings);
+
+// Takes the object's particle system away, its particles too.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_particles_remove(const struct FyWorld *world, uint64_t id);
+
+// Plays, stops, pauses, clears or emits from the object's system:
+// `FY_PARTICLES_*`. `count` is `FY_PARTICLES_EMIT`'s, ignored otherwise.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_particles_command(const struct FyWorld *world,
+                              uint64_t id,
+                              uint32_t command,
+                              uint32_t count);
+
+// Moves the object's system `seconds` on at once (Unity's `Simulate`).
+// `seconds` is read through a pointer, as `fy_world_animate`'s `dt`.
+//
+// # Safety
+//
+// `world` is null or live; `seconds` is null or readable.
+FyStatus fy_particles_simulate(const struct FyWorld *world, uint64_t id, const float *seconds);
+
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_particles_get(const struct FyWorld *world, uint64_t id, struct FyParticleState *out);
+
+// Moves every particle system on, once a frame, after the animators and
+// before the game's late update (where Unity steps them): `dt` seconds
+// of the game's time, `unscaled` for those that ask. Writes how many
+// systems were done, with a stop action, to `out_count`;
+// `fy_particle_events_get` reads them. Both times are read through
+// pointers, as `fy_world_animate`'s `dt`.
+//
+// # Safety
+//
+// `world` is null or live; `dt` and `unscaled` are null or readable;
+// `out_count` is null or writable.
+FyStatus fy_world_particles_step(const struct FyWorld *world,
+                                 const float *dt,
+                                 const float *unscaled,
+                                 size_t *out_count);
+
+// The last `fy_world_particles_step`'s events, as `fy_children_get`
+// writes ids.
+//
+// # Safety
+//
+// `world` is null or live; `buf` is null or valid for `cap` writes;
+// `out_count` is null or writable.
+FyStatus fy_particle_events_get(const struct FyWorld *world,
+                                struct FyParticleEvent *buf,
+                                size_t cap,
+                                size_t *out_count);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

@@ -85,7 +85,8 @@ impl From<WorldError> for Error {
             | WorldError::ModelIds { .. }
             | WorldError::Layer(_)
             | WorldError::NoClip { .. }
-            | WorldError::Animator(_) => FyStatus::InvalidValue,
+            | WorldError::Animator(_)
+            | WorldError::Particles(_) => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
     }

@@ -97,6 +97,8 @@ pub enum WorldError {
     },
     /// An animator's layer, blend or mask that can't be.
     Animator(&'static str),
+    /// A particle system's settings that can't be, or a call it can't take.
+    Particles(&'static str),
 }
 
 impl std::fmt::Display for WorldError {
@@ -141,6 +143,7 @@ impl std::fmt::Display for WorldError {
             WorldError::NoClip { object, clip, count } => {
                 write!(f, "{object}'s model has {count} clips; there's no clip {clip}")
             }
+            WorldError::Particles(why) => f.write_str(why),
             WorldError::Animator(message) => f.write_str(message),
         }
     }
@@ -191,6 +194,10 @@ pub struct World {
     pub(crate) skins: IdMap<ObjectId, crate::skin::Skin>,
     /// Each camera's screen effects, in order, by its object.
     camera_effects: IdMap<ObjectId, Vec<ScreenEffect>>,
+    /// Each object's particle system.
+    pub(crate) particles: IdMap<ObjectId, crate::particles::ParticleSystem>,
+    /// The next new system's own seed.
+    pub(crate) particle_seeds: u64,
 }
 
 impl std::fmt::Debug for World {
@@ -234,6 +241,8 @@ impl World {
             animators: IdMap::default(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
+            particles: IdMap::default(),
+            particle_seeds: 1,
         }
     }
 
@@ -263,6 +272,9 @@ impl World {
             }
             if !self.camera_effects.is_empty() {
                 self.camera_effects.remove(&id);
+            }
+            if !self.particles.is_empty() {
+                self.particles.remove(&id);
             }
             self.ecs.despawn(entity).expect("the id map only holds live entities");
         }
@@ -514,6 +526,9 @@ impl World {
             return Err(WorldError::NoMaterial(id));
         }
         if let Some(object) = self.user_of(|r| r.material == Some(id)) {
+            return Err(WorldError::MaterialInUse { material: id, object });
+        }
+        if let Some((&object, _)) = self.particles.iter().find(|(_, s)| s.settings().material == Some(id)) {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         self.materials.remove(&id);

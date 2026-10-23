@@ -1768,6 +1768,117 @@ Values out of range (a volume over 1, a pitch of 0) throw an
 `ArgumentError`; a file that isn't sound throws a `FormatException` with
 its name.
 
+## 13c. Particles
+
+A **`ParticleSystem`** is a component, as Unity's is: smoke, sparks,
+dust and splashes, made by the engine. It has Unity's main module and
+its defaults (`duration` 5 s, `looping`, `startLifetime`, `startSpeed`,
+`startSize`, `startRotation`, `startColor`, `gravityModifier`,
+`simulationSpace`, `simulationSpeed`, `maxParticles` 1000, `playOnAwake`,
+`stopAction`, `randomSeed`), an `emission` (a rate a second and up to 8
+`Burst`s), a `shape` they're made in, and a size and a colour over each
+one's life. It draws with its `material`, as a square facing the camera
+for each particle; without one, it moves its particles and draws none.
+
+```dart
+/// A fountain of water, and sparks that clean up after themselves.
+class Fountain extends GameObject {
+  Fountain()
+    : super(
+        name: 'fountain',
+        components: [
+          ParticleSystem(
+            startSpeed: const Range(5, 6),
+            startSize: const Range(0.1, 0.25),
+            startLifetime: const Range(1.2, 1.6),
+            gravityModifier: 1,
+            simulationSpace: ParticleSpace.world,
+            emission: const Emission(rateOverTime: 120),
+            shape: ParticleShape.cone(angle: 12.deg, radius: 0.1),
+            sizeOverLifetime: (t) => 1 - 0.6 * t,
+            colorOverLifetime: ColorGradient.fadeOut(),
+            material: Material(color: const Color(0xFF8FD3FF), blending: Blending.transparent),
+          ),
+        ],
+      );
+
+  static final _spark = Material(color: const Color(0xFFFFB347), blending: Blending.additive);
+
+  /// A puff of sparks at [at], on an object that goes when they do.
+  GameObject sparks(Vec3 at) => add(
+    GameObject(
+      transform: Transform(position: at),
+      components: [
+        ParticleSystem(
+          looping: false,
+          duration: 1,
+          startSpeed: const Range(2, 5),
+          startLifetime: const Range(0.5, 1),
+          stopAction: StopAction.destroy,
+          emission: Emission(rateOverTime: 0, bursts: [Burst(count: const Range(60, 80))]),
+          shape: const ParticleShape.sphere(radius: 0.1),
+          colorOverLifetime: ColorGradient([(0, Color.white), (0.3, const Color(0xFFFFC040)), (1, Color.rgb(1, 0.2, 0, 0))]),
+          material: _spark,
+        ),
+      ],
+    ),
+  );
+}
+```
+
+- **Values that vary.** `Range(min, max)` is Unity's "random between two
+  constants", picked for each particle as it's made; `Range(5)` is a
+  constant. `startColor` is a `Color`, or a `ColorRange(a, b)` for one
+  between them.
+- **Over a life**, from 0 (made) to 1 (gone): `sizeOverLifetime` is a
+  function, an `Ease` or your own, times `startSize`;
+  `colorOverLifetime` is a `ColorGradient` of stops, times `startColor`,
+  its alpha fading as the colour does (`ColorGradient.fadeOut()`,
+  `fadeInOut()`). Both are read 64 times along the life when set, so
+  they cost nothing a frame.
+- **Shapes** face +Y, as Unity's do, turned with their object:
+  `ParticleShape.point()`, `sphere(radius:)`, `hemisphere`,
+  `cone(angle:, radius:)` (Unity's default), `box(size:)`,
+  `circle(radius:, arc:)` and `edge(radius:)`. `radiusThickness` 0 makes
+  them on the surface alone; `randomDirection` 1 sends them any way.
+- **Local or world space.** In `ParticleSpace.local` (the default) the
+  particles move with their object, as a jet's flame should; in
+  `ParticleSpace.world` they stay where they were made, as a trail of
+  smoke should. Gravity pulls down the world either way.
+- **Playing.** It plays when its object comes, unless `playOnAwake` is
+  false. `play()`, `stop()` (no new ones, those in the air live on),
+  `stop(clear: true)`, `pause()`, `clear()`, `emit(n)` and
+  `simulate(seconds)` (moved on at once: an effect seen half-way
+  through); `isPlaying`, `isPaused`, `isEmitting`, `isStopped` and
+  `particleCount`. Turned off, or its object hidden, it stops and
+  clears; on again, it plays from the start.
+- **When it's done**, its last particle gone and not looping,
+  `stopAction` does what Unity's does: `destroy` destroys its object (a
+  one-off explosion), `disable` turns it off (one from a pool, §7, which
+  plays again when it's turned on), `callback` calls `onStopped`.
+- **Time.** It goes with the game's time: it holds while the game is
+  paused and follows `time.scale`; one with `useUnscaledTime` goes on,
+  for a pause menu's.
+- **The material.** Particles are unlit and fogged, as Unity's default
+  particle material is: each one's colour times the material's `color`
+  and its `baseColorTexture` (a soft dot, a puff of smoke), plus its
+  `emissive`. `Blending.transparent` lays them over what's behind,
+  furthest first; `Blending.additive` adds their light, for fire, sparks
+  and magic, and needs no order. A material that isn't blended is drawn
+  as transparent. Behind something solid, they're hidden.
+
+Settings change while it plays, and its particles stay. A value it
+can't have (a negative lifetime, a cone over 90°, more than 8 bursts)
+throws an `ArgumentError` and the old one stays.
+
+**What it costs.** Each system is one draw, however many particles it
+has. The engine moves 10,000 particles in about 0.03 ms a frame on a
+Mac and 0.1 ms on an iPhone 16 Pro Max; `world.particleStepTime` says
+how long the last frame's took (Unity's Profiler's
+ParticleSystem.Update). A frame with systems playing and bursting makes
+no garbage. What costs most on a phone is what's drawn over and over:
+big see-through particles covering the screen.
+
 ## 14. Shaders
 
 A material's look can be written by hand: a `.wgsl` file (WebGPU's
@@ -3379,7 +3490,7 @@ What keeps a game fast:
 ## 21. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
-  alone), particles, sprites and 2D, 3D text, vertex colours;
+  alone), sprites and 2D, 3D text, vertex colours;
   see-through objects don't cast shadows.
 - **Shaders** (§14): no matrices in `Values`; a shader can't use
   another's code; no node graph (Shader Graph): shaders are written in
@@ -3393,6 +3504,13 @@ What keeps a game fast:
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
   it by hand), the microphone, and sound made in code as it plays. On
   Android, another app taking the sound doesn't pause the game's.
+- **Particles** (§13c): texture sheets, stretched and mesh particles,
+  velocity, forces and noise over lifetime, soft and lit particles, a
+  material's own shader on them, sub emitters, collision, trails
+  (`TrailRenderer`) and emission over distance, which come later in
+  this stage; and particles on the GPU (Unity's VFX Graph), lights on
+  particles, collision with the physics world, wind zones, a mesh's
+  surface as a shape, shadows from particles, and an editor.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
@@ -3474,6 +3592,12 @@ What keeps a game fast:
 | An `AudioMixer`'s groups, their volume and mute; `outputAudioMixerGroup` | `audio.group('music')`: `volume`, `mute`, `fade(to, seconds)`; a source's `group` |
 | Music on a looping `AudioSource`, crossfades by hand | `audio.music`: `play(clip, fadeIn:)`, `crossFade(clip, seconds)`, `stop(fadeOut:)` |
 | An `AudioClip`'s Load Type: Streaming | Clips over 10 s stream; `AudioClip.decode(bytes, stream:)` |
+| `ParticleSystem`: main module, `emission`, `shape`, size and colour over lifetime | `ParticleSystem`: the same names; `sizeOverLifetime` a function, `colorOverLifetime` a `ColorGradient` |
+| `MinMaxCurve` "Random Between Two Constants", `MinMaxGradient` "Random Between Two Colors" | `Range(min, max)`, `ColorRange(a, b)` |
+| `ParticleSystem.Play`, `Stop`, `Pause`, `Clear`, `Emit`, `Simulate`, `particleCount` | `play`, `stop(clear:)`, `pause`, `clear`, `emit`, `simulate`, `particleCount` |
+| Stop Action: Destroy, Disable, Callback (`OnParticleSystemStopped`) | `stopAction: StopAction.destroy`, `disable`, `callback` (`onStopped`) |
+| Simulation Space: Local, World | `simulationSpace: ParticleSpace.local`, `world` |
+| A particle material (Particles/Unlit), Alpha or Additive | A `Material` with `Blending.transparent` or `Blending.additive` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |

@@ -385,6 +385,31 @@ external int fy_parent_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.U
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64)>(isLeaf: true)
 external int fy_parent_set(ffi.Pointer<FyWorld> world, int child, int parent);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyParticleEvent>, ffi.Size, ffi.Pointer<ffi.Size>)>(
+  isLeaf: true,
+)
+external int fy_particle_events_get(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<FyParticleEvent> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint32, ffi.Uint32)>(isLeaf: true)
+external int fy_particles_command(ffi.Pointer<FyWorld> world, int id, int command, int count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyParticleState>)>(isLeaf: true)
+external int fy_particles_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyParticleState> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_particles_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyParticleSettings>)>(isLeaf: true)
+external int fy_particles_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyParticleSettings> settings);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Float>)>(isLeaf: true)
+external int fy_particles_simulate(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Float> seconds);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint32>)>()
 external int fy_quality_auto(ffi.Pointer<ffi.Uint32> out);
 
@@ -588,6 +613,16 @@ external void fy_world_free(ffi.Pointer<FyWorld> world);
 @ffi.Native<ffi.Pointer<FyWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FyWorld> fy_world_new();
 
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Float>, ffi.Pointer<ffi.Size>)
+>(isLeaf: true)
+external int fy_world_particles_step(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<ffi.Float> dt,
+  ffi.Pointer<ffi.Float> unscaled,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyQuality>)>(isLeaf: true)
 external int fy_world_quality_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyQuality> quality);
 
@@ -610,7 +645,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 38;
+const int FY_ABI_VERSION = 39;
 
 const int FY_APPLE_MORE = 2;
 
@@ -641,6 +676,48 @@ const int FY_MESH_PLANE = 2;
 const int FY_MESH_QUAD = 5;
 
 const int FY_MESH_SPHERE = 1;
+
+const int FY_PARTICLES_CLEAR = 4;
+
+const int FY_PARTICLES_EMIT = 5;
+
+const int FY_PARTICLES_PAUSE = 3;
+
+const int FY_PARTICLES_PLAY = 0;
+
+const int FY_PARTICLES_STOP = 1;
+
+const int FY_PARTICLES_STOP_AND_CLEAR = 2;
+
+const int FY_PARTICLE_MAX_BURSTS = 8;
+
+const int FY_PARTICLE_SHAPE_BOX = 4;
+
+const int FY_PARTICLE_SHAPE_CIRCLE = 5;
+
+const int FY_PARTICLE_SHAPE_CONE = 3;
+
+const int FY_PARTICLE_SHAPE_EDGE = 6;
+
+const int FY_PARTICLE_SHAPE_HEMISPHERE = 2;
+
+const int FY_PARTICLE_SHAPE_POINT = 0;
+
+const int FY_PARTICLE_SHAPE_SPHERE = 1;
+
+const int FY_PARTICLE_SPACE_LOCAL = 0;
+
+const int FY_PARTICLE_SPACE_WORLD = 1;
+
+const int FY_PARTICLE_STOP_CALLBACK = 3;
+
+const int FY_PARTICLE_STOP_DESTROY = 2;
+
+const int FY_PARTICLE_STOP_DISABLE = 1;
+
+const int FY_PARTICLE_STOP_NONE = 0;
+
+const int FY_PARTICLE_TABLE = 64;
 
 const int FY_QUALITY_AUTO = 0;
 
@@ -999,6 +1076,161 @@ final class FyModelCounts extends ffi.Struct {
     ..ref.clips = clips;
 }
 
+final class FyParticleBurst extends ffi.Struct {
+  @ffi.Float()
+  external double time;
+
+  external FyRange count;
+
+  @ffi.Uint32()
+  external int cycles;
+
+  @ffi.Float()
+  external double interval;
+
+  @ffi.Float()
+  external double probability;
+}
+
+final class FyParticleEvent extends ffi.Struct {
+  @ffi.Uint64()
+  external int object;
+
+  @ffi.Uint32()
+  external int action;
+
+  static ffi.Pointer<FyParticleEvent> $allocate(ffi.Allocator $allocator, {required int object, required int action}) =>
+      $allocator<FyParticleEvent>()
+        ..ref.object = object
+        ..ref.action = action;
+}
+
+final class FyParticleSettings extends ffi.Struct {
+  @ffi.Float()
+  external double duration;
+
+  @ffi.Bool()
+  external bool looping;
+
+  @ffi.Bool()
+  external bool prewarm;
+
+  @ffi.Bool()
+  external bool play_on_awake;
+
+  @ffi.Bool()
+  external bool unscaled_time;
+
+  @ffi.Float()
+  external double start_delay;
+
+  external FyRange start_lifetime;
+
+  external FyRange start_speed;
+
+  external FyRange start_size;
+
+  external FyRange start_rotation;
+
+  @ffi.Array.multi([2])
+  external ffi.Array<FyColor> start_color;
+
+  @ffi.Float()
+  external double gravity_modifier;
+
+  @ffi.Uint32()
+  external int space;
+
+  @ffi.Float()
+  external double simulation_speed;
+
+  @ffi.Uint32()
+  external int max_particles;
+
+  @ffi.Uint32()
+  external int stop_action;
+
+  @ffi.Bool()
+  external bool seeded;
+
+  @ffi.Uint32()
+  external int seed;
+
+  @ffi.Float()
+  external double rate_over_time;
+
+  @ffi.Uint32()
+  external int burst_count;
+
+  @ffi.Array.multi([8])
+  external ffi.Array<FyParticleBurst> bursts;
+
+  external FyParticleShape shape;
+
+  @ffi.Bool()
+  external bool has_size_table;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<ffi.Float> size_table;
+
+  @ffi.Bool()
+  external bool has_color_table;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<FyColor> color_table;
+
+  @ffi.Uint64()
+  external int material;
+}
+
+final class FyParticleShape extends ffi.Struct {
+  @ffi.Uint32()
+  external int kind;
+
+  @ffi.Float()
+  external double radius;
+
+  @ffi.Float()
+  external double radius_thickness;
+
+  @ffi.Float()
+  external double angle;
+
+  @ffi.Float()
+  external double arc;
+
+  external FyVec3 size;
+
+  @ffi.Float()
+  external double random_direction;
+}
+
+final class FyParticleState extends ffi.Struct {
+  @ffi.Uint32()
+  external int count;
+
+  @ffi.Bool()
+  external bool playing;
+
+  @ffi.Bool()
+  external bool paused;
+
+  @ffi.Bool()
+  external bool emitting;
+
+  static ffi.Pointer<FyParticleState> $allocate(
+    ffi.Allocator $allocator, {
+    required int count,
+    required bool playing,
+    required bool paused,
+    required bool emitting,
+  }) => $allocator<FyParticleState>()
+    ..ref.count = count
+    ..ref.playing = playing
+    ..ref.paused = paused
+    ..ref.emitting = emitting;
+}
+
 final class FyQuality extends ffi.Struct {
   @ffi.Bool()
   external bool hdr;
@@ -1089,6 +1321,19 @@ final class FyQuat extends ffi.Struct {
     ..ref.y = y
     ..ref.z = z
     ..ref.w = w;
+}
+
+final class FyRange extends ffi.Struct {
+  @ffi.Float()
+  external double min;
+
+  @ffi.Float()
+  external double max;
+
+  static ffi.Pointer<FyRange> $allocate(ffi.Allocator $allocator, {required double min, required double max}) =>
+      $allocator<FyRange>()
+        ..ref.min = min
+        ..ref.max = max;
 }
 
 final class FyRay extends ffi.Struct {
