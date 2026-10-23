@@ -50,6 +50,17 @@ pub(crate) struct Meshes {
 }
 
 impl Mesh {
+    fn new(positions: &[Vector], indices: &[[u32; 3]]) -> Self {
+        Mesh {
+            points: positions.to_vec(),
+            triangles: indices.to_vec(),
+            hull: OnceCell::new(),
+            whole: OnceCell::new(),
+            whole_hull: OnceCell::new(),
+            scaled: RefCell::new(Vec::with_capacity(SCALED)),
+        }
+    }
+
     fn hull(&self) -> Option<&Triangles> {
         self.hull.get_or_init(|| try_convex_hull(&self.points).ok()).as_ref()
     }
@@ -138,33 +149,57 @@ impl Meshes {
     }
 }
 
+fn check_mesh(positions: &[Vector], indices: &[[u32; 3]]) -> Result<(), PhysicsError> {
+    if indices.is_empty() {
+        return Err(PhysicsError::Value("a mesh needs at least one triangle".into()));
+    }
+    if let Some(p) = positions.iter().find(|p| !p.is_finite()) {
+        return Err(PhysicsError::Value(format!("a mesh's positions must be finite, not {p}")));
+    }
+    if let Some(&i) = indices.iter().flatten().find(|&&i| i as usize >= positions.len()) {
+        return Err(PhysicsError::Value(format!("a mesh's index {i} is past its {} positions", positions.len())));
+    }
+    Ok(())
+}
+
 impl Physics {
     /// Adds a mesh for mesh colliders: `positions`, and three indices into
     /// them per triangle. Returns its id, never 0 and never reused.
     pub fn add_mesh(&mut self, positions: &[Vector], indices: &[[u32; 3]]) -> Result<u64, PhysicsError> {
-        if indices.is_empty() {
-            return Err(PhysicsError::Value("a mesh needs at least one triangle".into()));
-        }
-        if let Some(p) = positions.iter().find(|p| !p.is_finite()) {
-            return Err(PhysicsError::Value(format!("a mesh's positions must be finite, not {p}")));
-        }
-        if let Some(&i) = indices.iter().flatten().find(|&&i| i as usize >= positions.len()) {
-            return Err(PhysicsError::Value(format!("a mesh's index {i} is past its {} positions", positions.len())));
-        }
+        check_mesh(positions, indices)?;
         let meshes = &mut self.meshes;
         meshes.last += 1;
-        meshes.meshes.insert(
-            meshes.last,
-            Mesh {
-                points: positions.to_vec(),
-                triangles: indices.to_vec(),
-                hull: OnceCell::new(),
-                whole: OnceCell::new(),
-                whole_hull: OnceCell::new(),
-                scaled: RefCell::new(Vec::with_capacity(SCALED)),
-            },
-        );
+        meshes.meshes.insert(meshes.last, Mesh::new(positions, indices));
         Ok(meshes.last)
+    }
+
+    /// Gives mesh `id` new points and triangles, and each collider made of
+    /// it its new shape (Unity's `MeshCollider.sharedMesh` set again after
+    /// the mesh changed). Refused as [`Physics::add_mesh`] refuses, and then
+    /// nothing changes.
+    pub fn set_mesh(&mut self, id: u64, positions: &[Vector], indices: &[[u32; 3]]) -> Result<(), PhysicsError> {
+        if !self.meshes.contains(id) {
+            return Err(PhysicsError::Value(format!("no mesh {id}")));
+        }
+        check_mesh(positions, indices)?;
+        self.meshes.meshes.insert(id, Mesh::new(positions, indices));
+        let using: Vec<_> = self
+            .world
+            .colliders
+            .iter()
+            .filter_map(|(handle, _)| {
+                let followed = self.followed.get(handle.into_raw_parts().0 as usize)?.as_ref()?;
+                matches!(followed.spec.shape, ColliderShape::Mesh { mesh, .. } if mesh == id).then_some((
+                    handle,
+                    followed.spec,
+                    followed.object,
+                ))
+            })
+            .collect();
+        for (handle, spec, object) in using {
+            self.replace(handle, spec, object);
+        }
+        Ok(())
     }
 
     /// Removes a mesh no collider is made of.

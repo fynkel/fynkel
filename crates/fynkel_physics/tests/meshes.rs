@@ -204,3 +204,62 @@ fn colliders_of_one_mesh_at_one_scale_share_one_shape() {
     let y = height(&mut physics, 5.0).expect("a hit");
     assert!((y - 5.0).abs() < 1e-3, "{y}");
 }
+
+#[test]
+fn a_mesh_set_again_reshapes_each_collider_made_of_it() {
+    let mut physics = Physics::new();
+    let mesh = trough(&mut physics);
+    physics.add_static_collider(1, spec(mesh, false), at(0.0, 0.0, 0.0)).unwrap();
+    physics.add_static_collider(2, spec(mesh, false), at(10.0, 0.0, 0.0)).unwrap();
+    near(height(&mut physics, 1.0), 1.0);
+
+    // Flat at y = 0.5 now: the trough dug out and filled in.
+    let flat = [
+        Vector::new(-2.0, 0.5, -1.0),
+        Vector::new(2.0, 0.5, -1.0),
+        Vector::new(-2.0, 0.5, 1.0),
+        Vector::new(2.0, 0.5, 1.0),
+    ];
+    physics.set_mesh(mesh, &flat, &[[0, 2, 1], [1, 2, 3]]).unwrap();
+    near(height(&mut physics, 1.0), 0.5);
+    near(height(&mut physics, 11.0), 0.5);
+    assert_eq!(physics.mesh_count(), 1);
+
+    // Refused, and nothing changes.
+    assert!(physics.set_mesh(mesh, &flat, &[[0, 2, 7]]).is_err());
+    assert!(physics.set_mesh(mesh, &flat, &[]).is_err());
+    assert!(physics.set_mesh(99, &flat, &[[0, 2, 1]]).is_err());
+    near(height(&mut physics, 1.0), 0.5);
+}
+
+/// How long a ground of `n` × `n` squares takes to be set again, with one
+/// static collider made of it: `cargo test --release -p fynkel_physics
+/// --test meshes -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement"]
+fn how_long_a_mesh_takes_to_set_again() {
+    for n in [23_u32, 71] {
+        let points: Vec<Vector> =
+            (0..=n).flat_map(|z| (0..=n).map(move |x| Vector::new(x as f32, 0.0, z as f32))).collect();
+        let row = n + 1;
+        let triangles: Vec<[u32; 3]> = (0..n)
+            .flat_map(|z| {
+                (0..n).flat_map(move |x| {
+                    let a = z * row + x;
+                    [[a, a + row, a + 1], [a + 1, a + row, a + row + 1]]
+                })
+            })
+            .collect();
+        let mut physics = Physics::new();
+        let mesh = physics.add_mesh(&points, &triangles).unwrap();
+        physics.add_static_collider(1, spec(mesh, false), at(0.0, 0.0, 0.0)).unwrap();
+        let rounds = 100;
+        let start = std::time::Instant::now();
+        for _ in 0..rounds {
+            physics.set_mesh(mesh, &points, &triangles).unwrap();
+            physics.step(STEP);
+        }
+        let each = start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds);
+        println!("{} triangles: {each:.3} ms to set and step", triangles.len());
+    }
+}

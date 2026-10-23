@@ -13,7 +13,6 @@ import 'dart:collection';
 import 'dart:ffi';
 import 'dart:math' as math;
 
-import 'package:ffi/ffi.dart';
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:meta/meta.dart';
@@ -209,6 +208,13 @@ final class Physics extends WorldSystem implements Finalizable {
   final _leaving = <int>[];
   // The meshes mesh colliders are made of, by the native world's id.
   final _meshes = HashMap<Mesh, _HeldMesh>.identity();
+  // The same, looked at before each step for a mesh that changed.
+  final _heldMeshes = <_HeldMesh>[];
+  // Where a mesh that changed is read into, grown as needed.
+  Pointer<Float> _meshPoints = nullptr;
+  Pointer<Uint32> _meshIndices = nullptr;
+  var _meshPointCapacity = 0;
+  var _meshIndexCapacity = 0;
   var _leavingBefore = 0;
 
   // Native memory, freed when this is collected or the isolate ends.
@@ -387,6 +393,7 @@ final class Physics extends WorldSystem implements Finalizable {
       c._id = 0;
     }
     _meshes.clear();
+    _heldMeshes.clear();
     for (final b in _bodies) {
       b._physics = null;
       b._id = 0;
@@ -544,21 +551,54 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   _HeldMesh _addMesh(Mesh mesh) {
-    final (positions, indices) = (mesh.positions, mesh.indices);
-    return using((arena) {
-      final p = arena<Float>(positions.length);
-      p.asTypedList(positions.length).setAll(0, positions);
-      final i = arena<Uint32>(indices.length);
-      i.asTypedList(indices.length).setAll(0, indices);
-      checkPhysics(fp_mesh_add(_world, p, positions.length ~/ 3, i, indices.length, _id));
-      return _HeldMesh(_id.value);
-    });
+    final version = mesh.version;
+    _readMesh(mesh);
+    checkPhysics(fp_mesh_add(_world, _meshPoints, mesh.vertexCount, _meshIndices, mesh.indexCount, _id));
+    final held = _HeldMesh(_id.value, mesh, version);
+    _heldMeshes.add(held);
+    return held;
+  }
+
+  /// Reads [mesh]'s positions and indices into [_meshPoints] and
+  /// [_meshIndices], growing them first if they're too small.
+  void _readMesh(Mesh mesh) {
+    final (vertices, indices) = (mesh.vertexCount, mesh.indexCount);
+    if (vertices * 3 > _meshPointCapacity) {
+      if (_meshPoints != nullptr) _memory.free(_meshPoints);
+      _meshPointCapacity = math.max(vertices * 3 * 3 ~/ 2, 64);
+      _meshPoints = _memory<Float>(_meshPointCapacity);
+    }
+    if (indices > _meshIndexCapacity) {
+      if (_meshIndices != nullptr) _memory.free(_meshIndices);
+      _meshIndexCapacity = math.max(indices * 3 ~/ 2, 64);
+      _meshIndices = _memory<Uint32>(_meshIndexCapacity);
+    }
+    mesh.readInto(_meshPoints, vertices, _meshIndices, indices);
+  }
+
+  /// Gives the native world each held mesh that changed since it was read,
+  /// and so each collider made of it its new shape: Unity has the game set
+  /// `MeshCollider.sharedMesh` again, here it follows by itself. A mesh
+  /// left with no triangles keeps its last shape until it has some.
+  void _followMeshes() {
+    final held = _heldMeshes;
+    for (var i = 0; i < held.length; i++) {
+      final h = held[i];
+      final mesh = h.mesh;
+      final version = mesh.version;
+      if (version == h.version) continue;
+      h.version = version;
+      if (mesh.indexCount == 0) continue;
+      _readMesh(mesh);
+      checkPhysics(fp_mesh_set(_world, h.id, _meshPoints, mesh.vertexCount, _meshIndices, mesh.indexCount));
+    }
   }
 
   void _releaseMesh(Mesh mesh) {
     final held = _meshes[mesh]!;
     if (--held.users > 0 || _disposed) return;
     _meshes.remove(mesh);
+    _heldMeshes.remove(held);
     checkPhysics(fp_mesh_remove(_world, held.id));
   }
 
@@ -576,6 +616,7 @@ final class Physics extends WorldSystem implements Finalizable {
   /// no joint waits.
   void _follow() {
     if (_stepping) _collect();
+    if (_heldMeshes.isNotEmpty) _followMeshes();
     if (_moved.length > 0) _followMoved();
     if (_waiting.isNotEmpty) _joinWaiting();
   }
@@ -1277,9 +1318,12 @@ extension on FpQuat {
 
 /// A mesh the native world has, and how many colliders are made of it.
 final class _HeldMesh {
-  _HeldMesh(this.id);
+  _HeldMesh(this.id, this.mesh, this.version);
 
   final int id;
+  final Mesh mesh;
+  // The mesh's version when the native world was given it.
+  int version;
   var users = 0;
 }
 

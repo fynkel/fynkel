@@ -409,7 +409,7 @@ impl Physics {
         }
     }
 
-    fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, object: ObjectPose) {
+    pub(crate) fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, object: ObjectPose) {
         let body = collider_body(&self.followed, handle);
         let (shape, pose) = spec.place(object, &self.meshes, self.dynamic(body));
         let groups = self.contacts.groups(spec.layer);

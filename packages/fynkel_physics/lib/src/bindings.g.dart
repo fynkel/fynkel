@@ -258,6 +258,25 @@ external int fp_mesh_add(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Uint64)>(isLeaf: true)
 external int fp_mesh_remove(ffi.Pointer<FpWorld> world, int mesh);
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FpWorld>,
+    ffi.Uint64,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Size,
+  )
+>(isLeaf: true)
+external int fp_mesh_set(
+  ffi.Pointer<FpWorld> world,
+  int mesh,
+  ffi.Pointer<ffi.Float> positions,
+  int vertex_count,
+  ffi.Pointer<ffi.Uint32> indices,
+  int index_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FpWorld>, ffi.Pointer<FpMoved>, ffi.Size)>(isLeaf: true)
 external int fp_moved_read(ffi.Pointer<FpWorld> world, ffi.Pointer<FpMoved> out, int len);
 
@@ -375,7 +394,7 @@ external void fp_world_free(ffi.Pointer<FpWorld> world);
 @ffi.Native<ffi.Pointer<FpWorld> Function()>(isLeaf: true)
 external ffi.Pointer<FpWorld> fp_world_new();
 
-const int FP_ABI_VERSION = 13;
+const int FP_ABI_VERSION = 14;
 
 const int FP_COLLIDED_ABOVE = 2;
 
