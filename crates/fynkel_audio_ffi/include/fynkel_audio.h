@@ -10,7 +10,9 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FA_ABI_VERSION 3
+#define FA_ABI_VERSION 4
+
+
 
 // What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 // Those the engine's interface has too have its numbers
@@ -88,6 +90,25 @@ typedef uint32_t FaRolloff;
 #endif // __STDC_VERSION__ >= 202311L
 #endif // __cplusplus
 
+// Whether a clip is decoded whole as it loads, or as it plays.
+enum FaStreaming
+#if defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+  : uint32_t
+#endif // defined(__cplusplus) || __STDC_VERSION__ >= 202311L
+ {
+  // Streamed when it's longer than 10 seconds.
+  FA_STREAMING_AUTO = 0,
+  FA_STREAMING_ALWAYS = 1,
+  FA_STREAMING_NEVER = 2,
+};
+#ifndef __cplusplus
+#if __STDC_VERSION__ >= 202311L
+typedef enum FaStreaming FaStreaming;
+#else
+typedef uint32_t FaStreaming;
+#endif // __STDC_VERSION__ >= 202311L
+#endif // __cplusplus
+
 // The sound of one world. Made by `fa_audio_new`, freed by
 // `fa_audio_free`.
 typedef struct FaAudio FaAudio;
@@ -97,13 +118,15 @@ typedef struct FaAudio FaAudio;
 typedef struct FaClip FaClip;
 
 // A clip: its rate in frames a second, 1 or 2 channels, its length in
-// frames and seconds, and the memory its samples take.
+// frames and seconds, the memory it takes (its samples, or a streamed
+// one's file), and whether it's `streamed` (1) or decoded whole (0).
 typedef struct FaClipInfo {
   uint32_t rate;
   uint32_t channels;
   uint64_t frames;
   double seconds;
   uint64_t bytes;
+  uint32_t streamed;
 } FaClipInfo;
 
 // A voice that stopped without being told to: it reached its clip's end
@@ -115,11 +138,13 @@ typedef struct FaStopped {
 } FaStopped;
 
 // How a voice plays: `volume` 0 to 1, `pitch` 0.05 to 8 (1 is the clip's
-// own speed), `looping` 0 or 1.
+// own speed), `looping` 0 or 1, and the `group` whose volume it's under
+// (0 for none, else 1 to `FA_MAX_GROUPS` - 1).
 typedef struct FaSettings {
   float volume;
   float pitch;
   uint32_t looping;
+  uint32_t group;
 } FaSettings;
 
 // Whether a voice is 2D or 3D: `blend` 0 (2D) to 1 (3D); `pan` -1 (left)
@@ -136,7 +161,8 @@ typedef struct FaSpatial {
 // How to play a clip: its settings; `priority` 0 (kept longest) to 256
 // (given up first); `pausable` 1 to hold while the game is paused; whose
 // it is (`owner`, 0 for no one's); where to start, in seconds; whether
-// it's 3D, and where it is.
+// it's 3D, and where it is; and the seconds it fades in over, from
+// silence (0 for none).
 typedef struct FaPlay {
   struct FaSettings settings;
   uint32_t priority;
@@ -145,7 +171,14 @@ typedef struct FaPlay {
   double from;
   struct FaSpatial spatial;
   float position[3];
+  float fade_in;
 } FaPlay;
+
+// A fade: to a volume `to`, 0 to 1, over `seconds`, 0 to 3600.
+typedef struct FaFade {
+  float to;
+  float seconds;
+} FaFade;
 
 // Who hears: where, and which way they face (a quaternion x, y, z, w,
 // looking along its -Z with +X on its right).
@@ -168,7 +201,8 @@ typedef struct FaVoice {
 } FaVoice;
 
 // The sound at a glance. `device` 1 when an output plays it; its `rate`
-// and `channels`; the voices the mixer has; and counts since the start.
+// and `channels`; the voices the mixer has; and counts since the start,
+// `starved` those of callbacks in which a streamed clip ran out (a gap).
 typedef struct FaStats {
   uint32_t device;
   uint32_t rate;
@@ -180,6 +214,7 @@ typedef struct FaStats {
   uint64_t callbacks;
   uint64_t underruns;
   uint64_t reopened;
+  uint64_t starved;
 } FaStats;
 
 #ifdef __cplusplus
@@ -194,10 +229,11 @@ uint32_t fa_abi_version(void);
 // any). Valid until the next failed call on this thread.
 const char *fa_last_error(void);
 
-// Decodes a WAV, OGG Vorbis or MP3 file from `len` bytes at `bytes`, and
-// writes the clip to `out`. `name` (`name_len` bytes of UTF-8, or none)
-// is the file's name: it helps find the format and goes in the error.
-// Any thread may call it.
+// Loads a WAV, OGG Vorbis or MP3 file from `len` bytes at `bytes`,
+// decoded whole or kept to decode as it plays as `streaming` (an
+// `FaStreaming`) says, and writes the clip to `out`. `name` (`name_len`
+// bytes of UTF-8, or none) is the file's name: it helps find the format
+// and goes in the error. Any thread may call it.
 //
 // # Safety
 //
@@ -207,6 +243,7 @@ FaStatus fa_clip_decode(const uint8_t *bytes,
                         size_t len,
                         const uint8_t *name,
                         size_t name_len,
+                        uint32_t streaming,
                         struct FaClip **out);
 
 // A clip from `len` samples at `samples`, interleaved in `channels` (1 or
@@ -317,6 +354,27 @@ FaStatus fa_audio_play(struct FaAudio *audio,
 //
 // `audio` is null or live.
 FaStatus fa_voice_stop(struct FaAudio *audio, uint64_t voice);
+
+// Fades a voice as `fade` says (its `to` times the voice's volume), then,
+// when `stop` is 1, stops it: it isn't playing from now. By pointer, as a
+// double passed to a native call is an allocation in Dart's JIT.
+//
+// # Safety
+//
+// `audio` is null or live; `fade` is null or readable.
+FaStatus fa_voice_fade(struct FaAudio *audio,
+                       uint64_t voice,
+                       const struct FaFade *fade,
+                       uint32_t stop);
+
+// Fades a group's volume as `fade` says (over the next few milliseconds
+// for 0 seconds): every voice in it follows. Groups are 1 to
+// `FA_MAX_GROUPS` - 1, each at 1 until set.
+//
+// # Safety
+//
+// `audio` is null or live; `fade` is null or readable.
+FaStatus fa_group_set(struct FaAudio *audio, uint32_t group, const struct FaFade *fade);
 
 // Pauses a voice where it is (`paused` 1), or plays it on (0).
 //

@@ -258,6 +258,50 @@ moving 3D voices cost the frame less than 0.1 ms on the Note10+.
 a gap (counted: no starved callbacks); a crossfade's golden matches; and
 a group's volume reaches its voices within one callback.
 
+*As built* (branch stage-11-mix, sound ABI 4):
+
+- A streamed clip keeps its file. Each voice that plays it gets its own
+  decoder and a ring of a second of frames, filled by one decoder thread
+  that wakes every 20 ms (and at once for a new voice); without a device
+  it's filled between the mixer's chunks, so tests hear the same. A
+  start far in seeks a fifth of a second early and decodes up to it, as
+  OGG and MP3 seeks land near rather than on; wav, ogg and mp3 streamed
+  match the same clip decoded to within 1e-6, from the start, from 2.1 s
+  in and looping (tests/stream.rs). A clip whose length the file doesn't
+  say is decoded until it passes 10 s, then streamed.
+- A stream that isn't ready holds where it is (silence, not a skip) and
+  counts in `stats.starved`. A looping stream told to stop looping ends
+  at the end of the time round it's in, though its decoder is ahead.
+- Fades and groups are exact per sample, a straight line, there by the
+  end of their seconds (0 seconds: by the end of the next callback, so
+  there's no click). A voice faded out to its stop ends when it reaches 0.
+  `audio.music` is a voice in group `music` at priority 0, ignoring the
+  pause unless told; a crossfade fades the old voice out to its stop and
+  the new one in. Golden: crates/fynkel_audio/tests/goldens/crossfade.wav.
+- Groups are flat, 15 of them, each under `audio.volume` (no group in a
+  group: a game's settings screen doesn't need it).
+- Fades and group volumes are passed to the native library through
+  memory, as a double passed to a call is an allocation in Dart's JIT;
+  the allocation test crossfades streamed tracks, moves sliders, mutes
+  and fades with no garbage.
+- Hot reload: `World.reloadAssets()` (from `FynkelGame.reassemble`) reads
+  again the files of every asset kind that reloads; a clip whose file
+  changed takes its new sound from its next play.
+- Android's audio focus (left from phase 1): `AudioSession.playback`
+  asks for it through JNI, so the player's music stops; `ambient` gives
+  it up. A call ringing or on (AudioManager's mode, read every half
+  second) holds the device, as the background does. Losing the focus to
+  another app isn't heard (it needs a Java listener).
+- The lab's "Sound: music and the mix" is the settings screen: master,
+  music and effects sliders, mutes, a duck, fades, over two tracks of
+  ours (examples/lab/tool/music.py, 24 s and 16 s, streamed), with the
+  starved count in the readout.
+- Ten minutes streamed, 2026-10-22: the Mac (`cargo test -p fynkel_audio
+  --test device -- --ignored a_streamed`, chase looping) 56,251
+  callbacks, none starved or underrun; the iPhone 16 Pro Max and the
+  Note10+ (the lab's scene with `--dart-define=LAB_SOUND=true`, a
+  crossfade every 30 s) 600 s each, none starved or underrun.
+
 ### Phase 4: the games, and measuring
 
 - **Sheepdog**: barks, sheep, footsteps on `animator.at`, a whistle,

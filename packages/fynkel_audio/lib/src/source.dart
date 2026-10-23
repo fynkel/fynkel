@@ -193,6 +193,17 @@ final class AudioSource extends Behaviour {
 
   AudioRolloffMode _rolloffMode;
 
+  /// The group whose volume its sounds are under ([AudioGroup]), such as
+  /// `audio.group('effects')`, or none: [Audio.volume]'s alone (Unity's
+  /// `outputAudioMixerGroup`). Its sounds follow it at once.
+  AudioGroup? get group => _group;
+  set group(AudioGroup? value) {
+    _group = value;
+    _sendSettings();
+  }
+
+  AudioGroup? _group;
+
   /// Called when [clip], played with [play], reaches its end; not when it's
   /// stopped, or gives way to a more important sound.
   void Function(AudioClip clip)? onEnd;
@@ -264,7 +275,14 @@ final class AudioSource extends Behaviour {
       ..[1] = _effectivePitch;
     audio._playFrom.value = _from < clip.length ? _from : clip.length;
     audio._writeSpatial(this);
-    _voice = audio._start(clip, looping: _loop, priority: _priority, pausable: !ignorePause, owner: _owner);
+    _voice = audio._start(
+      clip,
+      looping: _loop,
+      priority: _priority,
+      pausable: !ignorePause,
+      owner: _owner,
+      group: _indexOf(_group),
+    );
     _from = 0;
     _playing = _voice == 0 ? null : clip;
     _paused = false;
@@ -314,7 +332,14 @@ final class AudioSource extends Behaviour {
       ..[1] = _clampPitch(_effectivePitch * speed);
     audio._playFrom.value = 0;
     audio._writeSpatial(this);
-    final handle = audio._start(clip, looping: false, priority: _priority, pausable: !ignorePause, owner: _owner);
+    final handle = audio._start(
+      clip,
+      looping: false,
+      priority: _priority,
+      pausable: !ignorePause,
+      owner: _owner,
+      group: _indexOf(_group),
+    );
     if (handle == 0) return;
     // Full only when it took a voice of its own whose loss it hears of
     // after the frame: this one plays on, at the volume it started with.
@@ -353,17 +378,18 @@ final class AudioSource extends Behaviour {
     if (audio == null) return;
     final volume = _effectiveVolume, pitch = _effectivePitch;
     final settings = audio._settingsFloats;
+    final group = _indexOf(_group);
     if (_voice != 0) {
       settings
         ..[0] = volume
         ..[1] = pitch;
-      audio._set(_voice, looping: _loop);
+      audio._set(_voice, looping: _loop, group: group);
     }
     for (var i = 0; i < _shotCount; i++) {
       settings
         ..[0] = volume * _shotVolumes[i]
         ..[1] = _clampPitch(pitch * _shotPitches[i]);
-      audio._set(_shots[i], looping: false);
+      audio._set(_shots[i], looping: false, group: group);
     }
     _hold();
   }

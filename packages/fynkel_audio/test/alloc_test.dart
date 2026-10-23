@@ -1,7 +1,8 @@
 // Frames with sound allocate nothing (docs/stage-11.md): a clip looping,
 // one-shots starting and ending, sources reading where they are, slow
-// motion and the game's pause going on and off, and 3D sources moving
-// around a camera that turns, with sounds played at places. Counted by the VM
+// motion and the game's pause going on and off, 3D sources moving
+// around a camera that turns, with sounds played at places, and music
+// crossfading between streamed tracks while groups' volumes change. Counted by the VM
 // service's allocation profile (see allocations.dart).
 
 // Counted alone, a file at a time: see dart_test.yaml.
@@ -15,6 +16,7 @@ import 'package:fynkel_audio/fynkel_audio.dart';
 import 'package:test/test.dart';
 
 import 'allocations.dart';
+import 'audio_test.dart' show wav;
 
 /// Plays a short one-shot every few frames, reads its source's place each
 /// frame, and turns slow motion and the game's pause on and off.
@@ -84,6 +86,33 @@ class _Flyer extends Behaviour {
   }
 }
 
+/// Crossfades the music between two streamed tracks now and then, and
+/// moves the groups' volumes as a settings screen's sliders would.
+class _Mixer extends Behaviour {
+  _Mixer(this.tracks);
+
+  final List<AudioClip> tracks;
+  var frame = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    frame++;
+    final music = audio.music;
+    if (frame % 120 == 0) music.crossFade(tracks[(frame ~/ 120) % 2], 0.5);
+    if (frame % 500 == 0) music.stop(fadeOut: 0.25);
+    if (frame % 500 == 20) music.play(tracks[0], fadeIn: 0.25);
+    final effects = audio.group('effects');
+    if (frame % 2 == 0) {
+      effects.volume = 0.5;
+    } else {
+      effects.volume = 0.75;
+    }
+    if (frame % 300 == 0) audio.group('music').fade(0.3, 1);
+    if (frame % 300 == 150) audio.group('music').mute = frame % 600 == 150;
+  }
+}
+
 final _places = [
   Transform(position: Vec3(-5, 0, -2)),
   Transform(position: Vec3(0, 1, -6)),
@@ -110,6 +139,12 @@ void main() {
     final hum = AudioSource(clip: music, loop: true, spatialBlend: 1, maxDistance: 20);
     final buzz = AudioSource(clip: blip, loop: true, spatialBlend: 0.5, rolloffMode: AudioRolloffMode.linear);
     world.add(GameObject(name: 'flyer', components: [hum, buzz, _Flyer(camera, blip)]));
+    shot.group = world.audio.group('effects');
+    final tracks = [
+      for (final value in [0.1, 0.2])
+        await AudioClip.decode(wav(List.filled(96000, value)), name: 'track.wav', stream: true),
+    ];
+    world.add(GameObject(name: 'mixer', components: [_Mixer(tracks)]));
 
     expect(await madeEachFrame(world, 20000), isEmpty);
     expect(player.frame, greaterThan(50000));

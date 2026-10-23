@@ -75,6 +75,7 @@ external int fa_audio_volume_set(ffi.Pointer<FaAudio> audio, double volume);
     ffi.Size,
     ffi.Pointer<ffi.Uint8>,
     ffi.Size,
+    ffi.Uint32,
     ffi.Pointer<ffi.Pointer<FaClip>>,
   )
 >(isLeaf: true)
@@ -83,6 +84,7 @@ external int fa_clip_decode(
   int len,
   ffi.Pointer<ffi.Uint8> name,
   int name_len,
+  int streaming,
   ffi.Pointer<ffi.Pointer<FaClip>> out,
 );
 
@@ -103,6 +105,9 @@ external int fa_clip_new(
   ffi.Pointer<ffi.Pointer<FaClip>> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint32, ffi.Pointer<FaFade>)>(isLeaf: true)
+external int fa_group_set(ffi.Pointer<FaAudio> audio, int group, ffi.Pointer<FaFade> fade);
+
 @ffi.Native<ffi.Pointer<ffi.Char> Function()>(isLeaf: true)
 external ffi.Pointer<ffi.Char> fa_last_error();
 
@@ -111,6 +116,9 @@ external int fa_owner_stop(ffi.Pointer<FaAudio> audio, int owner);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Pointer<FaStopped>, ffi.Size)>(isLeaf: true)
 external int fa_stopped_read(ffi.Pointer<FaAudio> audio, ffi.Pointer<FaStopped> out, int len);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Pointer<FaFade>, ffi.Uint32)>(isLeaf: true)
+external int fa_voice_fade(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaFade> fade, int stop);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64, ffi.Pointer<FaVoice>)>(isLeaf: true)
 external int fa_voice_get(ffi.Pointer<FaAudio> audio, int voice, ffi.Pointer<FaVoice> out);
@@ -127,7 +135,7 @@ external int fa_voice_spatial_set(ffi.Pointer<FaAudio> audio, int voice, ffi.Poi
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FaAudio>, ffi.Uint64)>(isLeaf: true)
 external int fa_voice_stop(ffi.Pointer<FaAudio> audio, int voice);
 
-const int FA_ABI_VERSION = 3;
+const int FA_ABI_VERSION = 4;
 
 final class FaAudio extends ffi.Opaque {}
 
@@ -149,6 +157,9 @@ final class FaClipInfo extends ffi.Struct {
   @ffi.Uint64()
   external int bytes;
 
+  @ffi.Uint32()
+  external int streamed;
+
   static ffi.Pointer<FaClipInfo> $allocate(
     ffi.Allocator $allocator, {
     required int rate,
@@ -156,12 +167,27 @@ final class FaClipInfo extends ffi.Struct {
     required int frames,
     required double seconds,
     required int bytes,
+    required int streamed,
   }) => $allocator<FaClipInfo>()
     ..ref.rate = rate
     ..ref.channels = channels
     ..ref.frames = frames
     ..ref.seconds = seconds
-    ..ref.bytes = bytes;
+    ..ref.bytes = bytes
+    ..ref.streamed = streamed;
+}
+
+final class FaFade extends ffi.Struct {
+  @ffi.Float()
+  external double to;
+
+  @ffi.Float()
+  external double seconds;
+
+  static ffi.Pointer<FaFade> $allocate(ffi.Allocator $allocator, {required double to, required double seconds}) =>
+      $allocator<FaFade>()
+        ..ref.to = to
+        ..ref.seconds = seconds;
 }
 
 final class FaListener extends ffi.Struct {
@@ -199,6 +225,9 @@ final class FaPlay extends ffi.Struct {
 
   @ffi.Array.multi([3])
   external ffi.Array<ffi.Float> position;
+
+  @ffi.Float()
+  external double fade_in;
 }
 
 sealed class FaRolloff {
@@ -221,15 +250,20 @@ final class FaSettings extends ffi.Struct {
   @ffi.Uint32()
   external int looping;
 
+  @ffi.Uint32()
+  external int group;
+
   static ffi.Pointer<FaSettings> $allocate(
     ffi.Allocator $allocator, {
     required double volume,
     required double pitch,
     required int looping,
+    required int group,
   }) => $allocator<FaSettings>()
     ..ref.volume = volume
     ..ref.pitch = pitch
-    ..ref.looping = looping;
+    ..ref.looping = looping
+    ..ref.group = group;
 }
 
 final class FaSpatial extends ffi.Struct {
@@ -294,6 +328,9 @@ final class FaStats extends ffi.Struct {
   @ffi.Uint64()
   external int reopened;
 
+  @ffi.Uint64()
+  external int starved;
+
   static ffi.Pointer<FaStats> $allocate(
     ffi.Allocator $allocator, {
     required int device,
@@ -306,6 +343,7 @@ final class FaStats extends ffi.Struct {
     required int callbacks,
     required int underruns,
     required int reopened,
+    required int starved,
   }) => $allocator<FaStats>()
     ..ref.device = device
     ..ref.rate = rate
@@ -316,7 +354,8 @@ final class FaStats extends ffi.Struct {
     ..ref.refused = refused
     ..ref.callbacks = callbacks
     ..ref.underruns = underruns
-    ..ref.reopened = reopened;
+    ..ref.reopened = reopened
+    ..ref.starved = starved;
 }
 
 sealed class FaStatus {
@@ -349,6 +388,12 @@ final class FaStopped extends ffi.Struct {
     ..ref.handle = handle
     ..ref.owner = owner
     ..ref.stolen = stolen;
+}
+
+sealed class FaStreaming {
+  static const FA_STREAMING_AUTO = 0;
+  static const FA_STREAMING_ALWAYS = 1;
+  static const FA_STREAMING_NEVER = 2;
 }
 
 final class FaVoice extends ffi.Struct {

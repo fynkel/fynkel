@@ -1,22 +1,34 @@
 part of 'audio.dart';
 
-/// A sound, decoded (Unity's `AudioClip`): from a WAV, OGG Vorbis or MP3
-/// file with `assets.audio('coin.ogg')`, or made in code with
-/// [AudioClip.fromSamples]. Play it with an [AudioSource] or
-/// [Audio.playOneShot]. Short sounds are decoded whole as they load; a
-/// minute of stereo takes about 21 MB ([bytes]).
+/// A sound (Unity's `AudioClip`): from a WAV, OGG Vorbis or MP3 file with
+/// `assets.audio('coin.ogg')`, or made in code with
+/// [AudioClip.fromSamples]. Play it with an [AudioSource], [Audio.music] or
+/// [Audio.playOneShot].
+///
+/// Short sounds are decoded whole as they load: a minute of stereo would
+/// take about 21 MB ([bytes]). One longer than 10 seconds (music, say) is
+/// [streamed] instead: kept as its file, and decoded as it plays, a second
+/// ahead, off the game's thread.
+///
+/// On a hot reload, a clip from `assets` whose file changed takes the new
+/// sound, from the next time it's played.
 final class AudioClip implements Finalizable {
-  AudioClip._(this._clip, this.name) {
+  AudioClip._(this._clip, this.name, this._streaming) {
     _finalizer.attach(this, _clip.cast(), detach: this);
+    _readInfo();
+  }
+
+  void _readInfo() {
     final info = calloc<FaClipInfo>();
     try {
       _check(fa_clip_info(_clip, info));
       final i = info.ref;
-      rate = i.rate;
-      channels = i.channels;
-      frames = i.frames;
-      length = i.seconds;
-      bytes = i.bytes;
+      _rate = i.rate;
+      _channels = i.channels;
+      _frames = i.frames;
+      _length = i.seconds;
+      _bytes = i.bytes;
+      _streamed = i.streamed == 1;
     } finally {
       calloc.free(info);
     }
@@ -30,18 +42,35 @@ final class AudioClip implements Finalizable {
   /// files. `assets.audio(name)` is the short way.
   static const AssetKind<AudioClip> kind = _ClipKind();
 
-  /// Decodes a WAV, OGG Vorbis or MP3 file from its [bytes], off the
-  /// game's thread. [name] (the file's) helps find the format and goes in
-  /// the error. Throws a [FormatException] for bytes that aren't one of
-  /// those, or have more than two channels.
-  static Future<AudioClip> decode(Uint8List bytes, {String name = ''}) async {
+  /// Loads a WAV, OGG Vorbis or MP3 file from its [bytes], off the game's
+  /// thread: decoded whole, or, with [stream] (or, unless it's false, when
+  /// it's longer than 10 seconds), kept to be decoded as it plays. [name]
+  /// (the file's) helps find the format and goes in the error. Throws a
+  /// [FormatException] for bytes that aren't one of those, or have more
+  /// than two channels.
+  static Future<AudioClip> decode(Uint8List bytes, {String name = '', bool? stream}) async {
     _library;
+    final streaming = switch (stream) {
+      null => FaStreaming.FA_STREAMING_AUTO,
+      true => FaStreaming.FA_STREAMING_ALWAYS,
+      false => FaStreaming.FA_STREAMING_NEVER,
+    };
+    final clip = AudioClip._(await _load(bytes, name, streaming), name, streaming);
+    assert(() {
+      clip._hash = _hashOf(bytes);
+      return true;
+    }());
+    return clip;
+  }
+
+  /// The clip [bytes] makes, decoded on a helper isolate.
+  static Future<Pointer<FaClip>> _load(Uint8List bytes, String name, int streaming) async {
     final copy = malloc<Uint8>(bytes.isEmpty ? 1 : bytes.length);
     copy.asTypedList(bytes.length).setAll(0, bytes);
     try {
-      final (address, error) = await Isolate.run(() => _decodeAt(copy.address, bytes.length, name));
+      final (address, error) = await Isolate.run(() => _decodeAt(copy.address, bytes.length, name, streaming));
       if (error != null) throw FormatException(error);
-      return AudioClip._(Pointer.fromAddress(address), name);
+      return Pointer.fromAddress(address);
     } finally {
       malloc.free(copy);
     }
@@ -58,7 +87,7 @@ final class AudioClip implements Finalizable {
     try {
       copy.asTypedList(samples.length).setAll(0, samples);
       _check(fa_clip_new(rate, channels, copy, samples.length, out));
-      return AudioClip._(out.value, name);
+      return AudioClip._(out.value, name, FaStreaming.FA_STREAMING_NEVER);
     } finally {
       malloc.free(copy);
       calloc.free(out);
@@ -66,22 +95,58 @@ final class AudioClip implements Finalizable {
   }
 
   Pointer<FaClip> _clip;
+  final int _streaming;
+
+  /// In debug builds, a hash of the file it was loaded from, so a hot
+  /// reload decodes only those that changed.
+  int? _hash;
 
   /// The file it came from, or what it was named.
   final String name;
 
-  /// Its rate in frames a second (Unity's `frequency`), and its channels,
-  /// 1 or 2.
-  late final int rate, channels;
+  /// Its rate in frames a second (Unity's `frequency`).
+  int get rate => _rate;
+  late int _rate;
+
+  /// Its channels, 1 or 2.
+  int get channels => _channels;
+  late int _channels;
 
   /// How many frames it has (Unity's `samples`).
-  late final int frames;
+  int get frames => _frames;
+  late int _frames;
 
   /// How long it plays, in seconds, at pitch 1.
-  late final double length;
+  double get length => _length;
+  late double _length;
 
-  /// The memory its samples take, in bytes.
-  late final int bytes;
+  /// The memory it takes, in bytes: its samples, or, [streamed], its file.
+  int get bytes => _bytes;
+  late int _bytes;
+
+  /// Whether it's decoded as it plays (Unity's *Streaming* load type),
+  /// rather than whole as it loaded: a clip longer than 10 seconds, unless
+  /// it was loaded with `stream: false`.
+  bool get streamed => _streamed;
+  late bool _streamed;
+
+  /// Takes the sound in [bytes] in place of its own, from the next time
+  /// it's played (sounds playing it now play on): a hot reload's.
+  Future<void> _reload(Uint8List bytes) async {
+    final hash = _hashOf(bytes);
+    if (hash == _hash) return;
+    final loaded = await _load(bytes, name, _streaming);
+    if (isDisposed) {
+      fa_clip_free(loaded);
+      return;
+    }
+    _finalizer.detach(this);
+    fa_clip_free(_clip);
+    _clip = loaded;
+    _finalizer.attach(this, _clip.cast(), detach: this);
+    _hash = hash;
+    _readInfo();
+  }
 
   /// Whether it was freed: by `assets`, when the last object holding it
   /// went, or by [dispose]. A freed clip can't be played; sounds playing it
@@ -104,17 +169,27 @@ final class AudioClip implements Finalizable {
 
   @override
   String toString() =>
-      'AudioClip(${name.isEmpty ? '' : '$name, '}${length.toStringAsFixed(2)} s, $rate Hz × $channels)';
+      'AudioClip(${name.isEmpty ? '' : '$name, '}${length.toStringAsFixed(2)} s, $rate Hz × $channels'
+      '${streamed ? ', streamed' : ''})';
+}
+
+/// FNV-1a over [bytes], to tell a changed file from the same one.
+int _hashOf(Uint8List bytes) {
+  var hash = 0xcbf29ce484222325;
+  for (final byte in bytes) {
+    hash = (hash ^ byte) * 0x100000001b3;
+  }
+  return hash ^ bytes.length;
 }
 
 /// In a helper isolate: decodes and returns the clip's address, or the
 /// error.
-(int, String?) _decodeAt(int address, int length, String name) {
+(int, String?) _decodeAt(int address, int length, String name, int streaming) {
   final bytes = Pointer<Uint8>.fromAddress(address);
   final utf8Name = name.toNativeUtf8(allocator: malloc);
   final out = calloc<Pointer<FaClip>>();
   try {
-    final status = fa_clip_decode(bytes, length, utf8Name.cast(), utf8Name.length, out);
+    final status = fa_clip_decode(bytes, length, utf8Name.cast(), utf8Name.length, streaming, out);
     if (status == FaStatus.FA_STATUS_CANT_DECODE) return (0, _lastError());
     _check(status);
     return (out.value.address, null);
@@ -138,13 +213,20 @@ final class _ClipKind extends AssetKind<AudioClip> {
 
   @override
   void free(World world, AudioClip value) => value.dispose();
+
+  @override
+  bool get reloads => true;
+
+  @override
+  Future<void> reload(World world, String name, AudioClip value, Uint8List bytes) => value._reload(bytes);
 }
 
 /// Sounds from the game's assets.
 extension AssetsAudio on Assets {
-  /// The sound in [name] (a `.wav`, `.ogg` or `.mp3`), decoded, shared by
+  /// The sound in [name] (a `.wav`, `.ogg` or `.mp3`), shared by
   /// everything that asks for it, and freed when the last object that
-  /// asked is destroyed. A file that isn't sound throws a
+  /// asked is destroyed: decoded whole, or [AudioClip.streamed] when it's
+  /// longer than 10 seconds. A file that isn't sound throws a
   /// [FormatException].
   Future<AudioClip> audio(String name) => load(name, AudioClip.kind);
 }

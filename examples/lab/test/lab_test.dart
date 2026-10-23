@@ -8,6 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart' show Brightness;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_audio/fynkel_audio.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:lab/lab.dart';
@@ -39,6 +40,7 @@ import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
 import 'package:lab/scenes/crowd.dart';
 import 'package:lab/scenes/skinned.dart';
+import 'package:lab/scenes/sound_mix.dart';
 import 'package:lab/scenes/theme_basics.dart';
 import 'package:lab/scenes/world_widgets_basics.dart';
 
@@ -91,6 +93,27 @@ void main() {
       expect(scene.readout.value, title == 'Lifecycle' ? isEmpty : isNotEmpty);
     });
   }
+
+  test('Sound: music and the mix streams its tracks, crossfades them, and leaves the mix as found', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(SoundMixScene());
+    await scene.loaded;
+    world.update(0);
+    final music = world.audio.music;
+    expect(music.clip!.name, 'music/calm.ogg');
+    expect(music.clip!.streamed, isTrue, reason: 'over 10 seconds');
+    // Two seconds of sound, as a device would ask for it.
+    world.audio.render(48000 * 2);
+    expect(world.audio.stats.starved, 0);
+    (scene.controls.firstWhere((c) => c.label == 'crossfade to the other track') as Button).onPressed();
+    expect(music.clip!.name, 'music/chase.ogg');
+    (scene.controls.firstWhere((c) => c.label == 'music') as Slider).onChanged(0.3);
+    expect(world.audio.group('music').volume, 0.3);
+    scene.destroy();
+    world.update(0);
+    expect((music.isPlaying, world.audio.group('music').volume), (false, 1.0));
+  });
 
   test('Input on objects: a crate dragged off itself follows the finger, and a pad counts clicks', () async {
     final world = World();

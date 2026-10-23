@@ -16,10 +16,14 @@
 use std::ffi::c_char;
 use std::sync::Arc;
 
-use fynkel_audio::{Audio, Clip, Listener, Play, Rolloff, Session, Settings, Spatial};
+use fynkel_audio::{Audio, Clip, Listener, Play, Rolloff, Session, Settings, Spatial, Streaming};
 
 /// Bumped on any change to the functions or types in this file.
-pub const FA_ABI_VERSION: u32 = 3;
+pub const FA_ABI_VERSION: u32 = 4;
+
+/// How many groups there are: a voice's `group` is 0 (none) or one of 1 to
+/// this less one.
+pub const FA_MAX_GROUPS: u32 = fynkel_audio::MAX_GROUPS as u32;
 
 /// What a call did: `Ok`, or why not, with a message for `fa_last_error`.
 /// Those the engine's interface has too have its numbers
@@ -64,14 +68,26 @@ pub enum FaSession {
     Playback = 1,
 }
 
+/// Whether a clip is decoded whole as it loads, or as it plays.
+#[repr(u32)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FaStreaming {
+    /// Streamed when it's longer than 10 seconds.
+    Auto = 0,
+    Always = 1,
+    Never = 2,
+}
+
 /// How a voice plays: `volume` 0 to 1, `pitch` 0.05 to 8 (1 is the clip's
-/// own speed), `looping` 0 or 1.
+/// own speed), `looping` 0 or 1, and the `group` whose volume it's under
+/// (0 for none, else 1 to `FA_MAX_GROUPS` - 1).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaSettings {
     pub volume: f32,
     pub pitch: f32,
     pub looping: u32,
+    pub group: u32,
 }
 
 /// How a 3D sound fades with distance, as Unity's rolloff modes.
@@ -102,7 +118,8 @@ pub struct FaSpatial {
 /// How to play a clip: its settings; `priority` 0 (kept longest) to 256
 /// (given up first); `pausable` 1 to hold while the game is paused; whose
 /// it is (`owner`, 0 for no one's); where to start, in seconds; whether
-/// it's 3D, and where it is.
+/// it's 3D, and where it is; and the seconds it fades in over, from
+/// silence (0 for none).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FaPlay {
@@ -113,6 +130,15 @@ pub struct FaPlay {
     pub from: f64,
     pub spatial: FaSpatial,
     pub position: [f32; 3],
+    pub fade_in: f32,
+}
+
+/// A fade: to a volume `to`, 0 to 1, over `seconds`, 0 to 3600.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FaFade {
+    pub to: f32,
+    pub seconds: f32,
 }
 
 /// Who hears: where, and which way they face (a quaternion x, y, z, w,
@@ -152,7 +178,8 @@ pub struct FaVoice {
 }
 
 /// A clip: its rate in frames a second, 1 or 2 channels, its length in
-/// frames and seconds, and the memory its samples take.
+/// frames and seconds, the memory it takes (its samples, or a streamed
+/// one's file), and whether it's `streamed` (1) or decoded whole (0).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FaClipInfo {
@@ -161,10 +188,12 @@ pub struct FaClipInfo {
     pub frames: u64,
     pub seconds: f64,
     pub bytes: u64,
+    pub streamed: u32,
 }
 
 /// The sound at a glance. `device` 1 when an output plays it; its `rate`
-/// and `channels`; the voices the mixer has; and counts since the start.
+/// and `channels`; the voices the mixer has; and counts since the start,
+/// `starved` those of callbacks in which a streamed clip ran out (a gap).
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct FaStats {
@@ -178,6 +207,7 @@ pub struct FaStats {
     pub callbacks: u64,
     pub underruns: u64,
     pub reopened: u64,
+    pub starved: u64,
 }
 
 /// The sound of one world. Made by `fa_audio_new`, freed by
@@ -268,7 +298,11 @@ fn flag(value: u32, what: &str) -> Result<bool, Error> {
 }
 
 fn settings(s: FaSettings) -> Result<Settings, Error> {
-    Ok(Settings { volume: s.volume, pitch: s.pitch, looping: flag(s.looping, "looping")? })
+    let group = u8::try_from(s.group)
+        .ok()
+        .filter(|&g| u32::from(g) < FA_MAX_GROUPS)
+        .ok_or_else(|| invalid(format!("group {} isn't between 0 and {}", s.group, FA_MAX_GROUPS - 1)))?;
+    Ok(Settings { volume: s.volume, pitch: s.pitch, looping: flag(s.looping, "looping")?, group })
 }
 
 fn spatial(s: FaSpatial) -> Result<Spatial, Error> {
@@ -298,10 +332,11 @@ pub extern "C" fn fa_last_error() -> *const c_char {
 
 // --- Clips -------------------------------------------------------------------------
 
-/// Decodes a WAV, OGG Vorbis or MP3 file from `len` bytes at `bytes`, and
-/// writes the clip to `out`. `name` (`name_len` bytes of UTF-8, or none)
-/// is the file's name: it helps find the format and goes in the error.
-/// Any thread may call it.
+/// Loads a WAV, OGG Vorbis or MP3 file from `len` bytes at `bytes`,
+/// decoded whole or kept to decode as it plays as `streaming` (an
+/// `FaStreaming`) says, and writes the clip to `out`. `name` (`name_len`
+/// bytes of UTF-8, or none) is the file's name: it helps find the format
+/// and goes in the error. Any thread may call it.
 ///
 /// # Safety
 ///
@@ -313,13 +348,20 @@ pub unsafe extern "C" fn fa_clip_decode(
     len: usize,
     name: *const u8,
     name_len: usize,
+    streaming: u32,
     out: *mut *mut FaClip,
 ) -> FaStatus {
     guard(|| {
         // SAFETY: as this function's.
         let (bytes, name) = unsafe { (slice(bytes, len, "bytes")?, slice(name, name_len, "name")?) };
         let name = std::str::from_utf8(name).map_err(|_| invalid("the name isn't UTF-8".into()))?;
-        let clip = Clip::decode(bytes, name).map_err(|e| Error::new(FaStatus::CantDecode, e))?;
+        let streaming = match streaming {
+            0 => Streaming::Auto,
+            1 => Streaming::Always,
+            2 => Streaming::Never,
+            _ => return Err(invalid(format!("streaming {streaming} isn't an FaStreaming"))),
+        };
+        let clip = Clip::load(bytes, name, streaming).map_err(|e| Error::new(FaStatus::CantDecode, e))?;
         // SAFETY: as this function's.
         unsafe { write(out, "out", Box::into_raw(Box::new(FaClip(Arc::new(clip))))) }
     })
@@ -369,6 +411,7 @@ pub unsafe extern "C" fn fa_clip_info(clip: *const FaClip, out: *mut FaClipInfo)
             frames: clip.frames() as u64,
             seconds: clip.seconds(),
             bytes: clip.bytes() as u64,
+            streamed: u32::from(clip.streamed()),
         };
         // SAFETY: as this function's.
         unsafe { write(out, "out", info) }
@@ -583,6 +626,7 @@ pub unsafe extern "C" fn fa_audio_play(
                         from: p.from,
                         spatial: spatial(p.spatial)?,
                         position: p.position,
+                        fade_in: p.fade_in,
                     },
                 )
                 .map_err(invalid)?;
@@ -600,6 +644,49 @@ pub unsafe extern "C" fn fa_audio_play(
 pub unsafe extern "C" fn fa_voice_stop(audio: *mut FaAudio, voice: u64) -> FaStatus {
     // SAFETY: as this function's.
     unsafe { with_audio(audio, |a| a.audio.stop(voice).map_err(invalid)) }
+}
+
+/// Fades a voice as `fade` says (its `to` times the voice's volume), then,
+/// when `stop` is 1, stops it: it isn't playing from now. By pointer, as a
+/// double passed to a native call is an allocation in Dart's JIT.
+///
+/// # Safety
+///
+/// `audio` is null or live; `fade` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fa_voice_fade(audio: *mut FaAudio, voice: u64, fade: *const FaFade, stop: u32) -> FaStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_audio(audio, |a| {
+            if fade.is_null() {
+                return Err(Error::null("fade"));
+            }
+            let f = *fade;
+            a.audio.fade(voice, f.to, f.seconds, flag(stop, "stop")?).map_err(invalid)
+        })
+    }
+}
+
+/// Fades a group's volume as `fade` says (over the next few milliseconds
+/// for 0 seconds): every voice in it follows. Groups are 1 to
+/// `FA_MAX_GROUPS` - 1, each at 1 until set.
+///
+/// # Safety
+///
+/// `audio` is null or live; `fade` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fa_group_set(audio: *mut FaAudio, group: u32, fade: *const FaFade) -> FaStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_audio(audio, |a| {
+            if fade.is_null() {
+                return Err(Error::null("fade"));
+            }
+            let f = *fade;
+            let group = u8::try_from(group).map_err(|_| invalid(format!("group {group} isn't one")))?;
+            a.audio.set_group(group, f.to, f.seconds).map_err(invalid)
+        })
+    }
 }
 
 /// Pauses a voice where it is (`paused` 1), or plays it on (0).
@@ -757,6 +844,7 @@ pub unsafe extern "C" fn fa_audio_stats(audio: *mut FaAudio, out: *mut FaStats) 
                     callbacks: s.callbacks,
                     underruns: s.underruns,
                     reopened: s.reopened,
+                    starved: s.starved,
                 },
             )
         })
