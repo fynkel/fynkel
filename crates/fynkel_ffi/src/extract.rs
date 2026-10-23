@@ -51,8 +51,8 @@ use fynkel_render::{
     ScreenEffect, ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
-    Camera, Color, DrawnParticle, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer,
-    ObjectId, Quat, RenderMode, ShaderId, TextureId, Transform, World, WorldMatrices,
+    Camera, Color, DrawnParticle, ImageData, Light, LightKind, MAX_TRAIL_POINTS, Material, MaterialId, MeshData,
+    MeshId, MeshRenderer, ObjectId, Quat, RenderMode, ShaderId, TextureId, Transform, World, WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -420,6 +420,24 @@ impl Extract {
                 own: r.own,
             });
         });
+
+        // Room for as many particles and trail points as there can be, as
+        // each system is a fixed pool: how many there are now goes up and
+        // down, and a scene buffer grown only to the most it has seen grows
+        // again on a busier frame, whenever the worker happens to fill it.
+        // Reserved once, it grows only when the settings do.
+        if world.has_particles() || world.has_trails() {
+            let systems = world
+                .particle_systems()
+                .filter(|(_, s)| s.settings().material.is_some_and(|m| self.materials.contains_key(&m)))
+                .map(|(_, s)| s.settings().max_particles as usize);
+            let trails = world
+                .trails()
+                .filter(|(_, t)| t.settings().material.is_some_and(|m| self.materials.contains_key(&m)))
+                .map(|_| MAX_TRAIL_POINTS);
+            let most = systems.chain(trails).sum::<usize>();
+            scene.particles.reserve(most);
+        }
 
         // Particle systems with a material, each one draw of its particles.
         if world.has_particles() {
