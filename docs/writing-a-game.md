@@ -1867,17 +1867,75 @@ class Fountain extends GameObject {
   and magic, and needs no order. A material that isn't blended is drawn
   as transparent. Behind something solid, they're hidden.
 
+**The look.** Unity's other modules, by the same names:
+
+```dart
+/// A fire: [flames] a texture of 4 × 4 frames of a flame.
+ParticleSystem fire(Texture2D flames) => ParticleSystem(
+  startSize: const Range(0.8, 1.2),
+  startLifetime: const Range(0.7, 1),
+  emission: const Emission(rateOverTime: 40),
+  forceOverLifetime: const ParticleVector(y: ParticleCurve(2)),
+  noise: const ParticleNoise(strength: ParticleCurve(0.4), frequency: 1.5, scrollSpeed: 1),
+  textureSheet: TextureSheet(columns: 4, rows: 4),
+  softness: 0.3,
+  material: Material(baseColorTexture: flames, blending: Blending.additive),
+);
+```
+
+- **Curves.** A module's numbers are `ParticleCurve`s, Unity's
+  `MinMaxCurve`: `ParticleCurve(2)` a constant,
+  `ParticleCurve.between(1, 3)` random between two constants,
+  `ParticleCurve.curve((t) => …, scale:)` a curve over each particle's
+  life, `ParticleCurve.curves(a, b)` random between two curves. Each
+  particle keeps its own place between the two for its whole life.
+- **Movement.** `velocityOverLifetime` (a `ParticleVector`, x, y and z
+  curves, in local or world space) is added to how it moves;
+  `forceOverLifetime` speeds it up; `limitVelocity` holds its speed to a
+  `limit` (by `dampen`, 0 to 1, a second) and slows it by `drag`;
+  `rotationOverLifetime` turns it, radians a second; `noise` pushes it
+  about in a field that moves with `scrollSpeed` (`octaves` up to 4, each
+  costing about as much again).
+- **By speed.** `sizeBySpeed` and `colorBySpeed` scale its size and
+  colour from `minSpeed` to `maxSpeed`: sparks white when fast, red as
+  they slow.
+- **Texture sheets.** `textureSheet` splits the base colour texture into
+  `columns × rows` frames, played over each life (`frameOverTime`,
+  `cycles`), from a `startFrame`, or one row each (`randomRow`): flames,
+  explosions.
+- **How they're drawn.** `renderMode`: `ParticleRenderMode.billboard`
+  facing the camera (the default); `.stretched(lengthScale:,
+  speedScale:)` long the way they move (sparks, rain);
+  `ParticleRenderMode.horizontal` lying flat (ripples, splashes);
+  `ParticleRenderMode.vertical` standing up and turning to the camera
+  round up; `.mesh(mesh)` a mesh each, turned round up by its rotation
+  (leaves, rocks). A mesh in use can't be disposed.
+- **Soft particles.** `softness`, in metres: they fade out as they come
+  that close to what's behind, so smoke doesn't cut a hard line where it
+  meets the floor. At `Quality.low`, which has no depth to read, they're
+  hard.
+- **Lit particles.** `lit: true` lights them as a surface facing the
+  camera, with the material's `metallic` and `roughness`, as Unity's
+  Particles/Lit is: smoke the sun falls on.
+- **A material's own shader** (§14) shades them, its `unlit` or `surface`
+  function, with `particle_age()` (0 to 1 through its life) and
+  `particle_random()` (its own number) to tell them apart.
+
 Settings change while it plays, and its particles stay. A value it
 can't have (a negative lifetime, a cone over 90°, more than 8 bursts)
 throws an `ArgumentError` and the old one stays.
 
 **What it costs.** Each system is one draw, however many particles it
 has. The engine moves 10,000 particles in about 0.03 ms a frame on a
-Mac and 0.1 ms on an iPhone 16 Pro Max; `world.particleStepTime` says
-how long the last frame's took (Unity's Profiler's
-ParticleSystem.Update). A frame with systems playing and bursting makes
+Mac, 0.1 ms on an iPhone 16 Pro Max and 0.3 ms on a Galaxy Note10+;
+`world.particleStepTime` says how long the last frame's took (Unity's
+Profiler's ParticleSystem.Update). A frame with systems playing and bursting makes
 no garbage. What costs most on a phone is what's drawn over and over:
-big see-through particles covering the screen.
+big see-through particles covering the screen. The modules cost more:
+on a Mac, 10,000 particles take about 0.08 ms more for each of velocity
+over lifetime, force and limit velocity, 0.04 ms for rotation, and 0.15
+ms for noise (0.4 ms with three octaves), as Unity's noise is its most
+expensive module.
 
 ## 14. Shaders
 
@@ -1945,6 +2003,9 @@ class LavaPool extends GameObject {
   `var heights: texture_2d<f32>;` (data), read with `sample(rock, in.uv)`,
   set like values: `material.set('rock', await assets.texture('rock.png'))`.
 - `frame_time()` is the game's time, stopping when it's paused.
+- `particle_age()` (0 to 1 through its life) and `particle_random()`
+  (its own number, 0 to 1) tell a particle drawn with the material
+  (§13c) from the others; on anything else they're 0.
 - `hash`, `noise`, `noise3`, `fbm`, `fresnel`, `triplanar` and `remap`
   are there for patterns, rims and textures without UVs.
 
@@ -3504,9 +3565,7 @@ What keeps a game fast:
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
   it by hand), the microphone, and sound made in code as it plays. On
   Android, another app taking the sound doesn't pause the game's.
-- **Particles** (§13c): texture sheets, stretched and mesh particles,
-  velocity, forces and noise over lifetime, soft and lit particles, a
-  material's own shader on them, sub emitters, collision, trails
+- **Particles** (§13c): sub emitters, collision, trails
   (`TrailRenderer`) and emission over distance, which come later in
   this stage; and particles on the GPU (Unity's VFX Graph), lights on
   particles, collision with the physics world, wind zones, a mesh's
@@ -3598,6 +3657,12 @@ What keeps a game fast:
 | Stop Action: Destroy, Disable, Callback (`OnParticleSystemStopped`) | `stopAction: StopAction.destroy`, `disable`, `callback` (`onStopped`) |
 | Simulation Space: Local, World | `simulationSpace: ParticleSpace.local`, `world` |
 | A particle material (Particles/Unlit), Alpha or Additive | A `Material` with `Blending.transparent` or `Blending.additive` |
+| `MinMaxCurve` (Constant, Curve, Random Between Two Constants or Curves) | `ParticleCurve(v)`, `.curve(f)`, `.between(a, b)`, `.curves(f, g)` |
+| Velocity, Limit Velocity, Force and Rotation over Lifetime; Noise | `velocityOverLifetime`, `limitVelocity`, `forceOverLifetime`, `rotationOverLifetime`, `noise` |
+| Size by Speed, Color by Speed | `sizeBySpeed: SizeBySpeed(f, minSpeed:, maxSpeed:)`, `colorBySpeed: ColorBySpeed(gradient, …)` |
+| Texture Sheet Animation (Grid) | `textureSheet: TextureSheet(columns:, rows:)` |
+| Renderer's Render Mode: Billboard, Stretched, Horizontal, Vertical, Mesh | `renderMode: ParticleRenderMode.billboard`, `.stretched()`, `.horizontal`, `.vertical`, `.mesh(mesh)` |
+| Particles/Lit; Soft Particles | `lit: true`; `softness` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |

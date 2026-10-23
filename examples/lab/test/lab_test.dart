@@ -28,6 +28,7 @@ import 'package:lab/scenes/joints_character.dart';
 import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
+import 'package:lab/scenes/particles_look.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/moving_basics.dart';
@@ -350,6 +351,35 @@ void main() {
     control<Toggle>('ten thousand').onChanged(false);
     world.update(1 / 60);
     expect(scene.readout.value, isNot(contains('the ten')));
+  });
+
+  test('Particles: the look: five effects, each playing, and its switches', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ParticlesLookScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    Toggle toggle(String label) => scene.controls.whereType<Toggle>().firstWhere((c) => c.label == label);
+    frames(90);
+    expect(scene.systems.keys, particleEffects);
+    for (final MapEntry(key: name, value: systems) in scene.systems.entries) {
+      expect(systems.every((s) => s.particleCount > 0), isTrue, reason: name);
+    }
+    expect(scene.readout.value, matches(RegExp(r'^fire \d+, smoke \d+, swirl \d+, sparks \d+, rain \d+\n')));
+    final smoke = scene.systems['smoke']!.single;
+    toggle('soft particles').onChanged(false);
+    expect((smoke.softness, scene.systems['fire']!.single.softness), (0, 0));
+    toggle('lit smoke').onChanged(false);
+    expect(smoke.lit, isFalse);
+    toggle('noise').onChanged(false);
+    expect(smoke.noise, isNull);
+    toggle('rain').onChanged(false);
+    expect(scene.systems['rain']!.every((s) => !s.isEmitting), isTrue);
+    expect(toggle('rain').value(), isFalse);
   });
 
   test('Pooling: the basics: the fountain reuses its balls, and the handle lets go of one that went back', () {

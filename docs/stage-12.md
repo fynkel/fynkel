@@ -233,8 +233,9 @@ particles is unchanged.
   the renderer; the iPhone 16 Pro Max (the lab, profile, `LAB_SCENE=Particles
   LAB_RATES=true`) 0.11 ms median over two-second windows, the slowest
   frame of a window under 0.5 ms but for the first (2.9 ms, starting)
-  and one of 1.1 ms. **The Note10+ is still to measure**; at the
-  iPhone's ten times the Mac, it should be well under 1 ms.
+  and one of 1.1 ms; the Note10+ (measured with phase 2) 0.33 ms
+  median, the slowest frame of a window 0.9 to 1.9 ms but for the first
+  (10.3 ms, starting).
 - A world without particles: `step_particles` and Dart's step return at
   once, extraction adds nothing, and every golden from before is the
   same.
@@ -255,6 +256,52 @@ particles is unchanged.
 
 *Done when* each effect's golden passes, and the lab's scene holds 60 on
 all three devices at low.
+
+*As built* (branch stage-12-look, ABI 40):
+
+- crates/fynkel_world/src/particles.rs: `Curve` is Unity's MinMaxCurve
+  (a constant, two constants, a curve or two as 64-step tables), each
+  particle keeping its own number between the two for life (a seed per
+  particle, hashed once per use). Velocity, force and rotation over
+  lifetime; limit velocity (a limit, dampen, drag); size and colour by
+  speed; value noise (one hash per corner for all three axes, up to 4
+  octaves, scrolling); texture sheets (columns × rows, frame over time,
+  start frame, cycles, a random row); render modes billboard, stretched
+  (length and speed scale), horizontal, vertical and mesh (a mesh in use
+  can't be removed). 33 tests.
+- The C interface: `FyCurve`, `FyParticleVector`, `FyParticleLimit`,
+  `FyParticleNoise`, `FyParticleSheet` and the render modes in
+  `FyParticleSettings`.
+- Drawing: a 128-byte instance (the frame's UVs, the particle's age and
+  random number, its velocity for stretching); stretched, flat, upright
+  and mesh vertex entries; soft particles read the depth behind (none at
+  Quality.low, so they're hard there); lit particles shade as a surface
+  facing the camera; a material's own shader is appended to
+  particles.wgsl, with `particle_age()` and `particle_random()` in
+  library.wgsl. Pipelines are built once per kind and cached. Goldens:
+  particles_look (the renderer), and particles_fire, _smoke, _swirl,
+  _sparks and _rain (the lab's effects, each alone, seeded, after two
+  seconds).
+- Dart: `ParticleCurve` (`.between`, `.curve`, `.curves`),
+  `ParticleVector`, `LimitVelocity`, `SizeBySpeed`, `ColorBySpeed`,
+  `ParticleNoise`, `TextureSheet`, `ParticleRenderMode`, and `lit` and
+  `softness` on `ParticleSystem`. No garbage with every module on
+  (test/particles_alloc_test.dart).
+- What the modules cost, 10,000 particles on the Mac (release,
+  particles_bench.rs): plain 0.03 ms; velocity over lifetime 0.08, force
+  0.08, limit 0.08, rotation 0.04, noise 0.18 (three octaves 0.41);
+  every module at once about 0.6 ms, and 0.26 ms for extraction's copy.
+  Noise is the dear one, as in Unity.
+- The lab: "Particles: the look", fire (an additive 4 × 4 sheet, force
+  up, noise), smoke (lit, soft, rising, growing, turning), a swirl (its
+  own shader, velocity curves taking it round), sparks (stretched, drag,
+  colour and size by speed) and rain (stretched drops, flat splashes);
+  each effect's switch, soft, lit and noise switches; `LAB_QUALITY` and
+  `LAB_RATES` for measuring.
+- Frame rates at low, the lab's page (profile, `LAB_SCENE="Particles:
+  the look" LAB_QUALITY=low LAB_RATES=true`): RATES_HERE
+- The guide's §13c "The look", §14's `particle_age()` and
+  `particle_random()`, §22's rows.
 
 ### Phase 3: particles and the world
 
