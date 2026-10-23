@@ -257,7 +257,7 @@ fn how_long_a_mesh_takes_to_set_again() {
         let start = std::time::Instant::now();
         for _ in 0..rounds {
             physics.set_mesh(mesh, &points, &triangles).unwrap();
-            physics.step(STEP);
+            physics.step(STEP).unwrap();
         }
         let each = start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds);
         println!("{} triangles: {each:.3} ms to set and step", triangles.len());
