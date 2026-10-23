@@ -324,7 +324,30 @@ fn a_steady_frame_with_particle_systems_allocates_nothing_on_the_calling_thread(
     for i in 0..120 {
         frame(i as f32 / 60.0);
     }
-    view.read(120, 64, 64);
+    // A frame filled while the worker draws one and another waits takes a
+    // third scene buffer, new and empty, which grows as it's filled. Left
+    // to chance, the worker may first fall that far behind in the measured
+    // frames (it did, once in a while, on a busy machine). So frames back
+    // to back till some were replaced while waiting: by then all three
+    // buffers have been filled.
+    let mut warmed = 120;
+    for _ in 0..1000 {
+        let mut stats = FyViewStats::default();
+        // SAFETY: a live view and a pointer to a local.
+        ok(unsafe { fy_view_stats(view.0, &mut stats) });
+        if stats.coalesced >= 3 {
+            break;
+        }
+        for _ in 0..3 {
+            warmed += 1;
+            frame(warmed as f32 / 60.0);
+        }
+    }
+    let mut stats = FyViewStats::default();
+    // SAFETY: a live view and a pointer to a local.
+    ok(unsafe { fy_view_stats(view.0, &mut stats) });
+    assert!(stats.coalesced >= 3, "the worker never fell behind: {stats:?}");
+    view.read(warmed, 64, 64);
     let mut numbers = Vec::with_capacity(100);
     let allocations = count(|| {
         for i in 0..100 {
