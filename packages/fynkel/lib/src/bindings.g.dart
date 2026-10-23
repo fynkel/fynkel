@@ -645,7 +645,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 39;
+const int FY_ABI_VERSION = 40;
 
 const int FY_APPLE_MORE = 2;
 
@@ -656,6 +656,10 @@ const int FY_BLEND_ADDITIVE = 2;
 const int FY_BLEND_OPAQUE = 0;
 
 const int FY_BLEND_TRANSPARENT = 1;
+
+const int FY_CURVE_CONSTANT = 0;
+
+const int FY_CURVE_CURVES = 1;
 
 const int FY_LIGHT_AMBIENT = 1;
 
@@ -690,6 +694,16 @@ const int FY_PARTICLES_STOP = 1;
 const int FY_PARTICLES_STOP_AND_CLEAR = 2;
 
 const int FY_PARTICLE_MAX_BURSTS = 8;
+
+const int FY_PARTICLE_RENDER_BILLBOARD = 0;
+
+const int FY_PARTICLE_RENDER_HORIZONTAL = 2;
+
+const int FY_PARTICLE_RENDER_MESH = 4;
+
+const int FY_PARTICLE_RENDER_STRETCHED = 1;
+
+const int FY_PARTICLE_RENDER_VERTICAL = 3;
 
 const int FY_PARTICLE_SHAPE_BOX = 4;
 
@@ -878,6 +892,20 @@ final class FyColor extends ffi.Struct {
     ..ref.g = g
     ..ref.b = b
     ..ref.a = a;
+}
+
+final class FyCurve extends ffi.Struct {
+  @ffi.Uint32()
+  external int mode;
+
+  @ffi.Float()
+  external double min;
+
+  @ffi.Float()
+  external double max;
+
+  @ffi.Array.multi([2, 64])
+  external ffi.Array<ffi.Array<ffi.Float>> tables;
 }
 
 final class FyDebugLine extends ffi.Struct {
@@ -1105,6 +1133,28 @@ final class FyParticleEvent extends ffi.Struct {
         ..ref.action = action;
 }
 
+final class FyParticleLimit extends ffi.Struct {
+  external FyCurve limit;
+
+  @ffi.Float()
+  external double dampen;
+
+  external FyCurve drag;
+}
+
+final class FyParticleNoise extends ffi.Struct {
+  external FyCurve strength;
+
+  @ffi.Float()
+  external double frequency;
+
+  @ffi.Float()
+  external double scroll_speed;
+
+  @ffi.Uint32()
+  external int octaves;
+}
+
 final class FyParticleSettings extends ffi.Struct {
   @ffi.Float()
   external double duration;
@@ -1179,8 +1229,72 @@ final class FyParticleSettings extends ffi.Struct {
   @ffi.Array.multi([64])
   external ffi.Array<FyColor> color_table;
 
+  @ffi.Bool()
+  external bool has_velocity_over_lifetime;
+
+  external FyParticleVector velocity_over_lifetime;
+
+  @ffi.Bool()
+  external bool has_limit_velocity;
+
+  external FyParticleLimit limit_velocity;
+
+  @ffi.Bool()
+  external bool has_force_over_lifetime;
+
+  external FyParticleVector force_over_lifetime;
+
+  @ffi.Bool()
+  external bool has_rotation_over_lifetime;
+
+  external FyCurve rotation_over_lifetime;
+
+  @ffi.Bool()
+  external bool has_size_by_speed;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<ffi.Float> size_by_speed;
+
+  external FyRange size_speeds;
+
+  @ffi.Bool()
+  external bool has_color_by_speed;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<FyColor> color_by_speed;
+
+  external FyRange color_speeds;
+
+  @ffi.Bool()
+  external bool has_noise;
+
+  external FyParticleNoise noise;
+
+  @ffi.Bool()
+  external bool has_texture_sheet;
+
+  external FyParticleSheet texture_sheet;
+
   @ffi.Uint64()
   external int material;
+
+  @ffi.Uint32()
+  external int render_mode;
+
+  @ffi.Float()
+  external double length_scale;
+
+  @ffi.Float()
+  external double speed_scale;
+
+  @ffi.Uint64()
+  external int mesh;
+
+  @ffi.Bool()
+  external bool lit;
+
+  @ffi.Float()
+  external double softness;
 }
 
 final class FyParticleShape extends ffi.Struct {
@@ -1203,6 +1317,24 @@ final class FyParticleShape extends ffi.Struct {
 
   @ffi.Float()
   external double random_direction;
+}
+
+final class FyParticleSheet extends ffi.Struct {
+  @ffi.Uint32()
+  external int columns;
+
+  @ffi.Uint32()
+  external int rows;
+
+  external FyCurve frame_over_time;
+
+  external FyRange start_frame;
+
+  @ffi.Float()
+  external double cycles;
+
+  @ffi.Bool()
+  external bool random_row;
 }
 
 final class FyParticleState extends ffi.Struct {
@@ -1229,6 +1361,17 @@ final class FyParticleState extends ffi.Struct {
     ..ref.playing = playing
     ..ref.paused = paused
     ..ref.emitting = emitting;
+}
+
+final class FyParticleVector extends ffi.Struct {
+  external FyCurve x;
+
+  external FyCurve y;
+
+  external FyCurve z;
+
+  @ffi.Uint32()
+  external int space;
 }
 
 final class FyQuality extends ffi.Struct {

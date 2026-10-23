@@ -103,6 +103,18 @@ fn frame_delta() -> f32 {
     return frame.time.y;
 }
 
+// On a particle (stage 12): how far through its life it is, 0 at its
+// birth to 1 at its death; elsewhere 0. A particle's `PerObject` numbers
+// are this and `particle_random()`.
+fn particle_age() -> f32 {
+    return fy_in.own.x;
+}
+
+// On a particle: a number of its own, 0 to 1, the same all its life.
+fn particle_random() -> f32 {
+    return fy_in.own.y;
+}
+
 // What's behind a see-through surface: the solid scene and the sky, as
 // drawn before anything see-through. A shader that reads them is drawn
 // see-through, and a frame it's in keeps them; other frames pay nothing.

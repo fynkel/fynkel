@@ -1191,6 +1191,68 @@ class GameObject with _Moving {
           ..a = colors[i * 4 + 3];
       }
     }
+    s.has_velocity_over_lifetime = value.velocityOverLifetime != null;
+    value.velocityOverLifetime?._write(s.velocity_over_lifetime);
+    s.has_force_over_lifetime = value.forceOverLifetime != null;
+    value.forceOverLifetime?._write(s.force_over_lifetime);
+    s.has_limit_velocity = value.limitVelocity != null;
+    if (value.limitVelocity case final l?) {
+      l.limit._write(s.limit_velocity.limit);
+      l.drag._write(s.limit_velocity.drag);
+      s.limit_velocity.dampen = l.dampen;
+    }
+    s.has_rotation_over_lifetime = value.rotationOverLifetime != null;
+    value.rotationOverLifetime?._write(s.rotation_over_lifetime);
+    s.has_size_by_speed = value.sizeBySpeed != null;
+    if (value.sizeBySpeed case final b?) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.size_by_speed[i] = b._table[i];
+      }
+      range(s.size_speeds, Range(b.minSpeed, b.maxSpeed));
+    }
+    s.has_color_by_speed = value.colorBySpeed != null;
+    if (value.colorBySpeed case final b?) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.color_by_speed[i]
+          ..r = b._table[i * 4]
+          ..g = b._table[i * 4 + 1]
+          ..b = b._table[i * 4 + 2]
+          ..a = b._table[i * 4 + 3];
+      }
+      range(s.color_speeds, Range(b.minSpeed, b.maxSpeed));
+    }
+    s.has_noise = value.noise != null;
+    if (value.noise case final n?) {
+      n.strength._write(s.noise.strength);
+      s.noise
+        ..frequency = n.frequency
+        ..scroll_speed = n.scrollSpeed
+        ..octaves = n.octaves;
+    }
+    s.has_texture_sheet = value.textureSheet != null;
+    if (value.textureSheet case final t?) {
+      t.frameOverTime._write(s.texture_sheet.frame_over_time);
+      range(s.texture_sheet.start_frame, t.startFrame);
+      s.texture_sheet
+        ..columns = t.columns
+        ..rows = t.rows
+        ..cycles = t.cycles
+        ..random_row = t.randomRow;
+    }
+    final mode = value.renderMode;
+    s
+      ..render_mode = switch (mode._kind) {
+        _RenderKind.billboard => FY_PARTICLE_RENDER_BILLBOARD,
+        _RenderKind.stretched => FY_PARTICLE_RENDER_STRETCHED,
+        _RenderKind.horizontal => FY_PARTICLE_RENDER_HORIZONTAL,
+        _RenderKind.vertical => FY_PARTICLE_RENDER_VERTICAL,
+        _RenderKind.mesh => FY_PARTICLE_RENDER_MESH,
+      }
+      ..length_scale = mode.lengthScale
+      ..speed_scale = mode.speedScale
+      ..mesh = mode.mesh == null ? 0 : world._meshId(mode.mesh!)
+      ..lit = value.lit
+      ..softness = value.softness;
     check(fy_particles_set(w, id, scratch.particleSettings));
     world._particleSystems[id] = value;
   }

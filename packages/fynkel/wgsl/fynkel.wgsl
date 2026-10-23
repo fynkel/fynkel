@@ -121,6 +121,18 @@ fn frame_time() -> f32 {
     return 0.0;
 }
 
+// On a particle (stage 12): how far through its life it is, 0 at its
+// birth to 1 at its death; elsewhere 0.
+fn particle_age() -> f32 {
+    return 0.0;
+}
+
+// On a particle: a number of its own, 0 to 1, the same all its life;
+// elsewhere 0.
+fn particle_random() -> f32 {
+    return 0.0;
+}
+
 // How much `frame_time()` moved since the last frame.
 fn frame_delta() -> f32 {
     return 0.0;

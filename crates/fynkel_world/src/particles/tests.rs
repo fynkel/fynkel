@@ -345,3 +345,281 @@ fn a_steady_frame_allocates_nothing() {
     assert_eq!(pointer, world.particles(id).unwrap().position.as_ptr());
     assert!(out.capacity() == 1000);
 }
+
+/// One particle, standing still at the origin, living `lifetime` seconds,
+/// no gravity: a module's effect on it alone.
+fn still_one(lifetime: f32) -> ParticleSettings {
+    ParticleSettings {
+        shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+        start_speed: Range::constant(0.0),
+        gravity_modifier: 0.0,
+        ..burst(1.0, lifetime)
+    }
+}
+
+fn one(world: &World, id: ObjectId) -> DrawnParticle {
+    let mut out = Vec::new();
+    world.particles(id).unwrap().drawn(world.world_matrix(id).unwrap(), &mut out);
+    out[0]
+}
+
+fn ramp(from: f32, to: f32) -> Box<[[f32; TABLE]; 2]> {
+    let table = std::array::from_fn(|i| from + (to - from) * i as f32 / (TABLE - 1) as f32);
+    Box::new([table; 2])
+}
+
+#[test]
+fn a_curve_picks_between_its_two_by_a_particles_own_number() {
+    assert_eq!(Curve::Constant(Range { min: 2.0, max: 4.0 }).at(0.3, 0.5), 3.0);
+    let curves = Curve::Curves(Box::new([[0.0; TABLE], [10.0; TABLE]]));
+    assert_eq!(curves.at(0.7, 0.25), 2.5);
+    assert_eq!(Curve::Curves(ramp(0.0, 1.0)).at(0.5, 0.9), 0.5);
+    // Each particle's numbers stay put, and differ from use to use.
+    assert_eq!(pick(42, 3), pick(42, 3));
+    assert_ne!(pick(42, 3), pick(42, 4));
+    let mean = (0..10_000).map(|s| pick(s * 7919, 1)).sum::<f32>() / 10_000.0;
+    assert!((mean - 0.5).abs() < 0.02, "{mean}");
+}
+
+#[test]
+fn velocity_over_lifetime_moves_without_changing_the_velocity() {
+    let (mut world, id) = world_with(ParticleSettings {
+        velocity_over_lifetime: Some(VectorOverLifetime {
+            x: Curve::constant(2.0),
+            y: Curve::constant(0.0),
+            z: Curve::constant(0.0),
+            space: Space::World,
+        }),
+        ..still_one(5.0)
+    });
+    step(&mut world, 1.0, 0.01);
+    let p = one(&world, id);
+    assert!((p.position.x - 2.0).abs() < 0.05, "{:?}", p.position);
+    // Drawn, it goes the way it moves.
+    assert!((p.velocity - Vec3::X * 2.0).length() < 1e-4);
+    assert_eq!(world.particles(id).unwrap().velocity[0], Vec3::ZERO);
+}
+
+#[test]
+fn a_local_velocity_over_lifetime_turns_with_the_object() {
+    let (mut world, id) = world_with(ParticleSettings {
+        space: Space::World,
+        velocity_over_lifetime: Some(VectorOverLifetime {
+            x: Curve::constant(1.0),
+            y: Curve::constant(0.0),
+            z: Curve::constant(0.0),
+            space: Space::Local,
+        }),
+        ..still_one(5.0)
+    });
+    // Turned a quarter round up, its x is the world's -z.
+    world
+        .insert(id, Transform { rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2), ..Transform::default() })
+        .unwrap();
+    step(&mut world, 1.0, 0.01);
+    let p = one(&world, id).position;
+    assert!((p - Vec3::new(0.0, 0.0, -1.0)).length() < 0.05, "{p:?}");
+}
+
+#[test]
+fn force_over_lifetime_speeds_it_up() {
+    let (mut world, id) = world_with(ParticleSettings {
+        force_over_lifetime: Some(VectorOverLifetime {
+            x: Curve::constant(0.0),
+            y: Curve::constant(4.0),
+            z: Curve::constant(0.0),
+            space: Space::World,
+        }),
+        ..still_one(5.0)
+    });
+    step(&mut world, 1.0, 0.001);
+    let p = one(&world, id);
+    assert!((p.velocity.y - 4.0).abs() < 0.01);
+    assert!((p.position.y - 2.0).abs() < 0.02, "{:?}", p.position);
+}
+
+#[test]
+fn a_speed_limit_holds_and_drag_slows_the_same_at_any_frame_rate() {
+    let limited = |dampen: f32, drag: f32| ParticleSettings {
+        start_speed: Range::constant(10.0),
+        limit_velocity: Some(LimitVelocity { limit: Curve::constant(3.0), dampen, drag: Curve::constant(drag) }),
+        ..still_one(5.0)
+    };
+    let (mut world, id) = world_with(limited(1.0, 0.0));
+    step(&mut world, 0.1, 0.01);
+    assert!((one(&world, id).velocity.length() - 3.0).abs() < 1e-3);
+
+    let speed_after = |dt: f32| {
+        let (mut world, id) = world_with(limited(0.5, 1.0));
+        step(&mut world, 1.0, dt);
+        one(&world, id).velocity.length()
+    };
+    let (fast, slow) = (speed_after(1.0 / 120.0), speed_after(1.0 / 30.0));
+    assert!((fast - slow).abs() < 0.02, "{fast} {slow}");
+    assert!(fast < 3.0);
+}
+
+#[test]
+fn rotation_over_lifetime_turns_it() {
+    let (mut world, id) =
+        world_with(ParticleSettings { rotation_over_lifetime: Some(Curve::constant(2.0)), ..still_one(5.0) });
+    step(&mut world, 0.5, 0.01);
+    assert!((one(&world, id).rotation - 1.0).abs() < 0.03);
+}
+
+#[test]
+fn size_and_colour_by_speed_follow_how_fast_it_goes() {
+    let (mut world, id) = world_with(ParticleSettings {
+        start_speed: Range::constant(5.0),
+        start_size: Range::constant(1.0),
+        size_by_speed: Some(BySpeed { table: Box::new(ramp(1.0, 3.0)[0]), min_speed: 0.0, max_speed: 10.0 }),
+        color_by_speed: Some(BySpeed {
+            table: Box::new([Color::rgba(1.0, 1.0, 1.0, 0.5); TABLE]),
+            min_speed: 0.0,
+            max_speed: 1.0,
+        }),
+        ..still_one(5.0)
+    });
+    step(&mut world, 0.01, 0.01);
+    let p = one(&world, id);
+    assert!((p.size - 2.0).abs() < 1e-3);
+    assert!((p.color[3] - 0.5).abs() < 1e-3);
+}
+
+#[test]
+fn noise_moves_particles_apart_smoothly() {
+    let (mut world, id) = world_with(ParticleSettings {
+        noise: Some(Noise { strength: Curve::constant(1.0), frequency: 0.5, scroll_speed: 0.3, octaves: 2 }),
+        shape: Shape { kind: ShapeKind::Box, size: Vec3::splat(4.0), ..Shape::default() },
+        ..ParticleSettings { start_speed: Range::constant(0.0), gravity_modifier: 0.0, ..burst(50.0, 5.0) }
+    });
+    let before = positions(&world, id);
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    let before = if before.is_empty() { positions(&world, id) } else { before };
+    step(&mut world, 1.0, 1.0 / 60.0);
+    let after = positions(&world, id);
+    let moved: Vec<f32> = before.iter().zip(&after).map(|(a, b)| (*a - *b).length()).collect();
+    assert!(moved.iter().all(|&m| m < 1.01), "{moved:?}");
+    assert!(moved.iter().sum::<f32>() / moved.len() as f32 > 0.05, "{moved:?}");
+    // Smooth: near points, near pushes.
+    let n = Noise { strength: Curve::constant(1.0), frequency: 1.0, scroll_speed: 0.0, octaves: 1 };
+    let (a, b) = (noise_at(&n, Vec3::new(0.3, 0.2, 0.1), 0.0), noise_at(&n, Vec3::new(0.31, 0.2, 0.1), 0.0));
+    assert!((a - b).length() < 0.05);
+}
+
+#[test]
+fn a_texture_sheet_plays_its_frames_over_a_life() {
+    let sheet = TextureSheet { columns: 4, rows: 2, ..TextureSheet::default() };
+    let frames: Vec<u32> = [0.0, 0.2, 0.5, 0.99].iter().map(|&t| sheet_frame(&sheet, t, 9)).collect();
+    assert_eq!(frames, [0, 1, 4, 7]);
+    let twice = TextureSheet { cycles: 2.0, ..sheet.clone() };
+    assert_eq!(sheet_frame(&twice, 0.5, 9), 0);
+    // A random row plays its own row's four.
+    let rows = TextureSheet { random_row: true, ..sheet.clone() };
+    for seed in 0..50 {
+        let start = sheet_frame(&rows, 0.0, seed);
+        assert!(start == 0 || start == 4);
+        assert_eq!(sheet_frame(&rows, 0.99, seed), start + 3);
+    }
+    let (mut world, id) = world_with(ParticleSettings { texture_sheet: Some(sheet), ..still_one(1.0) });
+    step(&mut world, 0.55, 0.01);
+    assert_eq!(one(&world, id).frame, 4);
+}
+
+#[test]
+fn a_stretched_particle_reaches_past_its_size_in_its_box() {
+    let (mut world, id) = world_with(ParticleSettings {
+        start_speed: Range::constant(10.0),
+        start_size: Range::constant(0.1),
+        render_mode: RenderMode::Stretched { length_scale: 1.0, speed_scale: 0.1 },
+        ..still_one(5.0)
+    });
+    step(&mut world, 0.01, 0.01);
+    let mut out = Vec::new();
+    let (lo, hi) = world.particles(id).unwrap().drawn(Mat4::IDENTITY, &mut out).unwrap();
+    assert!(hi.y - lo.y >= 0.2 - 1e-4, "{lo:?} {hi:?}");
+}
+
+#[test]
+fn a_mesh_drawn_by_a_system_must_exist_and_cant_be_removed() {
+    let mut world = World::new();
+    let id = world.spawn();
+    let gone = world.add_mesh(fynkel_mesh::MeshData::cube());
+    world.remove_mesh(gone).unwrap();
+    let settings = |mesh| ParticleSettings { render_mode: RenderMode::Mesh(mesh), ..burst(3.0, 2.0) };
+    assert!(matches!(world.set_particles(id, settings(gone)), Err(WorldError::NoMesh(_))));
+    let mesh = world.add_mesh(fynkel_mesh::MeshData::cube());
+    world.set_particles(id, settings(mesh)).unwrap();
+    assert!(matches!(world.remove_mesh(mesh), Err(WorldError::MeshInUse { .. })));
+    world.despawn(id).unwrap();
+    world.remove_mesh(mesh).unwrap();
+}
+
+#[test]
+fn phase_two_settings_that_cant_be_are_refused() {
+    let (mut world, id) = world_with(burst(3.0, 2.0));
+    let nan = Curve::constant(f32::NAN);
+    for bad in [
+        ParticleSettings { rotation_over_lifetime: Some(nan.clone()), ..ParticleSettings::default() },
+        ParticleSettings {
+            limit_velocity: Some(LimitVelocity {
+                limit: Curve::constant(1.0),
+                dampen: 2.0,
+                drag: Curve::constant(0.0),
+            }),
+            ..ParticleSettings::default()
+        },
+        ParticleSettings {
+            size_by_speed: Some(BySpeed { table: Box::new([1.0; TABLE]), min_speed: 2.0, max_speed: 1.0 }),
+            ..ParticleSettings::default()
+        },
+        ParticleSettings {
+            noise: Some(Noise { strength: Curve::constant(1.0), frequency: 1.0, scroll_speed: 0.0, octaves: 5 }),
+            ..ParticleSettings::default()
+        },
+        ParticleSettings {
+            texture_sheet: Some(TextureSheet { columns: 0, ..TextureSheet::default() }),
+            ..ParticleSettings::default()
+        },
+        ParticleSettings { softness: -1.0, ..ParticleSettings::default() },
+        ParticleSettings {
+            render_mode: RenderMode::Stretched { length_scale: -1.0, speed_scale: 0.0 },
+            ..ParticleSettings::default()
+        },
+    ] {
+        assert!(matches!(world.set_particles(id, bad), Err(WorldError::Particles(_))));
+    }
+}
+
+#[test]
+fn a_steady_frame_with_every_module_allocates_nothing() {
+    let curves = Curve::Curves(ramp(0.0, 1.0));
+    let vector =
+        || VectorOverLifetime { x: curves.clone(), y: Curve::constant(0.5), z: curves.clone(), space: Space::Local };
+    let (mut world, id) = world_with(ParticleSettings {
+        rate_over_time: 200.0,
+        start_lifetime: Range::constant(1.0),
+        velocity_over_lifetime: Some(vector()),
+        force_over_lifetime: Some(vector()),
+        limit_velocity: Some(LimitVelocity { limit: Curve::constant(2.0), dampen: 0.5, drag: curves.clone() }),
+        rotation_over_lifetime: Some(curves.clone()),
+        size_by_speed: Some(BySpeed { table: Box::new([1.0; TABLE]), min_speed: 0.0, max_speed: 1.0 }),
+        noise: Some(Noise { strength: curves.clone(), frequency: 1.0, scroll_speed: 1.0, octaves: 3 }),
+        texture_sheet: Some(TextureSheet { columns: 4, rows: 4, random_row: true, ..TextureSheet::default() }),
+        render_mode: RenderMode::Stretched { length_scale: 2.0, speed_scale: 0.1 },
+        ..ParticleSettings::default()
+    });
+    let mut events = Vec::with_capacity(4);
+    let mut out = Vec::with_capacity(1000);
+    for _ in 0..120 {
+        world.step_particles(1.0 / 60.0, 1.0 / 60.0, &mut events);
+    }
+    let pointer = world.particles(id).unwrap().random.as_ptr();
+    for _ in 0..120 {
+        world.step_particles(1.0 / 60.0, 1.0 / 60.0, &mut events);
+        out.clear();
+        world.particles(id).unwrap().drawn(Mat4::IDENTITY, &mut out);
+    }
+    assert_eq!(pointer, world.particles(id).unwrap().random.as_ptr());
+    assert!(out.capacity() == 1000);
+}
