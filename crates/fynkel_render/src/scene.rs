@@ -305,6 +305,9 @@ pub struct Quality {
     /// next below it. On phones' GPUs the samples stay on the chip, so 4
     /// costs less than it sounds.
     pub samples: u32,
+    /// Whether particles with softness fade where they meet what's behind
+    /// them, which keeps the scene's depth to read; without, they're hard.
+    pub soft_particles: bool,
 }
 
 impl Quality {
@@ -316,6 +319,7 @@ impl Quality {
         bloom: false,
         ambient_occlusion: false,
         lamp_highlights: false,
+        soft_particles: false,
         shadows: Some(ShadowLevel {
             cascades: 1,
             map_size: 1024,
@@ -334,6 +338,7 @@ impl Quality {
         bloom: true,
         ambient_occlusion: false,
         lamp_highlights: true,
+        soft_particles: true,
         shadows: Some(ShadowLevel {
             cascades: 2,
             map_size: 2048,
@@ -352,6 +357,7 @@ impl Quality {
         bloom: true,
         ambient_occlusion: true,
         lamp_highlights: true,
+        soft_particles: true,
         shadows: Some(ShadowLevel {
             cascades: 3,
             map_size: 2048,
@@ -633,6 +639,11 @@ pub enum ParticleMode {
     Vertical,
     /// A mesh, its size across a metre of it, turned round up.
     Mesh(MeshKey),
+    /// A trail: a strip through the particles in order, facing the
+    /// camera, each particle a point on it, its size the strip's width
+    /// there, its velocity the way the strip goes, and its `t` how far
+    /// along it is (the texture's u).
+    Trail,
 }
 
 /// A particle system's particles, drawn with `material`: unlit, its

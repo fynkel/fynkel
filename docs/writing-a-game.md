@@ -526,6 +526,7 @@ from:
 | `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
 | `renderScale`: pixels drawn per pixel of the screen | 0.75 | 1 | 1 |
 | `antiAliasing`: samples a pixel, smoothing edges (MSAA) | 4 | 4 | 4 |
+| `softParticles`: particles fade where they meet what's behind | no | yes | yes |
 
 When the game doesn't choose, the device picks a level: high on Apple's
 GPUs and desktops', low on Android phones (Mali, Adreno and the rest), on a
@@ -1921,6 +1922,85 @@ ParticleSystem fire(Texture2D flames) => ParticleSystem(
   function, with `particle_age()` (0 to 1 through its life) and
   `particle_random()` (its own number) to tell them apart.
 
+**Particles and the world**, as Unity's modules of the same names:
+
+- **Emission over distance.** `Emission(rateOverDistance: 7)` makes 7 a
+  metre its object moves: dust under feet and wheels, none standing
+  still.
+- **Inherit velocity.** `inheritVelocity: InheritVelocity(curve:)` gives
+  each particle that much of its object's speed when it's made
+  (`InheritVelocityMode.initial`), or all through its life
+  (`.current`); a negative one throws dust back from the way it goes.
+- **Sub emitters.** `subEmitters: [SubEmitter(system, type)]`, up to 4:
+  another system, a child of this one, makes its burst (its own
+  `emission`'s bursts) where a particle is born, dies or hits something
+  (`SubEmitterType.birth`, `.death`, `.collision`); a birth one keeps
+  making its rate along the particle as it flies. `inherit:
+  {SubEmitterInherit.color, .size, .rotation}` passes on what the
+  particle had, and `probability` makes only some of them do it. A sub
+  emitter runs only for its parent, never on its own timeline:
+  fireworks are a shell with a trail on birth and a burst on death.
+- **Collision.** `collision: ParticleCollision(planes: [floor])`, up to 6
+  objects, each a plane through its position facing its up: the floor,
+  a wall. A particle hitting one bounces (`bounce`, 0 to 1, as Unity's),
+  loses speed (`dampen`) and life (`lifetimeLoss`), and dies below
+  `minKillSpeed`; `radiusScale` sizes it for hitting. With
+  `sendCollisionMessages`, `onParticleCollision(plane, count)` is called
+  once a frame for each plane hit, with how many particles hit it (Unity's
+  `OnParticleCollision`). Collision with the physics world's colliders is
+  not in this version.
+- **Trails.** A `TrailRenderer` is a component, as Unity's is: a strip
+  left behind its object as it moves, `time` seconds long, a point each
+  `minVertexDistance`, `widthMultiplier` wide times `widthCurve`
+  (`(t) => 1 - t` tapers it), coloured by `colorGradient` from the object
+  (0) to the tail (1), drawn with its `material` as particles are.
+  `emitting = false` lets it run out; `clear()` drops its points (a
+  ball put back on the tee); `positionCount` says how many it has. It
+  keeps at most 512.
+
+```dart
+/// Sparks off a grinder that bounce on the floor and flash where some hit.
+GameObject grinder(GameObject floor, Texture2D dot) {
+  final glow = Material(baseColorTexture: dot, blending: Blending.additive);
+  final flash = ParticleSystem(
+    startLifetime: const Range(0.15),
+    startSpeed: const Range(0),
+    emission: Emission(rateOverTime: 0, bursts: [Burst(count: const Range(1))]),
+    material: glow,
+  );
+  return GameObject(
+    name: 'grinder',
+    components: [
+      ParticleSystem(
+        startSpeed: const Range(2.5, 4),
+        gravityModifier: 1,
+        simulationSpace: ParticleSpace.world,
+        emission: const Emission(rateOverTime: 70),
+        collision: ParticleCollision(
+          planes: [floor],
+          bounce: const ParticleCurve(0.5),
+          lifetimeLoss: const ParticleCurve(0.15),
+          sendCollisionMessages: true,
+        ),
+        subEmitters: [SubEmitter(flash, SubEmitterType.collision, probability: 0.3)],
+        onParticleCollision: (plane, count) => print('$count hit ${plane.name}'),
+        material: glow,
+      ),
+    ],
+    children: [GameObject(name: 'flash', components: [flash])],
+  );
+}
+```
+
+`Quality.softParticles` turns soft particles on (medium and high) or off
+(low, where reading the depth costs too much on a phone), as Unity's
+quality setting of the same name. `world.debug.drawShapes = true` draws
+each system's shape and the planes it collides with, in the debug lines,
+as Unity's Scene view shows them when one is selected.
+
+The lab's "Particles and the world" has fireworks, a rolling ball with
+dust and a trail, and sparks bouncing off the floor.
+
 Settings change while it plays, and its particles stay. A value it
 can't have (a negative lifetime, a cone over 90°, more than 8 bursts)
 throws an `ArgumentError` and the old one stays.
@@ -2300,7 +2380,8 @@ class Sparkle extends GameObject {
 **Debug drawing**, for a frame or for `seconds:`, on top of everything:
 `debug.line(a, b)`, `debug.ray(origin, direction)`, `debug.box`,
 `debug.sphere`, `debug.path`, each with a `color`. It's off in release
-builds.
+builds. `debug.drawShapes = true` draws each particle system's shape and
+the planes its particles hit (§13c).
 
 ## 16. Physics: colliders, rigidbodies, queries and callbacks
 
@@ -3565,11 +3646,10 @@ What keeps a game fast:
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
   it by hand), the microphone, and sound made in code as it plays. On
   Android, another app taking the sound doesn't pause the game's.
-- **Particles** (§13c): sub emitters, collision, trails
-  (`TrailRenderer`) and emission over distance, which come later in
-  this stage; and particles on the GPU (Unity's VFX Graph), lights on
-  particles, collision with the physics world, wind zones, a mesh's
-  surface as a shape, shadows from particles, and an editor.
+- **Particles** (§13c): particles on the GPU (Unity's VFX Graph), lights
+  on particles, collision with the physics world's colliders (only
+  planes), triggers, wind zones, a mesh's surface as a shape, shadows
+  from particles, a `LineRenderer`, and an editor.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
@@ -3663,6 +3743,11 @@ What keeps a game fast:
 | Texture Sheet Animation (Grid) | `textureSheet: TextureSheet(columns:, rows:)` |
 | Renderer's Render Mode: Billboard, Stretched, Horizontal, Vertical, Mesh | `renderMode: ParticleRenderMode.billboard`, `.stretched()`, `.horizontal`, `.vertical`, `.mesh(mesh)` |
 | Particles/Lit; Soft Particles | `lit: true`; `softness` |
+| Emission's Rate over Distance; Inherit Velocity | `Emission(rateOverDistance:)`; `inheritVelocity: InheritVelocity(mode:, curve:)` |
+| Sub Emitters: Birth, Collision, Death; Inherit Color, Size, Rotation | `subEmitters: [SubEmitter(system, SubEmitterType.birth, inherit: {SubEmitterInherit.color})]` |
+| Collision (Planes): Dampen, Bounce, Lifetime Loss, Min Kill Speed; `OnParticleCollision` | `collision: ParticleCollision(planes:, dampen:, bounce:, lifetimeLoss:, minKillSpeed:)`; `onParticleCollision(plane, count)` |
+| `TrailRenderer`: Time, Min Vertex Distance, Width, Color, Emitting, `Clear()` | `TrailRenderer(time:, minVertexDistance:, widthMultiplier:, widthCurve:, colorGradient:, emitting:)`, `clear()` |
+| Quality's Soft Particles | `Quality.softParticles` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |

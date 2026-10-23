@@ -1,4 +1,4 @@
-// Particle systems from Dart (docs/stage-12.md phases 1 and 2): the settings go
+// Particle systems from Dart (docs/stage-12.md phases 1 to 3): the settings go
 // to the engine, the world steps them after the animators, and the
 // counts, commands and stop actions come back. The simulation's own
 // numbers are the engine's tests (crates/fynkel_world/src/particles/tests.rs).
@@ -252,5 +252,130 @@ void main() {
     expect(ColorGradient.fadeOut().at(0.5).a, 0.5);
     expect(() => ColorGradient([]), throwsArgumentError);
     expect(() => ColorGradient([(0.5, Color.white), (0.2, Color.white)]), throwsArgumentError);
+  });
+
+  group('phase 3: particles and the world', () {
+    test('rate over distance makes them as the object moves, none standing still', () {
+      final system = ParticleSystem(
+        emission: Emission(rateOverTime: 0, rateOverDistance: 10),
+        startSpeed: Range(0),
+        startLifetime: Range(10),
+        simulationSpace: ParticleSpace.world,
+      );
+      final object = world.add(GameObject(components: [system]));
+      frames(world, 0.5);
+      expect(system.particleCount, 0);
+      for (var i = 1; i <= 30; i++) {
+        object.transform = Transform(position: Vec3(i * 0.1, 0, 0));
+        world.update(dt);
+      }
+      expect(system.particleCount, inInclusiveRange(29, 30), reason: 'three metres at ten a metre');
+      expect(() => system.emission = Emission(rateOverDistance: -1), throwsArgumentError);
+    });
+
+    test('particles bounce off a plane and say so, a plane added after the system', () {
+      final hits = <(String, int)>[];
+      final system = ParticleSystem(
+        looping: false,
+        startSpeed: Range(0),
+        startSize: Range(0.2),
+        startLifetime: Range(5),
+        gravityModifier: 1,
+        simulationSpace: ParticleSpace.world,
+        emission: Emission(rateOverTime: 0, bursts: [Burst(count: Range(5))]),
+        shape: ParticleShape.point(),
+        onParticleCollision: (plane, count) => hits.add((plane.name!, count)),
+      );
+      final floor = GameObject(
+        name: 'floor',
+        transform: Transform(position: Vec3(0, -1, 0)),
+      );
+      system.collision = ParticleCollision(planes: [floor], bounce: ParticleCurve(0.5), sendCollisionMessages: true);
+      world.add(GameObject(components: [system]));
+      world.add(floor);
+      frames(world, 1);
+      expect(hits.first, ('floor', 5), reason: 'all five hit together, once');
+      expect(system.particleCount, 5, reason: 'they bounce, nothing lost');
+      expect(
+        () => system.collision = ParticleCollision(planes: List.filled(7, floor)),
+        throwsArgumentError,
+        reason: 'at most 6 planes',
+      );
+    });
+
+    test('a death sub emitter bursts where each dies, its system a child added after', () {
+      final sparks = ParticleSystem(
+        startLifetime: Range(5),
+        startSpeed: Range(1),
+        randomSeed: 3,
+        emission: Emission(rateOverTime: 100, bursts: [Burst(count: Range(10))]),
+      );
+      final shell = burst(count: 4, lifetime: 0.5)..subEmitters = [SubEmitter(sparks, SubEmitterType.death)];
+      world.add(
+        GameObject(
+          components: [shell],
+          children: [
+            GameObject(components: [sparks]),
+          ],
+        ),
+      );
+      frames(world, 0.3);
+      expect(sparks.particleCount, 0, reason: 'a sub emitter emits only for its parent');
+      frames(world, 0.4);
+      expect((shell.particleCount, sparks.particleCount), (0, 40));
+      expect(() => shell.subEmitters = [SubEmitter(shell, SubEmitterType.birth)], throwsArgumentError);
+      expect(() => shell.subEmitters = List.filled(5, SubEmitter(sparks, SubEmitterType.death)), throwsArgumentError);
+    });
+
+    test('inherit velocity takes the object\'s speed', () {
+      final system = ParticleSystem(
+        emission: Emission(rateOverTime: 60),
+        startSpeed: Range(0),
+        startLifetime: Range(10),
+        simulationSpace: ParticleSpace.world,
+        shape: ParticleShape.point(),
+        inheritVelocity: InheritVelocity(),
+      );
+      final object = world.add(GameObject(components: [system]));
+      for (var i = 1; i <= 30; i++) {
+        object.transform = Transform(position: Vec3(i * 0.05, 0, 0));
+        world.update(dt);
+      }
+      expect(system.particleCount, greaterThan(20));
+      expect(() => system.inheritVelocity = InheritVelocity(curve: ParticleCurve(double.nan)), throwsArgumentError);
+    });
+
+    test('a trail leaves points as its object moves, and clears', () {
+      final trail = TrailRenderer(time: 1, minVertexDistance: 0.25, widthCurve: (t) => 1 - t);
+      expect(trail.positionCount, 0, reason: 'on no object yet');
+      final object = world.add(GameObject(components: [trail]));
+      for (var i = 0; i <= 30; i++) {
+        object.transform = Transform(position: Vec3(i * 0.1, 0, 0));
+        world.update(dt);
+      }
+      expect(trail.positionCount, inInclusiveRange(10, 11));
+      trail.clear();
+      expect(trail.positionCount, 0);
+      trail.emitting = false;
+      for (var i = 0; i <= 10; i++) {
+        object.transform = Transform(position: Vec3(3 + i * 0.1, 0, 0));
+        world.update(dt);
+      }
+      expect(trail.positionCount, 0, reason: 'not emitting');
+      expect(() => trail.time = -1, throwsArgumentError);
+      expect(trail.time, 1);
+      trail.enabled = false;
+      expect(trail.positionCount, 0);
+      object.removeComponent(trail);
+      expect(object.get<TrailRenderer>(), isNull);
+    });
+
+    test('soft particles are off at low', () {
+      expect(
+        (Quality.low.softParticles, Quality.medium.softParticles, Quality.high.softParticles),
+        (false, true, true),
+      );
+      expect(Quality.low.copyWith(softParticles: true).softParticles, isTrue);
+    });
   });
 }

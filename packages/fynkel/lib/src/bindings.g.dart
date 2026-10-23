@@ -515,6 +515,18 @@ external int fy_texture_size(
   ffi.Pointer<ffi.Uint32> out_height,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_trail_clear(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_trail_count(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Size> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_trail_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTrailSettings>)>(isLeaf: true)
+external int fy_trail_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTrailSettings> settings);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTransform>)>(isLeaf: true)
 external int fy_transform_get(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyTransform> out);
 
@@ -645,7 +657,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 40;
+const int FY_ABI_VERSION = 41;
 
 const int FY_APPLE_MORE = 2;
 
@@ -693,7 +705,25 @@ const int FY_PARTICLES_STOP = 1;
 
 const int FY_PARTICLES_STOP_AND_CLEAR = 2;
 
+const int FY_PARTICLE_EVENT_COLLISION = 1;
+
+const int FY_PARTICLE_EVENT_DONE = 0;
+
+const int FY_PARTICLE_INHERIT_COLOR = 1;
+
+const int FY_PARTICLE_INHERIT_CURRENT = 1;
+
+const int FY_PARTICLE_INHERIT_INITIAL = 0;
+
+const int FY_PARTICLE_INHERIT_ROTATION = 4;
+
+const int FY_PARTICLE_INHERIT_SIZE = 2;
+
 const int FY_PARTICLE_MAX_BURSTS = 8;
+
+const int FY_PARTICLE_MAX_PLANES = 6;
+
+const int FY_PARTICLE_MAX_SUB_EMITTERS = 4;
 
 const int FY_PARTICLE_RENDER_BILLBOARD = 0;
 
@@ -730,6 +760,12 @@ const int FY_PARTICLE_STOP_DESTROY = 2;
 const int FY_PARTICLE_STOP_DISABLE = 1;
 
 const int FY_PARTICLE_STOP_NONE = 0;
+
+const int FY_PARTICLE_SUB_BIRTH = 0;
+
+const int FY_PARTICLE_SUB_COLLISION = 1;
+
+const int FY_PARTICLE_SUB_DEATH = 2;
 
 const int FY_PARTICLE_TABLE = 64;
 
@@ -1120,17 +1156,65 @@ final class FyParticleBurst extends ffi.Struct {
   external double probability;
 }
 
+final class FyParticleCollision extends ffi.Struct {
+  @ffi.Uint32()
+  external int plane_count;
+
+  @ffi.Array.multi([6])
+  external ffi.Array<ffi.Uint64> planes;
+
+  external FyCurve dampen;
+
+  external FyCurve bounce;
+
+  external FyCurve lifetime_loss;
+
+  @ffi.Float()
+  external double min_kill_speed;
+
+  @ffi.Float()
+  external double radius_scale;
+
+  @ffi.Bool()
+  external bool send_messages;
+}
+
 final class FyParticleEvent extends ffi.Struct {
   @ffi.Uint64()
   external int object;
 
   @ffi.Uint32()
+  external int kind;
+
+  @ffi.Uint32()
   external int action;
 
-  static ffi.Pointer<FyParticleEvent> $allocate(ffi.Allocator $allocator, {required int object, required int action}) =>
-      $allocator<FyParticleEvent>()
-        ..ref.object = object
-        ..ref.action = action;
+  @ffi.Uint64()
+  external int plane;
+
+  @ffi.Uint32()
+  external int count;
+
+  static ffi.Pointer<FyParticleEvent> $allocate(
+    ffi.Allocator $allocator, {
+    required int object,
+    required int kind,
+    required int action,
+    required int plane,
+    required int count,
+  }) => $allocator<FyParticleEvent>()
+    ..ref.object = object
+    ..ref.kind = kind
+    ..ref.action = action
+    ..ref.plane = plane
+    ..ref.count = count;
+}
+
+final class FyParticleInherit extends ffi.Struct {
+  @ffi.Uint32()
+  external int mode;
+
+  external FyCurve curve;
 }
 
 final class FyParticleLimit extends ffi.Struct {
@@ -1295,6 +1379,25 @@ final class FyParticleSettings extends ffi.Struct {
 
   @ffi.Float()
   external double softness;
+
+  @ffi.Float()
+  external double rate_over_distance;
+
+  @ffi.Bool()
+  external bool has_inherit_velocity;
+
+  external FyParticleInherit inherit_velocity;
+
+  @ffi.Bool()
+  external bool has_collision;
+
+  external FyParticleCollision collision;
+
+  @ffi.Uint32()
+  external int sub_emitter_count;
+
+  @ffi.Array.multi([4])
+  external ffi.Array<FyParticleSubEmitter> sub_emitters;
 }
 
 final class FyParticleShape extends ffi.Struct {
@@ -1363,6 +1466,32 @@ final class FyParticleState extends ffi.Struct {
     ..ref.emitting = emitting;
 }
 
+final class FyParticleSubEmitter extends ffi.Struct {
+  @ffi.Uint64()
+  external int system;
+
+  @ffi.Uint32()
+  external int kind;
+
+  @ffi.Uint32()
+  external int inherit;
+
+  @ffi.Float()
+  external double probability;
+
+  static ffi.Pointer<FyParticleSubEmitter> $allocate(
+    ffi.Allocator $allocator, {
+    required int system,
+    required int kind,
+    required int inherit,
+    required double probability,
+  }) => $allocator<FyParticleSubEmitter>()
+    ..ref.system = system
+    ..ref.kind = kind
+    ..ref.inherit = inherit
+    ..ref.probability = probability;
+}
+
 final class FyParticleVector extends ffi.Struct {
   external FyCurve x;
 
@@ -1411,6 +1540,9 @@ final class FyQuality extends ffi.Struct {
   @ffi.Uint32()
   external int samples;
 
+  @ffi.Bool()
+  external bool soft_particles;
+
   static ffi.Pointer<FyQuality> $allocate(
     ffi.Allocator $allocator, {
     required bool hdr,
@@ -1425,6 +1557,7 @@ final class FyQuality extends ffi.Struct {
     required int spot_shadows,
     required int spot_shadow_resolution,
     required int samples,
+    required bool soft_particles,
   }) => $allocator<FyQuality>()
     ..ref.hdr = hdr
     ..ref.bloom = bloom
@@ -1437,7 +1570,8 @@ final class FyQuality extends ffi.Struct {
     ..ref.shadow_distance = shadow_distance
     ..ref.spot_shadows = spot_shadows
     ..ref.spot_shadow_resolution = spot_shadow_resolution
-    ..ref.samples = samples;
+    ..ref.samples = samples
+    ..ref.soft_particles = soft_particles;
 }
 
 final class FyQuat extends ffi.Struct {
@@ -1558,6 +1692,35 @@ sealed class FyStatus {
 }
 
 final class FyTexture extends ffi.Opaque {}
+
+final class FyTrailSettings extends ffi.Struct {
+  @ffi.Float()
+  external double time;
+
+  @ffi.Float()
+  external double min_vertex_distance;
+
+  @ffi.Float()
+  external double width;
+
+  @ffi.Bool()
+  external bool has_width_table;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<ffi.Float> width_table;
+
+  @ffi.Bool()
+  external bool has_color_table;
+
+  @ffi.Array.multi([64])
+  external ffi.Array<FyColor> color_table;
+
+  @ffi.Bool()
+  external bool emitting;
+
+  @ffi.Uint64()
+  external int material;
+}
 
 final class FyTransform extends ffi.Struct {
   external FyVec3 position;

@@ -1,9 +1,18 @@
-//! Particle systems (`docs/stage-12.md` phases 1 and 2): a
+//! Particle systems (`docs/stage-12.md` phases 1 to 3): a
 //! [`ParticleSystem`] on an object emits particles from a shape, and
 //! [`World::step_particles`] moves every system's once a frame, as Unity's
 //! Particle System does, with its modules: velocity, force and rotation
 //! over a particle's life, a speed limit and drag, size and colour by
-//! speed, noise, and frames of a texture sheet.
+//! speed, noise, frames of a texture sheet, emission over the distance its
+//! object moves and the velocity it inherits from it, bouncing off planes,
+//! and sub emitters.
+//!
+//! A sub emitter is another object's system that emits where a particle
+//! of this one is born (all its life, at the sub system's rate a second
+//! for each), dies or hits a plane (its bursts' counts each time), as
+//! Unity's: a firework's trail, and its burst. A system that's some
+//! system's sub emitter emits only so, never by its own timeline. The
+//! systems step first, then the sub emitters emit, in the same frame.
 //!
 //! The game sets a system's [`ParticleSettings`] when they change, not
 //! each frame; a frame only steps. Each system is a fixed pool of
@@ -48,6 +57,12 @@ pub const MAX_PARTICLES: u32 = 100_000;
 
 /// Gravity at `gravity_modifier` 1, in metres a second a second, down.
 pub const GRAVITY: f32 = 9.81;
+
+/// The most planes a system's particles bounce off.
+pub const MAX_PLANES: usize = 6;
+
+/// The most sub emitters a system has.
+pub const MAX_SUB_EMITTERS: usize = 4;
 
 /// A number for each particle: `min` when it's the same for all, else a
 /// random one from `min` to `max` (Unity's *Random Between Two Constants*).
@@ -207,6 +222,13 @@ impl Curve {
             Curve::Curves(tables) => tables.iter().flatten().fold(f32::INFINITY, |m, &v| m.min(v)),
         }
     }
+
+    fn max(&self) -> f32 {
+        match self {
+            Curve::Constant(range) => range.min.max(range.max),
+            Curve::Curves(tables) => tables.iter().flatten().fold(f32::NEG_INFINITY, |m, &v| m.max(v)),
+        }
+    }
 }
 
 /// A vector over a particle's life, an axis each, in the system's own
@@ -302,6 +324,89 @@ impl Default for TextureSheet {
     }
 }
 
+/// Unity's *Inherit Velocity*: how much of its object's velocity a
+/// particle takes, over its life. `Initial` adds it once, at its birth;
+/// `Current` moves it with the object as it goes, each frame (in world
+/// space; a local system's particles move with their object anyway). A
+/// sub emitter's particles take their parent particle's velocity instead.
+#[derive(Clone, Debug, PartialEq)]
+pub struct InheritVelocity {
+    pub mode: InheritMode,
+    pub curve: Curve,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum InheritMode {
+    #[default]
+    Initial,
+    Current,
+}
+
+/// Unity's *Collision* with planes: each plane is an object's, through
+/// its position and facing its up (+Y), without end. A particle that
+/// meets one from the front, within its radius (half its size, times
+/// `radius_scale`), bounces: `bounce` of its speed into the plane comes
+/// back out, and then it loses `dampen` of its speed; it loses
+/// `lifetime_loss` of its lifetime; and one slower than `min_kill_speed`
+/// afterwards dies. Over a particle's life, as curves. With
+/// `send_messages`, the world says how many hit each plane each frame
+/// ([`ParticleEventKind::Collision`], Unity's `OnParticleCollision`).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Collision {
+    pub planes: Vec<ObjectId>,
+    pub dampen: Curve,
+    pub bounce: Curve,
+    pub lifetime_loss: Curve,
+    pub min_kill_speed: f32,
+    pub radius_scale: f32,
+    pub send_messages: bool,
+}
+
+impl Default for Collision {
+    /// Unity's: no planes, a full bounce, nothing lost.
+    fn default() -> Self {
+        Self {
+            planes: Vec::new(),
+            dampen: Curve::constant(0.0),
+            bounce: Curve::constant(1.0),
+            lifetime_loss: Curve::constant(0.0),
+            min_kill_speed: 0.0,
+            radius_scale: 1.0,
+            send_messages: false,
+        }
+    }
+}
+
+/// When a sub emitter emits.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SubEmitterKind {
+    /// From each particle all its life, at the sub system's rate over
+    /// time, a second.
+    Birth,
+    /// Where a particle hits a plane: the sub system's bursts' counts.
+    Collision,
+    /// Where a particle dies: the sub system's bursts' counts.
+    Death,
+}
+
+/// What a sub emitter's particles take from their parent: its colour (the
+/// sub's times it), its size (times it), its rotation (added).
+pub const INHERIT_COLOR: u32 = 1;
+pub const INHERIT_SIZE: u32 = 2;
+pub const INHERIT_ROTATION: u32 = 4;
+
+/// Another object's system, which emits where this one's particles are
+/// born, die or hit (Unity's *Sub Emitters*), each time with
+/// `probability` 0 to 1, its particles taking `inherit`
+/// (`INHERIT_*` together) from their parent.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SubEmitter {
+    pub system: ObjectId,
+    pub kind: SubEmitterKind,
+    pub inherit: u32,
+    pub probability: f32,
+}
+
 /// How each particle is drawn (Unity's renderer module).
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub enum RenderMode {
@@ -353,6 +458,8 @@ pub struct ParticleSettings {
     pub seed: Option<u32>,
     /// Particles a second while the timeline runs.
     pub rate_over_time: f32,
+    /// Particles a metre its object moves while the timeline runs.
+    pub rate_over_distance: f32,
     pub bursts: Vec<Burst>,
     pub shape: Shape,
     /// A particle's size times this, over its life.
@@ -372,6 +479,10 @@ pub struct ParticleSettings {
     pub color_by_speed: Option<BySpeed<Color>>,
     pub noise: Option<Noise>,
     pub texture_sheet: Option<TextureSheet>,
+    pub inherit_velocity: Option<InheritVelocity>,
+    pub collision: Option<Collision>,
+    /// At most [`MAX_SUB_EMITTERS`].
+    pub sub_emitters: Vec<SubEmitter>,
     /// What it's drawn with; nothing is drawn without one.
     pub material: Option<MaterialId>,
     pub render_mode: RenderMode,
@@ -405,6 +516,7 @@ impl Default for ParticleSettings {
             stop_action: StopAction::None,
             seed: None,
             rate_over_time: 10.0,
+            rate_over_distance: 0.0,
             bursts: Vec::new(),
             shape: Shape { kind: ShapeKind::Cone, ..Shape::default() },
             size_over_lifetime: None,
@@ -417,6 +529,9 @@ impl Default for ParticleSettings {
             color_by_speed: None,
             noise: None,
             texture_sheet: None,
+            inherit_velocity: None,
+            collision: None,
+            sub_emitters: Vec::new(),
             material: None,
             render_mode: RenderMode::Billboard,
             lit: false,
@@ -434,6 +549,7 @@ impl ParticleSettings {
             self.gravity_modifier,
             self.simulation_speed,
             self.rate_over_time,
+            self.rate_over_distance,
             self.shape.radius,
             self.shape.radius_thickness,
             self.shape.angle,
@@ -455,8 +571,14 @@ impl ParticleSettings {
         if self.start_lifetime.min < 0.0 || self.start_lifetime.max < 0.0 {
             return Some("a particle's start lifetime can't be below 0");
         }
-        if self.start_delay < 0.0 || self.rate_over_time < 0.0 || self.simulation_speed < 0.0 {
-            return Some("a particle system's start delay, rate over time and simulation speed can't be below 0");
+        if self.start_delay < 0.0
+            || self.rate_over_time < 0.0
+            || self.rate_over_distance < 0.0
+            || self.simulation_speed < 0.0
+        {
+            return Some(
+                "a particle system's start delay, rates over time and distance and simulation speed can't be below 0",
+            );
         }
         if !(1..=MAX_PARTICLES).contains(&self.max_particles) {
             return Some("a particle system holds 1 to 100,000 particles");
@@ -562,6 +684,43 @@ impl ParticleSettings {
         if self.softness < 0.0 {
             return Some("softness can't be below 0");
         }
+        if let Some(i) = &self.inherit_velocity
+            && !i.curve.is_finite()
+        {
+            return Some("a particle system's curves must be finite");
+        }
+        if let Some(c) = &self.collision {
+            if c.planes.len() > MAX_PLANES {
+                return Some("particles bounce off at most 6 planes");
+            }
+            let finite = c.dampen.is_finite()
+                && c.bounce.is_finite()
+                && c.lifetime_loss.is_finite()
+                && c.min_kill_speed.is_finite()
+                && c.radius_scale.is_finite();
+            if !finite {
+                return Some("a particle system's curves must be finite");
+            }
+            if c.dampen.min() < 0.0
+                || c.dampen.max() > 1.0
+                || c.bounce.min() < 0.0
+                || c.lifetime_loss.min() < 0.0
+                || c.lifetime_loss.max() > 1.0
+                || c.min_kill_speed < 0.0
+                || c.radius_scale < 0.0
+            {
+                return Some(
+                    "a collision's dampen and lifetime loss are 0 to 1, and its bounce, kill speed and radius \
+                     scale can't be below 0",
+                );
+            }
+        }
+        if self.sub_emitters.len() > MAX_SUB_EMITTERS {
+            return Some("a particle system has at most 4 sub emitters");
+        }
+        if self.sub_emitters.iter().any(|e| !(0.0..=1.0).contains(&e.probability)) {
+            return Some("a sub emitter's probability is 0 to 1");
+        }
         if let RenderMode::Stretched { length_scale, speed_scale } = self.render_mode
             && (length_scale < 0.0 || speed_scale < 0.0)
         {
@@ -571,12 +730,21 @@ impl ParticleSettings {
     }
 }
 
-/// What a system did this frame that the game hears of: it's done
-/// (stopped, its last particle gone), and its stop action is due.
+/// What a system did this frame that the game hears of.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct ParticleEvent {
     pub object: ObjectId,
-    pub action: StopAction,
+    pub kind: ParticleEventKind,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ParticleEventKind {
+    /// It's done (stopped, its last particle gone), and its stop action is
+    /// due.
+    Done(StopAction),
+    /// `count` of its particles hit `plane`'s plane this frame (with its
+    /// collision's `send_messages`).
+    Collision { plane: ObjectId, count: u32 },
 }
 
 /// What a system is doing.
@@ -648,6 +816,19 @@ pub struct DrawnParticle {
     pub random: f32,
 }
 
+/// Where a particle was born, died or hit, this frame, in the world, for
+/// a sub emitter: its velocity, and its colour (linear), size and turn as
+/// drawn.
+#[derive(Clone, Copy, Debug)]
+struct Trigger {
+    kind: SubEmitterKind,
+    position: Vec3,
+    velocity: Vec3,
+    color: [f32; 4],
+    size: f32,
+    rotation: f32,
+}
+
 /// A particle system: its settings, and its particles.
 #[derive(Clone, Debug)]
 pub struct ParticleSystem {
@@ -689,6 +870,30 @@ pub struct ParticleSystem {
     /// Whether its object was shown at the last step; `None` before the
     /// first.
     shown: Option<bool>,
+    /// Where its object was at the last step, in the world; `None` from
+    /// play.
+    last_position: Option<Vec3>,
+    /// How fast its object moves, in the world, metres a second.
+    emitter_velocity: Vec3,
+    /// The part of a particle owed by the distance its object moved.
+    distance_carry: f32,
+    /// The planes it bounces off this frame, each a point on it and the
+    /// way it faces, in its particles' space, and its object.
+    planes: [(Vec3, Vec3, Option<ObjectId>); MAX_PLANES],
+    plane_count: usize,
+    /// How many hit each plane this frame.
+    hits: [u32; MAX_PLANES],
+    /// Where its particles died or hit this frame, for its sub emitters;
+    /// room for as many as it can make, so a frame doesn't grow it.
+    triggers: Vec<Trigger>,
+    /// Its particles this frame, for its birth sub emitters.
+    living: Vec<Trigger>,
+    /// What's owed of a particle to each birth sub emitter.
+    sub_carry: [f32; MAX_SUB_EMITTERS],
+    /// Seconds of its own time it moved on this frame.
+    stepped: f32,
+    /// Some system's sub emitter, which emits only for it.
+    is_sub: bool,
 }
 
 impl ParticleSystem {
@@ -718,6 +923,17 @@ impl ParticleSystem {
             plays: seed,
             done: true,
             shown: None,
+            last_position: None,
+            emitter_velocity: Vec3::ZERO,
+            distance_carry: 0.0,
+            planes: [(Vec3::ZERO, Vec3::Y, None); MAX_PLANES],
+            plane_count: 0,
+            hits: [0; MAX_PLANES],
+            triggers: Vec::new(),
+            living: Vec::new(),
+            sub_carry: [0.0; MAX_SUB_EMITTERS],
+            stepped: 0.0,
+            is_sub: false,
         };
         s.set(settings);
         s
@@ -742,7 +958,46 @@ impl ParticleSystem {
         self.velocity.resize(max, Vec3::ZERO);
         self.color.resize(max, [1.0; 4]);
         self.random.resize(max, 0);
+        // Room for every death and hit a frame can have (a hit on each
+        // plane, then dying), and every living particle.
+        let subs = &settings.sub_emitters;
+        if subs.iter().any(|e| e.kind != SubEmitterKind::Birth) {
+            let room = max * (1 + settings.collision.as_ref().map_or(0, |c| c.planes.len()));
+            self.triggers.reserve(room.saturating_sub(self.triggers.len()));
+        }
+        if subs.iter().any(|e| e.kind == SubEmitterKind::Birth) {
+            self.living.reserve(max.saturating_sub(self.living.len()));
+        }
         self.settings = settings;
+    }
+
+    /// Particle `i`, `t` through its life, as a sub emitter's trigger, in
+    /// the world: its object at `emitter`, its settings `s` (out of it
+    /// while it steps).
+    fn trigger(&self, s: &ParticleSettings, i: usize, kind: SubEmitterKind, t: f32, emitter: Mat4) -> Trigger {
+        let (mut position, mut velocity) = (self.position[i], self.velocity[i]);
+        if s.space == Space::Local {
+            position = emitter.transform_point3(position);
+            velocity = emitter.transform_vector3(velocity);
+        }
+        let mut color = self.color[i];
+        if let Some(table) = self.color_table.as_deref() {
+            let over = sample_color(table, t);
+            for c in 0..4 {
+                color[c] *= over[c];
+            }
+        }
+        let size = self.size[i] * s.size_over_lifetime.as_deref().map_or(1.0, |table| sample(table, t));
+        Trigger { kind, position, velocity, color, size, rotation: self.rotation[i] }
+    }
+
+    /// Records particle `i` for its sub emitters of `kind`, if it has any
+    /// and there's room.
+    fn record(&mut self, s: &ParticleSettings, i: usize, kind: SubEmitterKind, t: f32, emitter: Mat4) {
+        if self.triggers.len() < self.triggers.capacity() && s.sub_emitters.iter().any(|e| e.kind == kind) {
+            let trigger = self.trigger(s, i, kind, t, emitter);
+            self.triggers.push(trigger);
+        }
     }
 
     /// How many particles it has.
@@ -782,6 +1037,8 @@ impl ParticleSystem {
         self.time = 0.0;
         self.delay = self.settings.start_delay;
         self.carry = 0.0;
+        self.distance_carry = 0.0;
+        self.last_position = None;
         self.fired = [0; MAX_BURSTS];
         self.plays += 1;
         self.rng = Rng::new(match self.settings.seed {
@@ -837,6 +1094,14 @@ impl ParticleSystem {
     /// simulation speed is applied here), its object where `emitter` puts
     /// it. Returns whether it just became done.
     fn step(&mut self, dt: f32, emitter: Mat4) -> bool {
+        // Where its object went since the last step, whatever it's doing,
+        // so it's never owed a whole journey at once.
+        let here = emitter.w_axis.truncate();
+        let from = self.last_position.unwrap_or(here);
+        self.last_position = Some(here);
+        if dt > 0.0 {
+            self.emitter_velocity = (here - from) / dt;
+        }
         if self.playing == State::Paused || self.done {
             return false;
         }
@@ -844,6 +1109,7 @@ impl ParticleSystem {
         if dt <= 0.0 {
             return false;
         }
+        self.stepped = dt;
         // Gravity is the world's down, in a local system's own space too.
         let mut gravity = Vec3::new(0.0, -GRAVITY * self.settings.gravity_modifier, 0.0);
         if self.settings.space == Space::Local {
@@ -864,10 +1130,18 @@ impl ParticleSystem {
         // How much of a speed past the limit is kept this step: the same
         // over a second at any frame rate.
         let kept = s.limit_velocity.as_ref().map_or(1.0, |l| (1.0 - l.dampen).powf(dt * 30.0));
+        // Moved with its object as it goes: Inherit Velocity's Current.
+        let current = s
+            .inherit_velocity
+            .as_ref()
+            .filter(|v| v.mode == InheritMode::Current && s.space == Space::World)
+            .map(|v| (&v.curve, self.emitter_velocity));
+        let sizes = s.size_over_lifetime.as_deref();
         let mut i = 0;
         while i < self.count {
             self.age[i] += dt;
             if self.age[i] >= self.lifetime[i] {
+                self.record(&s, i, SubEmitterKind::Death, 1.0, emitter);
                 self.kill(i);
                 continue;
             }
@@ -901,9 +1175,17 @@ impl ParticleSystem {
             if let Some(noise) = &s.noise {
                 v += noise_at(noise, self.position[i], self.noise_time) * noise.strength.at(t, pick(seed, 9));
             }
+            if let Some((curve, velocity)) = current {
+                v += velocity * curve.at(t, pick(seed, 17));
+            }
             self.position[i] += v * dt;
             if let Some(turn) = &s.rotation_over_lifetime {
                 self.rotation[i] += turn.at(t, pick(seed, 10)) * dt;
+            }
+            if s.collision.is_some() && self.collide(&s, i, t, sizes, emitter) {
+                self.record(&s, i, SubEmitterKind::Death, t, emitter);
+                self.kill(i);
+                continue;
             }
             i += 1;
         }
@@ -917,7 +1199,33 @@ impl ParticleSystem {
                 dt = -self.delay;
                 self.delay = 0.0;
             }
-            self.run_timeline(dt, emitter);
+            if !self.is_sub {
+                self.run_timeline(dt, emitter);
+                // Over the way its object came, as if it had left them
+                // there as it went.
+                if self.settings.rate_over_distance > 0.0 {
+                    self.distance_carry += (here - from).length() * self.settings.rate_over_distance;
+                    let n = self.distance_carry.floor();
+                    self.distance_carry -= n;
+                    let n = n as u32;
+                    for k in 0..n {
+                        let f = (k as f32 + 0.5) / n as f32;
+                        let mut at = emitter;
+                        at.w_axis = from.lerp(here, f).extend(1.0);
+                        self.spawn(at, dt * (1.0 - f));
+                    }
+                }
+            }
+        }
+        if self.settings.sub_emitters.iter().any(|e| e.kind == SubEmitterKind::Birth) {
+            self.living.clear();
+            for i in 0..self.count {
+                let t = (self.age[i] / self.lifetime[i]).clamp(0.0, 1.0);
+                let trigger = self.trigger(&self.settings, i, SubEmitterKind::Birth, t, emitter);
+                if self.living.len() < self.living.capacity() {
+                    self.living.push(trigger);
+                }
+            }
         }
         if !self.emitting && self.count == 0 {
             self.done = true;
@@ -978,8 +1286,43 @@ impl ParticleSystem {
         }
     }
 
+    /// Bounces particle `i` (`t` through its life, its size over life
+    /// `sizes`) off the planes it meets. Returns whether it then dies.
+    fn collide(&mut self, s: &ParticleSettings, i: usize, t: f32, sizes: Option<&[f32; TABLE]>, emitter: Mat4) -> bool {
+        let Some(c) = &s.collision else { return false };
+        let radius = self.size[i] * sizes.map_or(1.0, |table| sample(table, t)) * 0.5 * c.radius_scale;
+        let seed = self.random[i];
+        let mut hit = false;
+        for k in 0..self.plane_count {
+            let (point, normal, _) = self.planes[k];
+            let reach = (self.position[i] - point).dot(normal) - radius;
+            let v = self.velocity[i];
+            let into = v.dot(normal);
+            if reach >= 0.0 || into >= 0.0 {
+                continue;
+            }
+            self.position[i] -= normal * reach;
+            let across = v - normal * into;
+            let bounce = c.bounce.at(t, pick(seed, 14));
+            let dampen = c.dampen.at(t, pick(seed, 15));
+            self.velocity[i] = (across - normal * into * bounce) * (1.0 - dampen);
+            self.age[i] += c.lifetime_loss.at(t, pick(seed, 16)) * self.lifetime[i];
+            self.hits[k] += 1;
+            self.record(s, i, SubEmitterKind::Collision, t, emitter);
+            hit = true;
+        }
+        hit && self.velocity[i].length() < c.min_kill_speed
+    }
+
     /// Makes one particle, `age` seconds old already, if there's room.
     fn spawn(&mut self, emitter: Mat4, age: f32) {
+        self.spawn_from(emitter, age, None, None);
+    }
+
+    /// Makes one particle from its shape where `emitter` puts it; for a sub
+    /// emitter, from `parent`, taking what it inherits, and `into_local`
+    /// from the world into a local system's space.
+    fn spawn_from(&mut self, emitter: Mat4, age: f32, parent: Option<(&Trigger, u32)>, into_local: Option<Mat4>) {
         if self.count >= self.settings.max_particles as usize {
             return;
         }
@@ -994,9 +1337,25 @@ impl ParticleSystem {
             direction = direction.lerp(rng.direction(), s.shape.random_direction).normalize_or(Vec3::Y);
         }
         let mut velocity = direction * s.start_speed.pick(rng);
-        if s.space == Space::World {
+        // In the world, unless it's a local system's own.
+        let in_world = s.space == Space::World || into_local.is_some();
+        if in_world {
             position = emitter.transform_point3(position);
             velocity = emitter.transform_vector3(velocity);
+        }
+        if let Some(inherit) = &s.inherit_velocity
+            && (parent.is_some() || inherit.mode == InheritMode::Initial)
+        {
+            let from = parent.map_or(self.emitter_velocity, |(p, _)| p.velocity);
+            let mut add = from * inherit.curve.at(0.0, rng.unit());
+            if !in_world {
+                add = emitter.inverse().transform_vector3(add);
+            }
+            velocity += add;
+        }
+        if let Some(m) = into_local {
+            position = m.transform_point3(position);
+            velocity = m.transform_vector3(velocity);
         }
         let i = self.count;
         self.count += 1;
@@ -1014,6 +1373,72 @@ impl ParticleSystem {
             let t = rng.unit();
             std::array::from_fn(|c| a[c] + (b[c] - a[c]) * t)
         };
+        if let Some((p, inherit)) = parent {
+            if inherit & INHERIT_COLOR != 0 {
+                for c in 0..4 {
+                    self.color[i][c] *= p.color[c];
+                }
+            }
+            if inherit & INHERIT_SIZE != 0 {
+                self.size[i] *= p.size;
+            }
+            if inherit & INHERIT_ROTATION != 0 {
+                self.rotation[i] += p.rotation;
+            }
+        }
+    }
+
+    /// Emits for a parent's `triggers` of `kind` (its bursts' counts each),
+    /// or, for `Birth`, from its `living` particles at its rate a second
+    /// over `seconds`, owing `carry`. Its object is at `emitter`.
+    fn emit_for(
+        &mut self,
+        link: SubEmitter,
+        triggers: &[Trigger],
+        living: &[Trigger],
+        seconds: f32,
+        carry: &mut f32,
+        emitter: Mat4,
+    ) {
+        let into_local = (self.settings.space == Space::Local).then(|| emitter.inverse());
+        let at = |p: Vec3| {
+            let mut m = emitter;
+            m.w_axis = p.extend(1.0);
+            m
+        };
+        let before = self.count;
+        if link.kind == SubEmitterKind::Birth {
+            if living.is_empty() {
+                *carry = 0.0;
+                return;
+            }
+            *carry += living.len() as f32 * self.settings.rate_over_time * seconds;
+            let n = carry.floor();
+            *carry -= n;
+            for _ in 0..n as u32 {
+                let k = ((self.rng.unit() * living.len() as f32) as usize).min(living.len() - 1);
+                if link.probability < 1.0 && self.rng.unit() >= link.probability {
+                    continue;
+                }
+                let parent = &living[k];
+                self.spawn_from(at(parent.position), 0.0, Some((parent, link.inherit)), into_local);
+            }
+        } else {
+            for parent in triggers.iter().filter(|t| t.kind == link.kind) {
+                if link.probability < 1.0 && self.rng.unit() >= link.probability {
+                    continue;
+                }
+                for b in 0..self.settings.bursts.len() {
+                    let count = self.settings.bursts[b].count.pick(&mut self.rng).round() as u32;
+                    for _ in 0..count {
+                        self.spawn_from(at(parent.position), 0.0, Some((parent, link.inherit)), into_local);
+                    }
+                }
+            }
+        }
+        if self.count > before {
+            self.done = false;
+        }
     }
 
     fn kill(&mut self, i: usize) {
@@ -1175,14 +1600,14 @@ fn noise_at(noise: &Noise, p: Vec3, time: f32) -> Vec3 {
 }
 
 /// `table` at `t` (0 to 1), between its steps.
-fn sample(table: &[f32; TABLE], t: f32) -> f32 {
+pub(crate) fn sample(table: &[f32; TABLE], t: f32) -> f32 {
     let x = t * (TABLE - 1) as f32;
     let i = (x as usize).min(TABLE - 2);
     let f = x - i as f32;
     table[i] + (table[i + 1] - table[i]) * f
 }
 
-fn sample_color(table: &[[f32; 4]; TABLE], t: f32) -> [f32; 4] {
+pub(crate) fn sample_color(table: &[[f32; 4]; TABLE], t: f32) -> [f32; 4] {
     let x = t * (TABLE - 1) as f32;
     let i = (x as usize).min(TABLE - 2);
     let f = x - i as f32;
@@ -1263,6 +1688,15 @@ impl World {
         if let Some(why) = settings.refused() {
             return Err(WorldError::Particles(why));
         }
+        for plane in settings.collision.iter().flat_map(|c| &c.planes) {
+            self.entity(*plane)?;
+        }
+        for sub in &settings.sub_emitters {
+            self.entity(sub.system)?;
+            if sub.system == object {
+                return Err(WorldError::Particles("a particle system can't be its own sub emitter"));
+            }
+        }
         match self.particles.get_mut(&object) {
             Some(system) => system.set(settings),
             None => {
@@ -1271,16 +1705,37 @@ impl World {
                 self.particles.insert(object, ParticleSystem::new(settings, seed));
             }
         }
+        self.relink_particles();
         Ok(())
+    }
+
+    /// Marks the systems that are some system's sub emitter, and makes
+    /// room to step them without growing anything.
+    pub(crate) fn relink_particles(&mut self) {
+        let mut subs = std::mem::take(&mut self.particle_links);
+        subs.clear();
+        for (&object, system) in &self.particles {
+            for (k, sub) in system.settings.sub_emitters.iter().enumerate() {
+                subs.push((object, k, sub.system));
+            }
+        }
+        for system in self.particles.values_mut() {
+            system.is_sub = false;
+        }
+        for &(_, _, sub) in &subs {
+            if let Some(system) = self.particles.get_mut(&sub) {
+                system.is_sub = true;
+            }
+        }
+        self.particle_links = subs;
     }
 
     /// Takes `object`'s particle system away, its particles too.
     pub fn remove_particles(&mut self, object: ObjectId) -> Result<()> {
         self.entity(object)?;
-        self.particles
-            .remove(&object)
-            .map(|_| ())
-            .ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })
+        self.particles.remove(&object).ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })?;
+        self.relink_particles();
+        Ok(())
     }
 
     pub fn particles(&self, object: ObjectId) -> Result<&ParticleSystem> {
@@ -1321,8 +1776,11 @@ impl World {
             return Err(WorldError::Particles("simulate takes seconds of 0 or more"));
         }
         let emitter = self.world_matrix(object)?;
-        let system =
-            self.particles.get_mut(&object).ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })?;
+        let mut system =
+            self.particles.remove(&object).ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })?;
+        self.find_planes(&mut system, emitter);
+        self.particles.insert(object, system);
+        let system = self.particles.get_mut(&object).expect("put back above");
         let steps = (seconds * 30.0).ceil() as u32;
         for _ in 0..steps {
             system.step(seconds / steps as f32, emitter);
@@ -1330,15 +1788,38 @@ impl World {
         Ok(())
     }
 
+    /// Where `system`'s collision planes are now, in its particles' space,
+    /// its object at `emitter`. A plane whose object is gone is left out.
+    fn find_planes(&self, system: &mut ParticleSystem, emitter: Mat4) {
+        system.plane_count = 0;
+        let Some(collision) = &system.settings.collision else { return };
+        let into = (system.settings.space == Space::Local).then(|| emitter.inverse());
+        for &plane in &collision.planes {
+            let Ok(m) = self.world_matrix(plane) else { continue };
+            let (mut point, mut normal) = (m.w_axis.truncate(), m.y_axis.truncate());
+            if let Some(into) = into {
+                point = into.transform_point3(point);
+                normal = into.transform_vector3(normal);
+            }
+            system.planes[system.plane_count] = (point, normal.normalize_or(Vec3::Y), Some(plane));
+            system.plane_count += 1;
+        }
+    }
+
     /// Moves every system on, once a frame: by `dt` seconds of the game's
     /// time, or `unscaled` for those that ask. A system whose object is
     /// hidden stops and clears; shown again, one that plays on awake
-    /// plays. Those that became done are added to `events`.
+    /// plays. Those that became done are added to `events`. The trails
+    /// move on too, by `dt`.
     pub fn step_particles(&mut self, dt: f32, unscaled: f32, events: &mut Vec<ParticleEvent>) {
         let clean = |v: f32| if v.is_finite() { v.max(0.0) } else { 0.0 };
         let (dt, unscaled) = (clean(dt), clean(unscaled));
         let mut systems = std::mem::take(&mut self.particles);
         for (&object, system) in &mut systems {
+            system.triggers.clear();
+            system.living.clear();
+            system.hits = [0; MAX_PLANES];
+            system.stepped = 0.0;
             let shown = self.active_in_hierarchy(object).unwrap_or(false);
             let Ok(emitter) = self.world_matrix(object) else { continue };
             match (system.shown.replace(shown), shown) {
@@ -1361,11 +1842,36 @@ impl World {
                 continue;
             }
             let dt = if system.settings.unscaled_time { unscaled } else { dt };
-            if system.step(dt, emitter) && system.settings.stop_action != StopAction::None {
-                events.push(ParticleEvent { object, action: system.settings.stop_action });
+            self.find_planes(system, emitter);
+            let action = system.settings.stop_action;
+            if system.step(dt, emitter) && action != StopAction::None && !system.is_sub {
+                events.push(ParticleEvent { object, kind: ParticleEventKind::Done(action) });
+            }
+            if system.settings.collision.as_ref().is_some_and(|c| c.send_messages) {
+                for k in 0..system.plane_count {
+                    if let (count @ 1.., (_, _, Some(plane))) = (system.hits[k], system.planes[k]) {
+                        events.push(ParticleEvent { object, kind: ParticleEventKind::Collision { plane, count } });
+                    }
+                }
             }
         }
+        // Then the sub emitters, from what their parents' particles did.
+        for &(parent, k, sub) in &self.particle_links {
+            let Some(from) = systems.get_mut(&parent) else { continue };
+            let link = from.settings.sub_emitters[k];
+            let (triggers, living) = (std::mem::take(&mut from.triggers), std::mem::take(&mut from.living));
+            let (seconds, mut carry) = (from.stepped, from.sub_carry[k]);
+            if self.active_in_hierarchy(sub).unwrap_or(false)
+                && let Ok(emitter) = self.world_matrix(sub)
+                && let Some(system) = systems.get_mut(&sub)
+            {
+                system.emit_for(link, &triggers, &living, seconds, &mut carry, emitter);
+            }
+            let from = systems.get_mut(&parent).expect("there above");
+            (from.triggers, from.living, from.sub_carry[k]) = (triggers, living, carry);
+        }
         self.particles = systems;
+        self.step_trails(dt);
     }
 }
 

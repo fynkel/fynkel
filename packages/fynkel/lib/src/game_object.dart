@@ -778,7 +778,7 @@ class GameObject with _Moving {
         b._listening?.cancelAll();
         b._ending = true;
         world._safely(this, b.onDestroy);
-      case Camera() || Light() || MeshRenderer() || ParticleSystem():
+      case Camera() || Light() || MeshRenderer() || ParticleSystem() || TrailRenderer():
         if (component._enabledFlag) _unwrite(component);
     }
     component
@@ -925,6 +925,9 @@ class GameObject with _Moving {
       case ParticleSystem():
         check(fy_particles_remove(world.pointer, id));
         world._particleSystems.remove(id);
+      case TrailRenderer():
+        check(fy_trail_remove(world.pointer, id));
+        world._trails.remove(id);
       case Behaviour():
     }
   }
@@ -935,6 +938,7 @@ class GameObject with _Moving {
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),
     ParticleSystem c => _writeParticles(c),
+    TrailRenderer c => _writeTrail(c),
     Behaviour() => null,
   };
 
@@ -1109,6 +1113,36 @@ class GameObject with _Moving {
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
   }
 
+  void _writeTrail(TrailRenderer value) {
+    final w = _engine('its TrailRenderer can\'t be changed');
+    final s = scratch.trailSettings.ref
+      ..time = value.time
+      ..min_vertex_distance = value.minVertexDistance
+      ..width = value.widthMultiplier
+      ..emitting = value.emitting
+      ..material = value.material == null ? 0 : world._materialId(value.material!);
+    final widths = value._widthTable;
+    s.has_width_table = widths != null;
+    if (widths != null) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.width_table[i] = widths[i];
+      }
+    }
+    final colors = value._colorTable;
+    s.has_color_table = colors != null;
+    if (colors != null) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.color_table[i]
+          ..r = colors[i * 4]
+          ..g = colors[i * 4 + 1]
+          ..b = colors[i * 4 + 2]
+          ..a = colors[i * 4 + 3];
+      }
+    }
+    check(fy_trail_set(w, id, scratch.trailSettings));
+    world._trails[id] = value;
+  }
+
   void _writeParticles(ParticleSystem value) {
     final w = _engine('its ParticleSystem can\'t be changed');
     final s = scratch.particleSettings.ref
@@ -1131,6 +1165,7 @@ class GameObject with _Moving {
       ..seeded = value.randomSeed != null
       ..seed = value.randomSeed ?? 0
       ..rate_over_time = value.emission.rateOverTime
+      ..rate_over_distance = value.emission.rateOverDistance
       ..burst_count = value.emission.bursts.length
       ..material = value.material == null ? 0 : world._materialId(value.material!);
     void range(FyRange to, Range r) => to
@@ -1253,8 +1288,62 @@ class GameObject with _Moving {
       ..mesh = mode.mesh == null ? 0 : world._meshId(mode.mesh!)
       ..lit = value.lit
       ..softness = value.softness;
+    s.has_inherit_velocity = value.inheritVelocity != null;
+    if (value.inheritVelocity case final i?) {
+      s.inherit_velocity.mode = switch (i.mode) {
+        InheritVelocityMode.initial => FY_PARTICLE_INHERIT_INITIAL,
+        InheritVelocityMode.current => FY_PARTICLE_INHERIT_CURRENT,
+      };
+      i.curve._write(s.inherit_velocity.curve);
+    }
+    // Planes and sub emitters not in this world yet are left out, and the
+    // system written again once they may be.
+    var waiting = false;
+    s.has_collision = value.collision != null;
+    if (value.collision case final c?) {
+      var n = 0;
+      for (final plane in c.planes) {
+        if (!identical(plane._world, world) || plane.isDestroyed) {
+          waiting = true;
+          continue;
+        }
+        s.collision.planes[n++] = plane._id;
+      }
+      s.collision
+        ..plane_count = n
+        ..min_kill_speed = c.minKillSpeed
+        ..radius_scale = c.radiusScale
+        ..send_messages = c.sendCollisionMessages;
+      c.dampen._write(s.collision.dampen);
+      c.bounce._write(s.collision.bounce);
+      c.lifetimeLoss._write(s.collision.lifetime_loss);
+    }
+    var subs = 0;
+    for (final sub in value.subEmitters) {
+      final object = sub.system._live;
+      if (object == null || !identical(object._world, world) || !sub.system._enabledFlag) {
+        waiting = true;
+        continue;
+      }
+      s.sub_emitters[subs++]
+        ..system = object._id
+        ..kind = switch (sub.type) {
+          SubEmitterType.birth => FY_PARTICLE_SUB_BIRTH,
+          SubEmitterType.collision => FY_PARTICLE_SUB_COLLISION,
+          SubEmitterType.death => FY_PARTICLE_SUB_DEATH,
+        }
+        ..inherit =
+            (sub.inherit.contains(SubEmitterInherit.color) ? FY_PARTICLE_INHERIT_COLOR : 0) |
+            (sub.inherit.contains(SubEmitterInherit.size) ? FY_PARTICLE_INHERIT_SIZE : 0) |
+            (sub.inherit.contains(SubEmitterInherit.rotation) ? FY_PARTICLE_INHERIT_ROTATION : 0)
+        ..probability = sub.probability;
+    }
+    s.sub_emitter_count = subs;
     check(fy_particles_set(w, id, scratch.particleSettings));
+    // Another's sub emitter may be this one, now here: they try again.
+    if (world._waitingParticles.isNotEmpty) world._waitingShape = -1;
     world._particleSystems[id] = value;
+    if (waiting) world._waitingParticles.add(value);
   }
 
   @override

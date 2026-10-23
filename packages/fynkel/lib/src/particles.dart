@@ -100,20 +100,157 @@ final class Burst {
 }
 
 /// How many particles a [ParticleSystem] makes (Unity's emission module):
-/// [rateOverTime] a second while its timeline runs, and its [bursts], at
-/// most 8.
+/// [rateOverTime] a second while its timeline runs, [rateOverDistance] a
+/// metre its object moves, and its [bursts], at most 8.
 final class Emission {
   /// Unity's default: ten a second, no bursts.
-  const Emission({this.rateOverTime = 10, this.bursts = const []});
+  const Emission({this.rateOverTime = 10, this.rateOverDistance = 0, this.bursts = const []});
 
   /// Particles a second while the timeline runs.
   final double rateOverTime;
+
+  /// Particles a metre its object moves while the timeline runs, spread
+  /// along the way it went: dust behind a rolling ball, footprints. Best
+  /// in [ParticleSpace.world], where they stay where they were made.
+  final double rateOverDistance;
 
   /// At most 8.
   final List<Burst> bursts;
 
   @override
-  String toString() => 'Emission(rateOverTime: $rateOverTime, bursts: $bursts)';
+  String toString() => 'Emission(rateOverTime: $rateOverTime, rateOverDistance: $rateOverDistance, bursts: $bursts)';
+}
+
+/// When a particle takes its object's velocity ([InheritVelocity.mode]).
+enum InheritVelocityMode {
+  /// Once, as it's born: sparks thrown from a moving cart keep going.
+  initial,
+
+  /// Each frame, carrying it along as the object moves: a flame on a
+  /// torch that's waved about, in world space.
+  current,
+}
+
+/// A particle takes [curve] of its object's velocity (Unity's *Inherit
+/// Velocity* module): 1 for all of it.
+final class InheritVelocity {
+  /// All of it, as it's born, unless given.
+  const InheritVelocity({this.mode = InheritVelocityMode.initial, this.curve = const ParticleCurve(1)});
+
+  /// As it's born, or all its life.
+  final InheritVelocityMode mode;
+
+  /// How much of the object's velocity, over each particle's life.
+  final ParticleCurve curve;
+
+  @override
+  String toString() => 'InheritVelocity(${mode.name}, $curve)';
+}
+
+/// Particles that bounce off [planes] (Unity's *Collision* module, with
+/// planes): each plane an object's, through its position and facing its
+/// up (+Y), without end, a floor or a wall. Its objects can be empty ones
+/// (`GameObject(name: 'floor')`), and move. At most 6.
+///
+/// A particle that meets one from the front, within its radius (half its
+/// size, times [radiusScale]), bounces: [bounce] of its speed into the
+/// plane comes back out, then it loses [dampen] of its speed and
+/// [lifetimeLoss] of its lifetime; one slower than [minKillSpeed]
+/// afterwards dies. With [sendCollisionMessages], the system's
+/// [ParticleSystem.onParticleCollision] is told how many hit each plane.
+final class ParticleCollision {
+  /// A full bounce off [planes], nothing lost, unless given (Unity's).
+  const ParticleCollision({
+    required this.planes,
+    this.dampen = const ParticleCurve(0),
+    this.bounce = const ParticleCurve(1),
+    this.lifetimeLoss = const ParticleCurve(0),
+    this.minKillSpeed = 0,
+    this.radiusScale = 1,
+    this.sendCollisionMessages = false,
+  });
+
+  /// At most 6, each added to the world before the system's object.
+  final List<GameObject> planes;
+
+  /// How much of its speed it loses as it hits, 0 to 1.
+  final ParticleCurve dampen;
+
+  /// How much of its speed into the plane comes back out: 1 for a full
+  /// bounce, 0 to stop on the plane.
+  final ParticleCurve bounce;
+
+  /// How much of its lifetime it loses as it hits, 0 to 1: 1 dies there.
+  final ParticleCurve lifetimeLoss;
+
+  /// Slower than this after a hit, in metres a second, it dies.
+  final double minKillSpeed;
+
+  /// Its radius against a plane, times half its size.
+  final double radiusScale;
+
+  /// Calls the system's [ParticleSystem.onParticleCollision] after each
+  /// frame with hits.
+  final bool sendCollisionMessages;
+
+  bool get _finite =>
+      dampen._finite && bounce._finite && lifetimeLoss._finite && minKillSpeed.isFinite && radiusScale.isFinite;
+
+  @override
+  String toString() => 'ParticleCollision(${planes.length} planes, bounce: $bounce, dampen: $dampen)';
+}
+
+/// When a [SubEmitter] emits (Unity's `ParticleSystemSubEmitterType`).
+enum SubEmitterType {
+  /// From each particle all its life, at the sub system's
+  /// [Emission.rateOverTime] for each: a firework's trail.
+  birth,
+
+  /// Where one hits a plane, its sub system's bursts' counts: a splash.
+  collision,
+
+  /// Where one dies, its sub system's bursts' counts: a firework's burst.
+  death,
+}
+
+/// What a [SubEmitter]'s particles take from the particle they come from,
+/// times their own (Unity's `ParticleSystemSubEmitterProperties`).
+enum SubEmitterInherit {
+  /// Its colour, times the sub system's start colour.
+  color,
+
+  /// Its size, times the sub system's start size.
+  size,
+
+  /// Its rotation, added to the sub system's start rotation.
+  rotation,
+}
+
+/// Another system that emits where this one's particles are born, hit or
+/// die (Unity's *Sub Emitters* module): its [system] emits only so,
+/// never on its own timeline, from wherever its own object is. Each
+/// time with [probability], 0 to 1. Its particles start where the
+/// particle was, with the sub system's own settings and its
+/// [InheritVelocity] of the particle's velocity, in world space.
+final class SubEmitter {
+  /// [system] emitting at each [type] of event, inheriting nothing, every
+  /// time, unless given.
+  const SubEmitter(this.system, this.type, {this.inherit = const {}, this.probability = 1});
+
+  /// On an object of its own, which can be this one's child.
+  final ParticleSystem system;
+
+  /// As each particle is born, hits a plane or dies.
+  final SubEmitterType type;
+
+  /// What its particles take from the particle they come from.
+  final Set<SubEmitterInherit> inherit;
+
+  /// How likely each time is, 0 to 1.
+  final double probability;
+
+  @override
+  String toString() => 'SubEmitter(${type.name}, $system)';
 }
 
 enum _ShapeKind { point, sphere, hemisphere, cone, box, circle, edge }
@@ -493,8 +630,9 @@ final class ParticleRenderMode {
 /// [material] as squares that face the camera (or as its [renderMode]
 /// says). Its modules change them over their lives, as Unity's do:
 /// [velocityOverLifetime], [limitVelocity], [forceOverLifetime],
-/// [rotationOverLifetime], [sizeBySpeed], [colorBySpeed], [noise] and a
-/// [textureSheet]; null is a module turned off.
+/// [rotationOverLifetime], [sizeBySpeed], [colorBySpeed], [noise], a
+/// [textureSheet], [inheritVelocity], [collision] with planes and
+/// [subEmitters]; null (or empty) is a module turned off.
 ///
 /// The engine moves them, once a frame, after the animators and before
 /// [Behaviour.lateUpdate]; Dart only sends the settings when they change.
@@ -546,7 +684,11 @@ final class ParticleSystem extends Component {
     this._renderMode = ParticleRenderMode.billboard,
     this._lit = false,
     this._softness = 0,
+    this._inheritVelocity,
+    this._collision,
+    this._subEmitters = const [],
     this.onStopped,
+    this.onParticleCollision,
   }) : _sizeOverLifetime = sizeOverLifetime,
        _sizeTable = _sizes(sizeOverLifetime),
        _colorOverLifetime = colorOverLifetime,
@@ -558,6 +700,11 @@ final class ParticleSystem extends Component {
   /// Called when it's done, with [StopAction.callback] (Unity's
   /// `OnParticleSystemStopped`).
   void Function()? onStopped;
+
+  /// Called after each frame in which its particles hit a plane, with
+  /// [ParticleCollision.sendCollisionMessages] on: the plane's object and
+  /// how many hit it (Unity's `OnParticleCollision`).
+  void Function(GameObject plane, int count)? onParticleCollision;
 
   double _duration;
   bool _looping, _prewarm;
@@ -589,6 +736,9 @@ final class ParticleSystem extends Component {
   ParticleRenderMode _renderMode;
   bool _lit;
   double _softness;
+  InheritVelocity? _inheritVelocity;
+  ParticleCollision? _collision;
+  List<SubEmitter> _subEmitters;
 
   /// How long its timeline is, in seconds, at least 0.05: one round of a
   /// looping system, the whole of one that isn't.
@@ -762,6 +912,20 @@ final class ParticleSystem extends Component {
   double get softness => _softness;
   set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
 
+  /// A particle takes its object's velocity, as it's born or all its
+  /// life.
+  InheritVelocity? get inheritVelocity => _inheritVelocity;
+  set inheritVelocity(InheritVelocity? value) => _set(() => _inheritVelocity, (v) => _inheritVelocity = v, value);
+
+  /// Its particles bounce off planes.
+  ParticleCollision? get collision => _collision;
+  set collision(ParticleCollision? value) => _set(() => _collision, (v) => _collision = v, value);
+
+  /// Other systems that emit where its particles are born, hit a plane or
+  /// die: at most 4.
+  List<SubEmitter> get subEmitters => _subEmitters;
+  set subEmitters(List<SubEmitter> value) => _set(() => _subEmitters, (v) => _subEmitters = v, value);
+
   /// Plays from the start, keeping the particles it has; a paused system
   /// goes on from where it was.
   void play() => _command(FY_PARTICLES_PLAY, 0);
@@ -892,6 +1056,24 @@ final class ParticleSystem extends Component {
     if (_renderMode.mesh case final mesh? when mesh.isDisposed) {
       return ArgumentError('renderMode: its mesh is disposed');
     }
+    if (!_emission.rateOverDistance.isFinite || _emission.rateOverDistance < 0) {
+      return ArgumentError.value(_emission.rateOverDistance, 'rateOverDistance', 'must be 0 or more');
+    }
+    if (_inheritVelocity case final i? when !i.curve._finite) {
+      return ArgumentError('inheritVelocity\'s curve must be finite');
+    }
+    if (_collision case final c?) {
+      if (c.planes.length > 6) return ArgumentError('a ParticleSystem collides with at most 6 planes');
+      if (!c._finite) return ArgumentError('collision\'s numbers must be finite');
+      if (c.planes.any((p) => p.isDestroyed)) return ArgumentError('collision: a plane\'s object is destroyed');
+    }
+    if (_subEmitters.length > 4) return ArgumentError('a ParticleSystem has at most 4 sub emitters');
+    for (final sub in _subEmitters) {
+      if (identical(sub.system, this)) return ArgumentError('a ParticleSystem can\'t be its own sub emitter');
+      if (!sub.probability.isFinite || sub.probability < 0 || sub.probability > 1) {
+        return ArgumentError.value(sub.probability, 'probability', 'must be 0 to 1');
+      }
+    }
     return null;
   }
 
@@ -928,7 +1110,8 @@ extension _Particles on World {
   /// stop actions of those that were done.
   void _stepParticles() {
     _particleWatch.reset();
-    if (_particleSystems.isEmpty) return;
+    if (_waitingParticles.isNotEmpty && _waitingShape != _shape) _linkWaitingParticles();
+    if (_particleSystems.isEmpty && _trails.isEmpty) return;
     _sendTransforms();
     scratch.numbers[0] = time._delta;
     scratch.numbers[1] = time._unscaledDelta;
@@ -939,22 +1122,53 @@ extension _Particles on World {
     if (count > 0) _particleEvents(count);
   }
 
+  /// Writes again the systems whose sub emitters or planes weren't in the
+  /// world when they were written, now that they may be.
+  void _linkWaitingParticles() {
+    final waiting = _waitingParticles.toList();
+    _waitingParticles.clear();
+    for (final system in waiting) {
+      if (system.isRemoved || !system._enabledFlag) continue;
+      system._live?._writeParticles(system);
+    }
+    _waitingShape = _shape;
+  }
+
   void _particleEvents(int count) {
-    final buf = scratch.particleEvents(count);
-    check(fy_particle_events_get(pointer, buf, count, scratch.count));
-    // Copied first: a stop action may destroy or add objects.
-    final events = [for (var i = 0; i < count; i++) (buf[i].object, buf[i].action)];
-    for (final (id, action) in events) {
+    check(fy_particle_events_get(pointer, scratch.particleEvents(count), count, scratch.count));
+    // Read one at a time, a word at a time, without a list or a closure,
+    // as collisions come every frame: nothing a game does here writes to
+    // the buffer.
+    assert(sizeOf<FyParticleEvent>() == 32);
+    for (var i = 0; i < count; i++) {
+      final words = scratch.particleEventWords;
+      final halves = scratch.particleEventHalves;
+      final id = words[i * 4];
+      final kind = halves[i * 8 + 2];
+      final action = halves[i * 8 + 3];
+      final plane = words[i * 4 + 2];
+      final hits = halves[i * 8 + 6];
       final system = _particleSystems[id];
       if (system == null || system.isRemoved) continue;
       final object = system.gameObject;
-      switch (action) {
-        case FY_PARTICLE_STOP_DISABLE:
-          object.active = false;
-        case FY_PARTICLE_STOP_DESTROY:
-          object.destroy();
-        case FY_PARTICLE_STOP_CALLBACK:
-          if (system.onStopped case final onStopped?) _safely(object, onStopped);
+      if (kind == FY_PARTICLE_EVENT_COLLISION) {
+        final planeObject = _objects[plane];
+        final onCollision = system.onParticleCollision;
+        if (onCollision == null || planeObject == null) continue;
+        try {
+          onCollision(planeObject, hits);
+        } catch (error, stack) {
+          _report(object, error, stack);
+        }
+      } else {
+        switch (action) {
+          case FY_PARTICLE_STOP_DISABLE:
+            object.active = false;
+          case FY_PARTICLE_STOP_DESTROY:
+            object.destroy();
+          case FY_PARTICLE_STOP_CALLBACK:
+            if (system.onStopped case final onStopped?) _safely(object, onStopped);
+        }
       }
       if (_disposeAsked) return;
     }

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 40
+#define FY_ABI_VERSION 41
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -143,6 +143,43 @@
 
 // `mesh`, turned by its rotation round up.
 #define FY_PARTICLE_RENDER_MESH 4
+
+// `FyParticleInherit::mode`: the velocity a particle starts with.
+#define FY_PARTICLE_INHERIT_INITIAL 0
+
+// The velocity its object has each frame, carrying it along.
+#define FY_PARTICLE_INHERIT_CURRENT 1
+
+// The most planes in `FyParticleCollision`.
+#define FY_PARTICLE_MAX_PLANES 6
+
+// The most sub emitters in `FyParticleSettings`.
+#define FY_PARTICLE_MAX_SUB_EMITTERS 4
+
+// `FyParticleSubEmitter::kind`: as each particle is born, all its life.
+#define FY_PARTICLE_SUB_BIRTH 0
+
+// As one hits a plane.
+#define FY_PARTICLE_SUB_COLLISION 1
+
+// As one dies.
+#define FY_PARTICLE_SUB_DEATH 2
+
+// `FyParticleSubEmitter::inherit`, or'd: the particle's colour, size and
+// rotation, times the sub system's own.
+#define FY_PARTICLE_INHERIT_COLOR 1
+
+#define FY_PARTICLE_INHERIT_SIZE 2
+
+#define FY_PARTICLE_INHERIT_ROTATION 4
+
+// `FyParticleEvent::kind`: a system was done (stopped, its last particle
+// gone), with a stop action for the game to do.
+#define FY_PARTICLE_EVENT_DONE 0
+
+// A system's particles hit a plane, with `send_messages` on (Unity's
+// `OnParticleCollision`), `count` of them this step.
+#define FY_PARTICLE_EVENT_COLLISION 1
 
 // `fy_particles_command`: plays from the start (or on from a pause).
 #define FY_PARTICLES_PLAY 0
@@ -303,6 +340,9 @@ typedef struct FyQuality {
   // Samples a pixel is drawn with, smoothing edges (MSAA): 1, 2 or 4.
   // A device that can't draw a count draws the next below it.
   uint32_t samples;
+  // Particles with softness fade where they meet what's behind them;
+  // without, they're hard.
+  bool soft_particles;
 } FyQuality;
 
 // sRGB, 0–1 per channel.
@@ -651,6 +691,39 @@ typedef struct FyParticleSheet {
   bool random_row;
 } FyParticleSheet;
 
+// A particle takes `curve` of its object's velocity (Unity's *Inherit
+// Velocity*): `FY_PARTICLE_INHERIT_*`.
+typedef struct FyParticleInherit {
+  uint32_t mode;
+  struct FyCurve curve;
+} FyParticleInherit;
+
+// Bouncing off planes: each the object's, through its position, facing
+// its up. As `fynkel_world::ParticleCollision`.
+typedef struct FyParticleCollision {
+  // How many of `planes` there are.
+  uint32_t plane_count;
+  uint64_t planes[FY_PARTICLE_MAX_PLANES];
+  struct FyCurve dampen;
+  struct FyCurve bounce;
+  struct FyCurve lifetime_loss;
+  float min_kill_speed;
+  float radius_scale;
+  // Its hits are events (`FY_PARTICLE_EVENT_COLLISION`).
+  bool send_messages;
+} FyParticleCollision;
+
+// Another object's system that emits where this one's particles are
+// born, hit or die, with `probability`.
+typedef struct FyParticleSubEmitter {
+  uint64_t system;
+  // `FY_PARTICLE_SUB_*`.
+  uint32_t kind;
+  // `FY_PARTICLE_INHERIT_COLOR` and the others.
+  uint32_t inherit;
+  float probability;
+} FyParticleSubEmitter;
+
 // A particle system's settings: Unity's main, emission and shape
 // modules, its over-lifetime and by-speed modules, noise, a texture
 // sheet, and how it's drawn. Sent when they change, not each frame.
@@ -724,6 +797,15 @@ typedef struct FyParticleSettings {
   bool lit;
   // Metres it fades out in front of what's behind it; 0 for none.
   float softness;
+  // Particles a metre its object moves.
+  float rate_over_distance;
+  bool has_inherit_velocity;
+  struct FyParticleInherit inherit_velocity;
+  bool has_collision;
+  struct FyParticleCollision collision;
+  // How many of `sub_emitters` there are.
+  uint32_t sub_emitter_count;
+  struct FyParticleSubEmitter sub_emitters[FY_PARTICLE_MAX_SUB_EMITTERS];
 } FyParticleSettings;
 
 // What a particle system is doing, from `fy_particles_get`.
@@ -736,13 +818,37 @@ typedef struct FyParticleState {
   bool emitting;
 } FyParticleState;
 
-// A system that was done in the last `fy_world_particles_step` (stopped,
-// its last particle gone), with a stop action for the game to do.
+// What happened in the last `fy_world_particles_step`.
 typedef struct FyParticleEvent {
   uint64_t object;
-  // `FY_PARTICLE_STOP_*`, not `FY_PARTICLE_STOP_NONE`.
+  // `FY_PARTICLE_EVENT_*`.
+  uint32_t kind;
+  // `FY_PARTICLE_EVENT_DONE`'s: `FY_PARTICLE_STOP_*`, not
+  // `FY_PARTICLE_STOP_NONE`.
   uint32_t action;
+  // `FY_PARTICLE_EVENT_COLLISION`'s: the plane's object, and how many
+  // hit it.
+  uint64_t plane;
+  uint32_t count;
 } FyParticleEvent;
+
+// A trail's settings (Unity's `TrailRenderer`), as
+// `fynkel_world::TrailSettings`: seconds and metres, colours sRGB. Its
+// width and colour go over its length, head to tail.
+typedef struct FyTrailSettings {
+  float time;
+  float min_vertex_distance;
+  float width;
+  // Its width times `width_table` along it, when set.
+  bool has_width_table;
+  float width_table[FY_PARTICLE_TABLE];
+  // Its colour along it, when set; else white.
+  bool has_color_table;
+  struct FyColor color_table[FY_PARTICLE_TABLE];
+  bool emitting;
+  // What it's drawn with, or 0 for nothing drawn.
+  uint64_t material;
+} FyTrailSettings;
 
 // What a view did since it was made.
 typedef struct FyViewStats {
@@ -1800,9 +1906,10 @@ FyStatus fy_particles_get(const struct FyWorld *world, uint64_t id, struct FyPar
 
 // Moves every particle system on, once a frame, after the animators and
 // before the game's late update (where Unity steps them): `dt` seconds
-// of the game's time, `unscaled` for those that ask. Writes how many
-// systems were done, with a stop action, to `out_count`;
-// `fy_particle_events_get` reads them. Both times are read through
+// of the game's time, `unscaled` for those that ask; and the trails, by
+// `dt`. Writes how many events there were (systems done, with a stop
+// action, and planes hit) to `out_count`; `fy_particle_events_get` reads
+// them. Both times are read through
 // pointers, as `fy_world_animate`'s `dt`.
 //
 // # Safety
@@ -1825,6 +1932,38 @@ FyStatus fy_particle_events_get(const struct FyWorld *world,
                                 struct FyParticleEvent *buf,
                                 size_t cap,
                                 size_t *out_count);
+
+// Gives the object a trail with `settings`, or changes the one it has,
+// keeping its points. Settings that can't be are
+// `FY_STATUS_INVALID_VALUE` and change nothing.
+//
+// # Safety
+//
+// `world` is null or live; `settings` is null or readable.
+FyStatus fy_trail_set(const struct FyWorld *world,
+                      uint64_t id,
+                      const struct FyTrailSettings *settings);
+
+// Takes the object's trail away.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_trail_remove(const struct FyWorld *world, uint64_t id);
+
+// Takes every point of the object's trail away (Unity's `Clear`).
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_trail_clear(const struct FyWorld *world, uint64_t id);
+
+// How many points the object's trail has, the head's not counted.
+//
+// # Safety
+//
+// `world` is null or live; `out` is null or writable.
+FyStatus fy_trail_count(const struct FyWorld *world, uint64_t id, size_t *out);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

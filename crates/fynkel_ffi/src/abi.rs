@@ -19,11 +19,12 @@ use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, Sha
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    AnimationEvent, Blend, Burst, BySpeed, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
-    LimitVelocity, MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData,
-    ObjectId, ParticleCommand, ParticleCurve, ParticleEvent, ParticleNoise, ParticleRange, ParticleSettings, Quat, Ray,
-    Raycaster, RenderMode, Shader, ShaderId, Shape, ShapeKind, Space, StopAction, TextureId, TextureSheet, Transform,
-    Vec2, Vec3, VectorOverLifetime, World,
+    AnimationEvent, Blend, Burst, BySpeed, Camera, Color, Component, HdrData, ImageData, ImageError, InheritMode,
+    InheritVelocity, Light, LightKind, LimitVelocity, MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId,
+    MeshParts, MeshRenderer, ModelData, ObjectId, ParticleCollision, ParticleCommand, ParticleCurve, ParticleEvent,
+    ParticleEventKind, ParticleNoise, ParticleRange, ParticleSettings, Quat, Ray, Raycaster, RenderMode, Shader,
+    ShaderId, Shape, ShapeKind, Space, StopAction, SubEmitter, SubEmitterKind, TABLE, TextureId, TextureSheet,
+    TrailSettings, Transform, Vec2, Vec3, VectorOverLifetime, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -31,7 +32,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 40;
+pub const FY_ABI_VERSION: u32 = 41;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -202,6 +203,9 @@ pub struct FyQuality {
     /// Samples a pixel is drawn with, smoothing edges (MSAA): 1, 2 or 4.
     /// A device that can't draw a count draws the next below it.
     pub samples: u32,
+    /// Particles with softness fade where they meet what's behind them;
+    /// without, they're hard.
+    pub soft_particles: bool,
 }
 
 impl FyQuality {
@@ -224,6 +228,7 @@ impl FyQuality {
             spot_shadows: s.spot_maps as u32,
             spot_shadow_resolution: s.spot_map_size,
             samples: q.samples,
+            soft_particles: q.soft_particles,
         }
     }
 
@@ -250,6 +255,7 @@ impl FyQuality {
                 distance: self.shadow_distance,
             }),
             samples: self.samples,
+            soft_particles: self.soft_particles,
         };
         match quality.invalid() {
             Some(why) => Err(Error::new(FyStatus::InvalidValue, format!("quality: {why}"))),
@@ -3318,7 +3324,8 @@ pub struct FyCurve {
 }
 
 impl FyCurve {
-    const fn constant(value: f32) -> Self {
+    /// `value` for every particle, all its life.
+    pub const fn constant(value: f32) -> Self {
         Self { mode: FY_CURVE_CONSTANT, min: value, max: value, tables: [[value; FY_PARTICLE_TABLE as usize]; 2] }
     }
 
@@ -3422,6 +3429,69 @@ pub struct FyParticleShape {
     pub random_direction: f32,
 }
 
+/// `FyParticleInherit::mode`: the velocity a particle starts with.
+pub const FY_PARTICLE_INHERIT_INITIAL: u32 = 0;
+/// The velocity its object has each frame, carrying it along.
+pub const FY_PARTICLE_INHERIT_CURRENT: u32 = 1;
+
+/// A particle takes `curve` of its object's velocity (Unity's *Inherit
+/// Velocity*): `FY_PARTICLE_INHERIT_*`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleInherit {
+    pub mode: u32,
+    pub curve: FyCurve,
+}
+
+/// The most planes in `FyParticleCollision`.
+pub const FY_PARTICLE_MAX_PLANES: u32 = 6;
+
+/// Bouncing off planes: each the object's, through its position, facing
+/// its up. As `fynkel_world::ParticleCollision`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleCollision {
+    /// How many of `planes` there are.
+    pub plane_count: u32,
+    pub planes: [u64; FY_PARTICLE_MAX_PLANES as usize],
+    pub dampen: FyCurve,
+    pub bounce: FyCurve,
+    pub lifetime_loss: FyCurve,
+    pub min_kill_speed: f32,
+    pub radius_scale: f32,
+    /// Its hits are events (`FY_PARTICLE_EVENT_COLLISION`).
+    pub send_messages: bool,
+}
+
+/// The most sub emitters in `FyParticleSettings`.
+pub const FY_PARTICLE_MAX_SUB_EMITTERS: u32 = 4;
+
+/// `FyParticleSubEmitter::kind`: as each particle is born, all its life.
+pub const FY_PARTICLE_SUB_BIRTH: u32 = 0;
+/// As one hits a plane.
+pub const FY_PARTICLE_SUB_COLLISION: u32 = 1;
+/// As one dies.
+pub const FY_PARTICLE_SUB_DEATH: u32 = 2;
+
+/// `FyParticleSubEmitter::inherit`, or'd: the particle's colour, size and
+/// rotation, times the sub system's own.
+pub const FY_PARTICLE_INHERIT_COLOR: u32 = 1;
+pub const FY_PARTICLE_INHERIT_SIZE: u32 = 2;
+pub const FY_PARTICLE_INHERIT_ROTATION: u32 = 4;
+
+/// Another object's system that emits where this one's particles are
+/// born, hit or die, with `probability`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyParticleSubEmitter {
+    pub system: u64,
+    /// `FY_PARTICLE_SUB_*`.
+    pub kind: u32,
+    /// `FY_PARTICLE_INHERIT_COLOR` and the others.
+    pub inherit: u32,
+    pub probability: f32,
+}
+
 /// `count` particles at once, `time` seconds into the timeline, `cycles`
 /// times (0 for as long as it plays) every `interval` seconds, each time
 /// with `probability`.
@@ -3510,6 +3580,15 @@ pub struct FyParticleSettings {
     pub lit: bool,
     /// Metres it fades out in front of what's behind it; 0 for none.
     pub softness: f32,
+    /// Particles a metre its object moves.
+    pub rate_over_distance: f32,
+    pub has_inherit_velocity: bool,
+    pub inherit_velocity: FyParticleInherit,
+    pub has_collision: bool,
+    pub collision: FyParticleCollision,
+    /// How many of `sub_emitters` there are.
+    pub sub_emitter_count: u32,
+    pub sub_emitters: [FyParticleSubEmitter; FY_PARTICLE_MAX_SUB_EMITTERS as usize],
 }
 
 impl Default for FyParticleSettings {
@@ -3589,6 +3668,22 @@ impl Default for FyParticleSettings {
             mesh: 0,
             lit: false,
             softness: 0.0,
+            rate_over_distance: 0.0,
+            has_inherit_velocity: false,
+            inherit_velocity: FyParticleInherit { mode: FY_PARTICLE_INHERIT_INITIAL, curve: FyCurve::constant(0.0) },
+            has_collision: false,
+            collision: FyParticleCollision {
+                plane_count: 0,
+                planes: [0; FY_PARTICLE_MAX_PLANES as usize],
+                dampen: FyCurve::constant(0.0),
+                bounce: FyCurve::constant(1.0),
+                lifetime_loss: FyCurve::constant(0.0),
+                min_kill_speed: 0.0,
+                radius_scale: 1.0,
+                send_messages: false,
+            },
+            sub_emitter_count: 0,
+            sub_emitters: [FyParticleSubEmitter::default(); FY_PARTICLE_MAX_SUB_EMITTERS as usize],
         }
     }
 }
@@ -3622,6 +3717,13 @@ impl FyParticleSettings {
         };
         if self.burst_count > FY_PARTICLE_MAX_BURSTS {
             return Err(Error::new(FyStatus::InvalidValue, "a particle system has at most 8 bursts"));
+        }
+        if self.sub_emitter_count > FY_PARTICLE_MAX_SUB_EMITTERS {
+            return Err(Error::new(FyStatus::InvalidValue, "a particle system has at most 4 sub emitters"));
+        }
+        let c = &self.collision;
+        if self.has_collision && c.plane_count > FY_PARTICLE_MAX_PLANES {
+            return Err(Error::new(FyStatus::InvalidValue, "a particle system collides with at most 6 planes"));
         }
         let s = &self.shape;
         Ok(ParticleSettings {
@@ -3721,6 +3823,48 @@ impl FyParticleSettings {
             render_mode,
             lit: self.lit,
             softness: self.softness,
+            rate_over_distance: self.rate_over_distance,
+            inherit_velocity: self
+                .has_inherit_velocity
+                .then(|| -> Result<_, Error> {
+                    let i = &self.inherit_velocity;
+                    let mode = match i.mode {
+                        FY_PARTICLE_INHERIT_INITIAL => InheritMode::Initial,
+                        FY_PARTICLE_INHERIT_CURRENT => InheritMode::Current,
+                        _ => return Err(bad("inherit_velocity.mode")),
+                    };
+                    Ok(InheritVelocity { mode, curve: i.curve.curve("inherit_velocity.curve")? })
+                })
+                .transpose()?,
+            collision: self
+                .has_collision
+                .then(|| -> Result<_, Error> {
+                    Ok(ParticleCollision {
+                        planes: c.planes[..c.plane_count as usize]
+                            .iter()
+                            .map(|&p| object(p))
+                            .collect::<Result<_, _>>()?,
+                        dampen: c.dampen.curve("collision.dampen")?,
+                        bounce: c.bounce.curve("collision.bounce")?,
+                        lifetime_loss: c.lifetime_loss.curve("collision.lifetime_loss")?,
+                        min_kill_speed: c.min_kill_speed,
+                        radius_scale: c.radius_scale,
+                        send_messages: c.send_messages,
+                    })
+                })
+                .transpose()?,
+            sub_emitters: self.sub_emitters[..self.sub_emitter_count as usize]
+                .iter()
+                .map(|e| {
+                    let kind = match e.kind {
+                        FY_PARTICLE_SUB_BIRTH => SubEmitterKind::Birth,
+                        FY_PARTICLE_SUB_COLLISION => SubEmitterKind::Collision,
+                        FY_PARTICLE_SUB_DEATH => SubEmitterKind::Death,
+                        _ => return Err(bad("sub_emitters.kind")),
+                    };
+                    Ok(SubEmitter { system: object(e.system)?, kind, inherit: e.inherit, probability: e.probability })
+                })
+                .collect::<Result<_, _>>()?,
         })
     }
 }
@@ -3773,14 +3917,27 @@ pub struct FyParticleState {
     pub emitting: bool,
 }
 
-/// A system that was done in the last `fy_world_particles_step` (stopped,
-/// its last particle gone), with a stop action for the game to do.
+/// `FyParticleEvent::kind`: a system was done (stopped, its last particle
+/// gone), with a stop action for the game to do.
+pub const FY_PARTICLE_EVENT_DONE: u32 = 0;
+/// A system's particles hit a plane, with `send_messages` on (Unity's
+/// `OnParticleCollision`), `count` of them this step.
+pub const FY_PARTICLE_EVENT_COLLISION: u32 = 1;
+
+/// What happened in the last `fy_world_particles_step`.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FyParticleEvent {
     pub object: u64,
-    /// `FY_PARTICLE_STOP_*`, not `FY_PARTICLE_STOP_NONE`.
+    /// `FY_PARTICLE_EVENT_*`.
+    pub kind: u32,
+    /// `FY_PARTICLE_EVENT_DONE`'s: `FY_PARTICLE_STOP_*`, not
+    /// `FY_PARTICLE_STOP_NONE`.
     pub action: u32,
+    /// `FY_PARTICLE_EVENT_COLLISION`'s: the plane's object, and how many
+    /// hit it.
+    pub plane: u64,
+    pub count: u32,
 }
 
 /// `fy_particles_command`: plays from the start (or on from a pause).
@@ -3898,9 +4055,10 @@ pub unsafe extern "C" fn fy_particles_get(world: *const FyWorld, id: u64, out: *
 
 /// Moves every particle system on, once a frame, after the animators and
 /// before the game's late update (where Unity steps them): `dt` seconds
-/// of the game's time, `unscaled` for those that ask. Writes how many
-/// systems were done, with a stop action, to `out_count`;
-/// `fy_particle_events_get` reads them. Both times are read through
+/// of the game's time, `unscaled` for those that ask; and the trails, by
+/// `dt`. Writes how many events there were (systems done, with a stop
+/// action, and planes hit) to `out_count`; `fy_particle_events_get` reads
+/// them. Both times are read through
 /// pointers, as `fy_world_animate`'s `dt`.
 ///
 /// # Safety
@@ -3920,7 +4078,7 @@ pub unsafe extern "C" fn fy_world_particles_step(
         let mut inner = world.lock()?;
         let mut events = world.particle_events.lock().unwrap_or_else(PoisonError::into_inner);
         events.clear();
-        if inner.has_particles() {
+        if inner.has_particles() || inner.has_trails() {
             inner.step_particles(dt, unscaled, &mut events);
         }
         // SAFETY: per this function's contract.
@@ -3947,10 +4105,143 @@ pub unsafe extern "C" fn fy_particle_events_get(
         let world = unsafe { handle(world, "world") }?;
         let _inner = world.lock()?;
         let events = world.particle_events.lock().unwrap_or_else(PoisonError::into_inner);
-        let items =
-            events.iter().map(|e| FyParticleEvent { object: e.object.raw(), action: stop_action_value(e.action) });
+        let items = events.iter().map(|e| match e.kind {
+            ParticleEventKind::Done(action) => FyParticleEvent {
+                object: e.object.raw(),
+                kind: FY_PARTICLE_EVENT_DONE,
+                action: stop_action_value(action),
+                ..FyParticleEvent::default()
+            },
+            ParticleEventKind::Collision { plane, count } => FyParticleEvent {
+                object: e.object.raw(),
+                kind: FY_PARTICLE_EVENT_COLLISION,
+                plane: plane.raw(),
+                count,
+                ..FyParticleEvent::default()
+            },
+        });
         // SAFETY: per this function's contract.
         unsafe { write_all(items, buf, cap, out_count) }
+    })
+}
+
+// --- Trails ------------------------------------------------------------------
+
+/// A trail's settings (Unity's `TrailRenderer`), as
+/// `fynkel_world::TrailSettings`: seconds and metres, colours sRGB. Its
+/// width and colour go over its length, head to tail.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyTrailSettings {
+    pub time: f32,
+    pub min_vertex_distance: f32,
+    pub width: f32,
+    /// Its width times `width_table` along it, when set.
+    pub has_width_table: bool,
+    pub width_table: [f32; FY_PARTICLE_TABLE as usize],
+    /// Its colour along it, when set; else white.
+    pub has_color_table: bool,
+    pub color_table: [FyColor; FY_PARTICLE_TABLE as usize],
+    pub emitting: bool,
+    /// What it's drawn with, or 0 for nothing drawn.
+    pub material: u64,
+}
+
+impl Default for FyTrailSettings {
+    /// Unity's: five seconds, a point each 0.1 m, a metre wide, white.
+    fn default() -> Self {
+        let d = TrailSettings::default();
+        Self {
+            time: d.time,
+            min_vertex_distance: d.min_vertex_distance,
+            width: d.width,
+            has_width_table: false,
+            width_table: [1.0; FY_PARTICLE_TABLE as usize],
+            has_color_table: false,
+            color_table: [FyColor::from(Color::WHITE); FY_PARTICLE_TABLE as usize],
+            emitting: d.emitting,
+            material: 0,
+        }
+    }
+}
+
+impl FyTrailSettings {
+    fn settings(&self) -> TrailSettings {
+        TrailSettings {
+            time: self.time,
+            min_vertex_distance: self.min_vertex_distance,
+            width: self.width,
+            width_curve: self.has_width_table.then(|| Box::new(self.width_table)),
+            color: self.has_color_table.then(|| Box::new(self.color_table.map(Color::from))),
+            emitting: self.emitting,
+            material: MaterialId::from_raw(self.material),
+        }
+    }
+}
+
+const _: () = assert!(TABLE == FY_PARTICLE_TABLE as usize);
+
+/// Gives the object a trail with `settings`, or changes the one it has,
+/// keeping its points. Settings that can't be are
+/// `FY_STATUS_INVALID_VALUE` and change nothing.
+///
+/// # Safety
+///
+/// `world` is null or live; `settings` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_trail_set(world: *const FyWorld, id: u64, settings: *const FyTrailSettings) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, settings) =
+            unsafe { (handle(world, "world")?, settings.as_ref().ok_or_else(|| Error::null("settings"))?) };
+        world.lock()?.set_trail(object(id)?, settings.settings())?;
+        Ok(())
+    })
+}
+
+/// Takes the object's trail away.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_trail_remove(world: *const FyWorld, id: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        world.lock()?.remove_trail(object(id)?)?;
+        Ok(())
+    })
+}
+
+/// Takes every point of the object's trail away (Unity's `Clear`).
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_trail_clear(world: *const FyWorld, id: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        world.lock()?.clear_trail(object(id)?)?;
+        Ok(())
+    })
+}
+
+/// How many points the object's trail has, the head's not counted.
+///
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_trail_count(world: *const FyWorld, id: u64, out: *mut usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let count = world.lock()?.trail(object(id)?)?.count();
+        // SAFETY: per this function's contract.
+        unsafe { write(out, count, "out") }
     })
 }
 

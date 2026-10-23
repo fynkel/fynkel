@@ -29,6 +29,7 @@ import 'package:lab/scenes/layer_matrix.dart';
 import 'package:lab/scenes/layers_basics.dart';
 import 'package:lab/scenes/mesh_colliders_basics.dart';
 import 'package:lab/scenes/particles_look.dart';
+import 'package:lab/scenes/particles_world.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/moving_basics.dart';
@@ -380,6 +381,37 @@ void main() {
     toggle('rain').onChanged(false);
     expect(scene.systems['rain']!.every((s) => !s.isEmitting), isTrue);
     expect(toggle('rain').value(), isFalse);
+  });
+
+  test('Particles and the world: fireworks burst, the ball leaves dust and a trail, sparks hit the floor', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ParticlesWorldScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    Toggle toggle(String label) => scene.controls.whereType<Toggle>().firstWhere((c) => c.label == label);
+    frames(150);
+    expect(scene.systems.keys, worldEffects);
+    final [shells, sparkTrail, burst] = scene.systems['fireworks']!;
+    expect(shells.particleCount, greaterThan(0));
+    expect(sparkTrail.particleCount, greaterThan(0), reason: 'what a shell leaves as it climbs');
+    expect(burst.particleCount, greaterThan(50), reason: 'a shell has ended and burst');
+    expect(scene.systems['ball']!.single.particleCount, greaterThan(0), reason: 'dust by the metre');
+    expect(scene.trail!.positionCount, greaterThan(5));
+    expect(scene.hits, greaterThan(0));
+    expect(scene.readout.value, matches(RegExp(r'^fireworks \d+, ball \d+, sparks \d+, trail \d+ points\n')));
+    toggle('ball').onChanged(false);
+    expect(scene.trail!.emitting, isFalse);
+    frames(60);
+    expect(scene.trail!.positionCount, lessThanOrEqualTo(1), reason: 'its points lived out their time');
+    toggle('show shapes').onChanged(true);
+    expect(world.debug.drawShapes, isTrue);
+    frames(2);
+    toggle('show shapes').onChanged(false);
   });
 
   test('Pooling: the basics: the fountain reuses its balls, and the handle lets go of one that went back', () {

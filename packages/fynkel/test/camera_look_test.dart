@@ -136,6 +136,7 @@ void main() {
           spotShadows: e.spot_shadows,
           spotShadowResolution: e.spot_shadow_resolution,
           antiAliasing: e.samples == 1 ? 0 : e.samples,
+          softParticles: e.soft_particles,
           // The views' to draw at, not the engine's.
           renderScale: level.renderScale,
         );

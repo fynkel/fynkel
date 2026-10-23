@@ -1,6 +1,6 @@
 // Particles (stage 12): each a square facing the camera, as Unity's
 // billboards are, or stretched the way it moves, lying flat, standing up,
-// or a mesh. Unlit, as Unity's default particle material is, its colour
+// or a mesh; and trails, a strip through their points. Unlit, as Unity's default particle material is, its colour
 // the particle's times the material's, times the base colour texture,
 // plus the material's emission; or lit as a surface facing the camera; or
 // shaded by the material's own shader. Appended to forward.wgsl and
@@ -19,7 +19,8 @@ struct FyParticleIn {
     // frame's.
     @location(7) uv_transform: vec4<f32>,
     // x: metallic, y: roughness, z: softness in metres, w: how it's drawn
-    // (0 facing the camera, 1 stretched, 2 flat, 3 upright, 4 a mesh).
+    // (0 facing the camera, 1 stretched, 2 flat, 3 upright, 4 a mesh, 5 a
+    // trail's point).
     @location(8) params: vec4<f32>,
     // rgb: the material's emission. w: 1, shadows fall on it.
     @location(9) emissive: vec4<f32>,
@@ -38,13 +39,24 @@ struct FyParticleMeshIn {
     @location(3) uv: vec2<f32>,
 };
 
+// A trail's next point: the same instances, one on. A trail's point has,
+// in `velocity_turn.xyz`, half its width across the strip as the camera
+// sees it, and in `particle.x` how far along the trail it is.
+struct FyTrailEnd {
+    @location(0) center_size: vec4<f32>,
+    @location(1) color: vec4<f32>,
+    @location(2) side: vec4<f32>,
+    @location(3) particle: vec4<f32>,
+};
+
 // As forward.wgsl's `VertexOut`, which a particle's surface is shaded as,
 // and its softness besides.
 struct FyParticleOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) @interpolate(flat) base_color: vec4<f32>,
+    // Flat on a particle; along a trail, from point to point.
+    @location(2) base_color: vec4<f32>,
     @location(3) @interpolate(flat) params: vec4<f32>,
     @location(4) tangent: vec4<f32>,
     @location(5) uv: vec2<f32>,
@@ -129,6 +141,25 @@ fn vs_fy_particle(@builtin(vertex_index) corner: u32, in: FyParticleIn) -> FyPar
     let p = center + right * at.x * half.x + up * at.y * half.y;
     let uv = vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
     return fy_particle_out(in, p, cross(right, up), vec4<f32>(right, 1.0), uv);
+}
+
+// A trail's strip from its point `in` to the next, `end`: its texture's u
+// along the trail, its v across it. A shader's `particle_age()` is how far
+// along it is.
+@vertex
+fn vs_fy_trail(@builtin(vertex_index) corner: u32, in: FyParticleIn, end: FyTrailEnd) -> FyParticleOut {
+    let k = array<u32, 6>(0u, 1u, 2u, 2u, 1u, 3u)[corner];
+    let next = (k & 1u) == 1u;
+    let across = f32(k >> 1u) * 2.0 - 1.0;
+    let side = select(in.velocity_turn.xyz, end.side.xyz, next);
+    let p = select(in.center_size.xyz, end.center_size.xyz, next) + side * across;
+    let u = select(in.particle.x, end.particle.x, next);
+    let to_camera = to_viewer(p);
+    let right = normalize(select(vec3<f32>(1.0, 0.0, 0.0), side, dot(side, side) > 1e-12));
+    var out = fy_particle_out(in, p, to_camera, vec4<f32>(right, 1.0), vec2<f32>(u, 0.5 - across * 0.5));
+    out.base_color = select(in.color, end.color, next);
+    out.own = vec4<f32>(u, in.particle.y, 0.0, 0.0);
+    return out;
 }
 
 // `v` turned round up by the angle whose sine and cosine are `s` and `c`.
