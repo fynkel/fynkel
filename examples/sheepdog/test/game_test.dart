@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldTheme, WorldWidget;
+import 'package:sheepdog/effects.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/palette.dart';
 
@@ -439,6 +440,79 @@ void main() {
         .nonNulls
         .where((m) => m.emissiveIntensity > 1);
     expect(eyes, isNotEmpty, reason: 'bright enough to glow');
+  });
+
+  group('the particles', () {
+    Dust dust(GameObject animal) => animal.children.whereType<Dust>().single;
+
+    test('the dog kicks up dust when it runs, not when it stands; on the effects layer, off the minimap', () {
+      world.run(0.1);
+      final kicked = dust(dog());
+      expect(kicked.layer, effects);
+      expect(game.map.cullingMask.contains(effects), isFalse);
+      world.run(1);
+      expect(kicked.system.particleCount, 0, reason: 'standing still');
+      world.input.setAxis2('move', Vec2(1, 0));
+      world.run(0.5);
+      expect(kicked.system.particleCount, greaterThan(5), reason: 'a puff every 20 cm, at a run');
+      shot('dust', width: 960, height: 640);
+      world.input.setAxis2('move', Vec2.zero);
+      world.run(1.5);
+      expect(kicked.system.particleCount, 0, reason: 'settled once it stops');
+    });
+
+    test('a sheep raises dust running from the dog, none grazing', () {
+      world.run(0.1);
+      final sheep = round().flock.first;
+      alone(sheep);
+      dog().position = Vec3(10, 0.35, -10);
+      world.run(2);
+      expect(dust(sheep).system.particleCount, 0, reason: 'grazing');
+      sheep.position = Vec3(0, 0.4, 0);
+      dog().position = Vec3(0, 0.35, 1.5);
+      world.run(0.5);
+      expect(dust(sheep).system.particleCount, greaterThan(0));
+    });
+
+    test("a wolf burning away gives off embers that follow it, and they go once they're out", () async {
+      final wolf = await firstWolf();
+      for (final sheep in round().flock) {
+        sheep.position = Vec3(10, 0.4, -10);
+      }
+      wolf.position = Vec3(0, 0.45, 2);
+      dog().position = wolf.position + Vec3(4, -0.1, 0);
+      expect(world.all<Embers>(), isEmpty);
+      dog().bark();
+      world.run(Wolf.burning / 2);
+      final embers = world.all<Embers>().single;
+      expect(embers.get<ParticleSystem>()!.particleCount, greaterThan(10));
+      expect((embers.position - wolf.position).length, lessThan(1e-3), reason: 'following it as it runs');
+      world.run(Wolf.burning + 1.5);
+      expect(wolf.isDestroyed, isTrue);
+      expect(embers.isDestroyed, isTrue, reason: 'StopAction.destroy, once the last went out');
+    });
+
+    test('a sheep coming home makes a puff with sparkles at the gate, gone once it has faded', () {
+      world.run(0.1);
+      final sheep = round().flock.first;
+      alone(sheep);
+      // The dog by the gate, for the camera, which follows it, to see it.
+      dog().position = Vec3(3, 0.35, penFront + 3);
+      world.run(1);
+      sheep.position = Vec3(0, 0.4, penFront - 0.2);
+      world.run(1 / 60);
+      expect(sheep.isHome, isTrue);
+      world.run(0.1);
+      final puff = world.all<Puff>().single;
+      expect((puff.position - Vec3(0, 0.4, penFront - 0.2)).flat.length, lessThan(0.2));
+      expect(puff.get<ParticleSystem>()!.particleCount, 14);
+      expect(puff.children.single.get<ParticleSystem>()!.particleCount, 8);
+      expect(dust(sheep).system.particleCount, 0, reason: 'home, no more dust');
+      shot('puff', width: 960, height: 640);
+      world.run(0.15);
+      world.run(1.35);
+      expect(puff.isDestroyed, isTrue);
+    });
   });
 
   group('the shaders', () {

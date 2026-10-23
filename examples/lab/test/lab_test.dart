@@ -352,6 +352,13 @@ void main() {
     control<Toggle>('ten thousand').onChanged(false);
     world.update(1 / 60);
     expect(scene.readout.value, isNot(contains('the ten')));
+    control<Toggle>('screen of smoke').onChanged(true);
+    frames(2);
+    final puffs = int.parse(RegExp(r'the screen of smoke: (\d+) puffs').firstMatch(scene.readout.value)!.group(1)!);
+    expect(puffs, inInclusiveRange(150, 200), reason: 'prewarmed, so full at once');
+    control<Toggle>('screen of smoke').onChanged(false);
+    world.update(1 / 60);
+    expect(scene.readout.value, isNot(contains('smoke')));
   });
 
   test('Particles: the look: five effects, each playing, and its switches', () {

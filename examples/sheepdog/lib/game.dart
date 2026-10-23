@@ -14,6 +14,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart'
     show Controls, FlutterColorToFynkel, ListenableSignal, WorldTheme, WorldWidget;
 
+import 'effects.dart';
 import 'labels.dart' show HealthBar, NameTag;
 
 /// Half the field's width: it goes from -size to size on x and z.
@@ -170,6 +171,10 @@ class SheepdogGame extends GameObject {
   /// no glow and no darkened corners, which it's too small to show.
   final map = Camera(orthographic: true, orthographicSize: size + 0.5, cullingMask: LayerMask.except([effects]));
 
+  /// The particles' materials: dust, embers, the puff where a sheep
+  /// comes home (effects.dart).
+  late final ParticleLooks particles;
+
   late final Light _sun, _ambient;
 
   /// The lamp posts' lights and their bulbs' glass: lit at night.
@@ -185,13 +190,15 @@ class SheepdogGame extends GameObject {
     // sheep and dog take them from here, not from the files again. (Each
     // asks for its own, and hears of a failure there.)
     assets.preload(['sheep.glb', 'dog.glb']).ignore();
-    final (ground, grassShader, pondShader, burn, flash) = await (
+    final (ground, grassShader, pondShader, burn, flash, looks) = await (
       assets.shader('shaders/ground.wgsl'),
       assets.shader('shaders/grass.wgsl'),
       assets.shader('shaders/pond.wgsl'),
       assets.shader('shaders/burn.wgsl'),
       assets.shader('shaders/flash.wgsl'),
+      ParticleLooks.load(assets),
     ).wait;
+    particles = looks;
     grass
       ..shader = ground
       ..set('sand', const Color(0xFFC8B088));
@@ -655,6 +662,7 @@ class Dog extends GameObject {
   Vec3 facing = Vec3.forward;
   double _sinceBark = 1, _speed = 0;
   late final Animator _moves;
+  late final Dust _dust;
 
   /// Told each bark, for the HUD's button to flash.
   final barked = Signal<void>();
@@ -666,6 +674,8 @@ class Dog extends GameObject {
     final model = add(await assets.instantiate('dog.glb'));
     model.transform = _farmAnimal(lift: 0.35, scale: 0.28);
     _moves = model.animator!..blend('move', _clips, thresholds: _dogPaces, at: 0, duration: 0);
+    // Dust at its feet when it runs.
+    _dust = add(Dust((parent! as Round).game.particles, lift: 0.35, from: 3.5, size: 0.4));
     on(input.onTap, (_) => bark());
   }
 
@@ -686,6 +696,7 @@ class Dog extends GameObject {
     }
     // Its legs go at its pace, from a stand to a run.
     if (time.delta > 0) _moves.blend('move', _clips, thresholds: _dogPaces, at: _speed);
+    _dust.pace(_speed);
     if (input.action('bark').wasPressed) bark();
   }
 
@@ -760,6 +771,7 @@ class Sheep extends GameObject {
   bool get isFree => !_home && !_taken;
 
   late final Animator _moves;
+  late final Dust _dust;
   List<MeshRenderer> _parts = const [];
 
   @override
@@ -776,6 +788,8 @@ class Sheep extends GameObject {
       part.material = game.flashing(part.material!);
     }
     _moves = model.animator!..blend('move', _clips, thresholds: _sheepPaces, at: 0, duration: 0);
+    // Dust at its feet when it runs, not as it grazes or walks.
+    _dust = add(Dust(game.particles, lift: 0.4, from: 2));
     // Its name over it: a Flutter widget, placed where the camera sees it
     // (labels.dart).
     addComponent(WorldWidget((context) => NameTag(name!), offset: Vec3(0, 0.9, 0), alignment: Alignment.bottomCenter));
@@ -856,6 +870,7 @@ class Sheep extends GameObject {
       position = walk(position, position + velocity * time.delta);
     }
     _moves.blend('move', _clips, thresholds: _sheepPaces, at: velocity.length);
+    _dust.pace(velocity.length);
     if (inPen(position)) _comeHome();
   }
 
@@ -877,8 +892,12 @@ class Sheep extends GameObject {
   void _comeHome() {
     _home = true;
     velocity = Vec3.zero;
+    _dust.pace(0);
     removeComponent(get<WorldWidget>()!);
     cameHome.emit(this);
+    // A puff where it came in.
+    final round = parent! as Round;
+    round.add(Puff(Vec3(position.x, 0.4, position.z), round.game.particles));
     // Further in, out of the gate, with a hop.
     final spot = Vec3((_random.nextDouble() * 2 - 1) * (penHalf - 0.8), 0.4, -size + 1.5 + _random.nextDouble() * 3);
     moveTo(spot, seconds: 1.2, ease: Ease.inOutSine);
@@ -893,6 +912,7 @@ class Sheep extends GameObject {
     if (!isFree) return;
     _taken = true;
     velocity = Vec3.zero;
+    _dust.pace(0);
     removeComponent(get<WorldWidget>()!);
     taken.emit(this);
     _moves.crossFade('Death', duration: 0.05, loop: false);
@@ -1085,6 +1105,7 @@ class Wolf extends GameObject {
   /// Chased off: it runs, burning away as it goes, and is gone.
   void _burnAway() {
     runOff();
+    round.add(Embers(this, round.game.particles, seconds: burning));
     final parts = _renderers(this).toList();
     tween(
       0.0,

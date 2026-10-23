@@ -6,10 +6,13 @@
 // SHEEPDOG_QUALITY=low` (or medium, high) draws it at that level, the
 // device's pick otherwise; `--define SHEEPDOG_SCALE=0.75` at that render
 // scale, `--define SHEEPDOG_AA=0` (or 2, 4) with that anti-aliasing.
+// `--define SHEEPDOG_PROBE=noparticles` turns the particles off (the dust,
+// the embers and the puffs), for the game as it was before them.
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show Blending, Color, GameObject, Light, LightKind, MeshRenderer, Quality;
+import 'package:fynkel/fynkel.dart'
+    show Blending, Color, GameObject, Light, LightKind, MeshRenderer, ParticleSystem, Quality;
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/hud.dart';
@@ -85,6 +88,11 @@ void _shaderProbes(GameObject root, Object _) {
       ..shader = null
       ..color = const Color(0xA00C4868)
       ..blending = Blending.transparent;
+  }
+  if (_probe.contains('noparticles')) {
+    for (final p in game.world.all<ParticleSystem>()) {
+      p.enabled = false;
+    }
   }
   for (final r in game.world.all<MeshRenderer>()) {
     if ((_probe.contains('nograss') && r.material == game.blades) ||

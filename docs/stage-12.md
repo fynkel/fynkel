@@ -299,7 +299,9 @@ all three devices at low.
   each effect's switch, soft, lit and noise switches; `LAB_QUALITY` and
   `LAB_RATES` for measuring.
 - Frame rates at low, the lab's page (profile, `LAB_SCENE="Particles:
-  the look" LAB_QUALITY=low LAB_RATES=true`): RATES_HERE
+  the look" LAB_QUALITY=low LAB_RATES=true`): Note10+ 59.9 (the step
+  0.10 ms a frame), the iPhone 60 (0.04 ms), the Mac 60 (0.03 ms), the
+  median of each second; the lowest seconds were the first, starting.
 - The guide's §13c "The look", §14's `particle_age()` and
   `particle_random()`, §22's rows.
 
@@ -371,6 +373,33 @@ goldens, and the scene holds 60 on all three devices at low.
 
 *Done when* Sheepdog with its effects runs as fast as before on all
 three devices, and §6's bars are met.
+
+*As built* (branch stage-12-game, no change to the engine or ABI 41):
+
+- examples/sheepdog/lib/effects.dart: `ParticleLooks`, the four
+  materials made once (dust and the puff see-through and lit, embers and
+  sparkles additive); `Dust`, a child of the dog and of each sheep, a
+  puff every 0.2 m by `rateOverDistance` while it runs (the dog over
+  3.5 m/s, a sheep over 2), none at a walk, thrown back a little from
+  its speed, soft where it meets the grass; `Embers`, rising off a wolf
+  for as long as it burns, following it, destroyed when the last goes
+  out; `Puff`, a burst of 14 white puffs and 8 gold sparkles where a
+  sheep comes home, gone when they've faded. All on the effects layer,
+  so the minimap leaves them out. Tests: dust on the dog, dust on a
+  running sheep and none while it grazes, embers that follow the wolf
+  and go, the puff's 22 particles and its going.
+- Textures from Kenney's Particle Pack (CC0): smoke_04, smoke_07,
+  circle_05 and star_06, scaled from 512 to 128 pixels;
+  assets/CREDITS.md.
+- tool/measured.dart: `SHEEPDOG_PROBE=noparticles` turns every system
+  off, for measuring the game with and without them.
+- The lab: "Particles: the basics" has a screen of smoke, puffs two to
+  three metres across five metres before the camera, and the page's
+  frame rate in its readout. `LAB_SMOKE=200` (or any count) starts with
+  it; `LAB_FULL=true` opens any page with its panel hidden.
+- fynkel_measure prints the three slowest seconds of a run and where
+  they fell.
+- Measured: see the [report](stage-12-report.md).
 
 ## 5. Not in this stage
 

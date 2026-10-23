@@ -1,12 +1,24 @@
 // Stage 12 phase 1: particles, the basics. A fountain whose settings are
 // the page's sliders and switches, a burst that cleans up after itself,
-// and ten systems of a thousand for the step's time (docs/stage-12.md §6).
+// ten systems of a thousand for the step's time, and a screen of smoke for
+// what drawing over and over costs (docs/stage-12.md §6).
 
 import 'dart:math' as math;
 
+import 'package:flutter/widgets.dart' show BuildContext, Widget;
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../lab.dart';
+import 'particles_look.dart' show smokePuff;
+
+/// `--dart-define=LAB_SMOKE=200`, with LAB_RATES: the screen of smoke from
+/// the start with that many puffs, in place of the ten thousand.
+const _startSmoke = int.fromEnvironment('LAB_SMOKE');
+
+/// `--dart-define=LAB_QUALITY=low` (or medium, high) starts the scene at
+/// that level.
+const _startQuality = String.fromEnvironment('LAB_QUALITY');
 
 class ParticlesBasicsScene extends LabScene {
   @override
@@ -20,19 +32,23 @@ class ParticlesBasicsScene extends LabScene {
       'plays. In world space the particles stay where they were made while the fountain moves; in local space they '
       'move with it. A burst makes a puff of sparks on an object of its own, which destroys itself when its last '
       'spark is gone. Ten thousand adds ten systems of a thousand, and the readout shows how long the engine takes '
-      'to move them all each frame.';
+      'to move them all each frame. A screen of smoke fills the view with 200 big see-through puffs: each pixel '
+      'drawn over and over, which is what costs a phone most.';
 
   late final ParticleSystem _fountain;
   late final GameObject _fountainObject;
   late final Material _water, _sparks;
   final _crowd = <GameObject>[];
-  var _moving = false, _bursts = 0;
+  GameObject? _smoke;
+  Texture2D? _puff;
+  var _moving = false, _bursts = 0, _fps = '–';
   // The step's times over the last two seconds, and what they came to.
   final _window = <int>[];
   var _shown = (median: 0, slowest: 0);
 
   @override
   void build() {
+    if (_startQuality.isNotEmpty) world.quality = Quality.levels.firstWhere((q) => q.name == _startQuality);
     _water = Material(color: const Color(0xFF8FD3FF), blending: Blending.transparent);
     _sparks = Material(color: const Color(0xFFFFB347), blending: Blending.additive);
     _fountain = ParticleSystem(
@@ -58,7 +74,8 @@ class ParticlesBasicsScene extends LabScene {
     );
     // Measuring on a device (LAB_SCENE=Particles LAB_RATES=true): the ten
     // thousand from the start, their step printed every two seconds.
-    if (printRates) _setCrowd(true);
+    if (printRates && _startSmoke == 0) _setCrowd(true);
+    if (_startSmoke > 0) _setSmoke(true, puffs: _startSmoke);
   }
 
   void _burst() {
@@ -128,6 +145,44 @@ class ParticlesBasicsScene extends LabScene {
     log.add('ten systems of 1000 particles, prewarmed so they start full');
   }
 
+  /// [puffs] of smoke, two to three metres across, filling the view
+  /// five metres before the camera: see-through, soft where they meet the
+  /// floor.
+  void _setSmoke(bool on, {int puffs = 200}) {
+    _smoke?.destroy();
+    _smoke = null;
+    if (!on) return;
+    _smoke = add(
+      GameObject(
+        name: 'smoke screen',
+        transform: Transform(position: eye + (target - eye).normalized * 5),
+        components: [
+          ParticleSystem(
+            maxParticles: puffs,
+            startLifetime: const Range(6),
+            startSpeed: const Range(0, 0.2),
+            startSize: const Range(2, 3),
+            startRotation: const Range(0, 6.28),
+            startColor: const ColorRange(Color(0xFF9AA0A8), Color(0xFFC8CCD2)),
+            emission: Emission(rateOverTime: puffs / 6),
+            shape: const ParticleShape.box(size: Vec3(10, 7, 3)),
+            prewarm: true,
+            colorOverLifetime: ColorGradient.fadeInOut(Color.white),
+            softness: 0.5,
+            material: Material(baseColorTexture: _puff ??= smokePuff(), blending: Blending.transparent),
+          ),
+        ],
+      ),
+    );
+    log.add('a screen of smoke: $puffs puffs, two to three metres across, over the whole view');
+  }
+
+  @override
+  void onDestroy() {
+    super.onDestroy();
+    _puff?.dispose();
+  }
+
   @override
   void onUpdate() {
     super.onUpdate();
@@ -143,8 +198,10 @@ class ParticlesBasicsScene extends LabScene {
       if (printRates) {
         // ignore: avoid_print
         print(
-          '[particles] ${_crowd.length * 1000} in the ten: step median ${_ms(_shown.median)}, '
-          'slowest ${_ms(_shown.slowest)}',
+          _smoke != null
+              ? '[particles] the screen of smoke: ${_smoke!.get<ParticleSystem>()!.particleCount} puffs'
+              : '[particles] ${_crowd.length * 1000} in the ten: step median ${_ms(_shown.median)}, '
+                    'slowest ${_ms(_shown.slowest)}',
         );
       }
     }
@@ -160,9 +217,13 @@ class ParticlesBasicsScene extends LabScene {
               ? ''
               : ', stopped'}',
       if (_crowd.isNotEmpty) 'the ten: $crowd particles',
-      'the step, over two seconds: ${_ms(_shown.median)} a frame, at most ${_ms(_shown.slowest)}',
+      if (_smoke case final smoke?) 'the screen of smoke: ${smoke.get<ParticleSystem>()!.particleCount} puffs',
+      'the step, over two seconds: ${_ms(_shown.median)} a frame, at most ${_ms(_shown.slowest)}   $_fps fps',
     ].join('\n');
   }
+
+  @override
+  Widget view(BuildContext context) => FynkelView(root: this, onStats: (s) => _fps = fps('particles', s));
 
   String _ms(int micros) => '${(micros / 1000).toStringAsFixed(2)} ms';
 
@@ -210,5 +271,6 @@ class ParticlesBasicsScene extends LabScene {
       max: 60,
     ),
     Toggle('ten thousand', () => _crowd.isNotEmpty, _setCrowd),
+    Toggle('screen of smoke', () => _smoke != null, (on) => _setSmoke(on)),
   ];
 }

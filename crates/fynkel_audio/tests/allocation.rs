@@ -6,30 +6,36 @@
 #![allow(unsafe_code)]
 
 use std::alloc::{GlobalAlloc, Layout, System};
+use std::cell::Cell;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use fynkel_audio::{Audio, Clip, Listener, MAX_VOICES, Play, QUIET_RATE, Rolloff, Settings, Spatial, Streaming, wav};
 
 struct Counting;
 
-static COUNT: AtomicUsize = AtomicUsize::new(0);
-static ARMED: AtomicBool = AtomicBool::new(false);
+// Counted on the measuring thread only: the tests run side by side, and
+// one's setup isn't the other's allocation.
+thread_local! {
+    static ARMED: Cell<bool> = const { Cell::new(false) };
+    static COUNT: Cell<usize> = const { Cell::new(0) };
+}
+
+fn count() {
+    if ARMED.with(Cell::get) {
+        COUNT.with(|c| c.set(c.get() + 1));
+    }
+}
 
 // SAFETY: passes every call to the system's allocator, counting.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        if ARMED.load(Ordering::Relaxed) {
-            COUNT.fetch_add(1, Ordering::Relaxed);
-        }
+        count();
         // SAFETY: as the caller promised.
         unsafe { System.alloc(layout) }
     }
 
     unsafe fn dealloc(&self, ptr: *mut u8, layout: Layout) {
-        if ARMED.load(Ordering::Relaxed) {
-            COUNT.fetch_add(1, Ordering::Relaxed);
-        }
+        count();
         // SAFETY: as the caller promised.
         unsafe { System.dealloc(ptr, layout) }
     }
@@ -39,11 +45,11 @@ unsafe impl GlobalAlloc for Counting {
 static ALLOCATOR: Counting = Counting;
 
 fn counted(work: impl FnOnce()) -> usize {
-    COUNT.store(0, Ordering::Relaxed);
-    ARMED.store(true, Ordering::Relaxed);
+    COUNT.with(|c| c.set(0));
+    ARMED.with(|a| a.set(true));
     work();
-    ARMED.store(false, Ordering::Relaxed);
-    COUNT.load(Ordering::Relaxed)
+    ARMED.with(|a| a.set(false));
+    COUNT.with(Cell::get)
 }
 
 #[test]

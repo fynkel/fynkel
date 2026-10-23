@@ -14,6 +14,10 @@ void main() => runApp(const LabApp());
 /// starts with it, for measuring on a device without tapping through.
 const _opened = String.fromEnvironment('LAB_SCENE');
 
+/// `--dart-define=LAB_FULL=true` opens it with the panel hidden, the view
+/// filling the screen.
+const _full = bool.fromEnvironment('LAB_FULL');
+
 class LabApp extends StatelessWidget {
   const LabApp({super.key});
 
@@ -69,7 +73,7 @@ class ScenePage extends StatefulWidget {
 }
 
 class _ScenePageState extends State<ScenePage> {
-  var _open = true;
+  var _open = !_full;
 
   @override
   Widget build(BuildContext context) => FynkelGame(make: widget.make, builder: _page);
