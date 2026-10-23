@@ -3388,14 +3388,11 @@ What keeps a game fast:
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
   (Unity's Humanoid), and clips made in code.
-- **Sound** (§13b): music that streams and crossfades, and groups with
-  their own volume, come in the next phase of stage 11. Not planned yet:
-  effects on the sound (reverb, echo, a low-pass for under water),
-  Doppler, 3D over headphones (HRTF), a custom rolloff curve, sound
-  blocked by walls, ducking, the microphone, and sound made in code as it
-  plays.
-  Android's audio focus (another app's sound pausing the game's) isn't
-  handled yet.
+- **Sound** (§13b): effects on the sound (reverb, echo, a low-pass for
+  under water), Doppler, 3D over headphones (HRTF), a custom rolloff
+  curve, sound blocked by walls, ducking by itself (a group's `fade` does
+  it by hand), the microphone, and sound made in code as it plays. On
+  Android, another app taking the sound doesn't pause the game's.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
