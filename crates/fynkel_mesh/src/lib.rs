@@ -69,6 +69,9 @@ pub struct MeshData {
     submeshes: Vec<Range<u32>>,
     /// The smallest and largest corner of the box around every vertex.
     bounds: (Vec3, Vec3),
+    /// Changed often: the GPU's copy has room to grow and is written in
+    /// place ([`MeshData::mark_dynamic`]).
+    dynamic: bool,
 }
 
 /// What [`MeshData::new`] takes. Only positions and indices are required.
@@ -251,6 +254,7 @@ impl MeshData {
             skin,
             submeshes,
             bounds: bounds(positions.iter().copied()),
+            dynamic: false,
         };
 
         match (tangents, uvs) {
@@ -479,6 +483,19 @@ impl MeshData {
             self.recalculate_tangents();
         }
         Ok(())
+    }
+
+    /// Says the mesh changes often, as Unity's `MarkDynamic`: each view
+    /// keeps its vertices and triangles on the GPU with room to grow, half
+    /// again, and writes a change into them where they are. Its outline
+    /// is pushed out along its own normals, not along ones averaged where
+    /// corners split.
+    pub fn mark_dynamic(&mut self) {
+        self.dynamic = true;
+    }
+
+    pub fn is_dynamic(&self) -> bool {
+        self.dynamic
     }
 
     /// Each vertex's normal from the faces around it, weighted by their

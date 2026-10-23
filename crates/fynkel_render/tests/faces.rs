@@ -105,6 +105,7 @@ fn a_mirrored_object_draws_as_the_mirror_image() {
         cast_shadows: true,
         receive_shadows: true,
         own: [0.0; 4],
+        submesh: 0,
     };
 
     let (plain, _) = render(&gpu, &mut r, &scene(vec![draw(turned)]), SIZE, SIZE);
@@ -142,6 +143,7 @@ fn a_double_sided_surface_shows_its_back_lit_like_its_front() {
             material: material(double_sided),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         }];
         render(&gpu, r, &scene(draws), SIZE, SIZE).0.pixel(SIZE / 2, SIZE / 2)
     };
@@ -191,6 +193,7 @@ fn uv_scale_and_offset_pick_part_of_a_texture() {
             cast_shadows: true,
             receive_shadows: true,
             own: [0.0; 4],
+            submesh: 0,
         }]);
         (unlit.lights, unlit.ambient) = (Vec::new(), Vec3::ZERO);
         let (image, _) = render(&gpu, r, &unlit, SIZE, SIZE);

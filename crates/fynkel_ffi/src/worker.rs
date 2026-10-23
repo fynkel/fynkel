@@ -401,6 +401,9 @@ fn take_within(waiting: &mut Vec<ResourceOp>, frame: &mut Vec<ResourceOp>, budge
 /// in.
 enum Made {
     Mesh(MeshKey, MadeMesh),
+    /// A dynamic mesh, written where it is under the assets' lock while
+    /// it fits (`Assets::upload_mesh`).
+    WriteMesh(MeshKey, Arc<fynkel_world::MeshData>),
     RemoveMesh(MeshKey),
     Texture(TextureKey, MadeTexture),
     RemoveTexture(TextureKey),
@@ -487,6 +490,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                     take_within(&mut world.ledger().ops, &mut ops, budget);
                     let kit = &world.device.kit;
                     made.extend(ops.drain(..).map(|op| match op {
+                        ResourceOp::UploadMesh(key, mesh) if mesh.is_dynamic() => Made::WriteMesh(key, mesh),
                         ResourceOp::UploadMesh(key, mesh) => Made::Mesh(key, kit.make_mesh(&mesh)),
                         ResourceOp::RemoveMesh(key) => Made::RemoveMesh(key),
                         ResourceOp::UploadTexture(key, space, image) => {
@@ -501,6 +505,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                     for made in made.drain(..) {
                         match made {
                             Made::Mesh(key, mesh) => assets.insert_mesh(key, mesh),
+                            Made::WriteMesh(key, mesh) => assets.upload_mesh(key, &mesh),
                             Made::RemoveMesh(key) => {
                                 assets.remove_mesh(key);
                             }

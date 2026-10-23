@@ -644,9 +644,12 @@ fn custom(positions: &[[f32; 3]], indices: &[u32]) -> FyMeshData {
         normals: ptr::null(),
         tangents: ptr::null(),
         uvs: ptr::null(),
+        colors: ptr::null(),
         vertex_count: positions.len(),
         indices: indices.as_ptr(),
         index_count: indices.len(),
+        submesh_starts: ptr::null(),
+        submesh_start_count: 0,
     }
 }
 
@@ -1133,4 +1136,123 @@ fn debug_lines_are_drawn_over_the_scene_until_replaced() {
         assert_eq!(fy_debug_lines_set(world.0, ptr::null(), 1), FyStatus::NullPointer);
         assert_eq!(fy_debug_lines_set(ptr::null(), lines.as_ptr(), 1), FyStatus::NullPointer);
     }
+}
+
+/// A grid of `n` × `n` squares on XZ, a metre across, centred, and its
+/// triangles: the far half's (-Z) then the near half's.
+fn grid(n: u32, height: impl Fn(f32, f32) -> f32) -> (Vec<[f32; 3]>, Vec<u32>) {
+    let mut positions = vec![];
+    for z in 0..=n {
+        for x in 0..=n {
+            let (x, z) = (x as f32 / n as f32 - 0.5, z as f32 / n as f32 - 0.5);
+            positions.push([x, height(x, z), z]);
+        }
+    }
+    let mut indices = vec![];
+    for z in 0..n {
+        for x in 0..n {
+            let i = z * (n + 1) + x;
+            indices.extend([i, i + n + 1, i + 1, i + 1, i + n + 1, i + n + 2]);
+        }
+    }
+    (positions, indices)
+}
+
+/// A mesh made from nothing through the C interface: positions, colours
+/// by height and triangles in two submeshes, the near one with a material
+/// of its own; then its positions changed where it is (dynamic) and given
+/// to the world again. Each frame matches its golden, and the change
+/// before `fy_mesh_update` isn't drawn.
+#[test]
+fn a_mesh_changed_through_the_c_interface_draws_each_change() {
+    use fynkel_world::{Transform, Vec3};
+    let world = World::new();
+    let cube = stage1(&world);
+    let w = world.0;
+    let mut renderer = FyMeshRenderer::default();
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_mesh_renderer_get(w, cube, &mut renderer));
+        ok(fy_despawn(w, cube));
+    }
+    let mut handle = ptr::null_mut();
+    // SAFETY: a pointer to a local.
+    ok(unsafe { fy_mesh_new_empty(&mut handle) });
+    let handle = Mesh(handle);
+    assert_eq!(handle.counts(), (0, 0));
+
+    let bump = |x: f32, z: f32| 0.4 * (-(x * x + z * z) * 12.0).exp();
+    let (positions, indices) = grid(16, bump);
+    // White low down, orange at the top.
+    let colors: Vec<[u8; 4]> = positions
+        .iter()
+        .map(|p| p[1] / 0.4)
+        .map(|h| [255, (255.0 - h * 135.0) as u8, (255.0 - h * 255.0) as u8, 255])
+        .collect();
+    let half = (indices.len() / 2) as u32;
+    let (mut mesh, mut blue, object) = (0, 0, world.spawn());
+    // SAFETY: a live world and mesh, and arrays of the counts given.
+    unsafe {
+        ok(fy_mesh_mark_dynamic(handle.0));
+        ok(fy_mesh_set_positions(handle.0, positions.as_ptr().cast(), positions.len()));
+        ok(fy_mesh_set_colors(handle.0, colors.as_ptr().cast(), colors.len()));
+        ok(fy_mesh_set_triangles(handle.0, indices.as_ptr(), indices.len(), &half, 1));
+        ok(fy_mesh_recalculate(handle.0, FY_MESH_NORMALS | FY_MESH_TANGENTS));
+        ok(fy_mesh_add(w, handle.0, &mut mesh));
+        let white = FyMaterial { base_color: srgb(1.0, 1.0, 1.0), roughness: 0.7, ..FyMaterial::default() };
+        let mut white_id = 0;
+        ok(fy_material_add(w, &white, &mut white_id));
+        let tint = FyMaterial { base_color: srgb(0.4, 0.6, 1.0), roughness: 0.7, ..FyMaterial::default() };
+        ok(fy_material_add(w, &tint, &mut blue));
+        let placed = Transform { scale: Vec3::splat(2.2), ..Transform::from_position(Vec3::new(0.0, -0.3, 0.0)) };
+        ok(fy_transform_set(w, object, &transform(placed)));
+        ok(fy_mesh_renderer_set(w, object, &FyMeshRenderer { mesh, material: white_id, ..renderer }));
+        ok(fy_submesh_materials_set(w, object, &blue, 1));
+    }
+    let (mut submeshes, mut starts, mut counts) = (0, [0u32; 2], [0u32; 2]);
+    // SAFETY: a live mesh and pointers to locals of the sizes given.
+    unsafe {
+        ok(fy_mesh_submesh_count(handle.0, &mut submeshes));
+        ok(fy_mesh_read_submeshes(handle.0, starts.as_mut_ptr(), counts.as_mut_ptr(), 2));
+    }
+    assert_eq!((submeshes, starts, counts), (2, [0, half], [half, half]));
+
+    let view = View::headless(&world, 256, 160);
+    assert_golden("mesh_changed_before", &view.read(view.frame(), 256, 160));
+
+    // A dent where the bump was. Not drawn until the world is given it.
+    let dent = |x: f32, z: f32| -bump(x, z) * 0.6;
+    let (dented, _) = grid(16, dent);
+    // SAFETY: a live mesh and an array of the count given.
+    unsafe {
+        ok(fy_mesh_set_positions(handle.0, dented.as_ptr().cast(), dented.len()));
+        ok(fy_mesh_recalculate(handle.0, FY_MESH_NORMALS));
+    }
+    assert_golden("mesh_changed_before", &view.read(view.frame(), 256, 160));
+    // SAFETY: a live world and mesh.
+    ok(unsafe { fy_mesh_update(w, mesh, handle.0) });
+    assert_golden("mesh_changed_after", &view.read(view.frame(), 256, 160));
+
+    // Reading back sees the change, and the colours kept.
+    let mut read = vec![[0u8; 4]; dented.len()];
+    // SAFETY: a live mesh and a buffer of the size given.
+    ok(unsafe {
+        fy_mesh_read_vertices(
+            handle.0,
+            ptr::null_mut(),
+            ptr::null_mut(),
+            ptr::null_mut(),
+            read.as_mut_ptr().cast(),
+            read.len(),
+        )
+    });
+    assert_eq!(read, colors);
+    // A triangle past the last vertex is refused, and changes nothing.
+    let bad = [0, 1, 9999];
+    // SAFETY: a live mesh and an array of the count given.
+    assert_eq!(unsafe { fy_mesh_set_triangles(handle.0, bad.as_ptr(), 3, ptr::null(), 0) }, FyStatus::InvalidValue);
+    assert!(last_error().contains("9999"), "{}", last_error());
+    assert_eq!(handle.counts(), (dented.len(), indices.len()));
+    // SAFETY: a live world; the material is in use.
+    assert_eq!(unsafe { fy_material_remove(w, blue) }, FyStatus::InUse);
 }

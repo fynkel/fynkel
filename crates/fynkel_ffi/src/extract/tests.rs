@@ -215,6 +215,48 @@ fn each_mesh_is_uploaded_once_and_removed_when_the_world_removes_it() {
 }
 
 #[test]
+fn a_changed_mesh_goes_up_again_and_a_change_still_waiting_is_replaced() {
+    let (mut world, cube) = stage1_world();
+    let (mut extract, mut scene, mut ops) = (Extract::default(), RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    ops.clear();
+
+    let plane = Arc::new(MeshData::plane());
+    world.set_mesh(cube, Arc::clone(&plane)).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(uploads(&ops), [mesh_key(cube)]);
+
+    // Not taken by the worker yet: the next change takes its place.
+    let sphere = Arc::new(MeshData::sphere(8, 4));
+    world.set_mesh(cube, Arc::clone(&sphere)).unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(uploads(&ops), [mesh_key(cube)], "one upload, not two");
+    let ResourceOp::UploadMesh(_, waiting) = &ops[0] else { unreachable!() };
+    assert!(Arc::ptr_eq(waiting, &sphere), "the latest");
+
+    ops.clear();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(ops, [], "nothing changed since");
+}
+
+#[test]
+fn each_submesh_after_the_first_is_drawn_with_its_own_material() {
+    let mut world = World::new();
+    let (cube, mesh) = stage1_into(&mut world);
+    let blue = world.add_material(Material::color(Color::from_argb32(0xFF2040E0))).unwrap();
+    let green = world.add_material(Material::color(Color::from_argb32(0xFF20E040))).unwrap();
+    world.set_submesh_materials(cube, &[blue, green]).unwrap();
+    let draws = extract(&world).0.draws;
+    assert_eq!(
+        draws.iter().map(|d| (d.mesh, d.submesh)).collect::<Vec<_>>(),
+        [(mesh_key(mesh), 0), (mesh_key(mesh), 1), (mesh_key(mesh), 2)]
+    );
+    assert_eq!(draws[1].material.base_color, Color::from_argb32(0xFF2040E0).to_linear());
+    assert_eq!(draws[1].model, draws[0].model);
+    assert_eq!(draws[2].material.base_color, Color::from_argb32(0xFF20E040).to_linear());
+}
+
+#[test]
 fn a_new_extract_uploads_every_mesh_the_world_has() {
     let (mut world, _) = stage1_world();
     world.add_mesh(MeshData::plane());

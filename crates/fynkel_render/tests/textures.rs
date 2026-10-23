@@ -45,6 +45,7 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
             material,
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         }],
     }
 }
@@ -249,6 +250,7 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
                 },
                 cast_shadows: true,
                 receive_shadows: true,
+                submesh: 0,
             }],
         }
     };
@@ -399,6 +401,7 @@ fn draws_are_batched_by_textures_too() {
             material: with(key, cutoff),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         })
         .collect();
     let (_, stats) = render(&gpu, &mut r, &scene, 64, 64);
@@ -484,6 +487,7 @@ fn textured_materials_match_their_golden() {
             material: PbrMaterial { textures: textures(|t| t.base_color = Some(GRID)), ..PbrMaterial::DEFAULT },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -498,6 +502,7 @@ fn textured_materials_match_their_golden() {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -514,6 +519,7 @@ fn textured_materials_match_their_golden() {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -528,6 +534,7 @@ fn textured_materials_match_their_golden() {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 320, 180);

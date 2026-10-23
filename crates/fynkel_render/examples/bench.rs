@@ -71,6 +71,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
                 material,
                 cast_shadows: true,
                 receive_shadows: true,
+                submesh: 0,
             })
             .collect(),
     }

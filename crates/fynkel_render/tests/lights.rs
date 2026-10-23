@@ -40,6 +40,7 @@ fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         }],
     }
 }

@@ -141,6 +141,7 @@ pub fn stage1_scene() -> RenderScene {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         }],
     }
 }

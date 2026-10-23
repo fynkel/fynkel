@@ -111,6 +111,7 @@ fn busy_scene(t: f32) -> RenderScene {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         })
         .collect();
     for (i, draw) in scene.draws.iter_mut().enumerate().filter(|(i, _)| i % 5 == 0) {

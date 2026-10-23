@@ -584,12 +584,16 @@ pub struct Draw {
     /// The object's own four numbers, which a material's shader reads as
     /// its `PerObject` values (stage 10). Zeros for most.
     pub own: [f32; 4],
+    /// Which of the mesh's submeshes (`fynkel_mesh::MeshData::submeshes`)
+    /// it draws: 0, the whole of a mesh that doesn't split. One the mesh
+    /// hasn't draws nothing.
+    pub submesh: u32,
 }
 
 impl Draw {
     /// `mesh` placed by `model`, casting and receiving shadows.
     pub fn new(mesh: MeshKey, model: Mat4, material: PbrMaterial) -> Self {
-        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None, own: [0.0; 4] }
+        Self { mesh, model, material, cast_shadows: true, receive_shadows: true, skin: None, own: [0.0; 4], submesh: 0 }
     }
 }
 
