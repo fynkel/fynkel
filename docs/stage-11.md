@@ -1,6 +1,6 @@
 # Stage 11 plan: sound
 
-Status: accepted 2026-10-21 ("let's go with your recommendation"), with the recommended answer to each decision (§7). Scope and rules:
+Status: done 2026-10-23, phases 1–3 ([report](stage-11-report.md)); phase 4 left out. Accepted 2026-10-21 ("let's go with your recommendation"), with the recommended answer to each decision (§7). Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 10 is done
 ([report](stage-10-report.md)).
 
@@ -315,6 +315,10 @@ a group's volume reaches its voices within one callback.
 
 *Done when* the three games have sound and run as fast as before on all
 three devices, and §6's bars are met.
+
+*Left out* (2026-10-23): the user closed the stage after phase 3. The
+games have no sound yet, and §6's in-game bars go to shipping (the
+report's "Not measured").
 
 ## 5. Not in this stage
 
