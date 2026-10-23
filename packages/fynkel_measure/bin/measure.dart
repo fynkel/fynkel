@@ -201,6 +201,11 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
         'fresh fps       median ${fresh[fresh.length ~/ 2].toStringAsFixed(1)}, '
         'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}',
       );
+      // Which seconds were slowest, counted from 1: a hitch at the start
+      // isn't one in the middle of play.
+      final slowest = [for (final (i, w) in windows.indexed) (i + 1, w['fresh'] as double)]
+        ..sort((a, b) => a.$2.compareTo(b.$2));
+      print('slowest seconds ${slowest.take(3).map((s) => '${s.$1}: ${s.$2.toStringAsFixed(1)}').join(', ')}');
       // Over a long run, each minute's median: whether the rate holds as
       // the device warms (docs/iphone-heat.md).
       if (windows.length >= 120) {
