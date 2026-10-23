@@ -3,4 +3,4 @@
 library;
 
 export 'src/frame_list.dart';
-export 'src/world.dart' show AssetKind, GameObjectSystems, MovedReader, WorldSystem, WorldSystems;
+export 'src/world.dart' show AssetKind, GameObjectSystems, MeshVersions, MovedReader, WorldSystem, WorldSystems;

@@ -56,6 +56,14 @@ extension _Resources on World {
     _meshes.remove(id);
   }
 
+  /// Gives this world [mesh] as it is now, under its [id] here; false
+  /// when it no longer has it.
+  bool _updateMesh(Mesh mesh, int id) {
+    if (isDisposed || _meshIds[mesh] != id) return false;
+    check(fy_mesh_update(_pointer, id, mesh._live));
+    return true;
+  }
+
   int _textureId(Texture2D texture) {
     final known = _textureIds[texture];
     if (known != null) return known;

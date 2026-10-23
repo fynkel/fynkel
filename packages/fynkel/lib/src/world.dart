@@ -642,8 +642,10 @@ final class World implements Finalizable {
   /// 7. **Cameras.** The camera rigs move their objects ([Follow] and
   ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
   ///    where the live [VirtualCamera] is, and shakes it.
-  /// 8. **Debug lines.** What was drawn with [debug] goes to the engine,
-  ///    to be drawn over the frame. Last, the systems' `afterFrame`.
+  /// 8. **Meshes and debug lines.** The meshes changed this frame go to
+  ///    the worlds that have them ([Mesh.setPositions]), and what was
+  ///    drawn with [debug] goes to the engine, to be drawn over the frame.
+  ///    Last, the systems' `afterFrame`.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
   /// are skipped by the last six and start when they're first shown; so are
@@ -747,6 +749,7 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
 
     cameras._run();
+    Mesh._publishChanges();
     _debug?._flush();
     _runSystems(_SystemHook.afterFrame);
   }

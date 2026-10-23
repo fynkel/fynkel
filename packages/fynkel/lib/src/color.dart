@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 /// A colour each particle starts with (Unity's `MinMaxGradient`): a
 /// [Color], the same for all, or a [ColorRange], one at random between
 /// two.
@@ -101,6 +103,15 @@ final class Color extends ParticleColor {
 
   /// Alpha, 0–1: 1 is opaque, 0 is fully see-through.
   final double a;
+
+  /// Writes it as four bytes at [offset] in [into]: red, green, blue and
+  /// alpha, 0–255, for a mesh's `setColors`.
+  void rgba8(Uint8List into, int offset) {
+    into[offset] = (r.clamp(0, 1) * 255).round();
+    into[offset + 1] = (g.clamp(0, 1) * 255).round();
+    into[offset + 2] = (b.clamp(0, 1) * 255).round();
+    into[offset + 3] = (a.clamp(0, 1) * 255).round();
+  }
 
   /// Opaque white.
   static const white = Color.rgb(1, 1, 1);
