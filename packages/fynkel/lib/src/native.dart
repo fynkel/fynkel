@@ -107,6 +107,7 @@ final class Scratch {
   final animatorState = malloc<FyAnimatorState>();
   final particleSettings = malloc<FyParticleSettings>();
   final particleState = malloc<FyParticleState>();
+  final trailSettings = malloc<FyTrailSettings>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -124,6 +125,7 @@ final class Scratch {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
     all.addAll([number, numbers, animatorState, _events, shader, particleSettings, particleState, _particleEvents]);
+    all.add(trailSettings);
     all.forEach(malloc.free);
   }
 
@@ -173,6 +175,11 @@ final class Scratch {
 
   var _particleEvents = malloc<FyParticleEvent>(_initial);
   var _particleEventCapacity = _initial;
+  // The same memory as 64- and 32-bit words, cast once: reading an event's
+  // fields through these makes nothing, where a struct's view would
+  // (`FyParticleEvent` is 32 bytes: object, kind, action, plane, count).
+  late var particleEventWords = _particleEvents.cast<Uint64>();
+  late var particleEventHalves = _particleEvents.cast<Uint32>();
 
   /// At least [count] particle events.
   Pointer<FyParticleEvent> particleEvents([int count = 0]) {
@@ -180,6 +187,8 @@ final class Scratch {
       malloc.free(_particleEvents);
       _particleEvents = malloc<FyParticleEvent>(count);
       _particleEventCapacity = count;
+      particleEventWords = _particleEvents.cast();
+      particleEventHalves = _particleEvents.cast();
     }
     return _particleEvents;
   }

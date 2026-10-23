@@ -324,24 +324,33 @@ fn a_texture_sheet_frame_shows_its_part_of_the_texture() {
 #[test]
 fn a_soft_particle_fades_where_it_meets_what_is_behind_it() {
     let gpu = gpu();
-    for quality in [QualityLevel::Low, QualityLevel::High] {
+    // Off at low unless the quality turns it on (Quality::soft_particles).
+    let low = QualityLevel::Low.quality();
+    for (quality, soft_on) in
+        [(low, false), (Quality { soft_particles: true, ..low }, true), (QualityLevel::High.quality(), true)]
+    {
         let mut r = renderer(&gpu, SRGB);
+        let scene = |draws| RenderScene { quality: Some(quality), ..scene(draws, QualityLevel::High) };
         let wall = || vec![square(0.0, 4.0, glow(RED, 1.0, Blend::Opaque))];
         let near_wall = [particle(Vec3::new(0.0, 0.0, 0.1), 1.0, GREEN, 1.0)];
-        let mut s = scene(wall(), quality);
+        let mut s = scene(wall());
         add(&mut s, &near_wall, plain(Blend::Transparent));
         let hard = render(&gpu, &mut r, &s, 33, 33).0.pixel(16, 16);
         assert_near(hard, GREEN, "hard");
-        let mut s = scene(wall(), quality);
+        let mut s = scene(wall());
         add_as(&mut s, &near_wall, plain(Blend::Transparent), |d| ParticleDraw { softness: 1.0, ..d });
         let soft = render(&gpu, &mut r, &s, 33, 33).0.pixel(16, 16);
+        if !soft_on {
+            assert_near(soft, GREEN, "soft particles off");
+            continue;
+        }
         // 0.1 m in front of the wall, with 1 m of softness: about a tenth.
         let want = to_srgb8(over(GREEN, 0.1, RED));
         for c in 0..3 {
             assert!(soft[c].abs_diff(want[c]) <= 12, "soft at {quality:?}: got {soft:?}, want {want:?}");
         }
         // Far from anything, it's as hard.
-        let mut s = scene(vec![], quality);
+        let mut s = scene(vec![]);
         add_as(&mut s, &near_wall, plain(Blend::Transparent), |d| ParticleDraw { softness: 1.0, ..d });
         assert_near(render(&gpu, &mut r, &s, 33, 33).0.pixel(16, 16), GREEN, "over the sky");
     }

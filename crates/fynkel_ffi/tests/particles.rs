@@ -1,6 +1,7 @@
-//! Particle systems through the C interface (stage 12 phase 1), the way
-//! `package:fynkel` drives them: settings when they change, a step a
-//! frame, commands, the done event, and a frame drawn.
+//! Particle systems through the C interface (stage 12 phases 1 and 3), the
+//! way `package:fynkel` drives them: settings when they change, a step a
+//! frame, commands, the done and collision events, sub emitters, trails,
+//! and frames drawn.
 #![allow(unsafe_code)]
 
 mod common;
@@ -70,7 +71,13 @@ fn a_burst_plays_and_its_stop_action_comes_back_once() {
     assert!(step(&world, 0.1).is_empty());
     assert_eq!(state(&world, id), FyParticleState { count: 25, playing: true, paused: false, emitting: true });
     let events = step(&world, 1.5);
-    assert_eq!(events, [FyParticleEvent { object: id, action: FY_PARTICLE_STOP_DESTROY }]);
+    let done = FyParticleEvent {
+        object: id,
+        kind: FY_PARTICLE_EVENT_DONE,
+        action: FY_PARTICLE_STOP_DESTROY,
+        ..Default::default()
+    };
+    assert_eq!(events, [done]);
     assert_eq!(state(&world, id).count, 0);
     assert!(!state(&world, id).playing);
 }
@@ -198,4 +205,148 @@ fn a_fountain_drawn_through_the_c_interface_matches_its_golden() {
     step(&world, 2.0);
     let view = View::headless(&world, 160, 160);
     assert_golden("particles_fountain", &view.read(view.frame(), 160, 160));
+}
+
+#[test]
+fn planes_send_collision_events_and_sub_emitters_burst_where_particles_die() {
+    let world = World::new();
+    let w = world.0;
+    let (shell, sparks, floor) = (world.spawn(), world.spawn(), world.spawn());
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        for id in [shell, sparks] {
+            ok(fy_transform_set(w, id, &transform(Transform::default())));
+        }
+        ok(fy_transform_set(w, floor, &transform(Transform::from_position(Vec3::new(0.0, -1.0, 0.0)))));
+        ok(fy_particles_set(w, sparks, &FyParticleSettings { rate_over_time: 100.0, ..burst(10.0, 5.0) }));
+        let mut planes = [0; FY_PARTICLE_MAX_PLANES as usize];
+        planes[0] = floor;
+        let mut subs = [FyParticleSubEmitter::default(); FY_PARTICLE_MAX_SUB_EMITTERS as usize];
+        subs[0] = FyParticleSubEmitter { system: sparks, kind: FY_PARTICLE_SUB_DEATH, inherit: 0, probability: 1.0 };
+        let settings = FyParticleSettings {
+            start_speed: FyRange { min: 0.0, max: 0.0 },
+            gravity_modifier: 1.0,
+            space: FY_PARTICLE_SPACE_WORLD,
+            shape: FyParticleShape { kind: FY_PARTICLE_SHAPE_POINT, ..Default::default() },
+            has_collision: true,
+            collision: FyParticleCollision {
+                plane_count: 1,
+                planes,
+                lifetime_loss: FyCurve::constant(1.0),
+                send_messages: true,
+                ..FyParticleSettings::default().collision
+            },
+            sub_emitter_count: 1,
+            sub_emitters: subs,
+            ..burst(4.0, 5.0)
+        };
+        ok(fy_particles_set(w, shell, &settings));
+    }
+    let events = step(&world, 0.3);
+    assert!(events.is_empty(), "{events:?}");
+    assert_eq!(state(&world, sparks).count, 0, "a sub emitter emits only for its parent");
+    // A metre down from rest: about 0.45 s.
+    let events = step(&world, 0.3);
+    let hit = FyParticleEvent {
+        object: shell,
+        kind: FY_PARTICLE_EVENT_COLLISION,
+        plane: floor,
+        count: 4,
+        ..Default::default()
+    };
+    assert_eq!(events, [hit]);
+    assert_eq!((state(&world, shell).count, state(&world, sparks).count), (0, 40), "they die as they hit");
+
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        let too_many = FyParticleSettings { sub_emitter_count: 5, ..Default::default() };
+        assert_eq!(fy_particles_set(w, shell, &too_many), FyStatus::InvalidValue);
+        let mut own = FyParticleSettings { sub_emitter_count: 1, ..Default::default() };
+        own.sub_emitters[0] = FyParticleSubEmitter { system: shell, probability: 1.0, ..Default::default() };
+        assert_eq!(fy_particles_set(w, shell, &own), FyStatus::InvalidValue);
+        let mut wrong_kind = FyParticleSettings { sub_emitter_count: 1, ..Default::default() };
+        wrong_kind.sub_emitters[0] = FyParticleSubEmitter { system: sparks, kind: 9, ..Default::default() };
+        assert_eq!(fy_particles_set(w, shell, &wrong_kind), FyStatus::InvalidValue);
+        let planes = FyParticleSettings {
+            has_collision: true,
+            collision: FyParticleCollision { plane_count: 7, ..FyParticleSettings::default().collision },
+            ..Default::default()
+        };
+        assert_eq!(fy_particles_set(w, shell, &planes), FyStatus::InvalidValue);
+    }
+}
+
+/// A trail left by an object going round a curve, tapering and fading,
+/// drawn: the golden.
+#[test]
+fn a_trail_drawn_through_the_c_interface_matches_its_golden() {
+    let world = World::new();
+    let w = world.0;
+    let ball = world.spawn();
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        let camera = world.spawn();
+        ok(fy_camera_set(
+            w,
+            camera,
+            &FyCamera {
+                fov_y: 50.0,
+                near_clip: 0.1,
+                far_clip: 100.0,
+                clear_color: srgb(0.1, 0.1, 0.15, 1.0),
+                size: 5.0,
+                culling_mask: u32::MAX,
+                ..Default::default()
+            },
+        ));
+        let looking = Transform::from_position(Vec3::new(0.0, 4.0, 5.0)).looking_at(Vec3::new(0.0, 0.0, 0.0));
+        ok(fy_transform_set(w, camera, &transform(looking)));
+        let mut material = 0;
+        let glow =
+            FyMaterial { base_color: srgb(1.0, 1.0, 1.0, 1.0), blend: FY_BLEND_TRANSPARENT, ..FyMaterial::default() };
+        ok(fy_material_add(w, &glow, &mut material));
+        let mut width_table = [0.0; FY_PARTICLE_TABLE as usize];
+        let mut color_table = [srgb(1.0, 1.0, 1.0, 1.0); FY_PARTICLE_TABLE as usize];
+        for i in 0..FY_PARTICLE_TABLE as usize {
+            let t = i as f32 / (FY_PARTICLE_TABLE - 1) as f32;
+            width_table[i] = 1.0 - t;
+            color_table[i] = srgb(1.0, 0.9 - 0.7 * t, 0.2 + 0.7 * t, 1.0 - t);
+        }
+        let settings = FyTrailSettings {
+            time: 1.0,
+            min_vertex_distance: 0.05,
+            width: 0.4,
+            has_width_table: true,
+            width_table,
+            has_color_table: true,
+            color_table,
+            material,
+            ..FyTrailSettings::default()
+        };
+        ok(fy_trail_set(w, ball, &settings));
+        // Round a circle of 1.5 m, once in two seconds.
+        let dt = 1.0f32 / 60.0;
+        let mut count = 0;
+        for i in 0..=90 {
+            let a = i as f32 * dt * std::f32::consts::PI;
+            let at = Vec3::new(a.cos() * 1.5, 0.0, a.sin() * 1.5);
+            ok(fy_transform_set(w, ball, &transform(Transform::from_position(at))));
+            ok(fy_world_particles_step(w, &dt, &dt, &mut count));
+        }
+        let mut points = 0;
+        ok(fy_trail_count(w, ball, &mut points));
+        assert!((40..=62).contains(&points), "{points}");
+        assert_eq!(fy_trail_set(w, ball, &FyTrailSettings { width: -1.0, ..settings }), FyStatus::InvalidValue);
+    }
+    let view = View::headless(&world, 160, 160);
+    assert_golden("trail_arc", &view.read(view.frame(), 160, 160));
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        ok(fy_trail_clear(w, ball));
+        let mut points = 1;
+        ok(fy_trail_count(w, ball, &mut points));
+        assert_eq!(points, 0);
+        ok(fy_trail_remove(w, ball));
+        assert_eq!(fy_trail_remove(w, ball), FyStatus::NoComponent);
+    }
 }

@@ -16,6 +16,7 @@ mod particles;
 pub mod raycast;
 mod resources;
 mod skin;
+mod trails;
 mod world;
 
 pub use animation::{AnimationEvent, AnimatorState, MAX_BLENDS, MAX_LAYERS, Motion};
@@ -39,4 +40,5 @@ pub use particles::{
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, ScreenEffect, Shader};
 pub use skin::Skin;
+pub use trails::{MAX_TRAIL_POINTS, Trail, TrailSettings};
 pub use world::{Result, World, WorldError};

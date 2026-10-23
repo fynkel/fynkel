@@ -23,6 +23,8 @@
 //! - A particle system is drawn when its object is shown and in the
 //!   camera's culling mask and it has a material and particles: one draw
 //!   of them all, round the box they're in.
+//! - A trail is drawn when its object is shown and in the camera's culling
+//!   mask and it has a material and two points: one draw of its strip.
 //! - The world's debug lines are drawn over the scene as they are.
 //! - A texture is uploaded once for each colour space a material reads it
 //!   in, the first frame a material uses it that way, and freed when the
@@ -462,6 +464,43 @@ impl Extract {
                     lit: settings.lit,
                     softness: settings.softness,
                     largest,
+                    first,
+                    count: self.drawn.len() as u32,
+                    center: (lo + hi) * 0.5,
+                    radius: (hi - lo).length() * 0.5,
+                });
+            }
+        }
+
+        // Trails with a material, each one draw of its strip.
+        if world.has_trails() {
+            for (id, trail) in world.trails() {
+                let Some(&material) = trail.settings().material.and_then(|m| self.materials.get(&m)) else {
+                    continue;
+                };
+                if !matrices.shown(world, id) || !world.in_mask(id, mask) {
+                    continue;
+                }
+                self.drawn.clear();
+                let Some((lo, hi)) = trail.drawn(&mut self.drawn) else { continue };
+                let first = scene.particles.len() as u32;
+                scene.particles.extend(self.drawn.iter().map(|p| Particle {
+                    position: p.position,
+                    size: p.size,
+                    color: p.color,
+                    rotation: 0.0,
+                    velocity: p.velocity,
+                    frame: 0,
+                    t: p.t,
+                    random: 0.0,
+                }));
+                scene.particle_draws.push(ParticleDraw {
+                    material,
+                    mode: ParticleMode::Trail,
+                    sheet: [1, 1],
+                    lit: false,
+                    softness: 0.0,
+                    largest: 0.0,
                     first,
                     count: self.drawn.len() as u32,
                     center: (lo + hi) * 0.5,

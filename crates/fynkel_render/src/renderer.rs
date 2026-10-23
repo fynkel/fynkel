@@ -266,11 +266,21 @@ const PARTICLE_ATTRIBUTES: [wgpu::VertexAttribute; 8] = wgpu::vertex_attr_array!
     8 => Float32x4, 9 => Float32x4, 10 => Float32x4, 11 => Uint32,
 ];
 
-/// A particle system's batch: drawn as meshes or squares, lit or not, and
-/// soft or not.
+/// A trail's next point, as particles.wgsl reads it (`FyTrailEnd`): the
+/// same instances, one on.
+const TRAIL_END_ATTRIBUTES: [wgpu::VertexAttribute; 4] = [
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 0, shader_location: 0 },
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 16, shader_location: 1 },
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 32, shader_location: 2 },
+    wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset: 96, shader_location: 3 },
+];
+
+/// A particle system's batch: drawn as meshes, squares or a trail's
+/// strip, lit or not, and soft or not.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 struct ParticleLook {
     mesh: bool,
+    trail: bool,
     lit: bool,
     soft: bool,
 }
@@ -1238,7 +1248,7 @@ impl Renderer {
                 stats.culled += 1;
                 continue;
             }
-            self.behind |= reads_behind || particles.softness > 0.0;
+            self.behind |= reads_behind || (particles.softness > 0.0 && self.quality.soft_particles);
             let cover = match Cover::of(m) {
                 Cover::Additive => Cover::Additive,
                 _ => Cover::Transparent,
@@ -1299,7 +1309,8 @@ impl Renderer {
                     key,
                     scene,
                     &scene.particle_draws[(i & !PARTICLES) as usize],
-                    (forward, values),
+                    (forward, camera.position, values),
+                    self.quality.soft_particles,
                 ),
             }
         }
@@ -1812,6 +1823,18 @@ impl Renderer {
                     pass.set_bind_group(1, bind_group, &[]);
                     let instances = batch.first..batch.first + batch.count;
                     match mesh {
+                        // A strip from each point to the next: the next
+                        // the same instances, one on.
+                        None if look.trail => {
+                            let next = frame.particles + std::mem::size_of::<ParticleInstance>() as u64;
+                            pass.set_vertex_buffer(0, frame.buffer.slice(frame.particles..));
+                            pass.set_vertex_buffer(1, frame.buffer.slice(next..));
+                            pass.draw(0..6, batch.first..batch.first + batch.count.saturating_sub(1));
+                            // The draws' instances back where they were.
+                            if frame.lines > frame.instances {
+                                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+                            }
+                        }
                         None => {
                             pass.set_vertex_buffer(0, frame.buffer.slice(frame.particles..));
                             pass.draw(0..6, instances);
@@ -2895,16 +2918,27 @@ impl Pipelines {
             step_mode: wgpu::VertexStepMode::Vertex,
             attributes: &VERTEX_ATTRIBUTES,
         };
+        let end = wgpu::VertexBufferLayout {
+            array_stride: std::mem::size_of::<ParticleInstance>() as u64,
+            step_mode: wgpu::VertexStepMode::Instance,
+            attributes: &TRAIL_END_ATTRIBUTES,
+        };
         let mesh_buffers = [Some(vertex), Some(instance.clone())];
+        let trail_buffers = [Some(instance.clone()), Some(end)];
         let square_buffers = [Some(instance)];
+        let (entry, buffers): (_, &[Option<wgpu::VertexBufferLayout<'_>>]) = match (key.look.mesh, key.look.trail) {
+            (true, _) => ("vs_fy_particle_mesh", &mesh_buffers),
+            (false, true) => ("vs_fy_trail", &trail_buffers),
+            (false, false) => ("vs_fy_particle", &square_buffers),
+        };
         let pipeline = self.maker.make(wgpu::RenderPipelineDescriptor {
             label: Some(&label),
             layout: Some(&layout),
             vertex: wgpu::VertexState {
                 module: &module,
-                entry_point: Some(if key.look.mesh { "vs_fy_particle_mesh" } else { "vs_fy_particle" }),
+                entry_point: Some(entry),
                 compilation_options: Default::default(),
-                buffers: if key.look.mesh { &mesh_buffers } else { &square_buffers },
+                buffers,
             },
             // Squares face the camera; a mesh's backs are hidden by its
             // fronts, as an opaque mesh's would be, mostly.
@@ -3264,15 +3298,18 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
 
 /// A particle system's batch, and its particles' instances: a
 /// transparent one's furthest first along the way the camera looks
-/// (`forward`), an additive one's as they are, which adds the same.
-/// `values` is where the materials' values start among the joints.
+/// (`forward`), an additive one's as they are, which adds the same; a
+/// trail's points in order, each facing the `eye`. `values` is where the
+/// materials' values start among the joints. Without `soft_particles`,
+/// none are soft.
 fn particle_batch(
     batches: &mut Vec<Batch>,
     instances: &mut Vec<ParticleInstance>,
     key: SortKey,
     scene: &RenderScene,
     draw: &crate::ParticleDraw,
-    (forward, values): (Vec3, u32),
+    (forward, eye, values): (Vec3, Vec3, u32),
+    soft_particles: bool,
 ) {
     let (cover, faces, _, shader, textures, _, mesh) = key;
     let first = instances.len() as u32;
@@ -3287,7 +3324,10 @@ fn particle_batch(
         crate::ParticleMode::Horizontal => (2.0, 0.0, 0.0),
         crate::ParticleMode::Vertical => (3.0, 0.0, 0.0),
         crate::ParticleMode::Mesh(_) => (4.0, 0.0, 0.0),
+        crate::ParticleMode::Trail => (5.0, 0.0, 0.0),
     };
+    let trail = draw.mode == crate::ParticleMode::Trail;
+    let softness = if soft_particles { draw.softness } else { 0.0 };
     let [columns, rows] = draw.sheet.map(|n| n.max(1));
     // A frame's share of the texture, then where the material's scale and
     // offset put it.
@@ -3297,18 +3337,24 @@ fn particle_batch(
     instances.extend(particles.iter().map(|p| {
         let [r, g, b, a] = p.color;
         let (column, row) = (p.frame % columns, (p.frame / columns) % rows);
+        // A trail's point: half its width across the way it goes, as seen
+        // from the eye, so the strip faces the camera and its joins meet.
+        let velocity = match trail {
+            false => p.velocity,
+            true => p.velocity.cross(eye - p.position).normalize_or_zero() * (p.size * 0.5),
+        };
         ParticleInstance {
             center_size: p.position.extend(p.size).into(),
             color: [r * base[0], g * base[1], b * base[2], a * base[3]],
-            velocity_turn: p.velocity.extend(p.rotation).into(),
+            velocity_turn: velocity.extend(p.rotation).into(),
             uv: [fu, fv, column as f32 * fu + ou, row as f32 * fv + ov],
-            params: [m.metallic, m.roughness, draw.softness, mode],
+            params: [m.metallic, m.roughness, softness, mode],
             emissive: [er, eg, eb, 1.0],
             particle: [p.t, p.random, length_scale, speed_scale],
             values: [values, 0, 0, 0],
         }
     }));
-    if cover == Cover::Transparent {
+    if cover == Cover::Transparent && !trail {
         let depth = |p: &ParticleInstance| Vec3::new(p.center_size[0], p.center_size[1], p.center_size[2]).dot(forward);
         instances[first as usize..].sort_unstable_by(|a, b| depth(b).total_cmp(&depth(a)));
     }
@@ -3321,7 +3367,7 @@ fn particle_batch(
         shader,
         textures,
         mesh: MeshKey(mesh),
-        particle: Some(ParticleLook { mesh: mesh != u64::MAX, lit: draw.lit, soft: draw.softness > 0.0 }),
+        particle: Some(ParticleLook { mesh: mesh != u64::MAX, trail, lit: draw.lit, soft: softness > 0.0 }),
         first,
         count,
     });

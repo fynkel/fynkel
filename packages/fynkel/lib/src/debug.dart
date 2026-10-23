@@ -111,6 +111,83 @@ final class Debug implements Finalizable {
     if (closed && points.length > 2) _add(points.last, points.first, color);
   }
 
+  /// Draws each particle system's shape where its object is, each frame,
+  /// and the planes it collides with (as Unity's gizmos show them in the
+  /// Scene view): where its particles come from, and what they bounce
+  /// off. Off unless set.
+  bool drawShapes = false;
+
+  static const _shapeColor = Color(0xFF66CCFF);
+  static const _planeColor = Color(0xFFFFCC33);
+
+  /// The frame's shapes, with [drawShapes].
+  void _drawShapes() {
+    _addSeconds = null;
+    for (final system in _world._particleSystems.values) {
+      if (system.isRemoved || !system.enabled) continue;
+      final object = system.gameObject;
+      if (!object.activeInHierarchy) continue;
+      final world = object.worldTransform;
+      final (at, turn) = (world.position, world.rotation);
+      final shape = system.shape;
+      switch (shape._kind) {
+        case _ShapeKind.point:
+          for (final axis in const [Vec3(0.1, 0, 0), Vec3(0, 0.1, 0), Vec3(0, 0, 0.1)]) {
+            final d = turn.rotate(axis);
+            _add(at - d, at + d, _shapeColor);
+          }
+        case _ShapeKind.sphere || _ShapeKind.hemisphere:
+          for (var axis = 0; axis < 3; axis++) {
+            _ring(at, turn, shape.radius, axis, shape._kind == _ShapeKind.hemisphere && axis != 1);
+          }
+        case _ShapeKind.cone:
+          // Its base, and where its sides are a metre up.
+          final top = shape.radius + math.tan(shape.angle);
+          final up = turn.rotate(const Vec3(0, 1, 0));
+          _ring(at, turn, shape.radius, 1, false);
+          _ring(at + up, turn, top, 1, false);
+          for (final side in const [Vec3(1, 0, 0), Vec3(-1, 0, 0), Vec3(0, 0, 1), Vec3(0, 0, -1)]) {
+            _add(at + turn.rotate(side * shape.radius), at + up + turn.rotate(side * top), _shapeColor);
+          }
+        case _ShapeKind.box:
+          final h = shape.size * 0.5;
+          for (var i = 0; i < 8; i++) {
+            for (var bit = 1; bit < 8; bit <<= 1) {
+              if (i & bit == 0) _add(_corner(at, h, turn, i), _corner(at, h, turn, i | bit), _shapeColor);
+            }
+          }
+        case _ShapeKind.circle:
+          _ring(at, turn, shape.radius, 1, false);
+        case _ShapeKind.edge:
+          final d = turn.rotate(Vec3(shape.radius, 0, 0));
+          _add(at - d, at + d, _shapeColor);
+      }
+      for (final plane in system.collision?.planes ?? const <GameObject>[]) {
+        if (plane.isDestroyed || !identical(plane._world, _world)) continue;
+        final p = plane.worldTransform;
+        // A square two metres across, its up the way it faces.
+        final (a, b) = (p.rotation.rotate(const Vec3(1, 0, 0)), p.rotation.rotate(const Vec3(0, 0, 1)));
+        final corners = [p.position + a + b, p.position - a + b, p.position - a - b, p.position + a - b];
+        for (var i = 0; i < 4; i++) {
+          _add(corners[i], corners[(i + 1) % 4], _planeColor);
+        }
+        _add(p.position, p.position + p.rotation.rotate(const Vec3(0, 0.5, 0)), _planeColor);
+      }
+    }
+  }
+
+  /// A circle of [radius] round [center], turned by [turn], round [axis]
+  /// (0 X, 1 Y, 2 Z); only its upper half with [upper].
+  void _ring(Vec3 center, Quat turn, double radius, int axis, bool upper) {
+    _radius = radius;
+    const segments = 32;
+    for (var i = 0; i < segments; i++) {
+      final (a, b) = (_around(Vec3.zero, axis, i, segments), _around(Vec3.zero, axis, i + 1, segments));
+      if (upper && (a.y < -1e-6 || b.y < -1e-6)) continue;
+      _add(center + turn.rotate(a), center + turn.rotate(b), _shapeColor);
+    }
+  }
+
   /// Takes every line away now, those with seconds left too.
   void clear() => _count = 0;
 
@@ -180,6 +257,7 @@ final class Debug implements Finalizable {
   /// seconds left are kept.
   void _flush() {
     if (!enabled) _count = 0;
+    if (enabled && drawShapes) _drawShapes();
     _now = _world.time._unscaledSinceStart;
     _keep(oneFrame: true);
     if (_count == 0 && _sent == 0) return;

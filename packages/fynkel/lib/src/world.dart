@@ -36,6 +36,7 @@ part 'signals.dart';
 part 'sky.dart';
 part 'systems.dart';
 part 'time.dart';
+part 'trails.dart';
 part 'world_loop.dart';
 part 'world_objects.dart';
 part 'world_resources.dart';
@@ -344,6 +345,12 @@ final class World implements Finalizable {
   final _animators = <int, Animator>{};
   // The particle systems in the engine, by their objects' ids.
   final _particleSystems = <int, ParticleSystem>{};
+  // Systems written before their sub emitters' or planes' objects were in
+  // the world: written again before the next step.
+  final _waitingParticles = <ParticleSystem>{};
+  // [_shape] when they last tried, so they try again only after a change.
+  var _waitingShape = 0;
+  final _trails = <int, TrailRenderer>{};
   final _particleWatch = Stopwatch();
 
   /// How long the engine took to move every particle system on, in the
@@ -986,6 +993,7 @@ final class Quality {
     this.spotShadowResolution = 1024,
     this.renderScale = 1,
     this.antiAliasing = 4,
+    this.softParticles = true,
   });
 
   /// The cheapest, for slow GPUs and ones not known: drawn straight to the
@@ -1004,6 +1012,7 @@ final class Quality {
     spotShadows: 1,
     spotShadowResolution: 512,
     renderScale: 0.75,
+    softParticles: false,
   );
 
   /// Between: bloom, and soft shadows in two cascades; no ambient
@@ -1103,6 +1112,12 @@ final class Quality {
   /// edges are jagged and shimmer as things move.
   final int antiAliasing;
 
+  /// Whether particles with [ParticleSystem.softness] fade where they meet
+  /// what's behind them (Unity's soft particles setting): off at low,
+  /// where they're hard, since reading the scene's depth costs a pass
+  /// more on a phone.
+  final bool softParticles;
+
   /// A copy with the values given changed.
   Quality copyWith({
     String? name,
@@ -1119,6 +1134,7 @@ final class Quality {
     int? spotShadowResolution,
     double? renderScale,
     int? antiAliasing,
+    bool? softParticles,
   }) => Quality(
     name: name ?? this.name,
     hdr: hdr ?? this.hdr,
@@ -1134,6 +1150,7 @@ final class Quality {
     spotShadowResolution: spotShadowResolution ?? this.spotShadowResolution,
     renderScale: renderScale ?? this.renderScale,
     antiAliasing: antiAliasing ?? this.antiAliasing,
+    softParticles: softParticles ?? this.softParticles,
   );
 
   void _write(FyQuality q) {
@@ -1149,7 +1166,8 @@ final class Quality {
       ..shadow_distance = shadowDistance
       ..spot_shadows = spotShadows
       ..spot_shadow_resolution = spotShadowResolution
-      ..samples = antiAliasing == 0 ? 1 : antiAliasing;
+      ..samples = antiAliasing == 0 ? 1 : antiAliasing
+      ..soft_particles = softParticles;
   }
 
   List<Object> get _fields => [
@@ -1167,6 +1185,7 @@ final class Quality {
     spotShadowResolution,
     renderScale,
     antiAliasing,
+    softParticles,
   ];
 
   @override
@@ -1187,7 +1206,7 @@ final class Quality {
       'Quality($name: hdr $hdr, bloom $bloom, ambientOcclusion $ambientOcclusion, lampHighlights $lampHighlights, '
       'shadows ${shadows ? '$shadowCascades × $shadowResolution ${shadowSoftness.name} to ${shadowDistance}m, '
                 'spot $spotShadows × $spotShadowResolution' : 'off'}, renderScale $renderScale, '
-      'antiAliasing $antiAliasing)';
+      'antiAliasing $antiAliasing, softParticles $softParticles)';
 }
 
 /// How a shadow's edge is drawn ([Quality.shadowSoftness]).

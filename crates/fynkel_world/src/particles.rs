@@ -1600,14 +1600,14 @@ fn noise_at(noise: &Noise, p: Vec3, time: f32) -> Vec3 {
 }
 
 /// `table` at `t` (0 to 1), between its steps.
-fn sample(table: &[f32; TABLE], t: f32) -> f32 {
+pub(crate) fn sample(table: &[f32; TABLE], t: f32) -> f32 {
     let x = t * (TABLE - 1) as f32;
     let i = (x as usize).min(TABLE - 2);
     let f = x - i as f32;
     table[i] + (table[i + 1] - table[i]) * f
 }
 
-fn sample_color(table: &[[f32; 4]; TABLE], t: f32) -> [f32; 4] {
+pub(crate) fn sample_color(table: &[[f32; 4]; TABLE], t: f32) -> [f32; 4] {
     let x = t * (TABLE - 1) as f32;
     let i = (x as usize).min(TABLE - 2);
     let f = x - i as f32;
@@ -1788,10 +1788,6 @@ impl World {
         Ok(())
     }
 
-    /// Moves every system on, once a frame: by `dt` seconds of the game's
-    /// time, or `unscaled` for those that ask. A system whose object is
-    /// hidden stops and clears; shown again, one that plays on awake
-    /// plays. Those that became done are added to `events`.
     /// Where `system`'s collision planes are now, in its particles' space,
     /// its object at `emitter`. A plane whose object is gone is left out.
     fn find_planes(&self, system: &mut ParticleSystem, emitter: Mat4) {
@@ -1810,6 +1806,11 @@ impl World {
         }
     }
 
+    /// Moves every system on, once a frame: by `dt` seconds of the game's
+    /// time, or `unscaled` for those that ask. A system whose object is
+    /// hidden stops and clears; shown again, one that plays on awake
+    /// plays. Those that became done are added to `events`. The trails
+    /// move on too, by `dt`.
     pub fn step_particles(&mut self, dt: f32, unscaled: f32, events: &mut Vec<ParticleEvent>) {
         let clean = |v: f32| if v.is_finite() { v.max(0.0) } else { 0.0 };
         let (dt, unscaled) = (clean(dt), clean(unscaled));
@@ -1870,6 +1871,7 @@ impl World {
             (from.triggers, from.living, from.sub_carry[k]) = (triggers, living, carry);
         }
         self.particles = systems;
+        self.step_trails(dt);
     }
 }
 

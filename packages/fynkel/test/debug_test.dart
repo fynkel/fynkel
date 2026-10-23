@@ -196,4 +196,45 @@ void main() {
     expect(() => other.debug.line(Vec3.zero, Vec3.up), throwsStateError);
     expect(other.debug.count, 0);
   });
+
+  test('drawShapes shows each particle system\'s shape and the planes it bounces off', () {
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 2, 5), rotation: Quat.lookRotation(Vec3(0, -2, -5))),
+        components: [Camera(clearColor: Color(0xFF202020), bloom: null, ambientOcclusion: null)],
+      ),
+    );
+    final floor = world.add(
+      GameObject(
+        name: 'floor',
+        transform: Transform(position: Vec3(0, -0.5, 0)),
+      ),
+    );
+    for (final (x, shape) in [
+      (-1.5, ParticleShape.cone(radius: 0.3)),
+      (0.0, ParticleShape.sphere(radius: 0.4)),
+      (1.5, ParticleShape.box(size: Vec3(0.6, 0.6, 0.6))),
+    ]) {
+      world.add(
+        GameObject(
+          transform: Transform(position: Vec3(x, 0, 0)),
+          components: [
+            ParticleSystem(
+              shape: shape,
+              playOnAwake: false,
+              collision: ParticleCollision(planes: [floor]),
+            ),
+          ],
+        ),
+      );
+    }
+    final view = HeadlessView(world, width: 256, height: 256);
+    addTearDown(view.dispose);
+    world.update(1 / 60);
+    expectGolden('debug_particle_shapes', view.read(view.frame()).rgba, 256, 256);
+    world.debug.drawShapes = true;
+    world.update(1 / 60);
+    expect(world.debug.count, 0, reason: 'drawn each frame, kept for none');
+    expectGolden('debug_particle_shapes_on', view.read(view.frame()).rgba, 256, 256);
+  });
 }

@@ -201,6 +201,8 @@ pub struct World {
     /// Each system's sub emitters: (the system, which of its sub
     /// emitters, the sub emitter's system).
     pub(crate) particle_links: Vec<(ObjectId, usize, ObjectId)>,
+    /// Each object's trail.
+    pub(crate) trails: IdMap<ObjectId, crate::trails::Trail>,
 }
 
 impl std::fmt::Debug for World {
@@ -247,6 +249,7 @@ impl World {
             particles: IdMap::default(),
             particle_seeds: 1,
             particle_links: Vec::new(),
+            trails: IdMap::default(),
         }
     }
 
@@ -277,6 +280,9 @@ impl World {
             }
             if !self.camera_effects.is_empty() {
                 self.camera_effects.remove(&id);
+            }
+            if !self.trails.is_empty() {
+                self.trails.remove(&id);
             }
             if !self.particles.is_empty() && self.particles.remove(&id).is_some() {
                 unlinked = true;
@@ -542,6 +548,9 @@ impl World {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         if let Some((&object, _)) = self.particles.iter().find(|(_, s)| s.settings().material == Some(id)) {
+            return Err(WorldError::MaterialInUse { material: id, object });
+        }
+        if let Some((&object, _)) = self.trails.iter().find(|(_, t)| t.settings().material == Some(id)) {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         self.materials.remove(&id);
