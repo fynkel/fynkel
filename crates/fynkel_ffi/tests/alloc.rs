@@ -300,8 +300,12 @@ fn a_steady_frame_with_particle_systems_allocates_nothing_on_the_calling_thread(
                 material,
                 ..FyParticleSettings::default()
             };
-            // SAFETY: a live world and a pointer to a local.
+            // SAFETY: a live world and pointers to locals. Full from the
+            // start, so every scene buffer the warm-up uses grows to the
+            // size the measured frames need, however the render worker
+            // keeps up (the spare buffers go last in, first out).
             ok(unsafe { fy_particles_set(world.0, id, &settings) });
+            ok(unsafe { fy_particles_simulate(world.0, id, &1.0) });
             id
         })
         .collect();
