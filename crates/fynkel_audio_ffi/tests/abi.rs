@@ -134,6 +134,8 @@ fn bad_values_are_refused_and_say_why() {
     assert_eq!(unsafe { fa_audio_play(audio.0, clip, &bad, &mut handle) }, FaStatus::InvalidValue);
     // SAFETY: live audio.
     assert_eq!(unsafe { fa_audio_session_set(audio.0, 5) }, FaStatus::InvalidValue);
+    // SAFETY: live audio.
+    assert_eq!(unsafe { fa_audio_session_set(audio.0, FaSession::VoiceChat as u32) }, FaStatus::Ok);
     // SAFETY: a null clip is refused, not read.
     assert_eq!(unsafe { fa_audio_play(audio.0, ptr::null(), &play(1.0), &mut handle) }, FaStatus::NullPointer);
     // SAFETY: null settings are refused, not read.

@@ -29,6 +29,13 @@ enum AudioSession {
   /// music stops: on Android, the game takes the audio focus (Unity's
   /// *Mute Other Audio Sources*). For a game whose sound is the point.
   playback,
+
+  /// The game talks and listens at once, like a call: the mic works
+  /// alongside the game's sound (iOS's `playAndRecord`), which plays from
+  /// the loudspeaker (not the earpiece) and ignores the silent switch. On
+  /// Android, as [playback]. Set it before the first sound, and let the
+  /// mic's plugin leave the session alone, so the two don't fight.
+  voiceChat,
 }
 
 /// The sound itself failed: a panic, or sound a panic left in doubt. A
