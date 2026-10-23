@@ -223,6 +223,31 @@ CI green and it's been seen on the Mac, the iPhone and the Note10+.
 *Done when* a 10,000-vertex grid changed every frame holds 60 on all
 three at low, with no garbage, and every golden from before is the same.
 
+**As built** (2026-10-24, engine ABI 42, physics ABI 14):
+
+- As planned, plus `world.meshChangeTime` (what sending the changed
+  meshes took, as `particleStepTime`). Tangents are worked out only once
+  a mesh has UVs. A mesh keeps up to four copies from before, so the
+  copy made on the first change after it was sent goes into one nothing
+  holds any more: a mesh changed every frame allocates nothing, in Dart
+  or in Rust (tests in both).
+- A `MeshCollider` follows its mesh before the next step or query
+  (`fp_mesh_set`), and a body resting on it wakes. Rebuilding one, with
+  a step, takes 0.23 ms for 1,000 triangles and 2.9 ms for 10,000 on the
+  Mac (release).
+- The lab's "Meshes that change": a flag (two submeshes), water of
+  10,201 vertices changed and coloured every frame, ripples where it's
+  tapped, and ground dug where it's tapped with its collider following.
+- Measured at low (profile builds): the Mac 60 fps, the Note10+ 59.9.
+  What the engine's side of changing the flag and the water costs each
+  frame (setting the channels, then sending them, normals worked out):
+  the Mac 0.07 + 0.11 ms, the Note10+ 0.45 + 0.82 ms, about 1.3 ms
+  against the 1 ms bar, from 2.1 ms before skipping tangents without
+  UVs, reusing copies and not checking unchanged triangles again. The
+  water's own waves are 0.5 ms more on the Note10+. **The iPhone is
+  owed**: its run sent no log lines.
+- Every golden from before is the same.
+
 ### Phase 2: building meshes
 
 - `MeshBuilder`; `Mesh.combine`.

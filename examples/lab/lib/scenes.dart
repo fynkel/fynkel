@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's, 10's and 11's. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's, 10's, 11's, 12's and 13's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -37,6 +37,7 @@ import 'scenes/lifecycle.dart';
 import 'scenes/look.dart';
 import 'scenes/menus_basics.dart';
 import 'scenes/mesh_colliders_basics.dart';
+import 'scenes/meshes_change.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
 import 'scenes/moving_basics.dart';
@@ -126,4 +127,5 @@ final List<LabScene Function()> scenes = [
   ParticlesBasicsScene.new,
   ParticlesLookScene.new,
   ParticlesWorldScene.new,
+  MeshesChangeScene.new,
 ];
