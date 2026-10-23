@@ -19,10 +19,11 @@ use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, Sha
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    AnimationEvent, Blend, Burst, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
-    MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId,
-    ParticleCommand, ParticleEvent, ParticleRange, ParticleSettings, Quat, Ray, Raycaster, Shader, ShaderId, Shape,
-    ShapeKind, Space, StopAction, TextureId, Transform, Vec2, Vec3, World,
+    AnimationEvent, Blend, Burst, BySpeed, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
+    LimitVelocity, MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData,
+    ObjectId, ParticleCommand, ParticleCurve, ParticleEvent, ParticleNoise, ParticleRange, ParticleSettings, Quat, Ray,
+    Raycaster, RenderMode, Shader, ShaderId, Shape, ShapeKind, Space, StopAction, TextureId, TextureSheet, Transform,
+    Vec2, Vec3, VectorOverLifetime, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -30,7 +31,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 39;
+pub const FY_ABI_VERSION: u32 = 40;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -3298,6 +3299,109 @@ pub const FY_PARTICLE_TABLE: u32 = 64;
 /// The most bursts in `FyParticleSettings`.
 pub const FY_PARTICLE_MAX_BURSTS: u32 = 8;
 
+/// `FyCurve::mode`: between `min` and `max`.
+pub const FY_CURVE_CONSTANT: u32 = 0;
+/// Between `tables[0]` and `tables[1]` over a particle's life.
+pub const FY_CURVE_CURVES: u32 = 1;
+
+/// A number over a particle's life (Unity's `MinMaxCurve`): each
+/// particle's is somewhere between two constants or two curves, by a
+/// random number of its own.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyCurve {
+    /// `FY_CURVE_*`.
+    pub mode: u32,
+    pub min: f32,
+    pub max: f32,
+    pub tables: [[f32; FY_PARTICLE_TABLE as usize]; 2],
+}
+
+impl FyCurve {
+    const fn constant(value: f32) -> Self {
+        Self { mode: FY_CURVE_CONSTANT, min: value, max: value, tables: [[value; FY_PARTICLE_TABLE as usize]; 2] }
+    }
+
+    fn curve(&self, what: &str) -> Result<ParticleCurve, Error> {
+        match self.mode {
+            FY_CURVE_CONSTANT => Ok(ParticleCurve::Constant(ParticleRange { min: self.min, max: self.max })),
+            FY_CURVE_CURVES => Ok(ParticleCurve::Curves(Box::new(self.tables))),
+            _ => Err(Error::new(FyStatus::InvalidValue, format!("{what}'s mode isn't one of the FY_CURVE_* values"))),
+        }
+    }
+}
+
+/// A vector over a particle's life, an axis each, in `space`
+/// (`FY_PARTICLE_SPACE_*`).
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleVector {
+    pub x: FyCurve,
+    pub y: FyCurve,
+    pub z: FyCurve,
+    pub space: u32,
+}
+
+impl FyParticleVector {
+    fn vector(&self, what: &str) -> Result<VectorOverLifetime, Error> {
+        Ok(VectorOverLifetime {
+            x: self.x.curve(what)?,
+            y: self.y.curve(what)?,
+            z: self.z.curve(what)?,
+            space: particle_space(self.space).ok_or_else(|| {
+                Error::new(FyStatus::InvalidValue, format!("{what}.space isn't one of the FY_PARTICLE_SPACE_* values"))
+            })?,
+        })
+    }
+}
+
+/// A speed past `limit` is brought down by `dampen`, 0 to 1; `drag` slows
+/// every particle by that much of its speed a second.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleLimit {
+    pub limit: FyCurve,
+    pub dampen: f32,
+    pub drag: FyCurve,
+}
+
+/// A wander through a smooth random field: `strength` in metres a
+/// second, `frequency` swirls a metre, the field changing `scroll_speed`
+/// a second, 1 to 4 `octaves`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleNoise {
+    pub strength: FyCurve,
+    pub frequency: f32,
+    pub scroll_speed: f32,
+    pub octaves: u32,
+}
+
+/// The material's texture as `columns` × `rows` frames, `frame_over_time`
+/// (0 the first, 1 past the last) `cycles` times a life, starting
+/// `start_frame` on; with `random_row`, a row each.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleSheet {
+    pub columns: u32,
+    pub rows: u32,
+    pub frame_over_time: FyCurve,
+    pub start_frame: FyRange,
+    pub cycles: f32,
+    pub random_row: bool,
+}
+
+/// `FyParticleSettings::render_mode`: a square facing the camera.
+pub const FY_PARTICLE_RENDER_BILLBOARD: u32 = 0;
+/// Long the way it moves, `length_scale` and `speed_scale`.
+pub const FY_PARTICLE_RENDER_STRETCHED: u32 = 1;
+/// Lying flat, facing up.
+pub const FY_PARTICLE_RENDER_HORIZONTAL: u32 = 2;
+/// Standing up, turned to the camera.
+pub const FY_PARTICLE_RENDER_VERTICAL: u32 = 3;
+/// `mesh`, turned by its rotation round up.
+pub const FY_PARTICLE_RENDER_MESH: u32 = 4;
+
 /// Where particles are made and which way they go. Shapes face up (+Y).
 /// Angles are radians.
 #[repr(C)]
@@ -3332,8 +3436,9 @@ pub struct FyParticleBurst {
 }
 
 /// A particle system's settings: Unity's main, emission and shape
-/// modules, and size and colour over a particle's life. Sent when they
-/// change, not each frame. Seconds, metres and radians; colours sRGB.
+/// modules, its over-lifetime and by-speed modules, noise, a texture
+/// sheet, and how it's drawn. Sent when they change, not each frame.
+/// Seconds, metres and radians; colours sRGB.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct FyParticleSettings {
@@ -3370,8 +3475,41 @@ pub struct FyParticleSettings {
     /// A particle's colour times `color_table` over its life, when set.
     pub has_color_table: bool,
     pub color_table: [FyColor; FY_PARTICLE_TABLE as usize],
+    pub has_velocity_over_lifetime: bool,
+    pub velocity_over_lifetime: FyParticleVector,
+    pub has_limit_velocity: bool,
+    pub limit_velocity: FyParticleLimit,
+    pub has_force_over_lifetime: bool,
+    pub force_over_lifetime: FyParticleVector,
+    /// Radians a second.
+    pub has_rotation_over_lifetime: bool,
+    pub rotation_over_lifetime: FyCurve,
+    /// A particle's size times `size_by_speed`, from `size_speeds.min` m/s
+    /// (its first step) to `size_speeds.max` (its last).
+    pub has_size_by_speed: bool,
+    pub size_by_speed: [f32; FY_PARTICLE_TABLE as usize],
+    pub size_speeds: FyRange,
+    pub has_color_by_speed: bool,
+    pub color_by_speed: [FyColor; FY_PARTICLE_TABLE as usize],
+    pub color_speeds: FyRange,
+    pub has_noise: bool,
+    pub noise: FyParticleNoise,
+    pub has_texture_sheet: bool,
+    pub texture_sheet: FyParticleSheet,
     /// What it's drawn with, or 0 for nothing drawn.
     pub material: u64,
+    /// `FY_PARTICLE_RENDER_*`.
+    pub render_mode: u32,
+    /// A stretched particle's length: `length_scale` times its size, plus
+    /// `speed_scale` times its speed.
+    pub length_scale: f32,
+    pub speed_scale: f32,
+    /// `FY_PARTICLE_RENDER_MESH`'s mesh.
+    pub mesh: u64,
+    /// Lit as a surface facing the camera.
+    pub lit: bool,
+    /// Metres it fades out in front of what's behind it; 0 for none.
+    pub softness: f32,
 }
 
 impl Default for FyParticleSettings {
@@ -3415,7 +3553,42 @@ impl Default for FyParticleSettings {
             size_table: [1.0; FY_PARTICLE_TABLE as usize],
             has_color_table: false,
             color_table: [FyColor::from(Color::WHITE); FY_PARTICLE_TABLE as usize],
+            has_velocity_over_lifetime: false,
+            velocity_over_lifetime: FyParticleVector::ZERO,
+            has_limit_velocity: false,
+            limit_velocity: FyParticleLimit {
+                limit: FyCurve::constant(1.0),
+                dampen: 0.0,
+                drag: FyCurve::constant(0.0),
+            },
+            has_force_over_lifetime: false,
+            force_over_lifetime: FyParticleVector::ZERO,
+            has_rotation_over_lifetime: false,
+            rotation_over_lifetime: FyCurve::constant(0.0),
+            has_size_by_speed: false,
+            size_by_speed: [1.0; FY_PARTICLE_TABLE as usize],
+            size_speeds: FyRange { min: 0.0, max: 1.0 },
+            has_color_by_speed: false,
+            color_by_speed: [FyColor::from(Color::WHITE); FY_PARTICLE_TABLE as usize],
+            color_speeds: FyRange { min: 0.0, max: 1.0 },
+            has_noise: false,
+            noise: FyParticleNoise { strength: FyCurve::constant(1.0), frequency: 0.5, scroll_speed: 0.0, octaves: 1 },
+            has_texture_sheet: false,
+            texture_sheet: FyParticleSheet {
+                columns: 1,
+                rows: 1,
+                frame_over_time: FyCurve::constant(0.0),
+                start_frame: FyRange::default(),
+                cycles: 1.0,
+                random_row: false,
+            },
             material: 0,
+            render_mode: FY_PARTICLE_RENDER_BILLBOARD,
+            length_scale: 2.0,
+            speed_scale: 0.0,
+            mesh: 0,
+            lit: false,
+            softness: 0.0,
         }
     }
 }
@@ -3424,11 +3597,18 @@ impl FyParticleSettings {
     fn settings(&self) -> Result<ParticleSettings, Error> {
         let bad =
             |what: &str| Error::new(FyStatus::InvalidValue, format!("{what} isn't one of the FY_PARTICLE_* values"));
-        let space = match self.space {
-            FY_PARTICLE_SPACE_LOCAL => Space::Local,
-            FY_PARTICLE_SPACE_WORLD => Space::World,
-            _ => return Err(bad("space")),
+        let space = particle_space(self.space).ok_or_else(|| bad("space"))?;
+        let render_mode = match self.render_mode {
+            FY_PARTICLE_RENDER_BILLBOARD => RenderMode::Billboard,
+            FY_PARTICLE_RENDER_STRETCHED => {
+                RenderMode::Stretched { length_scale: self.length_scale, speed_scale: self.speed_scale }
+            }
+            FY_PARTICLE_RENDER_HORIZONTAL => RenderMode::Horizontal,
+            FY_PARTICLE_RENDER_VERTICAL => RenderMode::Vertical,
+            FY_PARTICLE_RENDER_MESH => RenderMode::Mesh(mesh(self.mesh)?),
+            _ => return Err(bad("render_mode")),
         };
+        let by_speed = |speeds: FyRange| (speeds.min, speeds.max);
         let stop_action = stop_action(self.stop_action).ok_or_else(|| bad("stop_action"))?;
         let kind = match self.shape.kind {
             FY_PARTICLE_SHAPE_POINT => ShapeKind::Point,
@@ -3484,8 +3664,81 @@ impl FyParticleSettings {
             },
             size_over_lifetime: self.has_size_table.then(|| Box::new(self.size_table)),
             color_over_lifetime: self.has_color_table.then(|| Box::new(self.color_table.map(Color::from))),
+            velocity_over_lifetime: self
+                .has_velocity_over_lifetime
+                .then(|| self.velocity_over_lifetime.vector("velocity_over_lifetime"))
+                .transpose()?,
+            limit_velocity: self
+                .has_limit_velocity
+                .then(|| -> Result<_, Error> {
+                    let l = &self.limit_velocity;
+                    Ok(LimitVelocity { limit: l.limit.curve("limit")?, dampen: l.dampen, drag: l.drag.curve("drag")? })
+                })
+                .transpose()?,
+            force_over_lifetime: self
+                .has_force_over_lifetime
+                .then(|| self.force_over_lifetime.vector("force_over_lifetime"))
+                .transpose()?,
+            rotation_over_lifetime: self
+                .has_rotation_over_lifetime
+                .then(|| self.rotation_over_lifetime.curve("rotation_over_lifetime"))
+                .transpose()?,
+            size_by_speed: self.has_size_by_speed.then(|| {
+                let (min_speed, max_speed) = by_speed(self.size_speeds);
+                BySpeed { table: Box::new(self.size_by_speed), min_speed, max_speed }
+            }),
+            color_by_speed: self.has_color_by_speed.then(|| {
+                let (min_speed, max_speed) = by_speed(self.color_speeds);
+                BySpeed { table: Box::new(self.color_by_speed.map(Color::from)), min_speed, max_speed }
+            }),
+            noise: self
+                .has_noise
+                .then(|| -> Result<_, Error> {
+                    let n = &self.noise;
+                    Ok(ParticleNoise {
+                        strength: n.strength.curve("noise.strength")?,
+                        frequency: n.frequency,
+                        scroll_speed: n.scroll_speed,
+                        octaves: n.octaves,
+                    })
+                })
+                .transpose()?,
+            texture_sheet: self
+                .has_texture_sheet
+                .then(|| -> Result<_, Error> {
+                    let t = &self.texture_sheet;
+                    Ok(TextureSheet {
+                        columns: t.columns,
+                        rows: t.rows,
+                        frame_over_time: t.frame_over_time.curve("texture_sheet.frame_over_time")?,
+                        start_frame: t.start_frame.into(),
+                        cycles: t.cycles,
+                        random_row: t.random_row,
+                    })
+                })
+                .transpose()?,
             material: MaterialId::from_raw(self.material),
+            render_mode,
+            lit: self.lit,
+            softness: self.softness,
         })
+    }
+}
+
+impl FyParticleVector {
+    const ZERO: Self = Self {
+        x: FyCurve::constant(0.0),
+        y: FyCurve::constant(0.0),
+        z: FyCurve::constant(0.0),
+        space: FY_PARTICLE_SPACE_LOCAL,
+    };
+}
+
+fn particle_space(value: u32) -> Option<Space> {
+    match value {
+        FY_PARTICLE_SPACE_LOCAL => Some(Space::Local),
+        FY_PARTICLE_SPACE_WORLD => Some(Space::World),
+        _ => None,
     }
 }
 

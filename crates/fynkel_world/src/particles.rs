@@ -1,12 +1,18 @@
-//! Particle systems (`docs/stage-12.md` phase 1): a [`ParticleSystem`] on
-//! an object emits particles from a shape, and [`World::step_particles`]
-//! moves every system's once a frame, as Unity's Particle System does.
+//! Particle systems (`docs/stage-12.md` phases 1 and 2): a
+//! [`ParticleSystem`] on an object emits particles from a shape, and
+//! [`World::step_particles`] moves every system's once a frame, as Unity's
+//! Particle System does, with its modules: velocity, force and rotation
+//! over a particle's life, a speed limit and drag, size and colour by
+//! speed, noise, and frames of a texture sheet.
 //!
 //! The game sets a system's [`ParticleSettings`] when they change, not
 //! each frame; a frame only steps. Each system is a fixed pool of
 //! `max_particles`, kept as arrays (all positions, then all velocities, and
 //! so on), so a steady frame allocates nothing. Curves and gradients over
-//! a particle's life come as tables of [`TABLE`] steps, read with a lerp.
+//! a particle's life come as tables of [`TABLE`] steps, read with a lerp;
+//! a [`Curve`] between two of them, or two constants, picks for each
+//! particle by a random number of its own, as Unity's *Random Between
+//! Two Curves*.
 //!
 //! A system plays a timeline of `duration` seconds, looping or not: it
 //! emits at `rate_over_time` and in its bursts while that runs. Its
@@ -29,7 +35,7 @@
 use glam::{Mat4, Vec3};
 
 use crate::world::{Result, World, WorldError};
-use crate::{Color, MaterialId, ObjectId};
+use crate::{Color, MaterialId, MeshId, ObjectId};
 
 /// Steps in a curve or gradient over a particle's life.
 pub const TABLE: usize = 64;
@@ -160,8 +166,162 @@ impl Default for Burst {
     }
 }
 
-/// Everything a game sets on a system: Unity's main, emission and shape
-/// modules, and colour and size over a particle's life.
+/// A number over a particle's life (Unity's `MinMaxCurve`): two constants,
+/// or two curves of [`TABLE`] steps from its birth (0) to its death (1).
+/// Each particle is somewhere between the two, by a random number of its
+/// own that stays the same all its life; the same two are one constant or
+/// one curve.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Curve {
+    Constant(Range),
+    Curves(Box<[[f32; TABLE]; 2]>),
+}
+
+impl Curve {
+    pub const fn constant(value: f32) -> Self {
+        Curve::Constant(Range::constant(value))
+    }
+
+    /// At `t` (0 to 1) through a life, for a particle whose own random
+    /// number is `r` (0 to 1).
+    fn at(&self, t: f32, r: f32) -> f32 {
+        match self {
+            Curve::Constant(range) => range.min + (range.max - range.min) * r,
+            Curve::Curves(tables) => {
+                let a = sample(&tables[0], t);
+                a + (sample(&tables[1], t) - a) * r
+            }
+        }
+    }
+
+    fn is_finite(&self) -> bool {
+        match self {
+            Curve::Constant(range) => range.is_finite(),
+            Curve::Curves(tables) => tables.iter().flatten().all(|v| v.is_finite()),
+        }
+    }
+
+    fn min(&self) -> f32 {
+        match self {
+            Curve::Constant(range) => range.min.min(range.max),
+            Curve::Curves(tables) => tables.iter().flatten().fold(f32::INFINITY, |m, &v| m.min(v)),
+        }
+    }
+}
+
+/// A vector over a particle's life, an axis each, in the system's own
+/// space or the world's: velocity or force over lifetime.
+#[derive(Clone, Debug, PartialEq)]
+pub struct VectorOverLifetime {
+    pub x: Curve,
+    pub y: Curve,
+    pub z: Curve,
+    pub space: Space,
+}
+
+impl VectorOverLifetime {
+    fn at(&self, t: f32, r: [f32; 3]) -> Vec3 {
+        Vec3::new(self.x.at(t, r[0]), self.y.at(t, r[1]), self.z.at(t, r[2]))
+    }
+
+    fn is_finite(&self) -> bool {
+        self.x.is_finite() && self.y.is_finite() && self.z.is_finite()
+    }
+}
+
+/// Unity's *Limit Velocity over Lifetime*: a speed past `limit` is brought
+/// down by `dampen` (0 not at all, 1 to the limit at once; as much again
+/// each thirtieth of a second, so the same at any frame rate), and `drag`
+/// slows every particle, by that much of its speed a second.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LimitVelocity {
+    pub limit: Curve,
+    pub dampen: f32,
+    pub drag: Curve,
+}
+
+/// Something by how fast a particle goes: `table` from `min_speed` (its
+/// first step) to `max_speed` (its last), in metres a second.
+#[derive(Clone, Debug, PartialEq)]
+pub struct BySpeed<T> {
+    pub table: Box<[T; TABLE]>,
+    pub min_speed: f32,
+    pub max_speed: f32,
+}
+
+impl<T> BySpeed<T> {
+    fn t(&self, speed: f32) -> f32 {
+        ((speed - self.min_speed) / (self.max_speed - self.min_speed).max(1e-6)).clamp(0.0, 1.0)
+    }
+}
+
+/// Unity's *Noise*: each particle wanders through a smooth random field,
+/// as smoke curls and embers drift. `strength` is how fast it pushes, in
+/// metres a second, over a particle's life; `frequency` how many swirls a
+/// metre; `scroll_speed` how fast the field itself changes, a second;
+/// `octaves` 1 to 4 layers, each finer and half as strong.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Noise {
+    pub strength: Curve,
+    pub frequency: f32,
+    pub scroll_speed: f32,
+    pub octaves: u32,
+}
+
+/// Unity's *Texture Sheet Animation*: the material's texture is a grid of
+/// `columns` × `rows` frames, read left to right and top to bottom, and
+/// each particle shows one. `frame_over_time` says which through its life,
+/// 0 the first frame and 1 past the last, `cycles` times a life; it starts
+/// `start_frame` frames on. With `random_row`, each particle plays one row
+/// of `columns` frames, chosen at random.
+#[derive(Clone, Debug, PartialEq)]
+pub struct TextureSheet {
+    pub columns: u32,
+    pub rows: u32,
+    pub frame_over_time: Curve,
+    pub start_frame: Range,
+    pub cycles: f32,
+    pub random_row: bool,
+}
+
+impl Default for TextureSheet {
+    /// Every frame, once over a life.
+    fn default() -> Self {
+        let mut ramp = [0.0; TABLE];
+        for (i, v) in ramp.iter_mut().enumerate() {
+            *v = i as f32 / (TABLE - 1) as f32;
+        }
+        Self {
+            columns: 1,
+            rows: 1,
+            frame_over_time: Curve::Curves(Box::new([ramp; 2])),
+            start_frame: Range::constant(0.0),
+            cycles: 1.0,
+            random_row: false,
+        }
+    }
+}
+
+/// How each particle is drawn (Unity's renderer module).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum RenderMode {
+    /// A square facing the camera.
+    #[default]
+    Billboard,
+    /// Facing the camera, but long the way it moves: `length_scale` times
+    /// its size, plus `speed_scale` times its speed (sparks, rain).
+    Stretched { length_scale: f32, speed_scale: f32 },
+    /// Lying flat, facing up (a ripple, a ring on the ground).
+    Horizontal,
+    /// Standing up, turned round its upright to face the camera.
+    Vertical,
+    /// A mesh, its size across a metre of the mesh, turned by its rotation
+    /// round up (debris, coins).
+    Mesh(MeshId),
+}
+
+/// Everything a game sets on a system: Unity's main, emission, shape and
+/// over-lifetime modules, its noise and texture sheet, and how it's drawn.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ParticleSettings {
     /// How long the timeline is, in seconds.
@@ -199,8 +359,27 @@ pub struct ParticleSettings {
     pub size_over_lifetime: Option<Box<[f32; TABLE]>>,
     /// A particle's colour times this, over its life: sRGB, as picked.
     pub color_over_lifetime: Option<Box<[Color; TABLE]>>,
+    /// Added to its velocity, over its life, without changing it.
+    pub velocity_over_lifetime: Option<VectorOverLifetime>,
+    pub limit_velocity: Option<LimitVelocity>,
+    /// Added to its velocity each second, over its life.
+    pub force_over_lifetime: Option<VectorOverLifetime>,
+    /// How fast it turns, in radians a second, over its life.
+    pub rotation_over_lifetime: Option<Curve>,
+    /// Its size times this, by its speed.
+    pub size_by_speed: Option<BySpeed<f32>>,
+    /// Its colour times this, by its speed: sRGB, as picked.
+    pub color_by_speed: Option<BySpeed<Color>>,
+    pub noise: Option<Noise>,
+    pub texture_sheet: Option<TextureSheet>,
     /// What it's drawn with; nothing is drawn without one.
     pub material: Option<MaterialId>,
+    pub render_mode: RenderMode,
+    /// Lit as a surface facing the camera, rather than shown as it is.
+    pub lit: bool,
+    /// How far, in metres, a particle fades out in front of what's behind
+    /// it (Unity's soft particles); 0 for a hard edge.
+    pub softness: f32,
 }
 
 impl Default for ParticleSettings {
@@ -230,7 +409,18 @@ impl Default for ParticleSettings {
             shape: Shape { kind: ShapeKind::Cone, ..Shape::default() },
             size_over_lifetime: None,
             color_over_lifetime: None,
+            velocity_over_lifetime: None,
+            limit_velocity: None,
+            force_over_lifetime: None,
+            rotation_over_lifetime: None,
+            size_by_speed: None,
+            color_by_speed: None,
+            noise: None,
+            texture_sheet: None,
             material: None,
+            render_mode: RenderMode::Billboard,
+            lit: false,
+            softness: 0.0,
         }
     }
 }
@@ -311,6 +501,72 @@ impl ParticleSettings {
         if !tables {
             return Some("a particle system's curves must be finite");
         }
+        let curves = self.velocity_over_lifetime.as_ref().is_none_or(VectorOverLifetime::is_finite)
+            && self.force_over_lifetime.as_ref().is_none_or(VectorOverLifetime::is_finite)
+            && self.rotation_over_lifetime.as_ref().is_none_or(Curve::is_finite)
+            && self
+                .limit_velocity
+                .as_ref()
+                .is_none_or(|l| l.limit.is_finite() && l.drag.is_finite() && l.dampen.is_finite())
+            && self.size_by_speed.as_ref().is_none_or(|b| {
+                b.table.iter().all(|v| v.is_finite()) && b.min_speed.is_finite() && b.max_speed.is_finite()
+            })
+            && self.color_by_speed.as_ref().is_none_or(|b| {
+                b.table.iter().all(|c| [c.r, c.g, c.b, c.a].iter().all(|v| v.is_finite()))
+                    && b.min_speed.is_finite()
+                    && b.max_speed.is_finite()
+            })
+            && self
+                .noise
+                .as_ref()
+                .is_none_or(|n| n.strength.is_finite() && n.frequency.is_finite() && n.scroll_speed.is_finite())
+            && self
+                .texture_sheet
+                .as_ref()
+                .is_none_or(|t| t.frame_over_time.is_finite() && t.start_frame.is_finite() && t.cycles.is_finite())
+            && self.softness.is_finite()
+            && match self.render_mode {
+                RenderMode::Stretched { length_scale, speed_scale } => {
+                    length_scale.is_finite() && speed_scale.is_finite()
+                }
+                _ => true,
+            };
+        if !curves {
+            return Some("a particle system's curves must be finite");
+        }
+        if let Some(l) = &self.limit_velocity
+            && (!(0.0..=1.0).contains(&l.dampen) || l.limit.min() < 0.0 || l.drag.min() < 0.0)
+        {
+            return Some("a speed limit and drag can't be below 0, and dampen is 0 to 1");
+        }
+        let speeds = |min: f32, max: f32| min >= 0.0 && max > min;
+        if self.size_by_speed.as_ref().is_some_and(|b| !speeds(b.min_speed, b.max_speed))
+            || self.color_by_speed.as_ref().is_some_and(|b| !speeds(b.min_speed, b.max_speed))
+        {
+            return Some("a by-speed range goes from 0 or more up to a higher speed");
+        }
+        if let Some(n) = &self.noise
+            && (n.frequency <= 0.0 || !(1..=4).contains(&n.octaves))
+        {
+            return Some("noise has a frequency over 0 and 1 to 4 octaves");
+        }
+        if let Some(t) = &self.texture_sheet
+            && (!(1..=64).contains(&t.columns)
+                || !(1..=64).contains(&t.rows)
+                || t.cycles <= 0.0
+                || t.start_frame.min < 0.0
+                || t.start_frame.max < 0.0)
+        {
+            return Some("a texture sheet has 1 to 64 columns and rows, cycles over 0, and a start frame of 0 or more");
+        }
+        if self.softness < 0.0 {
+            return Some("softness can't be below 0");
+        }
+        if let RenderMode::Stretched { length_scale, speed_scale } = self.render_mode
+            && (length_scale < 0.0 || speed_scale < 0.0)
+        {
+            return Some("a stretched particle's length scale and speed scale can't be below 0");
+        }
         None
     }
 }
@@ -380,7 +636,16 @@ pub struct DrawnParticle {
     pub color: [f32; 4],
     /// Radians, round the way to the camera.
     pub rotation: f32,
+    /// How it moves, its velocity over lifetime too: the way a stretched
+    /// particle is long.
     pub velocity: Vec3,
+    /// Its texture sheet frame, 0 without one.
+    pub frame: u32,
+    /// How far through its life, 0 to 1.
+    pub t: f32,
+    /// A number of its own, 0 to 1, the same all its life: a shader's
+    /// `particle_random()`.
+    pub random: f32,
 }
 
 /// A particle system: its settings, and its particles.
@@ -390,6 +655,7 @@ pub struct ParticleSystem {
     /// Linear colours: the start's two, and the table's.
     start_linear: [[f32; 4]; 2],
     color_table: Option<Box<[[f32; 4]; TABLE]>>,
+    speed_color_table: Option<Box<[[f32; 4]; TABLE]>>,
     // The particles, `count` of each.
     position: Vec<Vec3>,
     velocity: Vec<Vec3>,
@@ -398,6 +664,8 @@ pub struct ParticleSystem {
     size: Vec<f32>,
     rotation: Vec<f32>,
     color: Vec<[f32; 4]>,
+    /// Each particle's own seed, for its picks along curves.
+    random: Vec<u32>,
     count: usize,
     playing: State,
     /// Whether its timeline is emitting: playing, and not past the end of
@@ -405,6 +673,8 @@ pub struct ParticleSystem {
     emitting: bool,
     /// Seconds into the timeline's cycle.
     time: f32,
+    /// Seconds it has run: where the noise field has scrolled to.
+    noise_time: f32,
     /// Seconds left of the start delay.
     delay: f32,
     /// The part of a particle owed by the rate.
@@ -426,6 +696,7 @@ impl ParticleSystem {
         let mut s = Self {
             start_linear: [[1.0; 4]; 2],
             color_table: None,
+            speed_color_table: None,
             settings: ParticleSettings::default(),
             position: Vec::new(),
             velocity: Vec::new(),
@@ -434,10 +705,12 @@ impl ParticleSystem {
             size: Vec::new(),
             rotation: Vec::new(),
             color: Vec::new(),
+            random: Vec::new(),
             count: 0,
             playing: State::Stopped,
             emitting: false,
             time: 0.0,
+            noise_time: 0.0,
             delay: 0.0,
             carry: 0.0,
             fired: [0; MAX_BURSTS],
@@ -459,6 +732,7 @@ impl ParticleSystem {
     fn set(&mut self, settings: ParticleSettings) {
         self.start_linear = settings.start_color.map(Color::to_linear);
         self.color_table = settings.color_over_lifetime.as_ref().map(|t| Box::new(t.map(Color::to_linear)));
+        self.speed_color_table = settings.color_by_speed.as_ref().map(|b| Box::new(b.table.map(Color::to_linear)));
         let max = settings.max_particles as usize;
         self.count = self.count.min(max);
         for v in [&mut self.age, &mut self.lifetime, &mut self.size, &mut self.rotation] {
@@ -467,6 +741,7 @@ impl ParticleSystem {
         self.position.resize(max, Vec3::ZERO);
         self.velocity.resize(max, Vec3::ZERO);
         self.color.resize(max, [1.0; 4]);
+        self.random.resize(max, 0);
         self.settings = settings;
     }
 
@@ -574,6 +849,21 @@ impl ParticleSystem {
         if self.settings.space == Space::Local {
             gravity = emitter.inverse().transform_vector3(gravity);
         }
+        // A module in the other space than the particles' is turned into
+        // theirs.
+        let into = |space: Space| match (space, self.settings.space) {
+            (Space::Local, Space::World) => Some(emitter),
+            (Space::World, Space::Local) => Some(emitter.inverse()),
+            _ => None,
+        };
+        let force_into = self.settings.force_over_lifetime.as_ref().and_then(|f| into(f.space));
+        let velocity_into = self.settings.velocity_over_lifetime.as_ref().and_then(|v| into(v.space));
+        self.noise_time += dt;
+        // Out of the way while the particles change; nothing below sets it.
+        let s = std::mem::take(&mut self.settings);
+        // How much of a speed past the limit is kept this step: the same
+        // over a second at any frame rate.
+        let kept = s.limit_velocity.as_ref().map_or(1.0, |l| (1.0 - l.dampen).powf(dt * 30.0));
         let mut i = 0;
         while i < self.count {
             self.age[i] += dt;
@@ -581,10 +871,43 @@ impl ParticleSystem {
                 self.kill(i);
                 continue;
             }
-            self.velocity[i] += gravity * dt;
-            self.position[i] += self.velocity[i] * dt;
+            let t = self.age[i] / self.lifetime[i];
+            let seed = self.random[i];
+            let mut v = self.velocity[i];
+            if let Some(force) = &s.force_over_lifetime {
+                let mut f = force.at(t, [pick(seed, 4), pick(seed, 5), pick(seed, 6)]);
+                if let Some(m) = force_into {
+                    f = m.transform_vector3(f);
+                }
+                v += f * dt;
+            }
+            v += gravity * dt;
+            if let Some(limit) = &s.limit_velocity {
+                let most = limit.limit.at(t, pick(seed, 7));
+                let speed = v.length();
+                if speed > most {
+                    v *= (most + (speed - most) * kept) / speed;
+                }
+                v *= (-limit.drag.at(t, pick(seed, 8)) * dt).exp();
+            }
+            self.velocity[i] = v;
+            if let Some(over) = &s.velocity_over_lifetime {
+                let mut extra = over.at(t, [pick(seed, 1), pick(seed, 2), pick(seed, 3)]);
+                if let Some(m) = velocity_into {
+                    extra = m.transform_vector3(extra);
+                }
+                v += extra;
+            }
+            if let Some(noise) = &s.noise {
+                v += noise_at(noise, self.position[i], self.noise_time) * noise.strength.at(t, pick(seed, 9));
+            }
+            self.position[i] += v * dt;
+            if let Some(turn) = &s.rotation_over_lifetime {
+                self.rotation[i] += turn.at(t, pick(seed, 10)) * dt;
+            }
             i += 1;
         }
+        self.settings = s;
         if self.playing == State::Playing && self.emitting {
             if self.delay > 0.0 {
                 self.delay -= dt;
@@ -683,6 +1006,7 @@ impl ParticleSystem {
         self.lifetime[i] = lifetime;
         self.size[i] = s.start_size.pick(rng);
         self.rotation[i] = s.start_rotation.pick(rng);
+        self.random[i] = (rng.next() >> 32) as u32;
         let [a, b] = self.start_linear;
         self.color[i] = if a == b {
             a
@@ -701,6 +1025,7 @@ impl ParticleSystem {
         self.size[i] = self.size[last];
         self.rotation[i] = self.rotation[last];
         self.color[i] = self.color[last];
+        self.random[i] = self.random[last];
         self.count = last;
     }
 
@@ -712,17 +1037,43 @@ impl ParticleSystem {
         }
         let local = self.settings.space == Space::Local;
         let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
-        let sizes = self.settings.size_over_lifetime.as_deref();
+        let s = &self.settings;
+        let sizes = s.size_over_lifetime.as_deref();
         let colors = self.color_table.as_deref();
+        let speed_colors = self.speed_color_table.as_deref();
+        // The world's velocity over lifetime, in the particles' space.
+        let over_into = s.velocity_over_lifetime.as_ref().and_then(|v| match (v.space, s.space) {
+            (Space::World, Space::Local) => Some(emitter.inverse()),
+            (Space::Local, Space::World) => Some(emitter),
+            _ => None,
+        });
+        // How far a stretched particle reaches past its size.
+        let stretch = match s.render_mode {
+            RenderMode::Stretched { length_scale, speed_scale } => Some((length_scale, speed_scale)),
+            _ => None,
+        };
         out.reserve(self.count);
         for i in 0..self.count {
             let t = (self.age[i] / self.lifetime[i]).clamp(0.0, 1.0);
+            let seed = self.random[i];
+            let mut velocity = self.velocity[i];
+            if let Some(over) = &s.velocity_over_lifetime {
+                let mut extra = over.at(t, [pick(seed, 1), pick(seed, 2), pick(seed, 3)]);
+                if let Some(m) = over_into {
+                    extra = m.transform_vector3(extra);
+                }
+                velocity += extra;
+            }
             let (position, velocity) = if local {
-                (emitter.transform_point3(self.position[i]), emitter.transform_vector3(self.velocity[i]))
+                (emitter.transform_point3(self.position[i]), emitter.transform_vector3(velocity))
             } else {
-                (self.position[i], self.velocity[i])
+                (self.position[i], velocity)
             };
-            let size = self.size[i] * sizes.map_or(1.0, |table| sample(table, t));
+            let speed = velocity.length();
+            let mut size = self.size[i] * sizes.map_or(1.0, |table| sample(table, t));
+            if let Some(by) = &s.size_by_speed {
+                size *= sample(&by.table, by.t(speed));
+            }
             let mut color = self.color[i];
             if let Some(table) = colors {
                 let over = sample_color(table, t);
@@ -730,13 +1081,97 @@ impl ParticleSystem {
                     color[c] *= over[c];
                 }
             }
-            let half = Vec3::splat(size * 0.5);
-            lo = lo.min(position - half);
-            hi = hi.max(position + half);
-            out.push(DrawnParticle { position, size, color, rotation: self.rotation[i], velocity });
+            if let (Some(table), Some(by)) = (speed_colors, &s.color_by_speed) {
+                let over = sample_color(table, by.t(speed));
+                for c in 0..4 {
+                    color[c] *= over[c];
+                }
+            }
+            let mut half = size * 0.5;
+            if let Some((length, by_speed)) = stretch {
+                half = half.max(size * (length + by_speed * speed) * 0.5);
+            }
+            lo = lo.min(position - Vec3::splat(half));
+            hi = hi.max(position + Vec3::splat(half));
+            let frame = s.texture_sheet.as_ref().map_or(0, |sheet| sheet_frame(sheet, t, seed));
+            out.push(DrawnParticle {
+                position,
+                size,
+                color,
+                rotation: self.rotation[i],
+                velocity,
+                frame,
+                t,
+                random: pick(seed, 0),
+            });
         }
         Some((lo, hi))
     }
+}
+
+/// A particle's own number for use `k`, 0 to under 1: a hash of its seed,
+/// so it costs nothing to keep and is the same each frame.
+fn pick(seed: u32, k: u32) -> f32 {
+    let mut x = seed ^ k.wrapping_mul(0x9E37_79B9);
+    x = (x ^ (x >> 16)).wrapping_mul(0x7FEB_352D);
+    x = (x ^ (x >> 15)).wrapping_mul(0x846C_A68B);
+    x ^= x >> 16;
+    (x >> 8) as f32 / (1u32 << 24) as f32
+}
+
+/// Which frame of `sheet` a particle shows, `t` through its life.
+fn sheet_frame(sheet: &TextureSheet, t: f32, seed: u32) -> u32 {
+    let (columns, rows) = (sheet.columns, sheet.rows);
+    let frames = if sheet.random_row { columns } else { columns * rows };
+    let cycle = (t * sheet.cycles).fract();
+    let start = sheet.start_frame.min + (sheet.start_frame.max - sheet.start_frame.min) * pick(seed, 11);
+    let at = sheet.frame_over_time.at(cycle, pick(seed, 12)).clamp(0.0, 1.0) * frames as f32 + start;
+    let frame = (at.floor() as u32).min(u32::MAX - 1) % frames;
+    if sheet.random_row {
+        let row = ((pick(seed, 13) * rows as f32) as u32).min(rows - 1);
+        row * columns + frame
+    } else {
+        frame
+    }
+}
+
+/// A smooth random vector at `p`, each axis -1 to 1: values at the
+/// corners of a unit grid, blended. One hash a corner gives all three.
+fn value_noise(p: Vec3) -> Vec3 {
+    let corner = |x: i32, y: i32, z: i32| {
+        let mut h = (x as u32).wrapping_mul(0x8DA6_B343)
+            ^ (y as u32).wrapping_mul(0xD816_3841)
+            ^ (z as u32).wrapping_mul(0xCB1A_B31F);
+        h = (h ^ (h >> 16)).wrapping_mul(0x7FEB_352D);
+        h = (h ^ (h >> 15)).wrapping_mul(0x846C_A68B);
+        h ^= h >> 16;
+        let axis = |shift: u32| ((h >> shift) & 0x3FF) as f32 * (2.0 / 1023.0) - 1.0;
+        Vec3::new(axis(0), axis(11), axis(22))
+    };
+    let f = p.floor();
+    let (x, y, z) = (f.x as i32, f.y as i32, f.z as i32);
+    let d = p - f;
+    let w = d * d * (Vec3::splat(3.0) - 2.0 * d);
+    let x00 = corner(x, y, z).lerp(corner(x + 1, y, z), w.x);
+    let x10 = corner(x, y + 1, z).lerp(corner(x + 1, y + 1, z), w.x);
+    let x01 = corner(x, y, z + 1).lerp(corner(x + 1, y, z + 1), w.x);
+    let x11 = corner(x, y + 1, z + 1).lerp(corner(x + 1, y + 1, z + 1), w.x);
+    x00.lerp(x10, w.y).lerp(x01.lerp(x11, w.y), w.z)
+}
+
+/// The noise module's push at `p`, `time` seconds in, before its strength:
+/// its octaves finer and fainter.
+fn noise_at(noise: &Noise, p: Vec3, time: f32) -> Vec3 {
+    let mut q = p * noise.frequency + Vec3::splat(time * noise.scroll_speed);
+    let (mut out, mut weight, mut total) = (Vec3::ZERO, 1.0, 0.0);
+    for _ in 0..noise.octaves {
+        out += weight * value_noise(q);
+        total += weight;
+        weight *= 0.5;
+        // Each octave off to one side, so they don't line up at the origin.
+        q = q * 2.0 + Vec3::new(17.3, 31.7, 47.1);
+    }
+    out / total
 }
 
 /// `table` at `t` (0 to 1), between its steps.
@@ -821,6 +1256,9 @@ impl World {
         self.entity(object)?;
         if let Some(material) = settings.material {
             self.material(material)?;
+        }
+        if let RenderMode::Mesh(mesh) = settings.render_mode {
+            self.mesh(mesh)?;
         }
         if let Some(why) = settings.refused() {
             return Err(WorldError::Particles(why));

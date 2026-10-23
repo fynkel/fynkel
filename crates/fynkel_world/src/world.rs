@@ -428,12 +428,17 @@ impl World {
         self.meshes.iter().map(|(&id, mesh)| (id, mesh))
     }
 
-    /// Removes a mesh. Refused while any object's [`MeshRenderer`] uses it.
+    /// Removes a mesh. Refused while any object's [`MeshRenderer`] uses it,
+    /// or a particle system draws its particles with it.
     pub fn remove_mesh(&mut self, id: MeshId) -> Result<()> {
         if !self.meshes.contains_key(&id) {
             return Err(WorldError::NoMesh(id));
         }
         if let Some(object) = self.user_of(|r| r.mesh == Some(id)) {
+            return Err(WorldError::MeshInUse { mesh: id, object });
+        }
+        let drawn_with = |s: &crate::ParticleSystem| s.settings().render_mode == crate::RenderMode::Mesh(id);
+        if let Some((&object, _)) = self.particles.iter().find(|(_, s)| drawn_with(s)) {
             return Err(WorldError::MeshInUse { mesh: id, object });
         }
         self.meshes.remove(&id);

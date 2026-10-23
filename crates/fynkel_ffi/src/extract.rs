@@ -45,12 +45,12 @@ use std::sync::Arc;
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
     AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
-    MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, PbrMaterial, Quality, RenderScene, ScreenEffect,
-    ShaderKey, ShaderUse, Sky, TextureKey,
+    MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality, RenderScene,
+    ScreenEffect, ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
     Camera, Color, DrawnParticle, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer,
-    ObjectId, Quat, ShaderId, TextureId, Transform, World, WorldMatrices,
+    ObjectId, Quat, RenderMode, ShaderId, TextureId, Transform, World, WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -432,14 +432,36 @@ impl Extract {
                 self.drawn.clear();
                 let Some((lo, hi)) = system.drawn(emitter, &mut self.drawn) else { continue };
                 let first = scene.particles.len() as u32;
-                scene.particles.extend(self.drawn.iter().map(|p| Particle {
-                    position: p.position,
-                    size: p.size,
-                    color: p.color,
-                    rotation: p.rotation,
+                let mut largest = 0.0f32;
+                scene.particles.extend(self.drawn.iter().map(|p| {
+                    largest = largest.max(p.size);
+                    Particle {
+                        position: p.position,
+                        size: p.size,
+                        color: p.color,
+                        rotation: p.rotation,
+                        velocity: p.velocity,
+                        frame: p.frame,
+                        t: p.t,
+                        random: p.random,
+                    }
                 }));
+                let settings = system.settings();
                 scene.particle_draws.push(ParticleDraw {
                     material,
+                    mode: match settings.render_mode {
+                        RenderMode::Billboard => ParticleMode::Billboard,
+                        RenderMode::Stretched { length_scale, speed_scale } => {
+                            ParticleMode::Stretched { length_scale, speed_scale }
+                        }
+                        RenderMode::Horizontal => ParticleMode::Horizontal,
+                        RenderMode::Vertical => ParticleMode::Vertical,
+                        RenderMode::Mesh(mesh) => ParticleMode::Mesh(mesh_key(mesh)),
+                    },
+                    sheet: settings.texture_sheet.as_ref().map_or([1, 1], |t| [t.columns, t.rows]),
+                    lit: settings.lit,
+                    softness: settings.softness,
+                    largest,
                     first,
                     count: self.drawn.len() as u32,
                     center: (lo + hi) * 0.5,

@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 39
+#define FY_ABI_VERSION 40
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -122,6 +122,27 @@
 
 // The most bursts in `FyParticleSettings`.
 #define FY_PARTICLE_MAX_BURSTS 8
+
+// `FyCurve::mode`: between `min` and `max`.
+#define FY_CURVE_CONSTANT 0
+
+// Between `tables[0]` and `tables[1]` over a particle's life.
+#define FY_CURVE_CURVES 1
+
+// `FyParticleSettings::render_mode`: a square facing the camera.
+#define FY_PARTICLE_RENDER_BILLBOARD 0
+
+// Long the way it moves, `length_scale` and `speed_scale`.
+#define FY_PARTICLE_RENDER_STRETCHED 1
+
+// Lying flat, facing up.
+#define FY_PARTICLE_RENDER_HORIZONTAL 2
+
+// Standing up, turned to the camera.
+#define FY_PARTICLE_RENDER_VERTICAL 3
+
+// `mesh`, turned by its rotation round up.
+#define FY_PARTICLE_RENDER_MESH 4
 
 // `fy_particles_command`: plays from the start (or on from a pause).
 #define FY_PARTICLES_PLAY 0
@@ -580,9 +601,60 @@ typedef struct FyParticleShape {
   float random_direction;
 } FyParticleShape;
 
+// A number over a particle's life (Unity's `MinMaxCurve`): each
+// particle's is somewhere between two constants or two curves, by a
+// random number of its own.
+typedef struct FyCurve {
+  // `FY_CURVE_*`.
+  uint32_t mode;
+  float min;
+  float max;
+  float tables[2][FY_PARTICLE_TABLE];
+} FyCurve;
+
+// A vector over a particle's life, an axis each, in `space`
+// (`FY_PARTICLE_SPACE_*`).
+typedef struct FyParticleVector {
+  struct FyCurve x;
+  struct FyCurve y;
+  struct FyCurve z;
+  uint32_t space;
+} FyParticleVector;
+
+// A speed past `limit` is brought down by `dampen`, 0 to 1; `drag` slows
+// every particle by that much of its speed a second.
+typedef struct FyParticleLimit {
+  struct FyCurve limit;
+  float dampen;
+  struct FyCurve drag;
+} FyParticleLimit;
+
+// A wander through a smooth random field: `strength` in metres a
+// second, `frequency` swirls a metre, the field changing `scroll_speed`
+// a second, 1 to 4 `octaves`.
+typedef struct FyParticleNoise {
+  struct FyCurve strength;
+  float frequency;
+  float scroll_speed;
+  uint32_t octaves;
+} FyParticleNoise;
+
+// The material's texture as `columns` × `rows` frames, `frame_over_time`
+// (0 the first, 1 past the last) `cycles` times a life, starting
+// `start_frame` on; with `random_row`, a row each.
+typedef struct FyParticleSheet {
+  uint32_t columns;
+  uint32_t rows;
+  struct FyCurve frame_over_time;
+  struct FyRange start_frame;
+  float cycles;
+  bool random_row;
+} FyParticleSheet;
+
 // A particle system's settings: Unity's main, emission and shape
-// modules, and size and colour over a particle's life. Sent when they
-// change, not each frame. Seconds, metres and radians; colours sRGB.
+// modules, its over-lifetime and by-speed modules, noise, a texture
+// sheet, and how it's drawn. Sent when they change, not each frame.
+// Seconds, metres and radians; colours sRGB.
 typedef struct FyParticleSettings {
   float duration;
   bool looping;
@@ -617,8 +689,41 @@ typedef struct FyParticleSettings {
   // A particle's colour times `color_table` over its life, when set.
   bool has_color_table;
   struct FyColor color_table[FY_PARTICLE_TABLE];
+  bool has_velocity_over_lifetime;
+  struct FyParticleVector velocity_over_lifetime;
+  bool has_limit_velocity;
+  struct FyParticleLimit limit_velocity;
+  bool has_force_over_lifetime;
+  struct FyParticleVector force_over_lifetime;
+  // Radians a second.
+  bool has_rotation_over_lifetime;
+  struct FyCurve rotation_over_lifetime;
+  // A particle's size times `size_by_speed`, from `size_speeds.min` m/s
+  // (its first step) to `size_speeds.max` (its last).
+  bool has_size_by_speed;
+  float size_by_speed[FY_PARTICLE_TABLE];
+  struct FyRange size_speeds;
+  bool has_color_by_speed;
+  struct FyColor color_by_speed[FY_PARTICLE_TABLE];
+  struct FyRange color_speeds;
+  bool has_noise;
+  struct FyParticleNoise noise;
+  bool has_texture_sheet;
+  struct FyParticleSheet texture_sheet;
   // What it's drawn with, or 0 for nothing drawn.
   uint64_t material;
+  // `FY_PARTICLE_RENDER_*`.
+  uint32_t render_mode;
+  // A stretched particle's length: `length_scale` times its size, plus
+  // `speed_scale` times its speed.
+  float length_scale;
+  float speed_scale;
+  // `FY_PARTICLE_RENDER_MESH`'s mesh.
+  uint64_t mesh;
+  // Lit as a surface facing the camera.
+  bool lit;
+  // Metres it fades out in front of what's behind it; 0 for none.
+  float softness;
 } FyParticleSettings;
 
 // What a particle system is doing, from `fy_particles_get`.

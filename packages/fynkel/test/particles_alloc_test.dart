@@ -1,6 +1,7 @@
 // A frame where particle systems play and burst allocates nothing in
 // Dart: the settings went to the engine when they were set, and a frame
-// is one call with its times in native memory (docs/stage-12.md phase 1).
+// is one call with its times in native memory (docs/stage-12.md phases 1
+// and 2: half the systems with every module on).
 // Counted by the VM service's allocation profile (see allocations.dart).
 
 // Counted alone, a file at a time: see dart_test.yaml.
@@ -15,7 +16,7 @@ import 'allocations.dart';
 void main() {
   final madeEachFrame = allocations();
 
-  test('a frame where 20 systems play and burst allocates nothing', () async {
+  test('a frame where 20 systems play and burst, with their modules, allocates nothing', () async {
     final world = World();
     addTearDown(world.dispose);
     final glow = Material(color: Color(0xFFFFAA33), blending: Blending.additive);
@@ -34,6 +35,14 @@ void main() {
               sizeOverLifetime: (t) => 1 - t,
               colorOverLifetime: ColorGradient.fadeOut(),
               material: glow,
+              velocityOverLifetime: i.isOdd ? ParticleVector(x: ParticleCurve.curve((t) => t)) : null,
+              limitVelocity: i.isOdd ? LimitVelocity(limit: ParticleCurve(4), drag: ParticleCurve(0.5)) : null,
+              forceOverLifetime: i.isOdd ? ParticleVector(y: ParticleCurve.between(1, 2)) : null,
+              rotationOverLifetime: i.isOdd ? ParticleCurve(1) : null,
+              noise: i.isOdd ? ParticleNoise(octaves: 2) : null,
+              textureSheet: i.isOdd ? TextureSheet(columns: 4, rows: 4) : null,
+              renderMode: i.isOdd ? ParticleRenderMode.stretched() : ParticleRenderMode.billboard,
+              lit: i.isOdd,
             ),
           ],
         ),

@@ -1,4 +1,4 @@
-// Particle systems from Dart (docs/stage-12.md phase 1): the settings go
+// Particle systems from Dart (docs/stage-12.md phases 1 and 2): the settings go
 // to the engine, the world steps them after the animators, and the
 // counts, commands and stop actions come back. The simulation's own
 // numbers are the engine's tests (crates/fynkel_world/src/particles/tests.rs).
@@ -192,6 +192,56 @@ void main() {
     final a = left(1);
     expect(left(1), a);
     expect(left(2), isNot(a));
+  });
+
+  test('the modules and how it is drawn are sent, and wrong ones are refused', () {
+    final system = ParticleSystem(
+      startLifetime: Range(2),
+      emission: Emission(rateOverTime: 100),
+      velocityOverLifetime: ParticleVector(x: ParticleCurve.curve((t) => t, scale: 2), space: ParticleSpace.world),
+      limitVelocity: LimitVelocity(limit: ParticleCurve(3), dampen: 0.5, drag: ParticleCurve.between(0.1, 0.3)),
+      forceOverLifetime: ParticleVector(y: ParticleCurve(2)),
+      rotationOverLifetime: ParticleCurve.curves((t) => 1 - t, (t) => t, scale: 3),
+      sizeBySpeed: SizeBySpeed((t) => 1 + t, maxSpeed: 5),
+      colorBySpeed: ColorBySpeed(ColorGradient.fadeOut(), minSpeed: 1, maxSpeed: 4),
+      noise: ParticleNoise(strength: ParticleCurve(0.5), frequency: 1, scrollSpeed: 0.2, octaves: 3),
+      textureSheet: TextureSheet(columns: 4, rows: 2, randomRow: true),
+      renderMode: ParticleRenderMode.stretched(lengthScale: 1, speedScale: 0.1),
+      lit: true,
+      softness: 0.5,
+      material: Material(blending: Blending.transparent),
+    );
+    world.add(GameObject(components: [system]));
+    frames(world, 0.5);
+    expect(system.particleCount, greaterThan(40));
+    final n = system.particleCount;
+    system
+      ..renderMode = ParticleRenderMode.horizontal
+      ..renderMode = ParticleRenderMode.vertical
+      ..noise = null
+      ..textureSheet = TextureSheet(columns: 2, rows: 2, frameOverTime: ParticleCurve(0.5), cycles: 2);
+    expect(system.particleCount, n, reason: 'kept as its settings change');
+    expect(() => system.limitVelocity = LimitVelocity(dampen: 2), throwsArgumentError);
+    expect(() => system.limitVelocity = LimitVelocity(drag: ParticleCurve(-1)), throwsArgumentError);
+    expect(() => system.noise = ParticleNoise(octaves: 5), throwsArgumentError);
+    expect(() => system.textureSheet = TextureSheet(columns: 0), throwsArgumentError);
+    expect(() => system.rotationOverLifetime = ParticleCurve(double.nan), throwsArgumentError);
+    expect(() => system.sizeBySpeed = SizeBySpeed((t) => 1, minSpeed: 2, maxSpeed: 1), throwsArgumentError);
+    expect(() => system.softness = -1, throwsArgumentError);
+    expect(() => system.renderMode = ParticleRenderMode.stretched(lengthScale: -1), throwsArgumentError);
+    expect(system.renderMode, ParticleRenderMode.vertical, reason: 'kept');
+    expect(system.noise, isNull);
+  });
+
+  test('a mesh its particles are drawn as stays while they are', () {
+    final mesh = Mesh.custom(positions: [Vec3.zero, Vec3(1, 0, 0), Vec3(0, 1, 0)], indices: [0, 1, 2]);
+    final system = ParticleSystem(renderMode: ParticleRenderMode.mesh(mesh), material: Material());
+    world.add(GameObject(components: [system]));
+    world.update(dt);
+    expect(mesh.dispose, throwsStateError);
+    system.renderMode = ParticleRenderMode.billboard;
+    mesh.dispose();
+    expect(() => system.renderMode = ParticleRenderMode.mesh(mesh), throwsArgumentError);
   });
 
   test('a gradient blends its stops, before the first and after the last', () {

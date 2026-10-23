@@ -214,11 +214,287 @@ final class ParticleShape {
   String toString() => 'ParticleShape.${_kind.name}(radius: $radius)';
 }
 
+/// A number over each particle's life (Unity's `MinMaxCurve`): a
+/// constant, one at random between two, a curve, or one at random between
+/// two curves. Each particle keeps its own pick all its life. A curve is
+/// any function of 0 (born) to 1 (gone), read at 64 points when it's made,
+/// not called each frame.
+final class ParticleCurve {
+  /// [value] for every particle, all its life.
+  const ParticleCurve(double value) : _min = value, _max = value, _tables = null;
+
+  /// One at random from [min] to [max] for each particle, all its life.
+  const ParticleCurve.between(double min, double max) : _min = min, _max = max, _tables = null;
+
+  /// [curve] over each particle's life, times [scale].
+  ParticleCurve.curve(EaseFunction curve, {double scale = 1}) : this._curves(curve, curve, scale);
+
+  /// One at random between [a] and [b], over each particle's life, times
+  /// [scale]: each particle somewhere between the two.
+  ParticleCurve.curves(EaseFunction a, EaseFunction b, {double scale = 1}) : this._curves(a, b, scale);
+
+  ParticleCurve._curves(EaseFunction a, EaseFunction b, double scale)
+    : _min = 0,
+      _max = 0,
+      _tables = Float32List(2 * FY_PARTICLE_TABLE) {
+    for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+      final t = i / (FY_PARTICLE_TABLE - 1);
+      _tables![i] = a(t) * scale;
+      _tables[FY_PARTICLE_TABLE + i] = b(t) * scale;
+    }
+  }
+
+  final double _min, _max;
+  final Float32List? _tables;
+
+  /// The least it is, anywhere.
+  double get _least => _tables == null ? math.min(_min, _max) : _tables.reduce(math.min);
+
+  bool get _finite => _tables == null ? _min.isFinite && _max.isFinite : _tables.every((v) => v.isFinite);
+
+  void _write(FyCurve to) {
+    final tables = _tables;
+    if (tables == null) {
+      to
+        ..mode = FY_CURVE_CONSTANT
+        ..min = _min
+        ..max = _max;
+      return;
+    }
+    to.mode = FY_CURVE_CURVES;
+    for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+      to.tables[0][i] = tables[i];
+      to.tables[1][i] = tables[FY_PARTICLE_TABLE + i];
+    }
+  }
+
+  @override
+  String toString() => _tables != null
+      ? 'ParticleCurve.curves(…)'
+      : _min == _max
+      ? 'ParticleCurve($_min)'
+      : 'ParticleCurve.between($_min, $_max)';
+}
+
+/// A vector over each particle's life, an axis each, in [space]: Unity's
+/// *Velocity over Lifetime* ([ParticleSystem.velocityOverLifetime], metres
+/// a second added to how it moves) and *Force over Lifetime*
+/// ([ParticleSystem.forceOverLifetime], metres a second added to its
+/// speed each second). In [ParticleSpace.local], it turns with the
+/// object.
+final class ParticleVector {
+  /// Nothing on each axis, in the object's space, unless given.
+  const ParticleVector({
+    this.x = const ParticleCurve(0),
+    this.y = const ParticleCurve(0),
+    this.z = const ParticleCurve(0),
+    this.space = ParticleSpace.local,
+  });
+
+  /// Each axis's.
+  final ParticleCurve x, y, z;
+
+  /// The object's space (turning with it) or the world's.
+  final ParticleSpace space;
+
+  bool get _finite => x._finite && y._finite && z._finite;
+
+  void _write(FyParticleVector to) {
+    x._write(to.x);
+    y._write(to.y);
+    z._write(to.z);
+    to.space = space == ParticleSpace.world ? FY_PARTICLE_SPACE_WORLD : FY_PARTICLE_SPACE_LOCAL;
+  }
+
+  @override
+  String toString() => 'ParticleVector(x: $x, y: $y, z: $z, space: ${space.name})';
+}
+
+/// Unity's *Limit Velocity over Lifetime*: a particle faster than [limit]
+/// metres a second is brought down towards it by [dampen], 0 (not at all)
+/// to 1 (to the limit at once), the same at any frame rate; and [drag]
+/// slows every particle by that much of its speed a second, as air does.
+final class LimitVelocity {
+  /// A limit of 1 m/s, not dampened, and no drag, unless given.
+  const LimitVelocity({this.limit = const ParticleCurve(1), this.dampen = 0, this.drag = const ParticleCurve(0)});
+
+  /// The most speed, in metres a second.
+  final ParticleCurve limit;
+
+  /// How much of the speed past the limit goes, 0 to 1.
+  final double dampen;
+
+  /// How much of its speed it loses a second.
+  final ParticleCurve drag;
+
+  @override
+  String toString() => 'LimitVelocity(limit: $limit, dampen: $dampen, drag: $drag)';
+}
+
+/// Unity's *Size by Speed*: each particle's size times [size] of how fast
+/// it goes, from [minSpeed] (`size(0)`) to [maxSpeed] (`size(1)`) metres
+/// a second.
+final class SizeBySpeed {
+  /// [size] from [minSpeed] to [maxSpeed].
+  SizeBySpeed(this.size, {this.minSpeed = 0, this.maxSpeed = 1}) : _table = ParticleSystem._sizes(size)!;
+
+  /// Its size's multiplier, from the slowest (0) to the fastest (1).
+  final EaseFunction size;
+
+  /// The speeds, in metres a second, of its start and end.
+  final double minSpeed, maxSpeed;
+  final Float32List _table;
+
+  @override
+  String toString() => 'SizeBySpeed(minSpeed: $minSpeed, maxSpeed: $maxSpeed)';
+}
+
+/// Unity's *Color by Speed*: each particle's colour times [gradient] of
+/// how fast it goes, from [minSpeed] to [maxSpeed] metres a second.
+final class ColorBySpeed {
+  /// [gradient] from [minSpeed] to [maxSpeed].
+  ColorBySpeed(this.gradient, {this.minSpeed = 0, this.maxSpeed = 1}) : _table = ParticleSystem._colors(gradient)!;
+
+  /// Its colour's multiplier, from the slowest to the fastest.
+  final ColorGradient gradient;
+
+  /// The speeds, in metres a second, of its start and end.
+  final double minSpeed, maxSpeed;
+  final Float32List _table;
+
+  @override
+  String toString() => 'ColorBySpeed(minSpeed: $minSpeed, maxSpeed: $maxSpeed)';
+}
+
+/// Unity's *Noise*: each particle wanders through a smooth random field,
+/// as smoke curls and embers drift. [strength] is how hard it pushes, in
+/// metres a second; [frequency] how many swirls a metre; [scrollSpeed] how
+/// fast the field itself changes; [octaves], 1 to 4, layers of finer
+/// detail.
+final class ParticleNoise {
+  /// Unity's: a strength of 1, half a swirl a metre, still, one octave.
+  const ParticleNoise({
+    this.strength = const ParticleCurve(1),
+    this.frequency = 0.5,
+    this.scrollSpeed = 0,
+    this.octaves = 1,
+  });
+
+  /// How hard it pushes, in metres a second.
+  final ParticleCurve strength;
+
+  /// Swirls a metre, and how fast the field changes, a second.
+  final double frequency, scrollSpeed;
+
+  /// Layers of finer detail, 1 to 4.
+  final int octaves;
+
+  @override
+  String toString() => 'ParticleNoise(strength: $strength, frequency: $frequency, octaves: $octaves)';
+}
+
+/// Unity's *Texture Sheet Animation*: the [ParticleSystem.material]'s
+/// texture is a grid of [columns] × [rows] frames, read left to right and
+/// top to bottom, and each particle shows one: a flame's flicker, a puff
+/// of smoke growing. [frameOverTime] says which through its life, 0 the
+/// first frame and 1 past the last (every frame, once, unless given),
+/// [cycles] times a life, from [startFrame] frames on. With [randomRow],
+/// each particle plays one row, chosen at random: rows of different
+/// puffs.
+final class TextureSheet {
+  /// One frame, the whole texture, unless given.
+  TextureSheet({
+    this.columns = 1,
+    this.rows = 1,
+    ParticleCurve? frameOverTime,
+    this.startFrame = const Range(0),
+    this.cycles = 1,
+    this.randomRow = false,
+  }) : frameOverTime = frameOverTime ?? ParticleCurve.curve((t) => t);
+
+  /// The grid's frames across and down.
+  final int columns, rows;
+
+  /// Which frame, over a life: 0 the first, 1 past the last.
+  final ParticleCurve frameOverTime;
+
+  /// How many frames on it starts, a random pick for each particle.
+  final Range startFrame;
+
+  /// How many times it goes through [frameOverTime] in a life.
+  final double cycles;
+
+  /// Each particle plays one row, chosen at random.
+  final bool randomRow;
+
+  @override
+  String toString() => 'TextureSheet($columns × $rows, cycles: $cycles)';
+}
+
+enum _RenderKind { billboard, stretched, horizontal, vertical, mesh }
+
+/// How a [ParticleSystem]'s particles are drawn (Unity's renderer
+/// module's render mode).
+final class ParticleRenderMode {
+  /// A square facing the camera. The default.
+  static const billboard = ParticleRenderMode._(_RenderKind.billboard);
+
+  /// Lying flat, facing up: a ripple, a ring on the ground.
+  static const horizontal = ParticleRenderMode._(_RenderKind.horizontal);
+
+  /// Standing up, turned round up to face the camera: a flame that
+  /// doesn't lean back as the camera looks down.
+  static const vertical = ParticleRenderMode._(_RenderKind.vertical);
+
+  /// Facing the camera, but long the way it moves: [lengthScale] times
+  /// its size, plus [speedScale] times its speed. Sparks, rain.
+  const ParticleRenderMode.stretched({this.lengthScale = 2, this.speedScale = 0})
+    : _kind = _RenderKind.stretched,
+      mesh = null;
+
+  /// [mesh], its size across a metre of the mesh, turned round up by its
+  /// rotation: debris, coins, leaves.
+  const ParticleRenderMode.mesh(Mesh this.mesh) : _kind = _RenderKind.mesh, lengthScale = 0, speedScale = 0;
+
+  const ParticleRenderMode._(this._kind) : lengthScale = 0, speedScale = 0, mesh = null;
+
+  final _RenderKind _kind;
+
+  /// A stretched particle's length: its size times [lengthScale], plus
+  /// its speed times [speedScale].
+  final double lengthScale, speedScale;
+
+  /// A mesh particle's mesh.
+  final Mesh? mesh;
+
+  @override
+  bool operator ==(Object other) =>
+      other is ParticleRenderMode &&
+      other._kind == _kind &&
+      other.lengthScale == lengthScale &&
+      other.speedScale == speedScale &&
+      identical(other.mesh, mesh);
+
+  @override
+  int get hashCode => Object.hash(_kind, lengthScale, speedScale, mesh);
+
+  @override
+  String toString() => switch (_kind) {
+    _RenderKind.stretched => 'ParticleRenderMode.stretched(lengthScale: $lengthScale, speedScale: $speedScale)',
+    _RenderKind.mesh => 'ParticleRenderMode.mesh($mesh)',
+    _ => 'ParticleRenderMode.${_kind.name}',
+  };
+}
+
 /// Smoke, dust, sparks, fire, rain and bursts of light, as Unity's
 /// Particle System: a component that makes particles from its [shape],
 /// at its [emission]'s rate and in its bursts, each living a
 /// [startLifetime] and moving at a [startSpeed], drawn with its
-/// [material] as squares that face the camera.
+/// [material] as squares that face the camera (or as its [renderMode]
+/// says). Its modules change them over their lives, as Unity's do:
+/// [velocityOverLifetime], [limitVelocity], [forceOverLifetime],
+/// [rotationOverLifetime], [sizeBySpeed], [colorBySpeed], [noise] and a
+/// [textureSheet]; null is a module turned off.
 ///
 /// The engine moves them, once a frame, after the animators and before
 /// [Behaviour.lateUpdate]; Dart only sends the settings when they change.
@@ -258,7 +534,18 @@ final class ParticleSystem extends Component {
     this._shape = const ParticleShape.cone(),
     EaseFunction? sizeOverLifetime,
     ColorGradient? colorOverLifetime,
+    this._velocityOverLifetime,
+    this._limitVelocity,
+    this._forceOverLifetime,
+    this._rotationOverLifetime,
+    this._sizeBySpeed,
+    this._colorBySpeed,
+    this._noise,
+    this._textureSheet,
     this._material,
+    this._renderMode = ParticleRenderMode.billboard,
+    this._lit = false,
+    this._softness = 0,
     this.onStopped,
   }) : _sizeOverLifetime = sizeOverLifetime,
        _sizeTable = _sizes(sizeOverLifetime),
@@ -290,7 +577,18 @@ final class ParticleSystem extends Component {
   Float32List? _sizeTable;
   ColorGradient? _colorOverLifetime;
   Float32List? _colorTable;
+  ParticleVector? _velocityOverLifetime;
+  LimitVelocity? _limitVelocity;
+  ParticleVector? _forceOverLifetime;
+  ParticleCurve? _rotationOverLifetime;
+  SizeBySpeed? _sizeBySpeed;
+  ColorBySpeed? _colorBySpeed;
+  ParticleNoise? _noise;
+  TextureSheet? _textureSheet;
   Material? _material;
+  ParticleRenderMode _renderMode;
+  bool _lit;
+  double _softness;
 
   /// How long its timeline is, in seconds, at least 0.05: one round of a
   /// looping system, the whole of one that isn't.
@@ -400,11 +698,69 @@ final class ParticleSystem extends Component {
     }, (value, _colors(value)));
   }
 
+  /// Added to how each particle moves, over its life, in metres a
+  /// second, without changing its velocity: a swirl, a drift.
+  ParticleVector? get velocityOverLifetime => _velocityOverLifetime;
+  set velocityOverLifetime(ParticleVector? value) =>
+      _set(() => _velocityOverLifetime, (v) => _velocityOverLifetime = v, value);
+
+  /// A speed limit and drag.
+  LimitVelocity? get limitVelocity => _limitVelocity;
+  set limitVelocity(LimitVelocity? value) => _set(() => _limitVelocity, (v) => _limitVelocity = v, value);
+
+  /// Added to each particle's velocity each second, over its life: wind,
+  /// an updraft.
+  ParticleVector? get forceOverLifetime => _forceOverLifetime;
+  set forceOverLifetime(ParticleVector? value) => _set(() => _forceOverLifetime, (v) => _forceOverLifetime = v, value);
+
+  /// How fast each particle turns, in radians a second, over its life.
+  ParticleCurve? get rotationOverLifetime => _rotationOverLifetime;
+  set rotationOverLifetime(ParticleCurve? value) =>
+      _set(() => _rotationOverLifetime, (v) => _rotationOverLifetime = v, value);
+
+  /// Each particle's size by how fast it goes.
+  SizeBySpeed? get sizeBySpeed => _sizeBySpeed;
+  set sizeBySpeed(SizeBySpeed? value) => _set(() => _sizeBySpeed, (v) => _sizeBySpeed = v, value);
+
+  /// Each particle's colour by how fast it goes: sparks that cool as they
+  /// slow.
+  ColorBySpeed? get colorBySpeed => _colorBySpeed;
+  set colorBySpeed(ColorBySpeed? value) => _set(() => _colorBySpeed, (v) => _colorBySpeed = v, value);
+
+  /// A smooth random wander.
+  ParticleNoise? get noise => _noise;
+  set noise(ParticleNoise? value) => _set(() => _noise, (v) => _noise = v, value);
+
+  /// Frames of the material's texture, over each particle's life.
+  TextureSheet? get textureSheet => _textureSheet;
+  set textureSheet(TextureSheet? value) => _set(() => _textureSheet, (v) => _textureSheet = v, value);
+
   /// What its particles are drawn with: its colour and base colour
   /// texture, unlit, and its emission; [Blending.additive] for fire and
-  /// sparks, else see-through by alpha. Without one, nothing is drawn.
+  /// sparks, else see-through by alpha. A material with its own
+  /// [Material.shader] draws them with it, each particle's colour its
+  /// `in.color`, and `particle_age()` and `particle_random()` for each.
+  /// Without one, nothing is drawn.
   Material? get material => _material;
   set material(Material? value) => _set(() => _material, (v) => _material = v, value);
+
+  /// How each particle is drawn: [ParticleRenderMode.billboard] unless
+  /// set.
+  ParticleRenderMode get renderMode => _renderMode;
+  set renderMode(ParticleRenderMode value) => _set(() => _renderMode, (v) => _renderMode = v, value);
+
+  /// Lit by the scene's lights as a surface facing the camera, with the
+  /// material's metal and roughness, rather than shown as it is: smoke and
+  /// dust in the sun.
+  bool get lit => _lit;
+  set lit(bool value) => _set(() => _lit, (v) => _lit = v, value);
+
+  /// How far, in metres, each particle fades out in front of what's
+  /// behind it (Unity's soft particles), so smoke doesn't cut a hard line
+  /// into the ground; 0 for a hard edge. A frame with soft particles keeps
+  /// the solid scene's depth to read, which costs a little.
+  double get softness => _softness;
+  set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
 
   /// Plays from the start, keeping the particles it has; a paused system
   /// goes on from where it was.
@@ -510,6 +866,31 @@ final class ParticleSystem extends Component {
     }
     if (_sizeTable case final t? when t.any((v) => !v.isFinite)) {
       return ArgumentError('sizeOverLifetime must give finite numbers from 0 to 1');
+    }
+    if (_sizeBySpeed?._table case final t? when t.any((v) => !v.isFinite)) {
+      return ArgumentError('sizeBySpeed must give finite numbers from 0 to 1');
+    }
+    final curves = [
+      _velocityOverLifetime?._finite,
+      _forceOverLifetime?._finite,
+      _rotationOverLifetime?._finite,
+      _limitVelocity?.limit._finite,
+      _limitVelocity?.drag._finite,
+      _noise?.strength._finite,
+      _textureSheet?.frameOverTime._finite,
+    ];
+    if (curves.contains(false)) return ArgumentError('a ParticleSystem\'s curves must be finite');
+    if (_limitVelocity case final l? when l.limit._least < 0 || l.drag._least < 0 || l.dampen < 0 || l.dampen > 1) {
+      return ArgumentError('limitVelocity: limit and drag can\'t be below 0, and dampen is 0 to 1; got $l');
+    }
+    if (_noise case final n? when n.octaves < 1 || n.octaves > 4) {
+      return ArgumentError.value(n.octaves, 'noise.octaves', 'must be 1 to 4');
+    }
+    if (_textureSheet case final t? when t.columns < 1 || t.columns > 64 || t.rows < 1 || t.rows > 64) {
+      return ArgumentError('textureSheet: 1 to 64 columns and rows; got $t');
+    }
+    if (_renderMode.mesh case final mesh? when mesh.isDisposed) {
+      return ArgumentError('renderMode: its mesh is disposed');
     }
     return null;
   }

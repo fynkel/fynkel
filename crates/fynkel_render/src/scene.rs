@@ -605,19 +605,60 @@ pub struct Particle {
     pub size: f32,
     /// Linear RGBA, times the material's base colour.
     pub color: [f32; 4],
-    /// Its turn round the way to the camera, in radians.
+    /// Its turn round the way to the camera (a mesh's, round up), in
+    /// radians.
     pub rotation: f32,
+    /// How it moves, in metres a second: a stretched one is long that way.
+    pub velocity: Vec3,
+    /// Its frame of the material's texture sheet ([`ParticleDraw::sheet`]).
+    pub frame: u32,
+    /// How far through its life, 0 to 1, and a number of its own, 0 to 1:
+    /// a shader's `particle_age()` and `particle_random()`.
+    pub t: f32,
+    pub random: f32,
+}
+
+/// How a system's particles are drawn.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub enum ParticleMode {
+    /// A square facing the camera.
+    #[default]
+    Billboard,
+    /// Facing the camera, long the way it moves: `length_scale` times its
+    /// size plus `speed_scale` times its speed.
+    Stretched { length_scale: f32, speed_scale: f32 },
+    /// Lying flat, facing up.
+    Horizontal,
+    /// Standing up, turned round up to face the camera.
+    Vertical,
+    /// A mesh, its size across a metre of it, turned round up.
+    Mesh(MeshKey),
 }
 
 /// A particle system's particles, drawn with `material`: unlit, its
 /// texture and base colour times each particle's colour, plus its
-/// emission. They're drawn among the blended draws, furthest first by
-/// their bounds' centre; a transparent system's particles furthest first
-/// among themselves too. A material that doesn't blend draws them as
-/// transparent; its own shader isn't used.
+/// emission; or `lit` as a surface facing the camera; or by the
+/// material's own shader, its colour the particle's times the material's.
+/// They're drawn among the blended draws, furthest first by their bounds'
+/// centre; a transparent system's particles furthest first among
+/// themselves too. A material that doesn't blend draws them as
+/// transparent.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ParticleDraw {
     pub material: PbrMaterial,
+    pub mode: ParticleMode,
+    /// The material's texture as a grid of so many columns and rows, each
+    /// particle showing its [`Particle::frame`]; `[1, 1]` for the whole.
+    pub sheet: [u32; 2],
+    /// Lit, with the built-in material; a material's own shader is
+    /// always used as it says.
+    pub lit: bool,
+    /// How far, in metres, a particle fades out in front of the solid
+    /// scene behind it; 0 for not at all.
+    pub softness: f32,
+    /// The biggest particle's size: a mesh particle reaches that times
+    /// the mesh's own reach from its origin.
+    pub largest: f32,
     /// Its first particle in [`RenderScene::particles`], and how many.
     pub first: u32,
     pub count: u32,
