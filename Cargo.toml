@@ -19,6 +19,8 @@ fynkel_mesh = { path = "crates/fynkel_mesh" }
 fynkel_load = { path = "crates/fynkel_load" }
 fynkel_physics = { path = "crates/fynkel_physics" }
 fynkel_physics_ffi = { path = "crates/fynkel_physics_ffi" }
+fynkel_audio = { path = "crates/fynkel_audio" }
+fynkel_audio_ffi = { path = "crates/fynkel_audio_ffi" }
 hecs = "0.11.2"
 glam = { version = "0.34.1", features = ["bytemuck"] }
 wgpu = "30.0.1"
@@ -32,10 +34,18 @@ image = { version = "0.25.10", default-features = false, features = ["png", "jpe
 # nothing is read from files.
 gltf = { version = "1.4.1", default-features = false, features = ["utils", "names", "KHR_texture_transform", "KHR_materials_emissive_strength", "extensions"] }
 jni-sys = "0.3.1"
+ndk-context = "0.1.1"
 bevy_mikktspace = { version = "1.0.0", default-features = false, features = ["std"] }
 # Physics (packages/fynkel_physics): single-threaded, 32-bit floats.
 rapier3d = "0.36.1"
 cbindgen = { version = "0.29.4", default-features = false }
+# Sound (packages/fynkel_audio): the output device (CoreAudio, AAudio), a
+# lock-free ring each way between the game and the audio thread, and
+# decoding. Only what games load: WAV, OGG Vorbis and MP3.
+cpal = "0.18.2"
+rtrb = "0.4.0"
+symphonia = { version = "0.6.1", default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "mp3"] }
+objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionTypes"] }
 
 # The build hook (package:fynkel/hooks.dart) always builds in release, so
 # this is what every app ships. Measured on the Mac (stage 6, PR 12b):

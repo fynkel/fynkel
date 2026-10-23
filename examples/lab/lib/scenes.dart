@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's and 10's. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's, 10's and 11's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -55,6 +55,7 @@ import 'scenes/shapes_basics.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/skinned.dart';
+import 'scenes/sound_basics.dart';
 import 'scenes/time.dart';
 import 'scenes/toon.dart';
 
@@ -114,4 +115,5 @@ final List<LabScene Function()> scenes = [
   BehindScene.new,
   ToonScene.new,
   EffectsScene.new,
+  SoundBasicsScene.new,
 ];

@@ -49,7 +49,13 @@ abstract class LabScene extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    world.errors.listen((e) => log.add('error in ${e.gameObject?.name ?? e.gameObject}: ${e.error}', error: true));
+    // Heard a little later: by then the object may be destroyed, and its
+    // name gone with it.
+    world.errors.listen((e) {
+      final object = e.gameObject;
+      final who = object == null ? 'the world' : (object.isAlive ? object.name : '$object');
+      log.add('error in $who: ${e.error}', error: true);
+    });
     add(
       GameObject(
         name: 'camera',

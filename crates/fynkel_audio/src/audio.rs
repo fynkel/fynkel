@@ -1,0 +1,452 @@
+//! The game's half (docs/stage-11.md §3.1): it decides which voice plays
+//! what, which is stolen when all are busy, and when, and tells the
+//! mixer. Until a device opens (and in tests, where none does) it renders
+//! the mixer itself, as much as the frames' time, so sounds still end when
+//! they would.
+
+use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use crate::clip::Clip;
+use crate::device::Device;
+use crate::mixer::{COMMANDS, Command, Ended, MAX_VOICES, Mixer, RETURNS, Settings, Shared};
+use crate::session::{self, Session};
+
+/// The rate and channels sound is made at without a device.
+pub const QUIET_RATE: u32 = 48_000;
+
+/// The least important priority, as Unity's: 0 is the most.
+pub const LOWEST_PRIORITY: u16 = 256;
+
+/// The highest pitch, 8 times the clip's speed.
+pub const MAX_PITCH: f32 = 8.0;
+
+/// The lowest pitch.
+pub const MIN_PITCH: f32 = 0.05;
+
+/// A playing voice, for as long as it plays: its slot and which use of
+/// that slot it is. Never 0.
+pub type Handle = u64;
+
+/// How to play a clip.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Play {
+    pub settings: Settings,
+    /// 0 (kept longest) to 256 (stolen first).
+    pub priority: u16,
+    /// Falls silent and holds while the game is paused.
+    pub pausable: bool,
+    /// Whose it is (an `AudioSource`'s id, say), to stop all of one
+    /// owner's at once; 0 for no one's.
+    pub owner: u64,
+    /// Where in the clip to start, in seconds.
+    pub from: f64,
+}
+
+impl Default for Play {
+    fn default() -> Self {
+        Self { settings: Settings::default(), priority: 128, pausable: true, owner: 0, from: 0.0 }
+    }
+}
+
+/// A voice that stopped playing without being told to.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Stopped {
+    pub handle: Handle,
+    pub owner: u64,
+    /// It was stolen for a more important sound, rather than reaching
+    /// the end of its clip.
+    pub stolen: bool,
+}
+
+/// Counts, for the game and its tests.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Stats {
+    /// Whether a device plays the sound.
+    pub device: bool,
+    pub rate: u32,
+    pub channels: u32,
+    /// Voices the mixer has now, paused ones too, as of its last callback.
+    pub voices: u32,
+    pub started: u64,
+    /// Voices stolen for more important ones.
+    pub stolen: u64,
+    /// Sounds not played: every voice was more important.
+    pub refused: u64,
+    pub callbacks: u64,
+    /// Times the device wasn't given its sound in time.
+    pub underruns: u64,
+    /// Times the device was lost and opened again.
+    pub reopened: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct Slot {
+    generation: u32,
+    /// The mixer has it: from its start until its end comes back.
+    busy: bool,
+    /// Told to stop: it isn't playing, but the mixer still fades it.
+    stopped: bool,
+    priority: u16,
+    owner: u64,
+    /// When it started, to steal the oldest of equals.
+    order: u64,
+    rate: u32,
+}
+
+/// The game's side of the sound.
+#[derive(Debug)]
+pub struct Audio {
+    slots: [Slot; MAX_VOICES],
+    order: u64,
+    commands: rtrb::Producer<Command>,
+    returns: rtrb::Consumer<Ended>,
+    shared: Arc<Shared>,
+    mixer: Arc<Mutex<Mixer>>,
+    session: Session,
+    device: Option<Device>,
+    /// The device was asked for: opened again when it's lost.
+    wants_device: bool,
+    suspended: bool,
+    last_try: Option<Instant>,
+    stopped: Vec<Stopped>,
+    /// Without a device: frames of time not yet rendered, and where.
+    owed: f64,
+    scratch: Vec<f32>,
+    stats: Stats,
+}
+
+impl Default for Audio {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl Audio {
+    /// Sound without a device, at [`QUIET_RATE`] in stereo, until
+    /// [`Audio::open_device`].
+    pub fn new() -> Self {
+        let (commands, take) = rtrb::RingBuffer::new(COMMANDS);
+        let (give, returns) = rtrb::RingBuffer::new(RETURNS);
+        let shared = Arc::new(Shared::default());
+        let mixer = Arc::new(Mutex::new(Mixer::new(QUIET_RATE, 2, take, give, shared.clone())));
+        // Some systems make a lock's insides the first time it's taken:
+        // here, not on the audio thread.
+        drop(mixer.try_lock());
+        Self {
+            slots: [Slot::default(); MAX_VOICES],
+            order: 0,
+            commands,
+            returns,
+            shared,
+            mixer,
+            session: Session::default(),
+            device: None,
+            wants_device: false,
+            suspended: false,
+            last_try: None,
+            // A steal per command, and an end per return, at most.
+            stopped: Vec::with_capacity(COMMANDS + RETURNS),
+            owed: 0.0,
+            scratch: vec![0.0; 1024 * 2],
+            stats: Stats::default(),
+        }
+    }
+
+    /// Plays through the default output from now on, and again after it's
+    /// lost. Without one (or when it can't be opened), sound goes on
+    /// without it, and the error says why.
+    pub fn open_device(&mut self) -> Result<(), String> {
+        self.wants_device = true;
+        if self.device.is_some() {
+            return Ok(());
+        }
+        self.try_device()
+    }
+
+    fn try_device(&mut self) -> Result<(), String> {
+        self.last_try = Some(Instant::now());
+        session::apply(self.session)?;
+        let device = Device::open(&self.mixer)?;
+        if self.suspended {
+            device.suspend(true)?;
+        }
+        self.device = Some(device);
+        self.owed = 0.0;
+        Ok(())
+    }
+
+    /// Closes the device: sound goes on without one.
+    pub fn close_device(&mut self) {
+        self.wants_device = false;
+        self.drop_device();
+    }
+
+    fn drop_device(&mut self) {
+        if let Some(device) = self.device.take() {
+            self.stats.underruns += device.underruns.load(Ordering::Relaxed);
+            drop(device);
+            if let Ok(mut mixer) = self.mixer.lock() {
+                mixer.set_output(QUIET_RATE, 2);
+            }
+        }
+    }
+
+    /// While the app is away: the device stops, and so does the sound.
+    pub fn suspend(&mut self, suspended: bool) -> Result<(), String> {
+        self.suspended = suspended;
+        match &self.device {
+            Some(device) => device.suspend(suspended),
+            None => Ok(()),
+        }
+    }
+
+    /// How the game's sound sits with the phone's (iOS).
+    pub fn set_session(&mut self, session: Session) -> Result<(), String> {
+        self.session = session;
+        if self.device.is_some() { session::apply(session) } else { Ok(()) }
+    }
+
+    pub fn session(&self) -> Session {
+        self.session
+    }
+
+    fn send(&mut self, command: Command) -> Result<(), String> {
+        self.commands.push(command).map_err(|_| format!("more than {COMMANDS} sound commands in one frame"))
+    }
+
+    fn slot(&self, handle: Handle) -> Option<usize> {
+        let slot = (handle & 0xFF) as usize;
+        let generation = (handle >> 8) as u32;
+        let s = self.slots.get(slot)?;
+        (s.busy && s.generation == generation).then_some(slot)
+    }
+
+    fn handle(&self, slot: usize) -> Handle {
+        (u64::from(self.slots[slot].generation) << 8) | slot as u64
+    }
+
+    /// Plays `clip`. `Ok(None)` if every voice is busy with one at least as
+    /// important; a stolen voice is in the next [`Audio::stopped`].
+    pub fn play(&mut self, clip: &Arc<Clip>, play: Play) -> Result<Option<Handle>, String> {
+        check_settings(play.settings)?;
+        if play.priority > LOWEST_PRIORITY {
+            return Err(format!("priority {} isn't between 0 and {LOWEST_PRIORITY}", play.priority));
+        }
+        if !(play.from.is_finite() && play.from >= 0.0) {
+            return Err(format!("a sound can't start at {} s", play.from));
+        }
+        if self.commands.slots() == 0 {
+            return Err(format!("more than {COMMANDS} sound commands in one frame"));
+        }
+        let slot = match self.slots.iter().position(|s| !s.busy) {
+            Some(free) => free,
+            None => {
+                // The least important at or below this one's importance,
+                // the oldest of equals, and one already stopping before all.
+                let victim = (0..MAX_VOICES)
+                    .filter(|&i| self.slots[i].stopped || self.slots[i].priority >= play.priority)
+                    .max_by_key(|&i| (self.slots[i].stopped, self.slots[i].priority, u64::MAX - self.slots[i].order));
+                let Some(victim) = victim else {
+                    self.stats.refused += 1;
+                    return Ok(None);
+                };
+                if !self.slots[victim].stopped {
+                    self.stats.stolen += 1;
+                    let (handle, owner) = (self.handle(victim), self.slots[victim].owner);
+                    self.stopped.push(Stopped { handle, owner, stolen: true });
+                }
+                victim
+            }
+        };
+        let generation = self.slots[slot].generation.wrapping_add(1).max(1);
+        self.order += 1;
+        self.slots[slot] = Slot {
+            generation,
+            busy: true,
+            stopped: false,
+            priority: play.priority,
+            owner: play.owner,
+            order: self.order,
+            rate: clip.rate(),
+        };
+        let from = play.from * f64::from(clip.rate());
+        self.send(Command::Start {
+            slot: slot as u8,
+            generation,
+            clip: clip.clone(),
+            settings: play.settings,
+            pausable: play.pausable,
+            from,
+        })?;
+        self.stats.started += 1;
+        Ok(Some(self.handle(slot)))
+    }
+
+    /// Stops a voice (with a short fade). A voice that already ended is
+    /// left alone.
+    pub fn stop(&mut self, handle: Handle) -> Result<(), String> {
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        if self.slots[slot].stopped {
+            return Ok(());
+        }
+        self.slots[slot].stopped = true;
+        let generation = self.slots[slot].generation;
+        self.send(Command::Stop { slot: slot as u8, generation })
+    }
+
+    /// Stops every voice of `owner`.
+    pub fn stop_owner(&mut self, owner: u64) -> Result<(), String> {
+        for slot in 0..MAX_VOICES {
+            let s = self.slots[slot];
+            if s.busy && !s.stopped && s.owner == owner {
+                self.stop(self.handle(slot))?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Pauses a voice where it is, or plays it on.
+    pub fn pause(&mut self, handle: Handle, paused: bool) -> Result<(), String> {
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        let generation = self.slots[slot].generation;
+        self.send(Command::Pause { slot: slot as u8, generation, paused })
+    }
+
+    /// Changes a playing voice's volume, pitch or looping.
+    pub fn set(&mut self, handle: Handle, settings: Settings) -> Result<(), String> {
+        check_settings(settings)?;
+        let Some(slot) = self.slot(handle) else { return Ok(()) };
+        let generation = self.slots[slot].generation;
+        self.send(Command::Set { slot: slot as u8, generation, settings })
+    }
+
+    /// Whether the voice plays: started, not stopped, not ended.
+    pub fn playing(&self, handle: Handle) -> bool {
+        self.slot(handle).is_some_and(|slot| !self.slots[slot].stopped)
+    }
+
+    /// Where the voice is in its clip, in seconds, as of the last callback
+    /// (0 before its first); `None` once it isn't [`Audio::playing`].
+    pub fn time(&self, handle: Handle) -> Option<f64> {
+        let slot = self.slot(handle)?;
+        let s = &self.slots[slot];
+        if s.stopped {
+            return None;
+        }
+        let frame = self.shared.voices[slot].read(s.generation).unwrap_or(0.0);
+        Some(frame / f64::from(s.rate))
+    }
+
+    /// Whether the game is paused: pausable voices fall silent and hold.
+    pub fn set_game_paused(&mut self, paused: bool) -> Result<(), String> {
+        self.send(Command::GamePaused(paused))
+    }
+
+    /// Every voice's gain, 0 to 1.
+    pub fn set_volume(&mut self, volume: f32) -> Result<(), String> {
+        if !(0.0..=1.0).contains(&volume) {
+            return Err(format!("volume {volume} isn't between 0 and 1"));
+        }
+        self.send(Command::Volume(volume))
+    }
+
+    /// Once a frame, with the frame's real time in seconds: takes back the
+    /// voices that ended (see [`Audio::stopped`]), renders the time
+    /// without a device, and opens a lost device again (at most once a
+    /// second).
+    pub fn update(&mut self, seconds: f64) {
+        self.stopped.clear();
+        if let Some(device) = &self.device
+            && device.lost.load(Ordering::Relaxed)
+        {
+            self.drop_device();
+        }
+        if self.device.is_none()
+            && self.wants_device
+            && self.last_try.is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
+            && self.try_device().is_ok()
+        {
+            self.stats.reopened += 1;
+        }
+        if self.device.is_none() && !self.suspended && seconds.is_finite() && seconds > 0.0 {
+            self.owed += seconds.min(1.0) * f64::from(QUIET_RATE);
+            let frames = self.owed.floor() as usize;
+            self.owed -= frames as f64;
+            self.render_quietly(frames);
+        }
+        self.take_returns();
+    }
+
+    fn render_quietly(&mut self, mut frames: usize) {
+        let Ok(mut mixer) = self.mixer.lock() else { return };
+        let channels = mixer.channels();
+        let chunk = self.scratch.len() / channels;
+        while frames > 0 {
+            let n = frames.min(chunk);
+            mixer.render(&mut self.scratch[..n * channels]);
+            frames -= n;
+        }
+    }
+
+    fn take_returns(&mut self) {
+        while let Ok(ended) = self.returns.pop() {
+            let slot = usize::from(ended.slot);
+            let Some(s) = self.slots.get_mut(slot) else { continue };
+            if s.busy && s.generation == ended.generation {
+                s.busy = false;
+                if ended.finished && !s.stopped {
+                    let handle = (u64::from(s.generation) << 8) | slot as u64;
+                    self.stopped.push(Stopped { handle, owner: s.owner, stolen: false });
+                }
+            }
+            // The clip is dropped here, off the audio thread.
+            drop(ended.clip);
+        }
+    }
+
+    /// The voices that stopped on their own in the last [`Audio::update`]:
+    /// those that reached their end, and those stolen since.
+    pub fn stopped(&self) -> &[Stopped] {
+        &self.stopped
+    }
+
+    /// Renders `out` (interleaved stereo at [`QUIET_RATE`]) as the device
+    /// would have, for tests. Fails while a device plays.
+    pub fn render(&mut self, out: &mut [f32]) -> Result<(), String> {
+        if self.device.is_some() {
+            return Err("a device plays the sound".into());
+        }
+        self.mixer.lock().map_err(|_| "the mixer panicked")?.render(out);
+        self.take_returns();
+        Ok(())
+    }
+
+    pub fn stats(&self) -> Stats {
+        let (rate, channels) = match &self.device {
+            Some(device) => (device.rate, device.channels as u32),
+            None => (QUIET_RATE, 2),
+        };
+        let underruns = self.device.as_ref().map_or(0, |d| d.underruns.load(Ordering::Relaxed));
+        Stats {
+            device: self.device.is_some(),
+            rate,
+            channels,
+            voices: self.shared.playing.load(Ordering::Relaxed),
+            callbacks: self.shared.callbacks.load(Ordering::Relaxed),
+            underruns: self.stats.underruns + underruns,
+            ..self.stats
+        }
+    }
+}
+
+fn check_settings(settings: Settings) -> Result<(), String> {
+    if !(0.0..=1.0).contains(&settings.volume) {
+        return Err(format!("volume {} isn't between 0 and 1", settings.volume));
+    }
+    if !(MIN_PITCH..=MAX_PITCH).contains(&settings.pitch) {
+        return Err(format!("pitch {} isn't between {MIN_PITCH} and {MAX_PITCH}", settings.pitch));
+    }
+    Ok(())
+}

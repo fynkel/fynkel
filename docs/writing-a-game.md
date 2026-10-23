@@ -1549,6 +1549,98 @@ textures. For a crowd on an older Android phone, keep it to a few dozen
 or turn the far ones' animators off (`stop()` holds their pose and costs
 nothing).
 
+## 13b. Sound
+
+Sound is a package, `fynkel_audio`, with a mixer of its own. Add it to
+the pubspec, next to `fynkel`, and a game without it ships none of it:
+
+```yaml
+  fynkel_audio:
+    path: <the repository>/packages/fynkel_audio
+```
+
+**A clip** is a sound file, `.wav`, `.ogg` or `.mp3`, loaded by name as
+any asset is (§12): `await assets.audio('bark.ogg')`. It's decoded once,
+off the UI thread, shared, and freed when the last object that asked for
+it is destroyed. `AudioClip.fromSamples(samples, rate:, channels:)`
+makes one from numbers, freed with `dispose()`.
+
+**An `AudioSource`** plays sounds from its object, as Unity's: its `clip`
+with `play()`, `pause()`, `unPause()` and `stop()`, and any clip over it
+with `playOneShot(clip, volume:, pitch:)`, for footsteps and hits. It has
+Unity's `volume`, `pitch` (2 is an octave up and twice as fast), `loop`,
+`mute`, `priority`, `playOnAwake` (on unless set: it plays `clip` when
+it's enabled), `isPlaying` and `playTime` (Unity's `time`; here `time`
+is the game's). `onEnd` is called when `clip` reaches its end, not when
+it's stopped. Disabling the source, or destroying its object, stops its
+sounds.
+
+```dart
+// lib/dog.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_audio/fynkel_audio.dart';
+
+/// Barks on B, and steps as it walks.
+class Dog extends Behaviour {
+  late final AudioSource voice;
+  late final AudioClip bark, step;
+  var _walked = 0.0;
+  var _left = true;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    bark = await assets.audio('bark.ogg');
+    step = await assets.audio('step.wav');
+    voice = gameObject.addComponent(AudioSource(clip: bark, playOnAwake: false));
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    if (input.wasPressed(KeyCode.b)) voice.play();
+    final move = input.axis2('move');
+    gameObject.position += Vec3(move.x, 0, -move.y) * (3 * time.delta);
+    _walked += move.length * 3 * time.delta;
+    if (_walked > 0.8) {
+      _walked = 0;
+      _left = !_left;
+      voice.playOneShot(step, pitch: _left ? 0.95 : 1.05);
+    }
+  }
+}
+```
+
+**The world's sound**, `audio` on every object and behaviour, is Unity's
+`AudioListener` and `AudioSettings` together: `audio.volume` for
+everything (a settings screen's master volume), `audio.playOneShot(clip)`
+for a sound that belongs to no object (a button's click), `audio.stats`
+(voices, underruns) and `audio.outputError`.
+
+- **Pausing.** While the game is paused (`world.paused`, §6) its sounds
+  hold where they are, and go on with it. A source with `ignorePause`
+  plays on, as a pause menu's sounds should, and so does
+  `audio.playOneShot(click, ignorePause: true)`. While the app is away
+  (in the background, or a call comes in), nothing plays.
+- **Slow motion.** `time.scale` doesn't change sound, as in Unity, unless
+  a source has `followTimeScale`: then it goes slower and lower with the
+  game, and holds when the game's time stands still.
+- **32 voices.** As many sounds as that play at once. Past it the least
+  important gives way: `priority` 0 is the most important, 256 the
+  least, 128 unless set; of equals, the oldest goes.
+- **The iPhone's silent switch** mutes the game and the player's own
+  music plays on under it, as most games do. `audio.session =
+  AudioSession.playback` plays through the switch and stops their music,
+  for a game whose sound is the point.
+- **The sound starts** when the world is first shown on screen. In a
+  test, which shows nothing, the sound is made and timed the same way
+  with no device: `world.update` steps it, a clip ends after its length,
+  and `onEnd` is called.
+
+Values out of range (a volume over 1, a pitch of 0) throw an
+`ArgumentError`; a file that isn't sound throws a `FormatException` with
+its name.
+
 ## 14. Shaders
 
 A material's look can be written by hand: a `.wgsl` file (WebGPU's
@@ -3169,7 +3261,13 @@ What keeps a game fast:
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
   (Unity's Humanoid), and clips made in code.
-- **Sound:** none yet.
+- **Sound** (§13b): 3D sound (by distance, and left or right), music
+  that streams and crossfades, and groups with their own volume come in
+  the next phases of stage 11. Not planned yet: effects on the sound
+  (reverb, echo, a low-pass for under water), Doppler, sound blocked by
+  walls, ducking, the microphone, and sound made in code as it plays.
+  Android's audio focus (another app's sound pausing the game's) isn't
+  handled yet.
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
@@ -3239,6 +3337,12 @@ What keeps a game fast:
 | `Instantiate(prefab)` of a model | `await assets.instantiate('model.glb')` |
 | `Animator.Play`, `CrossFade`, `speed`, an Animator Controller | `model.animator!.play`, `crossFade`, `speed`; the game's code is the state machine |
 | A 1D blend tree; animator layers with an avatar mask, `SetLayerWeight` | `animator.blend('move', clips, thresholds:, at: speed)`; `animator.layer(1, mask: 'spine', additive:, strength:)` |
+| `AudioSource`: `Play`, `Pause`, `UnPause`, `Stop`, `PlayOneShot`, `time` | `AudioSource` (from `fynkel_audio`): `play`, `pause`, `unPause`, `stop`, `playOneShot`, `playTime` |
+| `AudioClip` in the project | `await assets.audio('bark.ogg')` (`.wav`, `.ogg`, `.mp3`) |
+| `AudioListener.volume`, `AudioListener.pause` | `audio.volume`; `world.paused` holds the game's sounds |
+| `ignoreListenerPause` | `ignorePause` |
+| `AudioSettings`' Mute Other Audio Sources (iOS) | `audio.session = AudioSession.playback` |
+| A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
