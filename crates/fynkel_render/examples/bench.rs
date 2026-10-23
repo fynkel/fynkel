@@ -49,6 +49,8 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         time: [0.0; 2],
         shader_values: Vec::new(),
         effects: Vec::new(),
+        particles: Vec::new(),
+        particle_draws: Vec::new(),
         sky: None,
         fog: None,
         ambient: Vec3::splat(0.15),

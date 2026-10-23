@@ -124,6 +124,8 @@ pub fn stage1_scene() -> RenderScene {
         effects: Vec::new(),
         ambient: Vec3::splat(0.15),
         lines: Vec::new(),
+        particles: Vec::new(),
+        particle_draws: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {

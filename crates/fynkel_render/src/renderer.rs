@@ -74,6 +74,8 @@ pub struct FrameStats {
     pub culled: u32,
     /// Debug lines drawn.
     pub lines: u32,
+    /// Particles drawn: every particle system's in view.
+    pub particles: u32,
     /// Point and spot lights in the frame's list: in view, up to
     /// [`Renderer::MAX_LIGHTS`].
     pub lights: u32,
@@ -234,6 +236,21 @@ struct Instance {
     /// Its outline's linear colour, and how wide it is, in metres.
     outline: [f32; 4],
 }
+
+/// A particle, as particles.wgsl reads it.
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct ParticleInstance {
+    /// Its centre, and its size across.
+    center_size: [f32; 4],
+    /// Linear, times the material's base colour.
+    color: [f32; 4],
+    /// Its turn, then the material's emission.
+    turn_emissive: [f32; 4],
+}
+
+/// Marks a particle draw's index among the blended draws'.
+const PARTICLES: u32 = 1 << 31;
 
 /// A debug line's end, as lines.wgsl reads it.
 #[repr(C)]
@@ -440,6 +457,9 @@ struct Batch {
     shader: Option<ShaderKey>,
     textures: OwnTextures,
     mesh: MeshKey,
+    /// A particle system's particles, from `first` in the frame's
+    /// particles, rather than draws of `mesh`.
+    particles: bool,
     first: u32,
     count: u32,
 }
@@ -533,6 +553,10 @@ pub(crate) struct Pipelines {
     outlines: Mutex<HashMap<OutlineKey, wgpu::RenderPipeline>>,
     own_view_layout: wgpu::BindGroupLayout,
     lines: OnceLock<wgpu::RenderPipeline>,
+    /// Particles' module, and their pipelines: transparent or additive,
+    /// untextured or textured.
+    particle_shader: OnceLock<(wgpu::ShaderModule, wgpu::PipelineLayout)>,
+    particles: [[OnceLock<wgpu::RenderPipeline>; 2]; 2],
     /// The sky, behind everything.
     sky: OnceLock<wgpu::RenderPipeline>,
     /// What's behind (behind.wgsl): one sample of the solid scene's depth
@@ -597,6 +621,8 @@ pub struct Renderer {
     batches: Vec<Batch>,
     blended_from: usize,
     line_vertices: Vec<LineVertex>,
+    /// The particle systems' particles, as their batches draw them.
+    particle_instances: Vec<ParticleInstance>,
     /// The scene's solid draws that are seen, each with its sort key,
     /// sorted.
     order: Vec<(SortKey, u32)>,
@@ -743,6 +769,7 @@ impl Renderer {
             batches: Vec::new(),
             blended_from: 0,
             line_vertices: Vec::new(),
+            particle_instances: Vec::new(),
             order: Vec::new(),
             blended: Vec::new(),
             in_view_lights: Vec::new(),
@@ -867,6 +894,7 @@ impl Renderer {
         self.batches.clear();
         self.blended_from = 0;
         self.line_vertices.clear();
+        self.particle_instances.clear();
         self.shadow_candidates.clear();
         self.caster_order.clear();
         self.casters.clear();
@@ -1136,6 +1164,25 @@ impl Renderer {
                 self.order.push((key, i as u32));
             }
         }
+        // Particle systems: among the blended, by their bounds. One whose
+        // material doesn't blend is drawn as transparent.
+        for (i, particles) in scene.particle_draws.iter().enumerate() {
+            if particles.count == 0 {
+                continue;
+            }
+            if !in_view(&planes, particles.center, particles.radius) {
+                stats.culled += 1;
+                continue;
+            }
+            let cover = match Cover::of(&particles.material) {
+                Cover::Additive => Cover::Additive,
+                _ => Cover::Transparent,
+            };
+            let textures = OwnTextures::of(particles.material.textures);
+            let key = (cover, Faces::Both, false, None, textures, false, u64::MAX);
+            let distance = (particles.center - camera.position).dot(forward);
+            self.blended.push((distance, key, i as u32 | PARTICLES));
+        }
         // The camera's screen effects, each one's uniform laid out as
         // effect.wgsl reads it. Any makes the scene image, even at low, for
         // the last pass to draw into theirs.
@@ -1180,8 +1227,19 @@ impl Renderer {
         }
         self.blended_from = self.batches.len();
         for &(_, key, i) in &self.blended {
-            batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values);
+            match i & PARTICLES {
+                0 => batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values),
+                _ => particle_batch(
+                    &mut self.batches,
+                    &mut self.particle_instances,
+                    key,
+                    scene,
+                    &scene.particle_draws[(i & !PARTICLES) as usize],
+                    forward,
+                ),
+            }
         }
+        stats.particles = self.particle_instances.len() as u32;
         stats.joints = scene.joints.len() as u32;
         for line in &scene.lines {
             for end in [line.a, line.b] {
@@ -1483,6 +1541,7 @@ impl Renderer {
                 instances: bytemuck::cast_slice(&self.instances),
                 lines: bytemuck::cast_slice(&self.line_vertices),
                 casters: bytemuck::cast_slice(&self.casters),
+                particles: bytemuck::cast_slice(&self.particle_instances),
                 cells: self.clusters.bytes(),
             },
         );
@@ -1644,6 +1703,21 @@ impl Renderer {
             // The maps bound in group 2, or what's behind as well.
             let mut reading = false;
             for batch in batches.iter().filter(|b| b.outlined || !outlines) {
+                if batch.particles {
+                    let Some(bind_group) = textures.own_bind_group(&batch.textures) else { continue };
+                    if reading {
+                        pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
+                        reading = false;
+                    }
+                    let textured = batch.textures.base != MaterialTextures::NONE;
+                    pass.set_pipeline(scene_pipelines.particles(batch.cover == Cover::Additive, textured));
+                    pass.set_bind_group(1, bind_group, &[]);
+                    pass.set_vertex_buffer(0, frame.buffer.slice(frame.particles..));
+                    pass.draw(0..6, batch.first..batch.first + batch.count);
+                    // What follows sets its own pipeline and textures.
+                    last = None;
+                    continue;
+                }
                 // Freed since prepare, by another view's render worker.
                 let (Some(mesh), Some(bind_group)) =
                     (meshes.get(&batch.mesh), textures.own_bind_group(&batch.textures))
@@ -1728,7 +1802,10 @@ impl Renderer {
             if !batches.is_empty() {
                 pass.set_bind_group(2, &shadow_maps.bind_group, &[]);
                 pass.set_bind_group(3, sky_light, &[]);
-                pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+                // Particles alone have no instances.
+                if frame.lines > frame.instances {
+                    pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+                }
             }
         };
         let lines = |pass: &mut wgpu::RenderPass<'_>| {
@@ -2020,6 +2097,8 @@ impl Pipelines {
             outlines: Mutex::default(),
             own_view_layout: kit.shadows.own_view_layout.clone(),
             lines: OnceLock::new(),
+            particle_shader: OnceLock::new(),
+            particles: Default::default(),
             sky: OnceLock::new(),
             behind_shader: OnceLock::new(),
             copy_depth: OnceLock::new(),
@@ -2606,6 +2685,73 @@ impl Pipelines {
         })
     }
 
+    /// Particles' pipeline: additive or transparent, textured or not.
+    fn particles(&self, additive: bool, textured: bool) -> &wgpu::RenderPipeline {
+        self.particles[additive as usize][textured as usize].get_or_init(|| self.make_particles(additive, textured))
+    }
+
+    fn make_particles(&self, additive: bool, textured: bool) -> wgpu::RenderPipeline {
+        let (shader, layout) = self.particle_shader.get_or_init(|| {
+            let source = concat!(
+                include_str!("skin.wgsl"),
+                include_str!("forward.wgsl"),
+                include_str!("standard.wgsl"),
+                include_str!("particles.wgsl")
+            );
+            self.forward_module("particles", source, &self.textures_layout, &self.maps_layout)
+        });
+        let attributes = wgpu::vertex_attr_array![0 => Float32x4, 1 => Float32x4, 2 => Float32x4];
+        let constants = [("textured", if textured { 1.0 } else { 0.0 })];
+        // As the blended surfaces' (`make_forward_with`): premultiplied,
+        // tested against the depth but not writing it, and into the scene
+        // image their alpha as light.
+        let (entry_point, dst_factor) = match additive {
+            false => ("fs_particle_transparent", wgpu::BlendFactor::OneMinusSrcAlpha),
+            true => ("fs_particle_additive", wgpu::BlendFactor::One),
+        };
+        let color = wgpu::BlendComponent {
+            src_factor: wgpu::BlendFactor::One,
+            dst_factor,
+            operation: wgpu::BlendOperation::Add,
+        };
+        let write_mask = if self.format.is_srgb() { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL };
+        self.maker.make(wgpu::RenderPipelineDescriptor {
+            label: Some(if additive { "particles additive" } else { "particles" }),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: shader,
+                entry_point: Some("vs_particle"),
+                compilation_options: Default::default(),
+                buffers: &[Some(wgpu::VertexBufferLayout {
+                    array_stride: std::mem::size_of::<ParticleInstance>() as u64,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &attributes,
+                })],
+            },
+            primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleList, ..Default::default() },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH_FORMAT,
+                depth_write_enabled: Some(false),
+                depth_compare: Some(wgpu::CompareFunction::Greater),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
+            fragment: Some(wgpu::FragmentState {
+                module: shader,
+                entry_point: Some(entry_point),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: self.format,
+                    blend: Some(wgpu::BlendState { color, alpha: color }),
+                    write_mask,
+                })],
+            }),
+            multiview_mask: None,
+            cache: None,
+        })
+    }
+
     /// Debug lines' pipeline.
     fn lines(&self) -> &wgpu::RenderPipeline {
         self.lines.get_or_init(|| self.make_lines())
@@ -2912,10 +3058,67 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
     match batches.last_mut() {
         Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.outlined, b.mesh.0) == key => b.count += 1,
         _ => {
-            batches.push(Batch { cover, faces, skinned, outlined, shader, textures, mesh: draw.mesh, first, count: 1 })
+            let mesh = draw.mesh;
+            batches.push(Batch {
+                cover,
+                faces,
+                skinned,
+                outlined,
+                shader,
+                textures,
+                mesh,
+                particles: false,
+                first,
+                count: 1,
+            })
         }
     }
     instances.push(instance(draw, skinned, values));
+}
+
+/// A particle system's batch, and its particles' instances: a
+/// transparent one's furthest first along the way the camera looks
+/// (`forward`), an additive one's as they are, which adds the same.
+fn particle_batch(
+    batches: &mut Vec<Batch>,
+    instances: &mut Vec<ParticleInstance>,
+    key: SortKey,
+    scene: &RenderScene,
+    draw: &crate::ParticleDraw,
+    forward: Vec3,
+) {
+    let (cover, faces, _, _, textures, _, _) = key;
+    let first = instances.len() as u32;
+    let m = &draw.material;
+    let [er, eg, eb] = m.emissive;
+    let base = m.base_color;
+    let from = draw.first as usize;
+    let Some(particles) = scene.particles.get(from..from + draw.count as usize) else { return };
+    instances.extend(particles.iter().map(|p| {
+        let [r, g, b, a] = p.color;
+        ParticleInstance {
+            center_size: p.position.extend(p.size).into(),
+            color: [r * base[0], g * base[1], b * base[2], a * base[3]],
+            turn_emissive: [p.rotation, er, eg, eb],
+        }
+    }));
+    if cover == Cover::Transparent {
+        let depth = |p: &ParticleInstance| Vec3::new(p.center_size[0], p.center_size[1], p.center_size[2]).dot(forward);
+        instances[first as usize..].sort_unstable_by(|a, b| depth(b).total_cmp(&depth(a)));
+    }
+    let count = instances.len() as u32 - first;
+    batches.push(Batch {
+        cover,
+        faces,
+        skinned: false,
+        outlined: false,
+        shader: None,
+        textures,
+        mesh: MeshKey(u64::MAX),
+        particles: true,
+        first,
+        count,
+    });
 }
 
 /// `draw`'s instance, as forward.wgsl reads it.

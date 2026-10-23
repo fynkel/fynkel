@@ -26,6 +26,7 @@ part 'layers.dart';
 part 'model.dart';
 part 'motion.dart';
 part 'motion_kinds.dart';
+part 'particles.dart';
 part 'pointing.dart';
 part 'pool.dart';
 part 'resources.dart';
@@ -341,6 +342,14 @@ final class World implements Finalizable {
   // their model copies' ids, and in a list, which a frame goes through
   // without making an iterator.
   final _animators = <int, Animator>{};
+  // The particle systems in the engine, by their objects' ids.
+  final _particleSystems = <int, ParticleSystem>{};
+  final _particleWatch = Stopwatch();
+
+  /// How long the engine took to move every particle system on, in the
+  /// last frame: what Unity's Profiler shows as ParticleSystem.Update.
+  /// Zero in a world without particle systems.
+  Duration get particleStepTime => Duration(microseconds: _particleWatch.elapsedMicroseconds);
   final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
@@ -717,6 +726,8 @@ final class World implements Finalizable {
     if (_dueObjects.isNotEmpty) _runDue();
     if (_disposeAsked) return;
     _animate();
+    if (_disposeAsked) return;
+    _stepParticles();
     if (_disposeAsked) return;
     if (_shaders.isNotEmpty) check(fy_world_time_set(pointer, time._sinceStart, time._delta));
     _runSystems(_SystemHook.afterUpdate);

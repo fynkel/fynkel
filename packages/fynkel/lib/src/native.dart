@@ -102,7 +102,11 @@ final class Scratch {
   final number = malloc<Float>();
   // Two numbers for a call that takes them through a pointer.
   final numbers = malloc<Float>(2);
+  // The second of them, made once: `numbers + 1` makes a pointer each time.
+  late final secondNumber = numbers + 1;
   final animatorState = malloc<FyAnimatorState>();
+  final particleSettings = malloc<FyParticleSettings>();
+  final particleState = malloc<FyParticleState>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -119,7 +123,7 @@ final class Scratch {
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
-    all.addAll([number, numbers, animatorState, _events, shader]);
+    all.addAll([number, numbers, animatorState, _events, shader, particleSettings, particleState, _particleEvents]);
     all.forEach(malloc.free);
   }
 
@@ -165,6 +169,19 @@ final class Scratch {
       _eventCapacity = count;
     }
     return _events;
+  }
+
+  var _particleEvents = malloc<FyParticleEvent>(_initial);
+  var _particleEventCapacity = _initial;
+
+  /// At least [count] particle events.
+  Pointer<FyParticleEvent> particleEvents([int count = 0]) {
+    if (count > _particleEventCapacity) {
+      malloc.free(_particleEvents);
+      _particleEvents = malloc<FyParticleEvent>(count);
+      _particleEventCapacity = count;
+    }
+    return _particleEvents;
   }
 
   /// At least [count] bytes.

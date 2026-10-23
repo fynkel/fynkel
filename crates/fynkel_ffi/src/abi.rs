@@ -19,9 +19,10 @@ use fynkel_render::{Fog, Gpu, Quality, QualityLevel, Renderer, ShadowFilter, Sha
 
 use crate::device::{Device, WorldGpu};
 use fynkel_world::{
-    AnimationEvent, Blend, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
-    MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId, Quat,
-    Ray, Raycaster, Shader, ShaderId, TextureId, Transform, Vec2, Vec3, World,
+    AnimationEvent, Blend, Burst, Camera, Color, Component, HdrData, ImageData, ImageError, Light, LightKind,
+    MAX_SHADER_TEXTURES, Material, MaterialId, MeshData, MeshId, MeshParts, MeshRenderer, ModelData, ObjectId,
+    ParticleCommand, ParticleEvent, ParticleRange, ParticleSettings, Quat, Ray, Raycaster, Shader, ShaderId, Shape,
+    ShapeKind, Space, StopAction, TextureId, Transform, Vec2, Vec3, World,
 };
 
 use crate::error::{Error, FyStatus, guard, last_error};
@@ -29,7 +30,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 38;
+pub const FY_ABI_VERSION: u32 = 39;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -666,6 +667,9 @@ pub struct FyWorld {
     /// What the last `fy_world_animate` reported, for
     /// `fy_animation_events_get`. Locked only while `world` is.
     events: Mutex<Vec<AnimationEvent>>,
+    /// What the last `fy_world_particles_step` reported, for
+    /// `fy_particle_events_get`. Locked only while `world` is.
+    particle_events: Mutex<Vec<ParticleEvent>>,
 }
 
 impl FyWorld {
@@ -805,6 +809,7 @@ pub extern "C" fn fy_world_new() -> *mut FyWorld {
         sky: Mutex::default(),
         fog: Mutex::default(),
         events: Mutex::default(),
+        particle_events: Mutex::default(),
     };
     Arc::into_raw(Arc::new(world)).cast_mut()
 }
@@ -3245,6 +3250,452 @@ pub unsafe extern "C" fn fy_animation_events_get(
             to: e.to,
             ended: e.ended,
         });
+        // SAFETY: per this function's contract.
+        unsafe { write_all(items, buf, cap, out_count) }
+    })
+}
+
+// --- Particles ---------------------------------------------------------------
+
+/// A number for each particle: `min` when they're the same, else one at
+/// random from `min` to `max`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyRange {
+    pub min: f32,
+    pub max: f32,
+}
+
+impl From<FyRange> for ParticleRange {
+    fn from(r: FyRange) -> Self {
+        Self { min: r.min, max: r.max }
+    }
+}
+
+/// `FyParticleSettings::space`: particles move with the object.
+pub const FY_PARTICLE_SPACE_LOCAL: u32 = 0;
+/// Particles stay where they were made as the object moves.
+pub const FY_PARTICLE_SPACE_WORLD: u32 = 1;
+
+/// `FyParticleSettings::stop_action`, and `FyParticleEvent::action`.
+pub const FY_PARTICLE_STOP_NONE: u32 = 0;
+pub const FY_PARTICLE_STOP_DISABLE: u32 = 1;
+pub const FY_PARTICLE_STOP_DESTROY: u32 = 2;
+pub const FY_PARTICLE_STOP_CALLBACK: u32 = 3;
+
+/// `FyParticleShape::kind`.
+pub const FY_PARTICLE_SHAPE_POINT: u32 = 0;
+pub const FY_PARTICLE_SHAPE_SPHERE: u32 = 1;
+pub const FY_PARTICLE_SHAPE_HEMISPHERE: u32 = 2;
+pub const FY_PARTICLE_SHAPE_CONE: u32 = 3;
+pub const FY_PARTICLE_SHAPE_BOX: u32 = 4;
+pub const FY_PARTICLE_SHAPE_CIRCLE: u32 = 5;
+pub const FY_PARTICLE_SHAPE_EDGE: u32 = 6;
+
+/// The steps of `FyParticleSettings`' curves over a particle's life.
+pub const FY_PARTICLE_TABLE: u32 = 64;
+
+/// The most bursts in `FyParticleSettings`.
+pub const FY_PARTICLE_MAX_BURSTS: u32 = 8;
+
+/// Where particles are made and which way they go. Shapes face up (+Y).
+/// Angles are radians.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyParticleShape {
+    /// `FY_PARTICLE_SHAPE_*`.
+    pub kind: u32,
+    pub radius: f32,
+    /// 0 on the rim alone to 1 all through.
+    pub radius_thickness: f32,
+    /// A cone's, from up to its side: 0 to under π/2.
+    pub angle: f32,
+    /// Up to 2π.
+    pub arc: f32,
+    /// A box's.
+    pub size: FyVec3,
+    /// 0 to 1.
+    pub random_direction: f32,
+}
+
+/// `count` particles at once, `time` seconds into the timeline, `cycles`
+/// times (0 for as long as it plays) every `interval` seconds, each time
+/// with `probability`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyParticleBurst {
+    pub time: f32,
+    pub count: FyRange,
+    pub cycles: u32,
+    pub interval: f32,
+    pub probability: f32,
+}
+
+/// A particle system's settings: Unity's main, emission and shape
+/// modules, and size and colour over a particle's life. Sent when they
+/// change, not each frame. Seconds, metres and radians; colours sRGB.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct FyParticleSettings {
+    pub duration: f32,
+    pub looping: bool,
+    pub prewarm: bool,
+    pub play_on_awake: bool,
+    pub unscaled_time: bool,
+    pub start_delay: f32,
+    pub start_lifetime: FyRange,
+    pub start_speed: FyRange,
+    pub start_size: FyRange,
+    pub start_rotation: FyRange,
+    /// Each particle's is between the two at random.
+    pub start_color: [FyColor; 2],
+    pub gravity_modifier: f32,
+    /// `FY_PARTICLE_SPACE_*`.
+    pub space: u32,
+    pub simulation_speed: f32,
+    pub max_particles: u32,
+    /// `FY_PARTICLE_STOP_*`.
+    pub stop_action: u32,
+    /// The same particles each play when `seeded`.
+    pub seeded: bool,
+    pub seed: u32,
+    pub rate_over_time: f32,
+    /// How many of `bursts` there are.
+    pub burst_count: u32,
+    pub bursts: [FyParticleBurst; FY_PARTICLE_MAX_BURSTS as usize],
+    pub shape: FyParticleShape,
+    /// A particle's size times `size_table` over its life, when set.
+    pub has_size_table: bool,
+    pub size_table: [f32; FY_PARTICLE_TABLE as usize],
+    /// A particle's colour times `color_table` over its life, when set.
+    pub has_color_table: bool,
+    pub color_table: [FyColor; FY_PARTICLE_TABLE as usize],
+    /// What it's drawn with, or 0 for nothing drawn.
+    pub material: u64,
+}
+
+impl Default for FyParticleSettings {
+    /// Unity's: five seconds looping, ten a second living five seconds
+    /// each, at 5 m/s, a size of 1, white, from a cone of 25°.
+    fn default() -> Self {
+        let d = ParticleSettings::default();
+        let range = |r: ParticleRange| FyRange { min: r.min, max: r.max };
+        Self {
+            duration: d.duration,
+            looping: d.looping,
+            prewarm: d.prewarm,
+            play_on_awake: d.play_on_awake,
+            unscaled_time: d.unscaled_time,
+            start_delay: d.start_delay,
+            start_lifetime: range(d.start_lifetime),
+            start_speed: range(d.start_speed),
+            start_size: range(d.start_size),
+            start_rotation: range(d.start_rotation),
+            start_color: d.start_color.map(FyColor::from),
+            gravity_modifier: d.gravity_modifier,
+            space: FY_PARTICLE_SPACE_LOCAL,
+            simulation_speed: d.simulation_speed,
+            max_particles: d.max_particles,
+            stop_action: FY_PARTICLE_STOP_NONE,
+            seeded: false,
+            seed: 0,
+            rate_over_time: d.rate_over_time,
+            burst_count: 0,
+            bursts: [FyParticleBurst::default(); FY_PARTICLE_MAX_BURSTS as usize],
+            shape: FyParticleShape {
+                kind: FY_PARTICLE_SHAPE_CONE,
+                radius: d.shape.radius,
+                radius_thickness: d.shape.radius_thickness,
+                angle: d.shape.angle,
+                arc: d.shape.arc,
+                size: d.shape.size.into(),
+                random_direction: d.shape.random_direction,
+            },
+            has_size_table: false,
+            size_table: [1.0; FY_PARTICLE_TABLE as usize],
+            has_color_table: false,
+            color_table: [FyColor::from(Color::WHITE); FY_PARTICLE_TABLE as usize],
+            material: 0,
+        }
+    }
+}
+
+impl FyParticleSettings {
+    fn settings(&self) -> Result<ParticleSettings, Error> {
+        let bad =
+            |what: &str| Error::new(FyStatus::InvalidValue, format!("{what} isn't one of the FY_PARTICLE_* values"));
+        let space = match self.space {
+            FY_PARTICLE_SPACE_LOCAL => Space::Local,
+            FY_PARTICLE_SPACE_WORLD => Space::World,
+            _ => return Err(bad("space")),
+        };
+        let stop_action = stop_action(self.stop_action).ok_or_else(|| bad("stop_action"))?;
+        let kind = match self.shape.kind {
+            FY_PARTICLE_SHAPE_POINT => ShapeKind::Point,
+            FY_PARTICLE_SHAPE_SPHERE => ShapeKind::Sphere,
+            FY_PARTICLE_SHAPE_HEMISPHERE => ShapeKind::Hemisphere,
+            FY_PARTICLE_SHAPE_CONE => ShapeKind::Cone,
+            FY_PARTICLE_SHAPE_BOX => ShapeKind::Box,
+            FY_PARTICLE_SHAPE_CIRCLE => ShapeKind::Circle,
+            FY_PARTICLE_SHAPE_EDGE => ShapeKind::Edge,
+            _ => return Err(bad("shape.kind")),
+        };
+        if self.burst_count > FY_PARTICLE_MAX_BURSTS {
+            return Err(Error::new(FyStatus::InvalidValue, "a particle system has at most 8 bursts"));
+        }
+        let s = &self.shape;
+        Ok(ParticleSettings {
+            duration: self.duration,
+            looping: self.looping,
+            prewarm: self.prewarm,
+            start_delay: self.start_delay,
+            start_lifetime: self.start_lifetime.into(),
+            start_speed: self.start_speed.into(),
+            start_size: self.start_size.into(),
+            start_rotation: self.start_rotation.into(),
+            start_color: self.start_color.map(Color::from),
+            gravity_modifier: self.gravity_modifier,
+            space,
+            simulation_speed: self.simulation_speed,
+            unscaled_time: self.unscaled_time,
+            play_on_awake: self.play_on_awake,
+            max_particles: self.max_particles,
+            stop_action,
+            seed: self.seeded.then_some(self.seed),
+            rate_over_time: self.rate_over_time,
+            bursts: self.bursts[..self.burst_count as usize]
+                .iter()
+                .map(|b| Burst {
+                    time: b.time,
+                    count: b.count.into(),
+                    cycles: b.cycles,
+                    interval: b.interval,
+                    probability: b.probability,
+                })
+                .collect(),
+            shape: Shape {
+                kind,
+                radius: s.radius,
+                radius_thickness: s.radius_thickness,
+                angle: s.angle,
+                arc: s.arc,
+                size: s.size.into(),
+                random_direction: s.random_direction,
+            },
+            size_over_lifetime: self.has_size_table.then(|| Box::new(self.size_table)),
+            color_over_lifetime: self.has_color_table.then(|| Box::new(self.color_table.map(Color::from))),
+            material: MaterialId::from_raw(self.material),
+        })
+    }
+}
+
+fn stop_action(value: u32) -> Option<StopAction> {
+    Some(match value {
+        FY_PARTICLE_STOP_NONE => StopAction::None,
+        FY_PARTICLE_STOP_DISABLE => StopAction::Disable,
+        FY_PARTICLE_STOP_DESTROY => StopAction::Destroy,
+        FY_PARTICLE_STOP_CALLBACK => StopAction::Callback,
+        _ => return None,
+    })
+}
+
+fn stop_action_value(action: StopAction) -> u32 {
+    match action {
+        StopAction::None => FY_PARTICLE_STOP_NONE,
+        StopAction::Disable => FY_PARTICLE_STOP_DISABLE,
+        StopAction::Destroy => FY_PARTICLE_STOP_DESTROY,
+        StopAction::Callback => FY_PARTICLE_STOP_CALLBACK,
+    }
+}
+
+/// What a particle system is doing, from `fy_particles_get`.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyParticleState {
+    /// How many particles it has.
+    pub count: u32,
+    /// From play until it's stopped and its last particle is gone.
+    pub playing: bool,
+    pub paused: bool,
+    pub emitting: bool,
+}
+
+/// A system that was done in the last `fy_world_particles_step` (stopped,
+/// its last particle gone), with a stop action for the game to do.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FyParticleEvent {
+    pub object: u64,
+    /// `FY_PARTICLE_STOP_*`, not `FY_PARTICLE_STOP_NONE`.
+    pub action: u32,
+}
+
+/// `fy_particles_command`: plays from the start (or on from a pause).
+pub const FY_PARTICLES_PLAY: u32 = 0;
+/// Emits no more; its particles live out their lives.
+pub const FY_PARTICLES_STOP: u32 = 1;
+/// Emits no more, and its particles go at once.
+pub const FY_PARTICLES_STOP_AND_CLEAR: u32 = 2;
+pub const FY_PARTICLES_PAUSE: u32 = 3;
+/// Its particles go; it plays on.
+pub const FY_PARTICLES_CLEAR: u32 = 4;
+/// Makes `count` particles now, playing or not.
+pub const FY_PARTICLES_EMIT: u32 = 5;
+
+/// Gives the object a particle system with `settings`, or changes the one
+/// it has, keeping its particles and where it is. A new one plays when
+/// it's first stepped, if it plays on awake. Settings that can't be are
+/// `FY_STATUS_INVALID_VALUE` and change nothing.
+///
+/// # Safety
+///
+/// `world` is null or live; `settings` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particles_set(
+    world: *const FyWorld,
+    id: u64,
+    settings: *const FyParticleSettings,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, settings) =
+            unsafe { (handle(world, "world")?, settings.as_ref().ok_or_else(|| Error::null("settings"))?) };
+        let settings = settings.settings()?;
+        world.lock()?.set_particles(object(id)?, settings)?;
+        Ok(())
+    })
+}
+
+/// Takes the object's particle system away, its particles too.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particles_remove(world: *const FyWorld, id: u64) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        world.lock()?.remove_particles(object(id)?)?;
+        Ok(())
+    })
+}
+
+/// Plays, stops, pauses, clears or emits from the object's system:
+/// `FY_PARTICLES_*`. `count` is `FY_PARTICLES_EMIT`'s, ignored otherwise.
+///
+/// # Safety
+///
+/// `world` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particles_command(world: *const FyWorld, id: u64, command: u32, count: u32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let command = match command {
+            FY_PARTICLES_PLAY => ParticleCommand::Play,
+            FY_PARTICLES_STOP => ParticleCommand::Stop { clear: false },
+            FY_PARTICLES_STOP_AND_CLEAR => ParticleCommand::Stop { clear: true },
+            FY_PARTICLES_PAUSE => ParticleCommand::Pause,
+            FY_PARTICLES_CLEAR => ParticleCommand::Clear,
+            FY_PARTICLES_EMIT => ParticleCommand::Emit(count),
+            _ => return Err(Error::new(FyStatus::InvalidValue, "command isn't one of FY_PARTICLES_*")),
+        };
+        world.lock()?.particle_command(object(id)?, command)?;
+        Ok(())
+    })
+}
+
+/// Moves the object's system `seconds` on at once (Unity's `Simulate`).
+/// `seconds` is read through a pointer, as `fy_world_animate`'s `dt`.
+///
+/// # Safety
+///
+/// `world` is null or live; `seconds` is null or readable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particles_simulate(world: *const FyWorld, id: u64, seconds: *const f32) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, seconds) = unsafe { (handle(world, "world")?, read(seconds, "seconds")?) };
+        world.lock()?.simulate_particles(object(id)?, seconds)?;
+        Ok(())
+    })
+}
+
+/// # Safety
+///
+/// `world` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particles_get(world: *const FyWorld, id: u64, out: *mut FyParticleState) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let inner = world.lock()?;
+        let system = inner.particles(object(id)?)?;
+        let state = FyParticleState {
+            count: system.count() as u32,
+            playing: system.is_playing(),
+            paused: system.is_paused(),
+            emitting: system.is_emitting(),
+        };
+        // SAFETY: per this function's contract.
+        unsafe { write(out, state, "out") }
+    })
+}
+
+/// Moves every particle system on, once a frame, after the animators and
+/// before the game's late update (where Unity steps them): `dt` seconds
+/// of the game's time, `unscaled` for those that ask. Writes how many
+/// systems were done, with a stop action, to `out_count`;
+/// `fy_particle_events_get` reads them. Both times are read through
+/// pointers, as `fy_world_animate`'s `dt`.
+///
+/// # Safety
+///
+/// `world` is null or live; `dt` and `unscaled` are null or readable;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_particles_step(
+    world: *const FyWorld,
+    dt: *const f32,
+    unscaled: *const f32,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, dt, unscaled) = unsafe { (handle(world, "world")?, read(dt, "dt")?, read(unscaled, "unscaled")?) };
+        let mut inner = world.lock()?;
+        let mut events = world.particle_events.lock().unwrap_or_else(PoisonError::into_inner);
+        events.clear();
+        if inner.has_particles() {
+            inner.step_particles(dt, unscaled, &mut events);
+        }
+        // SAFETY: per this function's contract.
+        unsafe { write(out_count, events.len(), "out_count") }
+    })
+}
+
+/// The last `fy_world_particles_step`'s events, as `fy_children_get`
+/// writes ids.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_particle_events_get(
+    world: *const FyWorld,
+    buf: *mut FyParticleEvent,
+    cap: usize,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let _inner = world.lock()?;
+        let events = world.particle_events.lock().unwrap_or_else(PoisonError::into_inner);
+        let items =
+            events.iter().map(|e| FyParticleEvent { object: e.object.raw(), action: stop_action_value(e.action) });
         // SAFETY: per this function's contract.
         unsafe { write_all(items, buf, cap, out_count) }
     })

@@ -264,6 +264,77 @@ fn a_steady_frame_with_1000_moving_cubes_in_trees_allocates_nothing_on_the_calli
     );
 }
 
+/// Particle systems stepping and drawn (stage 12): each a fixed pool,
+/// stepped in place, extracted into the scene's kept buffers. Ten full
+/// systems, half in world space, half moving, bursting each round.
+#[test]
+fn a_steady_frame_with_particle_systems_allocates_nothing_on_the_calling_thread() {
+    let world = World::new();
+    stage1(&world);
+    let mut material = 0;
+    // SAFETY: a live world and pointers to locals.
+    ok(unsafe {
+        fy_material_add(world.0, &FyMaterial { blend: FY_BLEND_ADDITIVE, ..FyMaterial::default() }, &mut material)
+    });
+    let mut bursts = [FyParticleBurst::default(); FY_PARTICLE_MAX_BURSTS as usize];
+    bursts[0] = FyParticleBurst {
+        time: 0.0,
+        count: FyRange { min: 50.0, max: 80.0 },
+        cycles: 0,
+        interval: 0.5,
+        probability: 1.0,
+    };
+    let systems: Vec<u64> = (0..10)
+        .map(|i| {
+            let id = world.spawn();
+            let settings = FyParticleSettings {
+                max_particles: 300,
+                rate_over_time: 2000.0,
+                start_lifetime: FyRange { min: 0.5, max: 1.0 },
+                gravity_modifier: 1.0,
+                space: if i % 2 == 0 { FY_PARTICLE_SPACE_WORLD } else { FY_PARTICLE_SPACE_LOCAL },
+                burst_count: 1,
+                bursts,
+                has_size_table: true,
+                has_color_table: true,
+                material,
+                ..FyParticleSettings::default()
+            };
+            // SAFETY: a live world and pointers to locals. Full from the
+            // start, so every scene buffer the warm-up uses grows to the
+            // size the measured frames need, however the render worker
+            // keeps up (the spare buffers go last in, first out).
+            ok(unsafe { fy_particles_set(world.0, id, &settings) });
+            ok(unsafe { fy_particles_simulate(world.0, id, &1.0) });
+            id
+        })
+        .collect();
+    let view = View::headless(&world, 64, 64);
+    let frame = |t: f32| {
+        for (i, &id) in systems.iter().enumerate().filter(|(i, _)| i % 2 == 0) {
+            let value = transform(Transform::from_position(Vec3::new(i as f32, 0.0, t.sin())));
+            // SAFETY: a live world and a pointer to a local.
+            ok(unsafe { fy_transform_set(world.0, id, &value) });
+        }
+        let (dt, mut events) = (1.0f32 / 60.0, 0);
+        // SAFETY: a live world and pointers to locals.
+        ok(unsafe { fy_world_particles_step(world.0, &dt, &dt, &mut events) });
+        view.frame()
+    };
+    for i in 0..120 {
+        frame(i as f32 / 60.0);
+    }
+    view.read(120, 64, 64);
+    let mut numbers = Vec::with_capacity(100);
+    let allocations = count(|| {
+        for i in 0..100 {
+            numbers.push(frame(i as f32 / 60.0));
+        }
+    });
+    view.read(*numbers.last().unwrap(), 64, 64);
+    assert_eq!(allocations, 0, "allocations in 100 frames of ten full particle systems, stepped and drawn");
+}
+
 /// Flutter's raster thread calls `fy_apple_acquire` once per frame.
 #[cfg(target_vendor = "apple")]
 #[test]

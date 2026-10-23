@@ -20,6 +20,9 @@
 //! - An object is drawn when it has a `Transform` and a `MeshRenderer`
 //!   with both a mesh and a material, and its layer is in the camera's
 //!   culling mask (stage 4 plan §3.9). Lights light every layer.
+//! - A particle system is drawn when its object is shown and in the
+//!   camera's culling mask and it has a material and particles: one draw
+//!   of them all, round the box they're in.
 //! - The world's debug lines are drawn over the scene as they are.
 //! - A texture is uploaded once for each colour space a material reads it
 //!   in, the first frame a material uses it that way, and freed when the
@@ -42,12 +45,12 @@ use std::sync::Arc;
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
     AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
-    MaterialTextures, MeshKey, Outline, PbrMaterial, Quality, RenderScene, ScreenEffect, ShaderKey, ShaderUse, Sky,
-    TextureKey,
+    MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, PbrMaterial, Quality, RenderScene, ScreenEffect,
+    ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
-    Camera, Color, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat,
-    ShaderId, TextureId, Transform, World, WorldMatrices,
+    Camera, Color, DrawnParticle, ImageData, Light, LightKind, Material, MaterialId, MeshData, MeshId, MeshRenderer,
+    ObjectId, Quat, ShaderId, TextureId, Transform, World, WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -109,6 +112,9 @@ pub(crate) struct Extract {
     /// Where each skeleton's joints start in the scene's, found this frame
     /// ([`fynkel_world::Skin::key`]), or `None` for one missing a joint.
     skins: HashMap<usize, Option<u32>>,
+    /// A particle system's particles as it gives them, before they go to
+    /// the scene. Kept so a frame allocates nothing.
+    drawn: Vec<DrawnParticle>,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -412,6 +418,35 @@ impl Extract {
                 own: r.own,
             });
         });
+
+        // Particle systems with a material, each one draw of its particles.
+        if world.has_particles() {
+            for (id, system) in world.particle_systems() {
+                let Some(&material) = system.settings().material.and_then(|m| self.materials.get(&m)) else {
+                    continue;
+                };
+                if !matrices.shown(world, id) || !world.in_mask(id, mask) {
+                    continue;
+                }
+                let Some(emitter) = matrices.matrix(world, id) else { continue };
+                self.drawn.clear();
+                let Some((lo, hi)) = system.drawn(emitter, &mut self.drawn) else { continue };
+                let first = scene.particles.len() as u32;
+                scene.particles.extend(self.drawn.iter().map(|p| Particle {
+                    position: p.position,
+                    size: p.size,
+                    color: p.color,
+                    rotation: p.rotation,
+                }));
+                scene.particle_draws.push(ParticleDraw {
+                    material,
+                    first,
+                    count: self.drawn.len() as u32,
+                    center: (lo + hi) * 0.5,
+                    radius: (hi - lo).length() * 0.5,
+                });
+            }
+        }
 
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));
         Ok(())

@@ -778,7 +778,7 @@ class GameObject with _Moving {
         b._listening?.cancelAll();
         b._ending = true;
         world._safely(this, b.onDestroy);
-      case Camera() || Light() || MeshRenderer():
+      case Camera() || Light() || MeshRenderer() || ParticleSystem():
         if (component._enabledFlag) _unwrite(component);
     }
     component
@@ -922,6 +922,9 @@ class GameObject with _Moving {
         world._countLight(this, l, _LightCount.none);
       case MeshRenderer():
         check(fy_mesh_renderer_remove(world.pointer, id));
+      case ParticleSystem():
+        check(fy_particles_remove(world.pointer, id));
+        world._particleSystems.remove(id);
       case Behaviour():
     }
   }
@@ -931,6 +934,7 @@ class GameObject with _Moving {
     Camera c => _writeCamera(c),
     Light c => _writeLight(c),
     MeshRenderer c => _writeMeshRenderer(c),
+    ParticleSystem c => _writeParticles(c),
     Behaviour() => null,
   };
 
@@ -1103,6 +1107,92 @@ class GameObject with _Moving {
       r.own[i] = own == null ? 0 : own[i];
     }
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
+  }
+
+  void _writeParticles(ParticleSystem value) {
+    final w = _engine('its ParticleSystem can\'t be changed');
+    final s = scratch.particleSettings.ref
+      ..duration = value.duration
+      ..looping = value.looping
+      ..prewarm = value.prewarm
+      ..play_on_awake = value.playOnAwake
+      ..unscaled_time = value.useUnscaledTime
+      ..start_delay = value.startDelay
+      ..gravity_modifier = value.gravityModifier
+      ..space = value.simulationSpace == ParticleSpace.world ? FY_PARTICLE_SPACE_WORLD : FY_PARTICLE_SPACE_LOCAL
+      ..simulation_speed = value.simulationSpeed
+      ..max_particles = value.maxParticles
+      ..stop_action = switch (value.stopAction) {
+        StopAction.none => FY_PARTICLE_STOP_NONE,
+        StopAction.disable => FY_PARTICLE_STOP_DISABLE,
+        StopAction.destroy => FY_PARTICLE_STOP_DESTROY,
+        StopAction.callback => FY_PARTICLE_STOP_CALLBACK,
+      }
+      ..seeded = value.randomSeed != null
+      ..seed = value.randomSeed ?? 0
+      ..rate_over_time = value.emission.rateOverTime
+      ..burst_count = value.emission.bursts.length
+      ..material = value.material == null ? 0 : world._materialId(value.material!);
+    void range(FyRange to, Range r) => to
+      ..min = r.min
+      ..max = r.max;
+    range(s.start_lifetime, value.startLifetime);
+    range(s.start_speed, value.startSpeed);
+    range(s.start_size, value.startSize);
+    range(s.start_rotation, value.startRotation);
+    final (a, b) = switch (value.startColor) {
+      final Color c => (c, c),
+      ColorRange(:final a, :final b) => (a, b),
+    };
+    s.start_color[0].write(a);
+    s.start_color[1].write(b);
+    final bursts = value.emission.bursts;
+    for (var i = 0; i < bursts.length; i++) {
+      final burst = bursts[i];
+      final to = s.bursts[i]
+        ..time = burst.time
+        ..cycles = burst.cycles
+        ..interval = burst.interval
+        ..probability = burst.probability;
+      range(to.count, burst.count);
+    }
+    final shape = value.shape;
+    s.shape
+      ..kind = switch (shape._kind) {
+        _ShapeKind.point => FY_PARTICLE_SHAPE_POINT,
+        _ShapeKind.sphere => FY_PARTICLE_SHAPE_SPHERE,
+        _ShapeKind.hemisphere => FY_PARTICLE_SHAPE_HEMISPHERE,
+        _ShapeKind.cone => FY_PARTICLE_SHAPE_CONE,
+        _ShapeKind.box => FY_PARTICLE_SHAPE_BOX,
+        _ShapeKind.circle => FY_PARTICLE_SHAPE_CIRCLE,
+        _ShapeKind.edge => FY_PARTICLE_SHAPE_EDGE,
+      }
+      ..radius = shape.radius
+      ..radius_thickness = shape.radiusThickness
+      ..angle = shape.angle
+      ..arc = shape.arc
+      ..random_direction = shape.randomDirection
+      ..size.write(shape.size);
+    final sizes = value._sizeTable;
+    s.has_size_table = sizes != null;
+    if (sizes != null) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.size_table[i] = sizes[i];
+      }
+    }
+    final colors = value._colorTable;
+    s.has_color_table = colors != null;
+    if (colors != null) {
+      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+        s.color_table[i]
+          ..r = colors[i * 4]
+          ..g = colors[i * 4 + 1]
+          ..b = colors[i * 4 + 2]
+          ..a = colors[i * 4 + 3];
+      }
+    }
+    check(fy_particles_set(w, id, scratch.particleSettings));
+    world._particleSystems[id] = value;
   }
 
   @override

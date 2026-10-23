@@ -23,6 +23,8 @@ fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
         effects: Vec::new(),
         ambient: Vec3::ZERO,
         lines: Vec::new(),
+        particles: Vec::new(),
+        particle_draws: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {

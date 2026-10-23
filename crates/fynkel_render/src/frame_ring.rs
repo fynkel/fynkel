@@ -87,6 +87,7 @@ pub(crate) struct Written<'a> {
     pub(crate) instances: u64,
     pub(crate) lines: u64,
     pub(crate) casters: u64,
+    pub(crate) particles: u64,
 }
 
 /// A frame's data, as [`FrameRing::write`] writes it: the `uniforms`,
@@ -100,6 +101,7 @@ pub(crate) struct Parts<'a> {
     pub(crate) instances: &'a [u8],
     pub(crate) lines: &'a [u8],
     pub(crate) casters: &'a [u8],
+    pub(crate) particles: &'a [u8],
     pub(crate) cells: &'a [u8],
 }
 
@@ -224,7 +226,7 @@ impl FrameRing {
     /// binds what this returns must be submitted before the next `write`,
     /// which maps its buffer again.
     pub(crate) fn write(&mut self, device: &wgpu::Device, parts: Parts<'_>) -> Written<'_> {
-        let Parts { uniforms, views, joints, instances, lines, casters, cells } = parts;
+        let Parts { uniforms, views, joints, instances, lines, casters, particles, cells } = parts;
         debug_assert_eq!(uniforms.len() as u64, self.parts.uniforms);
         debug_assert!(views.len() as u64 <= self.parts.views);
         debug_assert!(cells.len() as u64 <= crate::clusters::BYTES);
@@ -246,7 +248,8 @@ impl FrameRing {
         let at = self.parts.instances_at(joint_room);
         let lines_at = at + instances.len() as u64;
         let casters_at = (lines_at + lines.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
-        let data = casters_at - at + casters.len() as u64;
+        let particles_at = (casters_at + casters.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
+        let data = particles_at - at + particles.len() as u64;
         if self.slots[index].joints < joint_room || self.slots[index].buffer.size() < at + data {
             // Dropping the old buffer frees it once the GPU is done with it.
             self.slots[index] = self.create_slot(device, joint_room, data.next_power_of_two());
@@ -265,6 +268,7 @@ impl FrameRing {
             view.slice(at as usize..lines_at as usize).copy_from_slice(instances);
             view.slice(lines_at as usize..lines_at as usize + lines.len()).copy_from_slice(lines);
             view.slice(casters_at as usize..casters_at as usize + casters.len()).copy_from_slice(casters);
+            view.slice(particles_at as usize..particles_at as usize + particles.len()).copy_from_slice(particles);
         }
         slot.buffer.unmap();
         slot.state.store(IN_FLIGHT, Ordering::Relaxed);
@@ -277,6 +281,7 @@ impl FrameRing {
             instances: at,
             lines: lines_at,
             casters: casters_at,
+            particles: particles_at,
         }
     }
 

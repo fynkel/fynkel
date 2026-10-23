@@ -31,6 +31,7 @@ import 'package:lab/scenes/mesh_colliders_basics.dart';
 import 'package:lab/scenes/motion.dart';
 import 'package:lab/scenes/motion_basics.dart';
 import 'package:lab/scenes/moving_basics.dart';
+import 'package:lab/scenes/particles_basics.dart';
 import 'package:lab/scenes/physics_queries_basics.dart';
 import 'package:lab/scenes/pointers.dart';
 import 'package:lab/scenes/controls_basics.dart';
@@ -321,6 +322,34 @@ void main() {
     expect(scene.readout.value, allOf(contains('cube 12'), contains('sphere 720'), contains('quad 2')));
     scene.controls.whereType<Toggle>().single.onChanged(true);
     expect(scene.quadMaterial.doubleSided, isTrue);
+  });
+
+  test('Particles: the basics: the fountain plays, a burst destroys itself, and ten thousand are stepped', () {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(ParticlesBasicsScene());
+    void frames(int n) {
+      for (var i = 0; i < n; i++) {
+        world.update(1 / 60);
+      }
+    }
+
+    T control<T extends Control>(String label) => scene.controls.whereType<T>().firstWhere((c) => c.label == label);
+    frames(120);
+    expect(scene.readout.value, matches(RegExp(r'the fountain: \d{3} particles\n')));
+    control<Button>('burst').onPressed();
+    world.update(1 / 60);
+    expect(scene.find('burst 0'), isNotNull);
+    frames(90);
+    expect(scene.find('burst 0'), isNull, reason: 'StopAction.destroy, once its sparks are gone');
+    control<Toggle>('ten thousand').onChanged(true);
+    frames(60);
+    final ten = int.parse(RegExp(r'the ten: (\d+)').firstMatch(scene.readout.value)!.group(1)!);
+    expect(ten, inInclusiveRange(9500, 10000));
+    expect(world.particleStepTime, greaterThan(Duration.zero));
+    control<Toggle>('ten thousand').onChanged(false);
+    world.update(1 / 60);
+    expect(scene.readout.value, isNot(contains('the ten')));
   });
 
   test('Pooling: the basics: the fountain reuses its balls, and the handle lets go of one that went back', () {

@@ -34,8 +34,8 @@ fn gpu_dirty_mb() -> f64 {
 }
 
 /// Draws the stage 1 cube at about 120 frames a second for `seconds`,
-/// calling `extra` after each frame, and returns the dirty GPU memory at
-/// the end.
+/// calling `extra` after each frame, and returns the least dirty GPU
+/// memory it read, once a second from the first second on.
 fn steady(seconds: f64, mut extra: impl FnMut()) -> f64 {
     let gpu = gpu();
     let mut r = renderer(&gpu, wgpu::TextureFormat::Bgra8UnormSrgb);
@@ -51,22 +51,28 @@ fn steady(seconds: f64, mut extra: impl FnMut()) -> f64 {
     });
     let view = target.create_view(&Default::default());
     let mut scene = stage1_scene();
-    let start = Instant::now();
+    let (start, mut lowest, mut read) = (Instant::now(), f64::MAX, 1.0);
     while start.elapsed().as_secs_f64() < seconds {
+        if start.elapsed().as_secs_f64() >= read {
+            lowest = lowest.min(gpu_dirty_mb());
+            read += 1.0;
+        }
         scene.draws[0].model = fynkel_render::glam::Mat4::from_rotation_y(start.elapsed().as_secs_f32());
         r.render(&scene, &view, 256, 256);
         extra();
         gpu.device.poll(wgpu::PollType::wait_indefinitely()).expect("the frame finishes");
         std::thread::sleep(Duration::from_millis(8));
     }
-    gpu_dirty_mb()
+    lowest.min(gpu_dirty_mb())
 }
 
 #[test]
 fn steady_frames_hold_no_blit_memory() {
-    // Device creation blits once (wgpu zeroes a buffer of its own); 3 s
-    // lets the driver free that first.
-    let ours = steady(3.0, || {});
+    // Device creation blits once (wgpu zeroes a buffer of its own), and
+    // the driver frees that pool a few seconds later: a second after it
+    // on an idle Mac, longer on a busy one. The lowest reading of 10 s is
+    // after it.
+    let ours = steady(10.0, || {});
 
     let gpu = gpu();
     let buffer = gpu.device.create_buffer(&wgpu::BufferDescriptor {

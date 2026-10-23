@@ -477,6 +477,7 @@ extension _Objects on World {
           if (c._takenOff) continue;
           c._removed = true;
           if (c is Light) _countLight(object, c, _LightCount.none);
+          if (c is ParticleSystem) _particleSystems.remove(object._id);
           _unregister(c);
         }
       }
