@@ -437,11 +437,12 @@ impl ShadowKit {
     }
 
     fn make(&self, format: wgpu::TextureFormat, cutout: bool, skinned: bool) -> wgpu::RenderPipeline {
-        // From the mesh, the position and the UV; from the caster, the rest.
+        // From the mesh, the position and the UV (with the colour, packed
+        // as forward's); from the caster, the rest.
         let vertex_attributes = [
             wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x3, offset: 0, shader_location: 0 },
             wgpu::VertexAttribute {
-                format: wgpu::VertexFormat::Float32x2,
+                format: wgpu::VertexFormat::Uint32x3,
                 offset: std::mem::offset_of!(fynkel_mesh::Vertex, uv) as u64,
                 shader_location: 3,
             },

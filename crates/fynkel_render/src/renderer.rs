@@ -3228,9 +3228,11 @@ type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, bool, u64);
 pub(crate) const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![14 => Uint16x4, 15 => Unorm16x4];
 
-/// A mesh's position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
+/// A mesh's position, normal, tangent, and its UV and colour together, as
+/// in `fynkel_mesh::Vertex`: the UV's bits and the colour's four bytes as
+/// three u32s (forward.wgsl's `uv_color`), as every location is used.
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Uint32x3];
 
 /// An [`Instance`], as forward.wgsl reads it.
 const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![

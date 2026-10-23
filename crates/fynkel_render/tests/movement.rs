@@ -56,6 +56,7 @@ fn bar(skinned: bool) -> MeshData {
         uvs: Some(&uvs),
         indices: &indices,
         skin: skinned.then_some((&joints[..], &weights[..])),
+        ..MeshParts::default()
     })
     .expect("a bar")
 }

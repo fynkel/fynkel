@@ -161,7 +161,7 @@ impl AoKit {
             // The forward pass's buffers; only the position, the model
             // matrix and where a skinned draw's joints start are read.
             let vertex_attributes =
-                wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
+                wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Uint32x3];
             // The model rows, then (after the base colour) the params.
             let instance_attributes = [(4, 0), (5, 16), (6, 32), (8, 64)].map(|(shader_location, offset)| {
                 wgpu::VertexAttribute { format: wgpu::VertexFormat::Float32x4, offset, shader_location }
