@@ -42,6 +42,7 @@ import 'scenes/motion_basics.dart';
 import 'scenes/moving_basics.dart';
 import 'scenes/particles_basics.dart';
 import 'scenes/particles_look.dart';
+import 'scenes/particles_world.dart';
 import 'scenes/physics_queries_basics.dart';
 import 'scenes/pointers.dart';
 import 'scenes/pooling_basics.dart';
@@ -124,4 +125,5 @@ final List<LabScene Function()> scenes = [
   SoundMixScene.new,
   ParticlesBasicsScene.new,
   ParticlesLookScene.new,
+  ParticlesWorldScene.new,
 ];
