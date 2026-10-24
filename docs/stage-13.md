@@ -261,6 +261,39 @@ three at low, with no garbage, and every golden from before is the same.
 *Done when* the shapes, the extrusion and the lathe match their goldens
 and their tests, and a combined town is one draw.
 
+**As built** (2026-10-24, engine ABI 43):
+
+- As planned. The shapes without settings stay the shared ones
+  (`Mesh.sphere()`); any setting makes a new mesh. `Mesh.cylinder` and
+  `Mesh.capsule` take settings too, and the default ones are made by the
+  same code at their sizes (a test checks they're unchanged). A setting
+  that makes no shape is refused, saying which (`segments is 2; it must
+  be from 3 to 1024`).
+- `Shape2D` (`rect`, `circle`, `rounded`, any points, either way round,
+  `withHole`); `Mesh.extrude` fills the ends by ear clipping, each hole
+  joined to the outside by a cut to a point it can see, and smooths
+  corners under 40°. `Mesh.lathe` turns a profile, its outside on the
+  right of the way it goes. Rust tests check every shape is wound
+  outwards, has tangents along u, is closed where it should be (each
+  edge used once each way) and has the volume it should.
+- `MeshBuilder`: `addQuad` and `addTriangle` with flat corners,
+  `addVertex` and `addIndices` to share them (`flat: true` to facet them
+  anyway), `submesh`, `color`, `addMesh`, `build` and `applyTo`. Stairs
+  rebuilt every frame with one make no garbage (a test), once its lists
+  have grown.
+- `Mesh.combine([CombineInstance(mesh, position:, rotation:, scale:)])`:
+  part n of each into part n, a mirroring scale turning its triangles
+  round. The lab's town of houses (walls and roofs) is one object of two
+  parts: two draws, whatever the number of houses.
+- What making them takes on the Mac (release): a 100 × 100 grid (20,000
+  triangles) 0.17 ms, a sphere of 2,208 triangles 0.03 ms, a gear of 96
+  points with 6 holes extruded 0.08 ms, a 41-point profile lathed 48
+  times 0.07 ms, 100 boxes combined 0.06 ms.
+- The lab's "Building meshes": the eight shapes with sliders for their
+  segments and size, a letter B with its two holes, a vase with a thick
+  wall, and a town; its golden is tests/golden/meshes_build.png. Every
+  golden from before is the same.
+
 ### Phase 3: splines
 
 - `Spline`, knots and tangent modes, by distance and by t, `nearest`,
