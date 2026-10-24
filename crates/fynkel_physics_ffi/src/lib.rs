@@ -26,7 +26,7 @@ use fynkel_physics::{
 };
 
 /// Bumped on any change to the functions or types in this file.
-pub const FP_ABI_VERSION: u32 = 13;
+pub const FP_ABI_VERSION: u32 = 14;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -1026,6 +1026,43 @@ pub unsafe extern "C" fn fp_collider_add(
     }
 }
 
+/// The points and triangles `fp_mesh_add` and `fp_mesh_set` are given.
+///
+/// # Safety
+///
+/// As theirs.
+unsafe fn read_mesh(
+    positions: *const f32,
+    vertex_count: usize,
+    indices: *const u32,
+    index_count: usize,
+) -> Result<(Vec<Vector>, Vec<[u32; 3]>), Error> {
+    if positions.is_null() && vertex_count > 0 {
+        return Err(Error::null("positions"));
+    }
+    if indices.is_null() && index_count > 0 {
+        return Err(Error::null("indices"));
+    }
+    if !index_count.is_multiple_of(3) {
+        return Err(invalid(format!("{index_count} indices: three per triangle")));
+    }
+    let points: Vec<Vector> = if vertex_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: not null, and valid for vertex_count * 3 reads, as the caller promises.
+        let flat = unsafe { std::slice::from_raw_parts(positions, vertex_count * 3) };
+        flat.chunks_exact(3).map(|p| Vector::new(p[0], p[1], p[2])).collect()
+    };
+    let triangles: Vec<[u32; 3]> = if index_count == 0 {
+        Vec::new()
+    } else {
+        // SAFETY: not null, and valid for index_count reads, as the caller promises.
+        let flat = unsafe { std::slice::from_raw_parts(indices, index_count) };
+        flat.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()
+    };
+    Ok((points, triangles))
+}
+
 /// Adds a mesh for mesh colliders (`FP_COLLIDER_KIND_MESH`): `vertex_count`
 /// positions, three floats each, and `index_count` indices into them,
 /// three per triangle. They're copied. Writes its id to `out`.
@@ -1047,31 +1084,35 @@ pub unsafe extern "C" fn fp_mesh_add(
     // SAFETY: as this function's.
     unsafe {
         with_world(world, |w| {
-            if positions.is_null() && vertex_count > 0 {
-                return Err(Error::null("positions"));
-            }
-            if indices.is_null() && index_count > 0 {
-                return Err(Error::null("indices"));
-            }
-            if !index_count.is_multiple_of(3) {
-                return Err(invalid(format!("{index_count} indices: three per triangle")));
-            }
-            let points: Vec<Vector> = if vertex_count == 0 {
-                Vec::new()
-            } else {
-                // SAFETY: not null, and valid for vertex_count * 3 reads, as the caller promises.
-                let flat = std::slice::from_raw_parts(positions, vertex_count * 3);
-                flat.chunks_exact(3).map(|p| Vector::new(p[0], p[1], p[2])).collect()
-            };
-            let triangles: Vec<[u32; 3]> = if index_count == 0 {
-                Vec::new()
-            } else {
-                // SAFETY: not null, and valid for index_count reads, as the caller promises.
-                let flat = std::slice::from_raw_parts(indices, index_count);
-                flat.chunks_exact(3).map(|t| [t[0], t[1], t[2]]).collect()
-            };
+            let (points, triangles) = read_mesh(positions, vertex_count, indices, index_count)?;
             let id = core!(w).physics.add_mesh(&points, &triangles)?;
             write(out, "out", id)
+        })
+    }
+}
+
+/// Gives mesh `mesh` new points and triangles, as `fp_mesh_add` takes
+/// them, and each collider made of it its new shape. Refused as
+/// `fp_mesh_add` refuses, and then nothing changes.
+///
+/// # Safety
+///
+/// `world` is null or live; `positions` is null or valid for
+/// `vertex_count * 3` reads, `indices` for `index_count`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fp_mesh_set(
+    world: *mut FpWorld,
+    mesh: u64,
+    positions: *const f32,
+    vertex_count: usize,
+    indices: *const u32,
+    index_count: usize,
+) -> FpStatus {
+    // SAFETY: as this function's.
+    unsafe {
+        with_world(world, |w| {
+            let (points, triangles) = read_mesh(positions, vertex_count, indices, index_count)?;
+            Ok(core!(w).physics.set_mesh(mesh, &points, &triangles)?)
         })
     }
 }

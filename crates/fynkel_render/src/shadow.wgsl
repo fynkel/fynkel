@@ -16,7 +16,8 @@ struct View {
 
 struct In {
     @location(0) position: vec3<f32>,
-    @location(3) uv: vec2<f32>,
+    // The UV's bits, then the vertex's colour (unread).
+    @location(3) uv_color: vec3<u32>,
     // Per caster (instance step):
     @location(4) model_0: vec4<f32>,
     @location(5) model_1: vec4<f32>,
@@ -39,7 +40,7 @@ struct Out {
 fn caster_vertex(in: In, world: vec4<f32>) -> Out {
     var out: Out;
     out.clip = view.matrix * world;
-    out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
+    out.uv = bitcast<vec2<f32>>(in.uv_color.xy) * in.uv_transform.xy + in.uv_transform.zw;
     out.alpha = in.alpha.xy;
     return out;
 }

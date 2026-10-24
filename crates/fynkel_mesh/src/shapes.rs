@@ -228,7 +228,7 @@ impl Shape {
             tangents: Some(&self.tangents),
             uvs: Some(&self.uvs),
             indices: &self.indices,
-            skin: None,
+            ..MeshParts::default()
         })
         .expect("the built-in shapes are valid")
     }

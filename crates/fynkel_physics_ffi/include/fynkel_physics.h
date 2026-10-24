@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FP_ABI_VERSION 13
+#define FP_ABI_VERSION 14
 
 // A character's move hit something on its sides (`FpCharacterMove::flags`).
 #define FP_COLLIDED_SIDES 1
@@ -610,6 +610,21 @@ FpStatus fp_mesh_add(struct FpWorld *world,
                      const uint32_t *indices,
                      size_t index_count,
                      uint64_t *out);
+
+// Gives mesh `mesh` new points and triangles, as `fp_mesh_add` takes
+// them, and each collider made of it its new shape. Refused as
+// `fp_mesh_add` refuses, and then nothing changes.
+//
+// # Safety
+//
+// `world` is null or live; `positions` is null or valid for
+// `vertex_count * 3` reads, `indices` for `index_count`.
+FpStatus fp_mesh_set(struct FpWorld *world,
+                     uint64_t mesh,
+                     const float *positions,
+                     size_t vertex_count,
+                     const uint32_t *indices,
+                     size_t index_count);
 
 // Removes a mesh no collider is made of.
 //

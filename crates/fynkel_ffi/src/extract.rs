@@ -74,7 +74,8 @@ pub(crate) enum ResourceOp {
 /// so each goes up once and is freed when the world removes it.
 #[derive(Debug, Default)]
 pub(crate) struct Uploaded {
-    meshes: HashSet<MeshId>,
+    /// Each mesh's version uploaded.
+    meshes: HashMap<MeshId, u64>,
     textures: HashSet<(TextureId, ColorSpace)>,
     /// Each shader's version uploaded.
     shaders: HashMap<ShaderId, u64>,
@@ -185,16 +186,31 @@ impl Extract {
     ) -> Result<(), String> {
         scene.clear();
 
-        uploaded.meshes.retain(|&id| {
+        uploaded.meshes.retain(|&id, _| {
             let kept = world.mesh(id).is_ok();
             if !kept {
                 ops.push(ResourceOp::RemoveMesh(mesh_key(id)));
             }
             kept
         });
-        for (id, mesh) in world.meshes() {
-            if uploaded.meshes.insert(id) {
-                ops.push(ResourceOp::UploadMesh(mesh_key(id), Arc::clone(mesh)));
+        for (id, mesh, version) in world.meshes() {
+            match uploaded.meshes.insert(id, version) {
+                None => ops.push(ResourceOp::UploadMesh(mesh_key(id), Arc::clone(mesh))),
+                Some(was) if was != version => {
+                    // Changed again before its last change went up: that
+                    // one is replaced, so a mesh changed every frame never
+                    // queues up behind a slow worker.
+                    let key = mesh_key(id);
+                    let waiting = ops.iter_mut().rev().find_map(|op| match op {
+                        ResourceOp::UploadMesh(k, waiting) if *k == key => Some(waiting),
+                        _ => None,
+                    });
+                    match waiting {
+                        Some(waiting) => *waiting = Arc::clone(mesh),
+                        None => ops.push(ResourceOp::UploadMesh(key, Arc::clone(mesh))),
+                    }
+                }
+                Some(_) => {}
             }
         }
 
@@ -373,6 +389,7 @@ impl Extract {
         let skins = &mut self.skins;
         skins.clear();
         let has_skins = world.has_skins();
+        let has_submesh_materials = world.has_submesh_materials();
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
             if !world.in_mask(id, mask) {
@@ -410,7 +427,7 @@ impl Extract {
                     Some(first as u32)
                 }),
             };
-            scene.draws.push(Draw {
+            let draw = Draw {
                 skin,
                 mesh: mesh_key(mesh),
                 model,
@@ -418,7 +435,20 @@ impl Extract {
                 cast_shadows: r.cast_shadows,
                 receive_shadows: r.receive_shadows,
                 own: r.own,
-            });
+                submesh: 0,
+            };
+            scene.draws.push(draw);
+            // The submeshes after the first, each with its own material.
+            if has_submesh_materials {
+                for (n, id) in world.submesh_materials(id).iter().enumerate() {
+                    let Some(&m) = materials.get(id) else { continue };
+                    let mut material = m;
+                    if r.own_color {
+                        material.base_color = r.color.to_linear();
+                    }
+                    scene.draws.push(Draw { material, submesh: n as u32 + 1, ..draw });
+                }
+            }
         });
 
         // Room for as many particles and trail points as there can be, as

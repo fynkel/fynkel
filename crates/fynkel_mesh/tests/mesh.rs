@@ -21,8 +21,8 @@ const TRIANGLE: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.
 // --- Checks ------------------------------------------------------------------
 
 #[test]
-fn a_vertex_is_48_bytes() {
-    assert_eq!(std::mem::size_of::<Vertex>(), 48);
+fn a_vertex_is_52_bytes() {
+    assert_eq!(std::mem::size_of::<Vertex>(), 52);
 }
 
 #[test]
@@ -361,4 +361,218 @@ fn the_bounds_hold_every_vertex() {
     let mesh = MeshData::new(parts(&[[1.0, -2.0, 0.5], [-3.0, 4.0, 0.0], [0.0, 0.0, 6.0]], &[0, 1, 2])).unwrap();
     assert_eq!(mesh.bounds(), (Vec3::new(-3.0, -2.0, 0.0), Vec3::new(1.0, 4.0, 6.0)));
     assert_eq!(MeshData::cube().bounds(), (Vec3::splat(-0.5), Vec3::splat(0.5)));
+}
+
+// --- A mesh that changes (stage 13 phase 1) ----------------------------------
+
+/// A flat grid of `n` × `n` squares on XZ, its image upright from above.
+fn grid(n: u32) -> (Vec<[f32; 3]>, Vec<[f32; 2]>, Vec<u32>) {
+    let (mut positions, mut uvs, mut indices) = (vec![], vec![], vec![]);
+    for z in 0..=n {
+        for x in 0..=n {
+            positions.push([x as f32, 0.0, z as f32]);
+            uvs.push([x as f32 / n as f32, z as f32 / n as f32]);
+        }
+    }
+    for z in 0..n {
+        for x in 0..n {
+            let i = z * (n + 1) + x;
+            indices.extend([i, i + n + 1, i + 1, i + 1, i + n + 1, i + n + 2]);
+        }
+    }
+    (positions, uvs, indices)
+}
+
+#[test]
+fn colours_are_kept_and_white_without_them() {
+    let colors = [[255, 0, 0, 255], [0, 255, 0, 128], [0, 0, 255, 0]];
+    let mesh = MeshData::new(MeshParts { colors: Some(&colors), ..parts(&TRIANGLE, &[0, 1, 2]) }).unwrap();
+    assert_eq!(mesh.vertices().iter().map(|v| v.color).collect::<Vec<_>>(), colors);
+    assert!(MeshData::new(parts(&TRIANGLE, &[0, 1, 2])).unwrap().vertices().iter().all(|v| v.color == WHITE));
+    let short = MeshParts { colors: Some(&colors[..2]), ..parts(&TRIANGLE, &[0, 1, 2]) };
+    assert_eq!(error(short), "colors has 2 items, but there are 3 positions");
+}
+
+#[test]
+fn submeshes_split_the_triangles_where_they_say() {
+    let (positions, _, indices) = grid(2);
+    let mesh = MeshData::new(MeshParts { submeshes: &[6, 18], ..parts(&positions, &indices) }).unwrap();
+    assert_eq!(mesh.submeshes(), [0..6, 6..18, 18..24]);
+    assert_eq!(MeshData::new(parts(&positions, &indices)).unwrap().submeshes(), std::slice::from_ref(&(0..24)));
+    for (starts, message) in [
+        (&[7][..], "submesh 1 starts at index 7"),
+        (&[12, 6][..], "submesh 2 starts at index 6"),
+        (&[27][..], "submesh 1 starts at index 27"),
+    ] {
+        let error = error(MeshParts { submeshes: starts, ..parts(&positions, &indices) });
+        assert!(error.starts_with(message), "{error}");
+    }
+}
+
+#[test]
+fn an_empty_mesh_has_nothing_and_takes_a_change() {
+    let mut mesh = MeshData::empty();
+    assert!(mesh.vertices().is_empty() && mesh.indices().is_empty());
+    assert_eq!(mesh.bounds(), (Vec3::ZERO, Vec3::ZERO));
+    mesh.change(MeshChange { positions: Some(&TRIANGLE), indices: Some((&[0, 1, 2], &[])), ..Default::default() })
+        .unwrap();
+    assert_eq!(mesh.vertices().len(), 3);
+    assert_eq!(mesh.bounds(), (Vec3::ZERO, Vec3::new(1.0, 1.0, 0.0)));
+    for v in mesh.vertices() {
+        assert_eq!(v.normal, [0.0, 0.0, 1.0], "worked out because the count changed");
+        assert_eq!(v.color, WHITE);
+    }
+    // Back to nothing.
+    mesh.change(MeshChange { positions: Some(&[]), indices: Some((&[], &[])), ..Default::default() }).unwrap();
+    assert!(mesh.vertices().is_empty() && mesh.indices().is_empty());
+}
+
+#[test]
+fn a_change_keeps_what_it_doesnt_give() {
+    let (positions, uvs, indices) = grid(2);
+    let colors = vec![[10, 20, 30, 40]; positions.len()];
+    let mut mesh =
+        MeshData::new(MeshParts { uvs: Some(&uvs), colors: Some(&colors), ..parts(&positions, &indices) }).unwrap();
+    let raised: Vec<_> = positions.iter().map(|p| [p[0], 2.0, p[2]]).collect();
+    mesh.change(MeshChange { positions: Some(&raised), ..Default::default() }).unwrap();
+    assert!(mesh.vertices().iter().all(|v| v.position[1] == 2.0 && v.color == [10, 20, 30, 40]));
+    assert_eq!(mesh.vertices().iter().map(|v| v.uv).collect::<Vec<_>>(), uvs);
+    assert_eq!(mesh.indices(), indices);
+    assert_eq!(mesh.bounds().0.y, 2.0);
+}
+
+#[test]
+fn a_refused_change_leaves_the_mesh_as_it_was() {
+    let mut mesh = MeshData::new(parts(&TRIANGLE, &[0, 1, 2])).unwrap();
+    let before = mesh.vertices().to_vec();
+    let bad = |change: MeshChange<'_>, mesh: &mut MeshData| mesh.change(change).unwrap_err().to_string();
+    let nan = [[0.0, 0.0, 0.0], [f32::NAN, 0.0, 0.0], [0.0, 1.0, 0.0]];
+    assert_eq!(bad(MeshChange { positions: Some(&nan), ..Default::default() }, &mut mesh), "position 1 isn't finite");
+    let four = [[0.0; 3]; 4];
+    let two_colors = [WHITE; 2];
+    assert_eq!(
+        bad(MeshChange { positions: Some(&four), colors: Some(&two_colors), ..Default::default() }, &mut mesh),
+        "colors has 2 items, but there are 4 positions"
+    );
+    assert_eq!(
+        bad(MeshChange { indices: Some((&[0, 1, 3], &[])), ..Default::default() }, &mut mesh),
+        "index 2 is 3, but there are only 3 vertices"
+    );
+    // Fewer vertices than the triangles it keeps use.
+    assert_eq!(
+        bad(MeshChange { positions: Some(&TRIANGLE[..2]), ..Default::default() }, &mut mesh),
+        "index 2 is 2, but there are only 2 vertices"
+    );
+    assert_eq!(
+        bad(MeshChange { indices: Some((&[0, 1], &[])), ..Default::default() }, &mut mesh),
+        "indices come in threes, one per triangle corner, but there are 2"
+    );
+    assert_eq!(mesh.vertices(), before);
+}
+
+#[test]
+fn a_skinned_mesh_cant_change() {
+    let joints = [[0, 0, 0, 0]; 3];
+    let weights = [[1.0, 0.0, 0.0, 0.0]; 3];
+    let mut mesh =
+        MeshData::new(MeshParts { skin: Some((&joints, &weights)), ..parts(&TRIANGLE, &[0, 1, 2]) }).unwrap();
+    let refused = mesh.change(MeshChange { positions: Some(&TRIANGLE), ..Default::default() });
+    assert_eq!(refused.unwrap_err().to_string(), "a skinned mesh can't be changed");
+}
+
+#[test]
+fn recalculated_normals_follow_the_surface() {
+    let (positions, uvs, indices) = grid(8);
+    let mut mesh = MeshData::new(MeshParts { uvs: Some(&uvs), ..parts(&positions, &indices) }).unwrap();
+    // A ridge along x = 4: the slopes face away from it.
+    let ridge: Vec<_> = positions.iter().map(|p| [p[0], 4.0 - (p[0] - 4.0).abs(), p[2]]).collect();
+    mesh.change(MeshChange { positions: Some(&ridge), recalculate_normals: true, ..Default::default() }).unwrap();
+    for v in mesh.vertices() {
+        let n = Vec3::from(v.normal);
+        assert!((n.length() - 1.0).abs() < 1e-5);
+        let expected = match v.position[0] {
+            x if x < 4.0 => Vec3::new(-1.0, 1.0, 0.0).normalize(),
+            x if x > 4.0 => Vec3::new(1.0, 1.0, 0.0).normalize(),
+            // On the ridge it depends on how many triangles each side has
+            // there, which is what weighting by area does; up-ish.
+            _ => {
+                assert!(n.y > 0.9, "{n} on the ridge");
+                continue;
+            }
+        };
+        assert!(n.distance(expected) < 1e-4, "{n} at {:?}, not {expected}", v.position);
+    }
+}
+
+#[test]
+fn recalculated_tangents_point_along_u_with_the_bitangent_up_the_image() {
+    let (positions, uvs, indices) = grid(4);
+    let mut mesh = MeshData::new(MeshParts { uvs: Some(&uvs), ..parts(&positions, &indices) }).unwrap();
+    let wave: Vec<_> = positions.iter().map(|p| [p[0], (p[0] * 0.7).sin() + (p[2] * 0.5).cos(), p[2]]).collect();
+    mesh.change(MeshChange {
+        positions: Some(&wave),
+        recalculate_normals: true,
+        recalculate_tangents: true,
+        ..Default::default()
+    })
+    .unwrap();
+    check_tangents(&mesh);
+    // The image mirrored left to right: w flips.
+    let mirrored: Vec<_> = uvs.iter().map(|uv| [1.0 - uv[0], uv[1]]).collect();
+    mesh.change(MeshChange { uvs: Some(&mirrored), recalculate_tangents: true, ..Default::default() }).unwrap();
+    check_tangents(&mesh);
+}
+
+/// What changing a 101 × 101 grid costs, part by part: `cargo test
+/// --release -p fynkel_mesh --test mesh -- --ignored --nocapture`.
+#[test]
+#[ignore = "a measurement"]
+fn what_changing_a_grid_costs() {
+    let n = 101_u32;
+    let positions: Vec<[f32; 3]> = (0..n * n).map(|i| [(i % n) as f32, 0.0, (i / n) as f32]).collect();
+    let mut indices = Vec::new();
+    for z in 0..n - 1 {
+        for x in 0..n - 1 {
+            let a = z * n + x;
+            indices.extend([a, a + n, a + 1, a + 1, a + n, a + n + 1]);
+        }
+    }
+    let mut mesh = MeshData::empty();
+    mesh.change(MeshChange { positions: Some(&positions), indices: Some((&indices, &[])), ..MeshChange::default() })
+        .unwrap();
+    let rounds = 200;
+    let time = |name: &str, f: &mut dyn FnMut()| {
+        let start = std::time::Instant::now();
+        for _ in 0..rounds {
+            f();
+        }
+        println!("{name}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds));
+    };
+    let shared = std::sync::Arc::new(mesh.clone());
+    time("clone", &mut || drop(std::hint::black_box((*shared).clone())));
+    time("positions", &mut || {
+        mesh.change(MeshChange { positions: Some(&positions), ..MeshChange::default() }).unwrap();
+    });
+    time("normals", &mut || mesh.recalculate_normals());
+    time("tangents", &mut || mesh.recalculate_tangents());
+}
+
+#[test]
+fn a_copy_written_into_an_older_one_has_the_new_triangles() {
+    let positions = [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0], [1.0, 0.0, 1.0]];
+    let mut mesh = MeshData::empty();
+    mesh.change(MeshChange { positions: Some(&positions), indices: Some((&[0, 2, 1], &[])), ..MeshChange::default() })
+        .unwrap();
+    let mut older = mesh.clone();
+    mesh.change(MeshChange { indices: Some((&[0, 2, 1, 1, 2, 3], &[3])), ..MeshChange::default() }).unwrap();
+    older.clone_from(&mesh);
+    assert_eq!(older, mesh);
+    assert_eq!(older.indices(), &[0, 2, 1, 1, 2, 3]);
+    assert_eq!(older.submeshes().len(), 2);
+
+    // Only the positions changed since: the same triangles stay.
+    let mut same = mesh.clone();
+    mesh.change(MeshChange { positions: Some(&[[0.0, 1.0, 0.0]; 4]), ..MeshChange::default() }).unwrap();
+    same.clone_from(&mesh);
+    assert_eq!(same, mesh);
 }

@@ -505,6 +505,8 @@ struct Batch {
     shader: Option<ShaderKey>,
     textures: OwnTextures,
     mesh: MeshKey,
+    /// Which of `mesh`'s submeshes.
+    submesh: u32,
     /// A particle system's particles, from `first` in the frame's
     /// particles, rather than draws of `mesh` (a mesh particle's mesh).
     particle: Option<ParticleLook>,
@@ -524,6 +526,7 @@ struct CasterBatch {
     skinned: bool,
     textures: MaterialTextures,
     mesh: MeshKey,
+    submesh: u32,
     first: u32,
     count: u32,
 }
@@ -531,7 +534,10 @@ struct CasterBatch {
 /// A caster's sort key: its map, a cut-out's own shader, cut out or not,
 /// skinned or not, its textures (a cut-out's only) and its mesh. Within a
 /// map, those with own shaders come last.
-type CasterKey = (u8, Option<Look>, bool, bool, MaterialTextures, u64);
+type CasterKey = (u8, Option<Look>, bool, bool, MaterialTextures, MeshPart);
+
+/// A mesh's key and one of its submeshes.
+type MeshPart = (u64, u32);
 
 /// A draw's own shader, if it has one, and its textures.
 type Look = (Option<ShaderKey>, OwnTextures);
@@ -1205,7 +1211,15 @@ impl Renderer {
             }
             let mirrored = Mat3::from_mat4(draw.model).determinant() < 0.0;
             let outlined = cover == Cover::Opaque && m.outline.is_some_and(|o| o.width > 0.0);
-            let key = (cover, Faces::of(m, mirrored), skin.is_some(), shader, textures, outlined, draw.mesh.0);
+            let key = (
+                cover,
+                Faces::of(m, mirrored),
+                skin.is_some(),
+                shader,
+                textures,
+                outlined,
+                (draw.mesh.0, draw.submesh),
+            );
             if cover.blended() {
                 self.behind |= reads_behind;
                 self.blended.push(((at - camera.position).dot(forward), key, i as u32));
@@ -1240,9 +1254,9 @@ impl Renderer {
                         continue;
                     };
                     radius += (mesh.centre.length() + mesh.radius) * particles.largest;
-                    key.0
+                    (key.0, 0)
                 }
-                _ => u64::MAX,
+                _ => (u64::MAX, 0),
             };
             if !in_view(&planes, particles.center, radius) {
                 stats.culled += 1;
@@ -1474,7 +1488,9 @@ impl Renderer {
             // forward pass draws it, from the instances after its own.
             let first = if own.is_some() { self.instances.len() } else { self.casters.len() } as u32;
             match self.caster_batches.last_mut() {
-                Some(b) if (b.map, b.own, b.cutout, b.skinned, b.textures, b.mesh.0) == key => b.count += 1,
+                Some(b) if (b.map, b.own, b.cutout, b.skinned, b.textures, (b.mesh.0, b.submesh)) == key => {
+                    b.count += 1
+                }
                 _ => self.caster_batches.push(CasterBatch {
                     map,
                     own,
@@ -1482,6 +1498,7 @@ impl Renderer {
                     skinned,
                     textures,
                     mesh: draw.mesh,
+                    submesh: draw.submesh,
                     first,
                     count: 1,
                 }),
@@ -1663,7 +1680,7 @@ impl Renderer {
                 }
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+                pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
             }
             // Then those with their own shaders, cut out or moving, which
             // read what the forward pass does, and the map's view in group 2.
@@ -1702,7 +1719,7 @@ impl Renderer {
                 }
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+                pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
             }
         }
 
@@ -1745,7 +1762,7 @@ impl Renderer {
                     }
                     pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                     pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+                    pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
                 }
             }
             images.encode(&kit.ao, encoder);
@@ -1925,7 +1942,7 @@ impl Renderer {
                 last = Some(batch);
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                pass.draw_indexed(0..mesh.index_count, 0, batch.first..batch.first + batch.count);
+                pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
             }
         };
         // What the draws read: the frame, the maps and the sky's light.
@@ -3215,22 +3232,24 @@ fn caster_key(map: u8, draw: &crate::Draw, skinned: bool, look: Option<Look>, mo
     let cutout = m.alpha_cutoff > 0.0;
     let own = look.filter(|(shader, _)| (cutout || moving) && shader.is_some());
     let textures = if cutout && own.is_none() { m.textures } else { MaterialTextures::default() };
-    (map, own, cutout, skinned, textures, draw.mesh.0)
+    (map, own, cutout, skinned, textures, (draw.mesh.0, draw.submesh))
 }
 
 /// A draw's sort key: how it covers what's behind, which faces, whether
 /// it's bent, its shader, its textures, whether it's outlined and its mesh,
 /// in the order draws are grouped.
-type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, bool, u64);
+type SortKey = (Cover, Faces, bool, Option<ShaderKey>, OwnTextures, bool, MeshPart);
 
 /// A skinned mesh's joints and weights (`fynkel_mesh::SkinVertex`), as
 /// skin.wgsl reads them.
 pub(crate) const SKIN_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
     wgpu::vertex_attr_array![14 => Uint16x4, 15 => Unorm16x4];
 
-/// A mesh's position, normal, tangent and UV, as in `fynkel_mesh::Vertex`.
+/// A mesh's position, normal, tangent, and its UV and colour together, as
+/// in `fynkel_mesh::Vertex`: the UV's bits and the colour's four bytes as
+/// three u32s (forward.wgsl's `uv_color`), as every location is used.
 const VERTEX_ATTRIBUTES: [wgpu::VertexAttribute; 4] =
-    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Float32x2];
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x4, 3 => Uint32x3];
 
 /// An [`Instance`], as forward.wgsl reads it.
 const INSTANCE_ATTRIBUTES: [wgpu::VertexAttribute; 10] = wgpu::vertex_attr_array![
@@ -3276,9 +3295,11 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
     let (cover, faces, skinned, shader, textures, outlined, _) = key;
     let first = instances.len() as u32;
     match batches.last_mut() {
-        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.outlined, b.mesh.0) == key => b.count += 1,
+        Some(b) if (b.cover, b.faces, b.skinned, b.shader, b.textures, b.outlined, (b.mesh.0, b.submesh)) == key => {
+            b.count += 1
+        }
         _ => {
-            let mesh = draw.mesh;
+            let (mesh, submesh) = (draw.mesh, draw.submesh);
             batches.push(Batch {
                 cover,
                 faces,
@@ -3287,6 +3308,7 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
                 shader,
                 textures,
                 mesh,
+                submesh,
                 particle: None,
                 first,
                 count: 1,
@@ -3366,8 +3388,9 @@ fn particle_batch(
         outlined: false,
         shader,
         textures,
-        mesh: MeshKey(mesh),
-        particle: Some(ParticleLook { mesh: mesh != u64::MAX, trail, lit: draw.lit, soft: softness > 0.0 }),
+        mesh: MeshKey(mesh.0),
+        submesh: 0,
+        particle: Some(ParticleLook { mesh: mesh.0 != u64::MAX, trail, lit: draw.lit, soft: softness > 0.0 }),
         first,
         count,
     });

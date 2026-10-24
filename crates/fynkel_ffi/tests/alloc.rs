@@ -358,6 +358,66 @@ fn a_steady_frame_with_particle_systems_allocates_nothing_on_the_calling_thread(
     assert_eq!(allocations, 0, "allocations in 100 frames of ten full particle systems, stepped and drawn");
 }
 
+/// A grid of 64 × 64 squares, marked dynamic, its heights changed, its
+/// normals worked out and the world given it every frame, and drawn: once
+/// the mesh has copies from before to write into, nothing is allocated.
+#[test]
+fn a_mesh_changed_every_frame_allocates_nothing_on_the_calling_thread() {
+    let world = World::new();
+    let cube = stage1(&world);
+    let n = 65_u32;
+    let mut positions: Vec<f32> =
+        (0..n * n).flat_map(|i| [(i % n) as f32 * 0.05 - 1.6, 0.0, (i / n) as f32 * 0.05 - 1.6]).collect();
+    let mut indices = Vec::new();
+    for z in 0..n - 1 {
+        for x in 0..n - 1 {
+            let a = z * n + x;
+            indices.extend([a, a + n, a + 1, a + 1, a + n, a + n + 1]);
+        }
+    }
+    let (mut mesh, mut id) = (std::ptr::null_mut(), 0);
+    let mut renderer = FyMeshRenderer::default();
+    // SAFETY: a live world, slices, and pointers to locals.
+    unsafe {
+        ok(fy_mesh_new_empty(&mut mesh));
+        ok(fy_mesh_set_positions(mesh, positions.as_ptr(), (n * n) as usize));
+        ok(fy_mesh_set_triangles(mesh, indices.as_ptr(), indices.len(), std::ptr::null(), 0));
+        ok(fy_mesh_mark_dynamic(mesh));
+        ok(fy_mesh_add(world.0, mesh, &mut id));
+        ok(fy_mesh_renderer_get(world.0, cube, &mut renderer));
+        renderer.mesh = id;
+        ok(fy_mesh_renderer_set(world.0, cube, &renderer));
+    }
+    let view = View::headless(&world, 64, 64);
+    let mut frame = |t: f32| {
+        for (i, y) in positions.iter_mut().skip(1).step_by(3).enumerate() {
+            *y = ((i % 65) as f32 * 0.3 + t).sin() * 0.1;
+        }
+        // SAFETY: a live mesh and world, and a slice.
+        unsafe {
+            ok(fy_mesh_set_positions(mesh, positions.as_ptr(), (n * n) as usize));
+            ok(fy_mesh_recalculate(mesh, FY_MESH_NORMALS));
+            ok(fy_mesh_update(world.0, id, mesh));
+        }
+        view.frame()
+    };
+    let mut warmed = 0;
+    for i in 0..240 {
+        warmed = frame(i as f32 / 60.0);
+    }
+    view.read(warmed, 64, 64);
+    let mut numbers = Vec::with_capacity(100);
+    let allocations = count(|| {
+        for i in 0..100 {
+            numbers.push(frame(i as f32 / 60.0));
+        }
+    });
+    view.read(*numbers.last().unwrap(), 64, 64);
+    // SAFETY: made above, freed once.
+    unsafe { fy_mesh_free(mesh) };
+    assert_eq!(allocations, 0, "allocations in 100 frames changing a 4,225-vertex mesh");
+}
+
 /// Flutter's raster thread calls `fy_apple_acquire` once per frame.
 #[cfg(target_vendor = "apple")]
 #[test]

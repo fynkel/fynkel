@@ -1,7 +1,7 @@
 part of 'world.dart';
 
-/// A shape to draw: triangles, with a normal, tangent and texture
-/// coordinate at each vertex. A mesh can be used in any number of worlds;
+/// A shape to draw: triangles, with a normal, tangent, texture coordinate
+/// and colour at each vertex. A mesh can be used in any number of worlds;
 /// each shares its data instead of copying it.
 ///
 /// Each built-in shape is one [Mesh], so `Mesh.cube()` always returns the
@@ -9,9 +9,32 @@ part of 'world.dart';
 /// mesh, make it in [Mesh.inBackground]. A world keeps a mesh while your
 /// code or an object's [MeshRenderer] can reach it, and lets it go once
 /// it's garbage-collected; [dispose] frees it sooner.
+///
+/// **A mesh can change** while the game runs, as Unity's: make an empty
+/// one with [Mesh()] (or change one made from code), then [setPositions],
+/// [setTriangles] and the rest. Each call copies what it's given, so the
+/// same lists can be filled again and passed each frame without garbage.
+/// The changes of a frame go to the worlds that have the mesh together,
+/// at the end of the frame. Until the game sets its own, the normals and
+/// tangents are worked out again when the positions, UVs or triangles
+/// change (the tangents once it has UVs). For a mesh that changes every frame, call [markDynamic].
 final class Mesh implements Finalizable {
-  Mesh._(this._pointer, this._name, {this._shape = false}) {
+  Mesh._(this._pointer, this._name, {this._shape = false, bool ownNormals = true, bool ownTangents = true})
+    // Private fields can't be named parameters.
+    // ignore: prefer_initializing_formals
+    : _ownNormals = ownNormals,
+      // ignore: prefer_initializing_formals
+      _ownTangents = ownTangents {
     _finalizer.attach(this, _pointer.cast(), detach: this);
+  }
+
+  /// An empty mesh, to fill with [setPositions] and [setTriangles] (Unity's
+  /// `new Mesh()`). It draws nothing until it has triangles.
+  factory Mesh() {
+    ensureEngine();
+    final out = scratch.mesh;
+    check(fy_mesh_new_empty(out));
+    return Mesh._(out.value, 'Mesh()', ownNormals: false, ownTangents: false).._hasUvs = false;
   }
 
   static final _finalizer = NativeFinalizer(
@@ -21,6 +44,23 @@ final class Mesh implements Finalizable {
   Pointer<FyMesh> _pointer;
   final String _name;
   final bool _shape;
+
+  // Whether the game set the normals or tangents (or they came with the
+  // mesh), or they're worked out by themselves; whether those worked out
+  // are out of date.
+  bool _ownNormals, _ownTangents;
+  bool _staleNormals = false, _staleTangents = false;
+  // Whether it has UVs: tangents are worked out from them, so not before.
+  bool _hasUvs = true;
+
+  // Changed since the worlds that have it were last given it; how many
+  // times they've been given a change; whether it's dynamic.
+  bool _changed = false;
+  int _version = 0;
+  bool _dynamic = false;
+
+  // The meshes changed this frame, for the worlds that have them.
+  static final _changedMeshes = FrameList<Mesh>();
 
   final _release = _Release(_Resource.mesh);
 
@@ -164,7 +204,7 @@ final class Mesh implements Finalizable {
       data.ref.indices.asTypedList(indices.length).setAll(0, indices);
       final out = arena<Pointer<FyMesh>>();
       check(fy_mesh_new(data, out));
-      return Mesh._(out.value, 'Mesh.custom');
+      return Mesh._(out.value, 'Mesh.custom', ownNormals: normals != null, ownTangents: tangents != null);
     });
   }
 
@@ -172,18 +212,182 @@ final class Mesh implements Finalizable {
   /// so a big mesh doesn't hold up the UI thread: generating tangents
   /// takes about a microsecond per triangle.
   static Future<Mesh> inBackground(Mesh Function() build) async {
-    final (address, name) = await inHelper(() {
+    final (address, name, ownNormals, ownTangents) = await inHelper(() {
       final mesh = build();
+      mesh._settle();
       // This isolate ends next; the mesh now belongs to the caller's.
       _finalizer.detach(mesh);
-      return (mesh._pointer.address, mesh._name);
+      return (mesh._pointer.address, mesh._name, mesh._ownNormals, mesh._ownTangents);
     });
-    return Mesh._(Pointer<FyMesh>.fromAddress(address), name);
+    return Mesh._(Pointer<FyMesh>.fromAddress(address), name, ownNormals: ownNormals, ownTangents: ownTangents);
+  }
+
+  // --- Changing it ---
+
+  /// The vertices' positions, 3 floats each (x, y, z), in the mesh's own
+  /// space (Unity's `SetVertices`). A different count from the mesh's
+  /// resets the UVs to (0, 0) and the colours to white, and needs
+  /// triangles that point at no vertex past the last: set fewer triangles
+  /// first, or [clear]. Throws an [ArgumentError], changing nothing, for a
+  /// length that isn't a multiple of 3 or a value that isn't finite.
+  void setPositions(Float32List positions) {
+    _changeable();
+    if (positions.length % 3 != 0) {
+      throw ArgumentError.value(positions.length, 'positions.length', 'must be a multiple of 3 (x, y, z)');
+    }
+    check(fy_mesh_set_positions(_live, positions.address, positions.length ~/ 3));
+    _staleNormals = !_ownNormals;
+    _staleTangents = !_ownTangents;
+  }
+
+  /// The vertices' normals, 3 floats each, one per vertex; each is made
+  /// unit length. From then on they're the game's: changing the positions
+  /// no longer works them out again (call [recalculateNormals]).
+  void setNormals(Float32List normals) {
+    _changeable();
+    check(fy_mesh_set_normals(_live, normals.address, _per(normals.length, 3, 'normals')));
+    _ownNormals = true;
+    _staleNormals = false;
+    _staleTangents = !_ownTangents;
+  }
+
+  /// The vertices' tangents, for normal maps: 4 floats each, a direction
+  /// along u then 1 or -1 (see [Mesh.raw]). From then on they're the
+  /// game's, as [setNormals].
+  void setTangents(Float32List tangents) {
+    _changeable();
+    check(fy_mesh_set_tangents(_live, tangents.address, _per(tangents.length, 4, 'tangents')));
+    _ownTangents = true;
+    _staleTangents = false;
+  }
+
+  /// The vertices' texture coordinates, 2 floats each, (0, 0) the image's
+  /// top-left (Unity's `SetUVs`).
+  void setUvs(Float32List uvs) {
+    _changeable();
+    check(fy_mesh_set_uvs(_live, uvs.address, _per(uvs.length, 2, 'uvs')));
+    _hasUvs = true;
+    _staleTangents = !_ownTangents;
+  }
+
+  /// The vertices' colours, 4 bytes each: red, green and blue as a colour
+  /// picker gives them (sRGB, 0–255), then alpha (Unity's `SetColors`
+  /// with `Color32`). They multiply the material's colour, so white, as
+  /// at first, leaves it as it is. [Color.rgba8] fills four bytes from a
+  /// [Color].
+  void setColors(Uint8List colors) {
+    _changeable();
+    check(fy_mesh_set_colors(_live, colors.address, _per(colors.length, 4, 'colors')));
+  }
+
+  /// The triangles: three indices into the positions each,
+  /// counter-clockwise seen from the front (Unity's `SetTriangles`).
+  ///
+  /// For a mesh of several parts, each drawn with its own material
+  /// ([MeshRenderer.materials]), give every part's triangles one after
+  /// another and, in [submeshStarts], where each part after the first
+  /// starts: `[0, 1, 2, 2, 3, 0]` with `submeshStarts: [3]` is two parts
+  /// of a triangle each. None is allowed: the mesh then draws nothing.
+  /// Throws an [ArgumentError], changing nothing, for an index past the
+  /// last vertex or a start out of order or not on a triangle.
+  void setTriangles(Uint32List indices, {Uint32List? submeshStarts}) {
+    _changeable();
+    final starts = submeshStarts ?? _noStarts;
+    check(fy_mesh_set_triangles(_live, indices.address, indices.length, starts.address, starts.length));
+    _staleNormals = !_ownNormals;
+    _staleTangents = !_ownTangents;
+  }
+
+  static final _noStarts = Uint32List(0);
+
+  /// Takes every vertex and triangle away (Unity's `Clear`): the mesh draws
+  /// nothing until it's given more. Its normals and tangents are worked
+  /// out by themselves again.
+  void clear() {
+    _changeable();
+    check(fy_mesh_set_triangles(_live, nullptr, 0, nullptr, 0));
+    check(fy_mesh_set_positions(_live, nullptr, 0));
+    _ownNormals = _ownTangents = _staleNormals = _staleTangents = _hasUvs = false;
+  }
+
+  /// Works out each vertex's normal from the faces around it, weighted by
+  /// their size (Unity's `RecalculateNormals`). Quicker than the angle
+  /// weighting [Mesh.custom] uses, for a mesh that changes each frame.
+  /// Not needed while the game hasn't set normals of its own.
+  void recalculateNormals() {
+    _changeable();
+    check(fy_mesh_recalculate(_live, FY_MESH_NORMALS));
+    _staleNormals = false;
+  }
+
+  /// Works out each vertex's tangent from its UVs, for normal maps
+  /// (Unity's `RecalculateTangents`), without splitting any vertex: where
+  /// a texture is mirrored the two sides average, which [Mesh.custom]'s
+  /// MikkTSpace splits instead.
+  void recalculateTangents() {
+    _changeable();
+    check(fy_mesh_recalculate(_live, FY_MESH_TANGENTS));
+    _staleTangents = false;
+  }
+
+  /// Says the mesh changes often, as Unity's `MarkDynamic`: each view
+  /// keeps it on the GPU with room to grow (half again) and writes a change
+  /// where it is, rather than making it again. For a mesh changed every
+  /// frame: a flag, water, ground being dug. Its outline, if its material
+  /// has one, follows its own normals.
+  void markDynamic() {
+    _changeable();
+    if (_dynamic) return;
+    check(fy_mesh_mark_dynamic(_live));
+    _dynamic = true;
+  }
+
+  /// Whether [markDynamic] was called.
+  bool get isDynamic => _dynamic;
+
+  void _changeable() {
+    if (_shape) throw StateError('$this is built in and can\'t change; make a Mesh() of your own');
+    _live;
+    if (!_changed) {
+      _changed = true;
+      _changedMeshes.add(this);
+    }
+  }
+
+  int _per(int length, int per, String name) {
+    if (length % per != 0) throw ArgumentError.value(length, '$name.length', 'must be a multiple of $per');
+    return length ~/ per;
+  }
+
+  /// Works out the normals and tangents out of date.
+  void _settle() {
+    if (!_staleNormals && !_staleTangents) return;
+    // Without UVs tangents mean nothing: they wait for them.
+    final what = (_staleNormals ? FY_MESH_NORMALS : 0) | (_staleTangents && _hasUvs ? FY_MESH_TANGENTS : 0);
+    _staleNormals = _staleTangents = false;
+    if (what != 0) check(fy_mesh_recalculate(_live, what));
+  }
+
+  /// Gives every changed mesh to the worlds that have it, at the end of a
+  /// frame.
+  static void _publishChanges() {
+    final changed = _changedMeshes;
+    if (changed.isEmpty) return;
+    for (var i = 0; i < changed.length; i++) {
+      final mesh = changed[i];
+      mesh._changed = false;
+      if (mesh.isDisposed) continue;
+      mesh._settle();
+      mesh._version++;
+      mesh._release.updateMesh(mesh);
+    }
+    changed.clear();
   }
 
   /// How many vertices the mesh has. Can be more than were given, when
   /// generated tangents split some.
   int get vertexCount {
+    _settle();
     check(fy_mesh_counts(_live, scratch.count, scratch.count2));
     return scratch.count.value;
   }
@@ -192,6 +396,58 @@ final class Mesh implements Finalizable {
   int get indexCount {
     check(fy_mesh_counts(_live, scratch.count, scratch.count2));
     return scratch.count2.value;
+  }
+
+  /// The vertices' normals, 3 floats each: a new copy each time, with
+  /// every change so far. Unity's `Mesh.normals`.
+  Float32List get normals => _readVertices(3, (p, n) => fy_mesh_read_vertices(_live, p, nullptr, nullptr, nullptr, n));
+
+  /// The vertices' tangents, 4 floats each: a new copy each time.
+  Float32List get tangents => _readVertices(4, (p, n) => fy_mesh_read_vertices(_live, nullptr, p, nullptr, nullptr, n));
+
+  /// The vertices' texture coordinates, 2 floats each: a new copy each
+  /// time. Unity's `Mesh.uv`.
+  Float32List get uvs => _readVertices(2, (p, n) => fy_mesh_read_vertices(_live, nullptr, nullptr, p, nullptr, n));
+
+  /// The vertices' colours, 4 bytes each (sRGB red, green, blue, then
+  /// alpha): a new copy each time. White unless set. Unity's
+  /// `Mesh.colors32`.
+  Uint8List get colors {
+    final count = vertexCount;
+    return using((arena) {
+      final p = arena<Uint8>(count * 4);
+      check(fy_mesh_read_vertices(_live, nullptr, nullptr, nullptr, p, count));
+      return Uint8List.fromList(p.asTypedList(count * 4));
+    });
+  }
+
+  Float32List _readVertices(int per, int Function(Pointer<Float>, int) read) {
+    final count = vertexCount;
+    return using((arena) {
+      final p = arena<Float>(count * per);
+      check(read(p, count));
+      return Float32List.fromList(p.asTypedList(count * per));
+    });
+  }
+
+  /// How many parts it has, each drawn with its own material
+  /// ([setTriangles]' `submeshStarts`): 1 for a mesh that doesn't split.
+  /// Unity's `subMeshCount`.
+  int get submeshCount {
+    check(fy_mesh_submesh_count(_live, scratch.count));
+    return scratch.count.value;
+  }
+
+  /// Where part [n]'s triangles start in [indices], and how many indices
+  /// it has.
+  ({int start, int count}) submesh(int n) {
+    final count = submeshCount;
+    RangeError.checkValidIndex(n, null, 'n', count);
+    return using((arena) {
+      final (starts, counts) = (arena<Uint32>(count), arena<Uint32>(count));
+      check(fy_mesh_read_submeshes(_live, starts, counts, count));
+      return (start: starts[n], count: counts[n]);
+    });
   }
 
   /// The vertices' positions, 3 floats each (x, y, z), in the mesh's own
@@ -235,6 +491,20 @@ final class Mesh implements Finalizable {
 
   @override
   String toString() => _name;
+}
+
+/// What packages read of a [Mesh] (package:fynkel/extend.dart).
+extension MeshVersions on Mesh {
+  /// How many changes the worlds that have it have been given: a
+  /// collider made of it is made again when this moves on.
+  int get version => _version;
+
+  /// Copies its positions, 3 floats a vertex, into [positions] and its
+  /// indices into [indices], as many as each has room for, making nothing
+  /// to collect: what [Mesh.positions] and [Mesh.indices] copy.
+  void readInto(Pointer<Float> positions, int vertexCount, Pointer<Uint32> indices, int indexCount) {
+    check(fy_mesh_read(_live, positions, vertexCount, indices, indexCount));
+  }
 }
 
 /// An image for [Material]s to use, decoded once and shared, not copied,
@@ -853,6 +1123,22 @@ final class _Release {
       },
     );
     if (_in.isEmpty) _finalizer.detach(this);
+  }
+
+  /// Writes [mesh], this one's, as it is now to each world that has it,
+  /// and forgets those gone or that no longer have it. In place, with no
+  /// closure: a mesh can change every frame.
+  void updateMesh(Mesh mesh) {
+    final entries = _in;
+    var kept = 0;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      final world = entry.$1.target;
+      if (world != null && world._updateMesh(mesh, entry.$2)) entries[kept++] = entry;
+    }
+    if (kept == entries.length) return;
+    entries.length = kept;
+    if (kept == 0) _finalizer.detach(this);
   }
 
   /// Writes [material], this one's, to each world that has it, and forgets

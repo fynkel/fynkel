@@ -920,7 +920,12 @@ class GameObject with _Moving {
       case Light l:
         check(fy_light_remove(world.pointer, id));
         world._countLight(this, l, _LightCount.none);
-      case MeshRenderer():
+      case MeshRenderer r:
+        // Its parts' materials go with it, so they can be let go.
+        if (r._moreSent) {
+          check(fy_submesh_materials_set(world.pointer, id, nullptr, 0));
+          r._moreSent = false;
+        }
         check(fy_mesh_renderer_remove(world.pointer, id));
       case ParticleSystem():
         check(fy_particles_remove(world.pointer, id));
@@ -1111,6 +1116,21 @@ class GameObject with _Moving {
       r.own[i] = own == null ? 0 : own[i];
     }
     check(fy_mesh_renderer_set(w.pointer, id, scratch.meshRenderer));
+    if (value._more != null || value._moreSent) _writeSubmeshMaterials(value);
+  }
+
+  // Apart from [_writeMeshRenderer], whose every call would otherwise make
+  // the closure's context, submeshes or not.
+  void _writeSubmeshMaterials(MeshRenderer value) {
+    final (w, more) = (world, value._more);
+    using((arena) {
+      final ids = arena<Uint64>(more?.length ?? 0);
+      for (var i = 0; i < (more?.length ?? 0); i++) {
+        ids[i] = w._materialId(more![i]);
+      }
+      check(fy_submesh_materials_set(w.pointer, id, more == null ? nullptr : ids, more?.length ?? 0));
+    });
+    value._moreSent = more != null;
   }
 
   void _writeTrail(TrailRenderer value) {

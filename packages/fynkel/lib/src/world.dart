@@ -357,6 +357,14 @@ final class World implements Finalizable {
   /// last frame: what Unity's Profiler shows as ParticleSystem.Update.
   /// Zero in a world without particle systems.
   Duration get particleStepTime => Duration(microseconds: _particleWatch.elapsedMicroseconds);
+  final _meshWatch = Stopwatch();
+
+  /// How long the last frame took to send the meshes the game changed to
+  /// the worlds that have them: their normals and tangents worked out, and
+  /// each handed to the engine (the GPU's copy is written as it draws).
+  /// With several worlds, the first to update sends them all. Zero when no
+  /// mesh changed.
+  Duration get meshChangeTime => Duration(microseconds: _meshWatch.elapsedMicroseconds);
   final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
@@ -642,8 +650,10 @@ final class World implements Finalizable {
   /// 7. **Cameras.** The camera rigs move their objects ([Follow] and
   ///    [Orbit], then [LookAt]), then [cameras] puts the view's camera
   ///    where the live [VirtualCamera] is, and shakes it.
-  /// 8. **Debug lines.** What was drawn with [debug] goes to the engine,
-  ///    to be drawn over the frame. Last, the systems' `afterFrame`.
+  /// 8. **Meshes and debug lines.** The meshes changed this frame go to
+  ///    the worlds that have them ([Mesh.setPositions]), and what was
+  ///    drawn with [debug] goes to the engine, to be drawn over the frame.
+  ///    Last, the systems' `afterFrame`.
   ///
   /// Hidden objects (inactive, or below one that is) and their behaviours
   /// are skipped by the last six and start when they're first shown; so are
@@ -747,6 +757,11 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
 
     cameras._run();
+    _meshWatch
+      ..reset()
+      ..start();
+    Mesh._publishChanges();
+    _meshWatch.stop();
     _debug?._flush();
     _runSystems(_SystemHook.afterFrame);
   }

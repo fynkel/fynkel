@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 41
+#define FY_ABI_VERSION 42
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -72,6 +72,12 @@
 
 // `fy_mesh_new_shape`'s shape: a 1×1 quad in XY facing +Z.
 #define FY_MESH_QUAD 5
+
+// `fy_mesh_recalculate`'s normals.
+#define FY_MESH_NORMALS 1
+
+// `fy_mesh_recalculate`'s tangents.
+#define FY_MESH_TANGENTS 2
 
 // `FySky::kind`: none; the camera's clear colour shows.
 #define FY_SKY_NONE 0
@@ -500,17 +506,25 @@ typedef struct FyLight {
 
 // A mesh made from code, for `fy_mesh_new`. Each array holds
 // `vertex_count` items of packed floats: 3 per position and normal, 4 per
-// tangent (xyz, then w = 1 or -1), 2 per UV. Normals, tangents and UVs
-// may be null, and are then computed (see `fy_mesh_new`).
+// tangent (xyz, then w = 1 or -1), 2 per UV; or 4 bytes per colour (sRGB
+// RGBA). Normals, tangents, UVs and colours may be null: normals and
+// tangents are then computed (see `fy_mesh_new`), UVs are (0, 0) and
+// colours white.
 typedef struct FyMeshData {
   const float *positions;
   const float *normals;
   const float *tangents;
   const float *uvs;
+  const uint8_t *colors;
   size_t vertex_count;
-  // Three per triangle, counter-clockwise seen from the front.
+  // Three per triangle, counter-clockwise seen from the front: every
+  // submesh's, one after another.
   const uint32_t *indices;
   size_t index_count;
+  // Where each submesh after the first starts in `indices`, in order,
+  // each a multiple of 3; null with 0 for a mesh that doesn't split.
+  const uint32_t *submesh_starts;
+  size_t submesh_start_count;
 } FyMeshData;
 
 typedef struct FyVec2 {
@@ -1347,6 +1361,134 @@ FyStatus fy_mesh_new_shape(uint32_t shape, struct FyMesh **out);
 // counts it gives; `out` is null or writable.
 FyStatus fy_mesh_new(const struct FyMeshData *mesh, struct FyMesh **out);
 
+// Makes a mesh with nothing in it, to change (`fy_mesh_set_positions` and
+// the rest), and writes it to `out`. It draws nothing until it has
+// triangles.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_empty(struct FyMesh **out);
+
+// Sets the vertices' positions, three floats each (x, y, z). A different
+// count from the mesh's resets every other channel: normals and tangents
+// are worked out again, UVs go to (0, 0) and colours to white; then its
+// triangles must not point past the last vertex, so set those first when
+// there are fewer. The array is copied.
+//
+// # Safety
+//
+// `mesh` is null or live, used on no other thread meanwhile;
+// `positions` is valid for `count * 3` floats (or null with `count` 0).
+FyStatus fy_mesh_set_positions(struct FyMesh *mesh, const float *positions, size_t count);
+
+// Sets the vertices' normals, three floats each, one per vertex. Each is
+// made unit length; none may be zero length.
+//
+// # Safety
+//
+// As `fy_mesh_set_positions`.
+FyStatus fy_mesh_set_normals(struct FyMesh *mesh, const float *normals, size_t count);
+
+// Sets the vertices' tangents, four floats each (a direction, then w = 1
+// or -1), one per vertex.
+//
+// # Safety
+//
+// As `fy_mesh_set_positions`, for `count * 4` floats.
+FyStatus fy_mesh_set_tangents(struct FyMesh *mesh, const float *tangents, size_t count);
+
+// Sets the vertices' texture coordinates, two floats each, one per vertex.
+//
+// # Safety
+//
+// As `fy_mesh_set_positions`, for `count * 2` floats.
+FyStatus fy_mesh_set_uvs(struct FyMesh *mesh, const float *uvs, size_t count);
+
+// Sets the vertices' colours, four bytes each (sRGB red, green and blue,
+// then alpha), one per vertex. They multiply the material's colour.
+//
+// # Safety
+//
+// As `fy_mesh_set_positions`, for `count * 4` bytes.
+FyStatus fy_mesh_set_colors(struct FyMesh *mesh, const uint8_t *colors, size_t count);
+
+// Sets the triangles: three indices each, counter-clockwise seen from the
+// front, every submesh's one after another, and where each submesh after
+// the first starts (as `FyMeshData`'s). None is allowed: the mesh then
+// draws nothing.
+//
+// # Safety
+//
+// As `fy_mesh_set_positions`; `indices` is valid for `index_count` u32s
+// and `starts` for `start_count` (each null with its count 0).
+FyStatus fy_mesh_set_triangles(struct FyMesh *mesh,
+                               const uint32_t *indices,
+                               size_t index_count,
+                               const uint32_t *starts,
+                               size_t start_count);
+
+// Works out the mesh's normals (`FY_MESH_NORMALS`), from the faces around
+// each vertex weighted by their area, and its tangents
+// (`FY_MESH_TANGENTS`), from its UVs without splitting a vertex. Normals
+// first, when both.
+//
+// # Safety
+//
+// `mesh` is null or live, used on no other thread meanwhile.
+FyStatus fy_mesh_recalculate(struct FyMesh *mesh, uint32_t what);
+
+// Says the mesh changes often (Unity's `MarkDynamic`): each view keeps it
+// on the GPU with room to grow and writes changes where it is.
+//
+// # Safety
+//
+// `mesh` is null or live, used on no other thread meanwhile.
+FyStatus fy_mesh_mark_dynamic(struct FyMesh *mesh);
+
+// Gives the world `mesh` as it is now under `id`, which it was added as
+// (`fy_mesh_add`): its objects are drawn with it, and each view uploads it
+// again, from the next frame. Nothing is copied.
+//
+// # Safety
+//
+// `world` and `mesh` are null or live.
+FyStatus fy_mesh_update(const struct FyWorld *world, uint64_t id, const struct FyMesh *mesh);
+
+// Copies the mesh's normals (3 floats each), tangents (4), UVs (2) and
+// colours (4 bytes) to the arrays given, each for `vertex_count`
+// vertices, which must be `fy_mesh_counts`' number. A null array is
+// skipped.
+//
+// # Safety
+//
+// `mesh` is null or live; each array is null or writable for its items.
+FyStatus fy_mesh_read_vertices(const struct FyMesh *mesh,
+                               float *normals,
+                               float *tangents,
+                               float *uvs,
+                               uint8_t *colors,
+                               size_t vertex_count);
+
+// Writes how many submeshes the mesh has: 1 when it doesn't split.
+//
+// # Safety
+//
+// `mesh` is null or live; `out` is null or writable.
+FyStatus fy_mesh_submesh_count(const struct FyMesh *mesh, size_t *out);
+
+// Writes where each submesh starts in the indices, and how many it has,
+// for `count` submeshes, which must be `fy_mesh_submesh_count`'s.
+//
+// # Safety
+//
+// `mesh` is null or live; `starts` and `counts` are each null or writable
+// for `count` u32s.
+FyStatus fy_mesh_read_submeshes(const struct FyMesh *mesh,
+                                uint32_t *starts,
+                                uint32_t *counts,
+                                size_t count);
+
 // Frees a mesh handle. Worlds that added it keep their share. Null is
 // ignored.
 //
@@ -1391,6 +1533,21 @@ FyStatus fy_mesh_add(const struct FyWorld *world, const struct FyMesh *mesh, uin
 //
 // `world` is null or live.
 FyStatus fy_mesh_remove(const struct FyWorld *world, uint64_t id);
+
+// Gives the submeshes of `object`'s mesh after the first a material each
+// (its `MeshRenderer`'s material draws the first), as Unity's
+// `Renderer.materials`: `count` ids at `materials`, each a material the
+// world has. A submesh without one isn't drawn. None (null with 0) takes
+// them away.
+//
+// # Safety
+//
+// `world` is null or live; `materials` is valid for `count` u64s (or null
+// with `count` 0).
+FyStatus fy_submesh_materials_set(const struct FyWorld *world,
+                                  uint64_t object,
+                                  const uint64_t *materials,
+                                  size_t count);
 
 // Adds a material and writes its id to `out`.
 //

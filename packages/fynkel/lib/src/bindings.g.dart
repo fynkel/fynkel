@@ -254,8 +254,14 @@ external int fy_mesh_counts(
 @ffi.Native<ffi.Void Function(ffi.Pointer<FyMesh>)>(isLeaf: true)
 external void fy_mesh_free(ffi.Pointer<FyMesh> mesh);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>)>(isLeaf: true)
+external int fy_mesh_mark_dynamic(ffi.Pointer<FyMesh> mesh);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMeshData>, ffi.Pointer<ffi.Pointer<FyMesh>>)>()
 external int fy_mesh_new(ffi.Pointer<FyMeshData> mesh, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
+external int fy_mesh_new_empty(ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
 external int fy_mesh_new_shape(int shape, ffi.Pointer<ffi.Pointer<FyMesh>> out);
@@ -271,6 +277,38 @@ external int fy_mesh_read(
   int index_count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint32>, ffi.Pointer<ffi.Uint32>, ffi.Size)>(
+  isLeaf: true,
+)
+external int fy_mesh_read_submeshes(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Uint32> starts,
+  ffi.Pointer<ffi.Uint32> counts,
+  int count,
+);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyMesh>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+  )
+>(isLeaf: true)
+external int fy_mesh_read_vertices(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Float> normals,
+  ffi.Pointer<ffi.Float> tangents,
+  ffi.Pointer<ffi.Float> uvs,
+  ffi.Pointer<ffi.Uint8> colors,
+  int vertex_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Uint32)>(isLeaf: true)
+external int fy_mesh_recalculate(ffi.Pointer<FyMesh> mesh, int what);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
 external int fy_mesh_remove(ffi.Pointer<FyWorld> world, int id);
 
@@ -282,6 +320,38 @@ external int fy_mesh_renderer_remove(ffi.Pointer<FyWorld> world, int id);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMeshRenderer>)>(isLeaf: true)
 external int fy_mesh_renderer_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMeshRenderer> value);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
+external int fy_mesh_set_colors(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Uint8> colors, int count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
+external int fy_mesh_set_normals(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> normals, int count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
+external int fy_mesh_set_positions(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> positions, int count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
+external int fy_mesh_set_tangents(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> tangents, int count);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint32>, ffi.Size, ffi.Pointer<ffi.Uint32>, ffi.Size)
+>(isLeaf: true)
+external int fy_mesh_set_triangles(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Uint32> indices,
+  int index_count,
+  ffi.Pointer<ffi.Uint32> starts,
+  int start_count,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
+external int fy_mesh_set_uvs(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> uvs, int count);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_mesh_submesh_count(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Size> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMesh>)>(isLeaf: true)
+external int fy_mesh_update(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMesh> mesh);
 
 @ffi.Native<
   ffi.Int32 Function(
@@ -485,6 +555,14 @@ external int fy_sky_image_size(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size)>(isLeaf: true)
+external int fy_submesh_materials_set(
+  ffi.Pointer<FyWorld> world,
+  int object,
+  ffi.Pointer<ffi.Uint64> materials,
+  int count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyTexture>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_texture_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyTexture> texture, ffi.Pointer<ffi.Uint64> out);
 
@@ -657,7 +735,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 41;
+const int FY_ABI_VERSION = 42;
 
 const int FY_APPLE_MORE = 2;
 
@@ -687,11 +765,15 @@ const int FY_MESH_CUBE = 0;
 
 const int FY_MESH_CYLINDER = 4;
 
+const int FY_MESH_NORMALS = 1;
+
 const int FY_MESH_PLANE = 2;
 
 const int FY_MESH_QUAD = 5;
 
 const int FY_MESH_SPHERE = 1;
+
+const int FY_MESH_TANGENTS = 2;
 
 const int FY_PARTICLES_CLEAR = 4;
 
@@ -1058,6 +1140,8 @@ final class FyMeshData extends ffi.Struct {
 
   external ffi.Pointer<ffi.Float> uvs;
 
+  external ffi.Pointer<ffi.Uint8> colors;
+
   @ffi.Size()
   external int vertex_count;
 
@@ -1066,23 +1150,34 @@ final class FyMeshData extends ffi.Struct {
   @ffi.Size()
   external int index_count;
 
+  external ffi.Pointer<ffi.Uint32> submesh_starts;
+
+  @ffi.Size()
+  external int submesh_start_count;
+
   static ffi.Pointer<FyMeshData> $allocate(
     ffi.Allocator $allocator, {
     required ffi.Pointer<ffi.Float> positions,
     required ffi.Pointer<ffi.Float> normals,
     required ffi.Pointer<ffi.Float> tangents,
     required ffi.Pointer<ffi.Float> uvs,
+    required ffi.Pointer<ffi.Uint8> colors,
     required int vertex_count,
     required ffi.Pointer<ffi.Uint32> indices,
     required int index_count,
+    required ffi.Pointer<ffi.Uint32> submesh_starts,
+    required int submesh_start_count,
   }) => $allocator<FyMeshData>()
     ..ref.positions = positions
     ..ref.normals = normals
     ..ref.tangents = tangents
     ..ref.uvs = uvs
+    ..ref.colors = colors
     ..ref.vertex_count = vertex_count
     ..ref.indices = indices
-    ..ref.index_count = index_count;
+    ..ref.index_count = index_count
+    ..ref.submesh_starts = submesh_starts
+    ..ref.submesh_start_count = submesh_start_count;
 }
 
 final class FyMeshRenderer extends ffi.Struct {

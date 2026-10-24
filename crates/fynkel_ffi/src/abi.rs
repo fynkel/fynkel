@@ -32,7 +32,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 41;
+pub const FY_ABI_VERSION: u32 = 42;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -379,8 +379,10 @@ pub const FY_MESH_QUAD: u32 = 5;
 
 /// A mesh made from code, for `fy_mesh_new`. Each array holds
 /// `vertex_count` items of packed floats: 3 per position and normal, 4 per
-/// tangent (xyz, then w = 1 or -1), 2 per UV. Normals, tangents and UVs
-/// may be null, and are then computed (see `fy_mesh_new`).
+/// tangent (xyz, then w = 1 or -1), 2 per UV; or 4 bytes per colour (sRGB
+/// RGBA). Normals, tangents, UVs and colours may be null: normals and
+/// tangents are then computed (see `fy_mesh_new`), UVs are (0, 0) and
+/// colours white.
 #[repr(C)]
 #[derive(Clone, Copy, Debug)]
 pub struct FyMeshData {
@@ -388,11 +390,22 @@ pub struct FyMeshData {
     pub normals: *const f32,
     pub tangents: *const f32,
     pub uvs: *const f32,
+    pub colors: *const u8,
     pub vertex_count: usize,
-    /// Three per triangle, counter-clockwise seen from the front.
+    /// Three per triangle, counter-clockwise seen from the front: every
+    /// submesh's, one after another.
     pub indices: *const u32,
     pub index_count: usize,
+    /// Where each submesh after the first starts in `indices`, in order,
+    /// each a multiple of 3; null with 0 for a mesh that doesn't split.
+    pub submesh_starts: *const u32,
+    pub submesh_start_count: usize,
 }
+
+/// `fy_mesh_recalculate`'s normals.
+pub const FY_MESH_NORMALS: u32 = 1;
+/// `fy_mesh_recalculate`'s tangents.
+pub const FY_MESH_TANGENTS: u32 = 2;
 
 // --- Conversions ---------------------------------------------------------------
 
@@ -1952,7 +1965,42 @@ pub unsafe extern "C" fn fy_light_remove(world: *const FyWorld, id: u64) -> FySt
 /// `fy_mesh_free`. Worlds that add it share its data, so freeing it
 /// doesn't take it from them.
 #[derive(Debug)]
-pub struct FyMesh(Arc<MeshData>);
+pub struct FyMesh(Arc<MeshData>, Vec<Arc<MeshData>>);
+
+/// How many copies a mesh that changes keeps from before, for its next
+/// changes to be written into: a world, and frames on their way to the
+/// GPU, hold the last few.
+const SPARE_MESHES: usize = 4;
+
+impl FyMesh {
+    fn new(data: Arc<MeshData>) -> Self {
+        FyMesh(data, Vec::new())
+    }
+
+    /// Its data, to change. While another holds it (a world, a frame on its
+    /// way to the GPU) the data is copied first: into a copy from before
+    /// that nothing holds any longer, so a mesh changed each frame
+    /// allocates nothing once it has a few, or else into a new one.
+    fn own(&mut self) -> &mut MeshData {
+        if Arc::get_mut(&mut self.0).is_none() {
+            let free = self.1.iter_mut().position(|spare| Arc::get_mut(spare).is_some());
+            let next = match free {
+                Some(i) => {
+                    let mut spare = self.1.swap_remove(i);
+                    Arc::get_mut(&mut spare).expect("nothing else holds it").clone_from(&self.0);
+                    spare
+                }
+                None => Arc::new((*self.0).clone()),
+            };
+            let held = std::mem::replace(&mut self.0, next);
+            if self.1.len() == SPARE_MESHES {
+                self.1.remove(0);
+            }
+            self.1.push(held);
+        }
+        Arc::get_mut(&mut self.0).expect("only this mesh holds it")
+    }
+}
 
 /// Writes a new mesh handle to `out`.
 ///
@@ -1964,7 +2012,7 @@ unsafe fn new_mesh(data: MeshData, out: *mut *mut FyMesh) -> Result<(), Error> {
         return Err(Error::null("out"));
     }
     // SAFETY: not null, and the caller promises it's writable.
-    unsafe { out.write(Box::into_raw(Box::new(FyMesh(Arc::new(data))))) };
+    unsafe { out.write(Box::into_raw(Box::new(FyMesh::new(Arc::new(data))))) };
     Ok(())
 }
 
@@ -2054,8 +2102,12 @@ pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyM
                 normals: items::<f32, 3>(m.normals, n, "normals")?,
                 tangents: items::<f32, 4>(m.tangents, n, "tangents")?,
                 uvs: items::<f32, 2>(m.uvs, n, "uvs")?,
+                colors: items::<u8, 4>(m.colors, n, "colors")?,
                 indices: items::<u32, 1>(m.indices, m.index_count, "indices")?
                     .ok_or_else(|| Error::null("indices"))?
+                    .as_flattened(),
+                submeshes: items::<u32, 1>(m.submesh_starts, m.submesh_start_count, "submesh_starts")?
+                    .unwrap_or_default()
                     .as_flattened(),
                 skin: None,
             }
@@ -2063,6 +2115,315 @@ pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyM
         let data = MeshData::new(parts).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a mesh with nothing in it, to change (`fy_mesh_set_positions` and
+/// the rest), and writes it to `out`. It draws nothing until it has
+/// triangles.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_empty(out: *mut *mut FyMesh) -> FyStatus {
+    // SAFETY: per this function's contract.
+    guard(|| unsafe { new_mesh(MeshData::empty(), out) })
+}
+
+/// Changes `mesh`'s own data, as `change` says. Worlds that have it keep
+/// what they had until `fy_mesh_update`. The data is copied when another
+/// holds it (a world, a frame on its way to the GPU), so the first change
+/// after an update copies the mesh and the rest change it in place; the
+/// copy goes into one from before when nothing holds that any longer.
+///
+/// # Safety
+///
+/// `mesh` is null or live, and not used on another thread meanwhile.
+unsafe fn change_mesh(mesh: *mut FyMesh, change: fynkel_world::MeshChange<'_>) -> Result<(), Error> {
+    // SAFETY: the caller promises it's null or live, and only theirs.
+    let mesh = unsafe { mesh.as_mut() }.ok_or_else(|| Error::null("mesh"))?;
+    mesh.own().change(change).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+}
+
+/// Sets the vertices' positions, three floats each (x, y, z). A different
+/// count from the mesh's resets every other channel: normals and tangents
+/// are worked out again, UVs go to (0, 0) and colours to white; then its
+/// triangles must not point past the last vertex, so set those first when
+/// there are fewer. The array is copied.
+///
+/// # Safety
+///
+/// `mesh` is null or live, used on no other thread meanwhile;
+/// `positions` is valid for `count * 3` floats (or null with `count` 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_positions(mesh: *mut FyMesh, positions: *const f32, count: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let positions = unsafe { items::<f32, 3>(positions, count, "positions") }?.unwrap_or_default();
+        let change = fynkel_world::MeshChange { positions: Some(positions), ..Default::default() };
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, change) }
+    })
+}
+
+/// Sets the vertices' normals, three floats each, one per vertex. Each is
+/// made unit length; none may be zero length.
+///
+/// # Safety
+///
+/// As `fy_mesh_set_positions`.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_normals(mesh: *mut FyMesh, normals: *const f32, count: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let normals = unsafe { items::<f32, 3>(normals, count, "normals") }?.unwrap_or_default();
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, fynkel_world::MeshChange { normals: Some(normals), ..Default::default() }) }
+    })
+}
+
+/// Sets the vertices' tangents, four floats each (a direction, then w = 1
+/// or -1), one per vertex.
+///
+/// # Safety
+///
+/// As `fy_mesh_set_positions`, for `count * 4` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_tangents(mesh: *mut FyMesh, tangents: *const f32, count: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let tangents = unsafe { items::<f32, 4>(tangents, count, "tangents") }?.unwrap_or_default();
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, fynkel_world::MeshChange { tangents: Some(tangents), ..Default::default() }) }
+    })
+}
+
+/// Sets the vertices' texture coordinates, two floats each, one per vertex.
+///
+/// # Safety
+///
+/// As `fy_mesh_set_positions`, for `count * 2` floats.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_uvs(mesh: *mut FyMesh, uvs: *const f32, count: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let uvs = unsafe { items::<f32, 2>(uvs, count, "uvs") }?.unwrap_or_default();
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, fynkel_world::MeshChange { uvs: Some(uvs), ..Default::default() }) }
+    })
+}
+
+/// Sets the vertices' colours, four bytes each (sRGB red, green and blue,
+/// then alpha), one per vertex. They multiply the material's colour.
+///
+/// # Safety
+///
+/// As `fy_mesh_set_positions`, for `count * 4` bytes.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_colors(mesh: *mut FyMesh, colors: *const u8, count: usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let colors = unsafe { items::<u8, 4>(colors, count, "colors") }?.unwrap_or_default();
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, fynkel_world::MeshChange { colors: Some(colors), ..Default::default() }) }
+    })
+}
+
+/// Sets the triangles: three indices each, counter-clockwise seen from the
+/// front, every submesh's one after another, and where each submesh after
+/// the first starts (as `FyMeshData`'s). None is allowed: the mesh then
+/// draws nothing.
+///
+/// # Safety
+///
+/// As `fy_mesh_set_positions`; `indices` is valid for `index_count` u32s
+/// and `starts` for `start_count` (each null with its count 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_set_triangles(
+    mesh: *mut FyMesh,
+    indices: *const u32,
+    index_count: usize,
+    starts: *const u32,
+    start_count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (indices, starts) = unsafe {
+            (
+                items::<u32, 1>(indices, index_count, "indices")?.unwrap_or_default().as_flattened(),
+                items::<u32, 1>(starts, start_count, "starts")?.unwrap_or_default().as_flattened(),
+            )
+        };
+        let change = fynkel_world::MeshChange { indices: Some((indices, starts)), ..Default::default() };
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, change) }
+    })
+}
+
+/// Works out the mesh's normals (`FY_MESH_NORMALS`), from the faces around
+/// each vertex weighted by their area, and its tangents
+/// (`FY_MESH_TANGENTS`), from its UVs without splitting a vertex. Normals
+/// first, when both.
+///
+/// # Safety
+///
+/// `mesh` is null or live, used on no other thread meanwhile.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_recalculate(mesh: *mut FyMesh, what: u32) -> FyStatus {
+    guard(|| {
+        let change = fynkel_world::MeshChange {
+            recalculate_normals: what & FY_MESH_NORMALS != 0,
+            recalculate_tangents: what & FY_MESH_TANGENTS != 0,
+            ..Default::default()
+        };
+        // SAFETY: per this function's contract.
+        unsafe { change_mesh(mesh, change) }
+    })
+}
+
+/// Says the mesh changes often (Unity's `MarkDynamic`): each view keeps it
+/// on the GPU with room to grow and writes changes where it is.
+///
+/// # Safety
+///
+/// `mesh` is null or live, used on no other thread meanwhile.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_mark_dynamic(mesh: *mut FyMesh) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { mesh.as_mut() }.ok_or_else(|| Error::null("mesh"))?;
+        if !mesh.0.is_dynamic() {
+            mesh.own().mark_dynamic();
+        }
+        Ok(())
+    })
+}
+
+/// Gives the world `mesh` as it is now under `id`, which it was added as
+/// (`fy_mesh_add`): its objects are drawn with it, and each view uploads it
+/// again, from the next frame. Nothing is copied.
+///
+/// # Safety
+///
+/// `world` and `mesh` are null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_update(world: *const FyWorld, id: u64, mesh: *const FyMesh) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let (world, data) = unsafe { (handle(world, "world")?, handle(mesh, "mesh")?) };
+        Ok(world.lock()?.set_mesh(self::mesh(id)?, Arc::clone(&data.0))?)
+    })
+}
+
+/// Copies the mesh's normals (3 floats each), tangents (4), UVs (2) and
+/// colours (4 bytes) to the arrays given, each for `vertex_count`
+/// vertices, which must be `fy_mesh_counts`' number. A null array is
+/// skipped.
+///
+/// # Safety
+///
+/// `mesh` is null or live; each array is null or writable for its items.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_read_vertices(
+    mesh: *const FyMesh,
+    normals: *mut f32,
+    tangents: *mut f32,
+    uvs: *mut f32,
+    colors: *mut u8,
+    vertex_count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        let vertices = mesh.0.vertices();
+        if vertex_count != vertices.len() {
+            return Err(Error::new(
+                FyStatus::WrongSize,
+                format!("the mesh has {} vertices, not {vertex_count}", vertices.len()),
+            ));
+        }
+        /// Each vertex's `N` values from `get`, to `out` if it isn't null.
+        ///
+        /// # Safety
+        ///
+        /// `out` is null or writable for `vertices.len() * N` values.
+        unsafe fn copy<T: Copy, const N: usize>(
+            out: *mut T,
+            vertices: &[fynkel_world::Vertex],
+            get: impl Fn(&fynkel_world::Vertex) -> [T; N],
+        ) {
+            if out.is_null() {
+                return;
+            }
+            // SAFETY: not null, and writable for this many per the contract.
+            let out = unsafe { std::slice::from_raw_parts_mut(out, vertices.len() * N) };
+            for (out, v) in out.chunks_exact_mut(N).zip(vertices) {
+                out.copy_from_slice(&get(v));
+            }
+        }
+        // SAFETY: per this function's contract.
+        unsafe {
+            copy(normals, vertices, |v| v.normal);
+            copy(tangents, vertices, |v| v.tangent);
+            copy(uvs, vertices, |v| v.uv);
+            copy(colors, vertices, |v| v.color);
+        }
+        Ok(())
+    })
+}
+
+/// Writes how many submeshes the mesh has: 1 when it doesn't split.
+///
+/// # Safety
+///
+/// `mesh` is null or live; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_submesh_count(mesh: *const FyMesh, out: *mut usize) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        // SAFETY: per this function's contract.
+        unsafe { write(out, mesh.0.submeshes().len(), "out") }
+    })
+}
+
+/// Writes where each submesh starts in the indices, and how many it has,
+/// for `count` submeshes, which must be `fy_mesh_submesh_count`'s.
+///
+/// # Safety
+///
+/// `mesh` is null or live; `starts` and `counts` are each null or writable
+/// for `count` u32s.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_read_submeshes(
+    mesh: *const FyMesh,
+    starts: *mut u32,
+    counts: *mut u32,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        let submeshes = mesh.0.submeshes();
+        if count != submeshes.len() {
+            return Err(Error::new(
+                FyStatus::WrongSize,
+                format!("the mesh has {} submeshes, not {count}", submeshes.len()),
+            ));
+        }
+        for (i, range) in submeshes.iter().enumerate() {
+            // SAFETY: each is null or writable for count u32s per the contract.
+            unsafe {
+                if !starts.is_null() {
+                    starts.add(i).write(range.start);
+                }
+                if !counts.is_null() {
+                    counts.add(i).write(range.end - range.start);
+                }
+            }
+        }
+        Ok(())
     })
 }
 
@@ -2182,6 +2543,33 @@ pub unsafe extern "C" fn fy_mesh_remove(world: *const FyWorld, id: u64) -> FySta
         // SAFETY: per this function's contract.
         let world = unsafe { handle(world, "world") }?;
         Ok(world.lock()?.remove_mesh(mesh(id)?)?)
+    })
+}
+
+/// Gives the submeshes of `object`'s mesh after the first a material each
+/// (its `MeshRenderer`'s material draws the first), as Unity's
+/// `Renderer.materials`: `count` ids at `materials`, each a material the
+/// world has. A submesh without one isn't drawn. None (null with 0) takes
+/// them away.
+///
+/// # Safety
+///
+/// `world` is null or live; `materials` is valid for `count` u64s (or null
+/// with `count` 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_submesh_materials_set(
+    world: *const FyWorld,
+    object: u64,
+    materials: *const u64,
+    count: usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        // SAFETY: per this function's contract.
+        let ids = unsafe { items::<u64, 1>(materials, count, "materials") }?.unwrap_or_default();
+        let ids = ids.iter().map(|&[id]| material(id)).collect::<Result<Vec<_>, _>>()?;
+        Ok(world.lock()?.set_submesh_materials(self::object(object)?, &ids)?)
     })
 }
 
@@ -2742,7 +3130,7 @@ pub unsafe extern "C" fn fy_model_mesh(model: *const FyModel, index: usize, out:
         let model = &unsafe { handle(model, "model") }?.0;
         let mesh = Arc::clone(nth(model.meshes(), index, "meshes")?);
         // SAFETY: per this function's contract.
-        unsafe { write(out, Box::into_raw(Box::new(FyMesh(mesh))), "out") }
+        unsafe { write(out, Box::into_raw(Box::new(FyMesh::new(mesh))), "out") }
     })
 }
 

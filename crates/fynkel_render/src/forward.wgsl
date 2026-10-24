@@ -159,8 +159,10 @@ struct VertexIn {
     // Along +u. w is 1 or -1: cross(normal, tangent) * w points up the
     // image (fynkel_mesh's convention, glTF's).
     @location(2) tangent: vec4<f32>,
-    // (0, 0) is the image's top-left.
-    @location(3) uv: vec2<f32>,
+    // xy: the UV's bits, (0, 0) the image's top-left; z: the vertex's
+    // colour, RGBA bytes (`vertex_uv` and `vertex_color`). Packed in one,
+    // as a vertex has no locations to spare.
+    @location(3) uv_color: vec3<u32>,
     // Per draw (instance step):
     // The model matrix's three rows (its last is always 0, 0, 0, 1).
     @location(4) model_0: vec4<f32>,
@@ -187,7 +189,8 @@ struct VertexOut {
     @builtin(position) clip: vec4<f32>,
     @location(0) world_position: vec3<f32>,
     @location(1) normal: vec3<f32>,
-    @location(2) @interpolate(flat) base_color: vec4<f32>,
+    // The material's colour times the vertex's.
+    @location(2) base_color: vec4<f32>,
     // As the instance's, with w 1, or -1 when the model matrix mirrors
     // (which flips the bitangent and the front face).
     @location(3) @interpolate(flat) params: vec4<f32>,
@@ -197,6 +200,22 @@ struct VertexOut {
     @location(7) @interpolate(flat) own: vec4<f32>,
     @location(8) @interpolate(flat) values: u32,
 };
+
+fn vertex_uv(packed: vec3<u32>) -> vec2<f32> {
+    return bitcast<vec2<f32>>(packed.xy);
+}
+
+// A vertex's colour, its sRGB bytes made linear, its alpha as it is.
+// White, as most are, is exactly white.
+fn vertex_color(packed: u32) -> vec4<f32> {
+    if packed == 0xffffffffu {
+        return vec4<f32>(1.0);
+    }
+    let c = unpack4x8unorm(packed);
+    let low = c.rgb / 12.92;
+    let high = pow((c.rgb + 0.055) / 1.055, vec3<f32>(2.4));
+    return vec4<f32>(select(high, low, c.rgb <= vec3<f32>(0.04045)), c.a);
+}
 
 @vertex
 fn vs_main(in: VertexIn) -> VertexOut {
@@ -232,8 +251,8 @@ fn place(in: VertexIn, model: array<vec4<f32>, 3>) -> VertexOut {
     // A tangent lies along the surface, so it turns with the model matrix
     // itself (unlike the normal).
     out.tangent = vec4<f32>(mat3x3<f32>(c0, c1, c2) * in.tangent.xyz, in.tangent.w * mirror);
-    out.uv = in.uv * in.uv_transform.xy + in.uv_transform.zw;
-    out.base_color = in.base_color;
+    out.uv = vertex_uv(in.uv_color) * in.uv_transform.xy + in.uv_transform.zw;
+    out.base_color = in.base_color * vertex_color(in.uv_color.z);
     out.params = vec4<f32>(in.params.xyz, mirror);
     out.emissive = in.emissive;
     out.own = in.own;

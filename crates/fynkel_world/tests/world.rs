@@ -234,9 +234,39 @@ fn meshes_lists_every_mesh_still_there() {
     let sphere = world.add_mesh(MeshData::sphere(8, 4));
     let plane = world.add_mesh(MeshData::plane());
     world.remove_mesh(sphere).unwrap();
-    let mut listed: Vec<_> = world.meshes().map(|(id, m)| (id, m.indices().len())).collect();
+    let mut listed: Vec<_> = world.meshes().map(|(id, m, _)| (id, m.indices().len())).collect();
     listed.sort();
     assert_eq!(listed, [(cube, 36), (plane, 6)]);
+}
+
+#[test]
+fn setting_a_mesh_shares_the_new_data_and_bumps_its_version() {
+    let (mut world, mesh, _) = world_with_cube();
+    let version = |world: &World| world.meshes().find(|&(id, ..)| id == mesh).unwrap().2;
+    assert_eq!(version(&world), 0);
+    let plane = std::sync::Arc::new(MeshData::plane());
+    world.set_mesh(mesh, std::sync::Arc::clone(&plane)).unwrap();
+    assert!(std::sync::Arc::ptr_eq(world.mesh(mesh).unwrap(), &plane));
+    assert_eq!(version(&world), 1);
+    world.remove_mesh(mesh).unwrap();
+    assert_eq!(world.set_mesh(mesh, MeshData::cube()), Err(WorldError::NoMesh(mesh)));
+}
+
+#[test]
+fn submesh_materials_must_exist_hold_their_materials_and_go_with_the_object() {
+    let (mut world, _, red) = world_with_cube();
+    let blue = world.add_material(Material::default()).unwrap();
+    let object = world.spawn();
+    assert!(world.submesh_materials(object).is_empty() && !world.has_submesh_materials());
+    world.set_submesh_materials(object, &[blue, red]).unwrap();
+    assert_eq!(world.submesh_materials(object), [blue, red]);
+    assert!(matches!(world.remove_material(blue), Err(WorldError::MaterialInUse { .. })));
+    let ghost = MaterialId::from_raw(77).unwrap();
+    assert_eq!(world.set_submesh_materials(object, &[ghost]), Err(WorldError::NoMaterial(ghost)));
+    assert_eq!(world.submesh_materials(object), [blue, red], "a refused change changes nothing");
+    world.despawn(object).unwrap();
+    assert!(!world.has_submesh_materials());
+    world.remove_material(blue).unwrap();
 }
 
 // --- Textures ----------------------------------------------------------------

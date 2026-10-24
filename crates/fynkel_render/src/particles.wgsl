@@ -36,7 +36,8 @@ struct FyParticleMeshIn {
     @location(0) position: vec3<f32>,
     @location(1) normal: vec3<f32>,
     @location(2) tangent: vec4<f32>,
-    @location(3) uv: vec2<f32>,
+    // The UV's bits, then the vertex's colour.
+    @location(3) uv_color: vec3<u32>,
 };
 
 // A trail's next point: the same instances, one on. A trail's point has,
@@ -175,7 +176,9 @@ fn vs_fy_particle_mesh(mesh: FyParticleMeshIn, in: FyParticleIn) -> FyParticleOu
     let c = cos(in.velocity_turn.w);
     let p = in.center_size.xyz + fy_turn_round_up(mesh.position, s, c) * in.center_size.w;
     let tangent = vec4<f32>(fy_turn_round_up(mesh.tangent.xyz, s, c), mesh.tangent.w);
-    return fy_particle_out(in, p, fy_turn_round_up(mesh.normal, s, c), tangent, mesh.uv);
+    var out = fy_particle_out(in, p, fy_turn_round_up(mesh.normal, s, c), tangent, vertex_uv(mesh.uv_color));
+    out.base_color *= vertex_color(mesh.uv_color.z);
+    return out;
 }
 
 fn fy_particle_vertex(in: FyParticleOut) -> VertexOut {

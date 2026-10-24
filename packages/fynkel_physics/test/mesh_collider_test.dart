@@ -3,6 +3,7 @@
 // by rays and by bodies, each mesh given to physics once.
 
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
@@ -162,6 +163,66 @@ void main() {
     // may be split in triangles).
     expect(lines.seen, inInclusiveRange(9 + 12, 9 + 18));
     physics.drawColliders = false;
+  });
+
+  group('a mesh that changes', () {
+    /// A flat square 4 m across at [y], in a mesh that can change.
+    Mesh ground(double y) => Mesh()
+      ..setPositions(Float32List.fromList([-2, y, -2, 2, y, -2, -2, y, 2, 2, y, 2]))
+      ..setTriangles(Uint32List.fromList([0, 2, 1, 1, 2, 3]));
+
+    void lower(Mesh mesh, double y) =>
+        mesh.setPositions(Float32List.fromList([-2, y, -2, 2, y, -2, -2, y, 2, 2, y, 2]));
+
+    test('its colliders follow it once the world is given the change', () {
+      final world = newWorld();
+      final mesh = ground(1);
+      world.add(GameObject(components: [MeshCollider(mesh: mesh)]));
+      world.add(
+        GameObject(
+          transform: Transform(position: const Vec3(10, 0, 0)),
+          components: [MeshRenderer(mesh), MeshCollider()],
+        ),
+      );
+      world.update(1 / 60);
+      expect(height(world, 1), closeTo(1, 1e-3));
+      expect(height(world, 11), closeTo(1, 1e-3));
+
+      lower(mesh, -0.5);
+      expect(height(world, 1), closeTo(1, 1e-3), reason: 'not till the world has it');
+      world.update(1 / 60);
+      expect(height(world, 1), closeTo(-0.5, 1e-3));
+      expect(height(world, 11), closeTo(-0.5, 1e-3));
+      expect(world.physics.meshCount, 1);
+
+      // Cleared, it keeps its last shape until it has triangles again.
+      mesh.clear();
+      world.update(1 / 60);
+      expect(height(world, 1), closeTo(-0.5, 1e-3));
+      lower(mesh, 0.25);
+      mesh.setTriangles(Uint32List.fromList([0, 2, 1, 1, 2, 3]));
+      world.update(1 / 60);
+      expect(height(world, 1), closeTo(0.25, 1e-3));
+    });
+
+    test('a body resting on it falls when it is dug away', () {
+      final world = newWorld();
+      final mesh = ground(0);
+      world.add(GameObject(components: [MeshCollider(mesh: mesh)]));
+      final ball = world.add(
+        GameObject(
+          transform: Transform(position: const Vec3(0, 1, 0)),
+          components: [SphereCollider(radius: 0.25), Rigidbody()],
+        ),
+      );
+      run(world, 4);
+      expect(ball.position.y, closeTo(0.25, 0.02));
+      expect(ball.get<Rigidbody>()!.isSleeping, isTrue, reason: 'settled');
+
+      lower(mesh, -1);
+      run(world, 2);
+      expect(ball.position.y, closeTo(-0.75, 0.02));
+    });
   });
 }
 

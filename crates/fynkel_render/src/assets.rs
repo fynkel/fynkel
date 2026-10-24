@@ -255,28 +255,31 @@ impl Kit {
     /// world's assets held.
     pub fn make_mesh(&self, data: &MeshData) -> MadeMesh {
         let device = &self.gpu.device;
+        let dynamic = data.is_dynamic() && data.skin().is_none();
+        let buffer = if dynamic { roomy_buffer } else { filled_buffer };
         let vertices =
-            filled_buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
-        let indices =
-            filled_buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
-        let (min, max) = data.bounds();
-        let centre = (min + max) * 0.5;
-        let radius = data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max);
+            buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
+        let indices = buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
+        let (centre, radius) = sphere(data);
         let skin = data.skin().map(|skin| GpuSkin {
             buffer: filled_buffer(device, "mesh joints", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(skin)),
             joints: joint_bounds(data.vertices(), skin),
         });
-        let outline_normals = outline_normals(data.vertices()).map(|normals| {
+        // Worked out once for a mesh that doesn't change: a hash map of every
+        // vertex is too slow for one that changes every frame.
+        let outline_normals = (!dynamic).then(|| outline_normals(data.vertices())).flatten().map(|normals| {
             filled_buffer(device, "mesh outline normals", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&normals))
         });
         MadeMesh(GpuMesh {
             vertices,
             indices,
             index_count: data.indices().len() as u32,
+            submeshes: data.submeshes().to_vec(),
             centre,
             radius,
             skin,
             outline_normals,
+            dynamic,
         })
     }
 
@@ -338,10 +341,19 @@ fn outline_normals(vertices: &[fynkel_mesh::Vertex]) -> Option<Vec<[f32; 3]>> {
     split.then(|| vertices.iter().map(|v| at[&v.position.map(f32::to_bits)].1.normalize_or_zero().into()).collect())
 }
 
+/// A sphere around every vertex of `data`: its centre and radius.
+fn sphere(data: &MeshData) -> (Vec3, f32) {
+    let (min, max) = data.bounds();
+    let centre = (min + max) * 0.5;
+    (centre, data.vertices().iter().map(|v| Vec3::from(v.position).distance(centre)).fold(0.0, f32::max))
+}
+
 pub(crate) struct GpuMesh {
     pub(crate) vertices: wgpu::Buffer,
     pub(crate) indices: wgpu::Buffer,
     pub(crate) index_count: u32,
+    /// Each submesh's indices.
+    pub(crate) submeshes: Vec<std::ops::Range<u32>>,
     /// A sphere around every vertex, in the mesh's own space: its centre
     /// and radius, for culling.
     pub(crate) centre: Vec3,
@@ -353,6 +365,9 @@ pub(crate) struct GpuMesh {
     /// others where it is, which an outline is pushed out along so it
     /// doesn't split at the corners. `[f32; 3]` each.
     pub(crate) outline_normals: Option<wgpu::Buffer>,
+    /// Its buffers have room to grow and are written in place
+    /// ([`MeshData::mark_dynamic`]).
+    dynamic: bool,
 }
 
 /// What a skeleton bends a mesh with: each vertex's joints and weights
@@ -366,6 +381,34 @@ pub(crate) struct GpuSkin {
 }
 
 impl GpuMesh {
+    /// The indices of submesh `n`, or none for one it hasn't.
+    pub(crate) fn submesh(&self, n: u32) -> std::ops::Range<u32> {
+        self.submeshes.get(n as usize).cloned().unwrap_or(0..0)
+    }
+
+    /// Writes `data` into a dynamic mesh's buffers where they are, if it
+    /// fits; returns whether it did.
+    fn write(&mut self, queue: &wgpu::Queue, data: &MeshData) -> bool {
+        let (vertices, indices): (&[u8], &[u8]) =
+            (bytemuck::cast_slice(data.vertices()), bytemuck::cast_slice(data.indices()));
+        let fits = vertices.len() as u64 <= self.vertices.size() && indices.len() as u64 <= self.indices.size();
+        if !self.dynamic || !data.is_dynamic() || data.skin().is_some() || !fits {
+            return false;
+        }
+        // Queued: frames already sent draw with what was there.
+        if !vertices.is_empty() {
+            queue.write_buffer(&self.vertices, 0, vertices);
+        }
+        if !indices.is_empty() {
+            queue.write_buffer(&self.indices, 0, indices);
+        }
+        self.index_count = data.indices().len() as u32;
+        self.submeshes.clear();
+        self.submeshes.extend_from_slice(data.submeshes());
+        (self.centre, self.radius) = sphere(data);
+        true
+    }
+
     fn bytes(&self) -> u64 {
         self.vertices.size()
             + self.indices.size()
@@ -458,7 +501,14 @@ impl Assets {
     /// Uploads `data` under `key`, replacing any mesh already there.
     /// [`Kit::make_mesh`] and [`Assets::insert_mesh`] do it without holding
     /// the assets while the GPU's buffers are made.
+    /// A dynamic mesh ([`MeshData::mark_dynamic`]) already under `key` is
+    /// written where it is, while it fits.
     pub fn upload_mesh(&mut self, key: MeshKey, data: &MeshData) {
+        if let Some(mesh) = self.meshes.get_mut(&key)
+            && mesh.write(&self.kit.gpu.queue, data)
+        {
+            return;
+        }
         let made = self.kit.make_mesh(data);
         self.insert_mesh(key, made);
     }
@@ -550,6 +600,20 @@ pub(crate) fn joints_entry() -> wgpu::BindGroupLayoutEntry {
         },
         count: None,
     }
+}
+
+/// A buffer holding `contents` with room for half as much again, for a
+/// mesh that changes: written in place by the queue, so not mapped.
+fn roomy_buffer(device: &wgpu::Device, label: &str, usage: wgpu::BufferUsages, contents: &[u8]) -> wgpu::Buffer {
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some(label),
+        size: (contents.len() as u64 * 3 / 2).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT).max(256),
+        usage: usage | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: true,
+    });
+    buffer.get_mapped_range_mut(..).expect("mapped at creation").slice(..contents.len()).copy_from_slice(contents);
+    buffer.unmap();
+    buffer
 }
 
 /// A buffer holding `contents`, written by the CPU where the GPU reads it:

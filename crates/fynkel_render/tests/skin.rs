@@ -40,6 +40,7 @@ fn bar() -> MeshData {
         uvs: Some(&uvs),
         indices: &indices,
         skin: Some((&joints, &weights)),
+        ..MeshParts::default()
     })
     .expect("a bar")
 }
@@ -59,6 +60,7 @@ fn plain_bar() -> MeshData {
         uvs: Some(&uvs),
         indices: skinned.indices(),
         skin: None,
+        ..MeshParts::default()
     })
     .expect("a bar")
 }

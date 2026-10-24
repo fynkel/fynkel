@@ -1,6 +1,7 @@
 //! Triangle meshes on the CPU (stage 2 plan §3.2): the vertex layout, the
 //! built-in shapes, and [`MeshData::new`], which checks a mesh made from
-//! code or a file and fills in what it leaves out.
+//! code or a file and fills in what it leaves out. [`MeshData::change`]
+//! changes one while the game runs (stage 13).
 //!
 //! Conventions, glTF's:
 //! - Front faces wind counter-clockwise seen from outside, and normals
@@ -15,12 +16,13 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::ops::Range;
 
 use glam::{Vec3, Vec4};
 
 mod shapes;
 
-/// One vertex, as the GPU reads it: 48 bytes.
+/// One vertex, as the GPU reads it: 52 bytes.
 #[repr(C)]
 #[derive(Clone, Copy, Debug, PartialEq, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct Vertex {
@@ -31,9 +33,15 @@ pub struct Vertex {
     /// bitangent's side (see the module docs).
     pub tangent: [f32; 4],
     pub uv: [f32; 2],
+    /// sRGB and alpha, 0 to 255 (Unity's `Color32`): multiplied into the
+    /// material's colour. White for a mesh that gives none.
+    pub color: [u8; 4],
 }
 
-const _: () = assert!(std::mem::size_of::<Vertex>() == 48);
+const _: () = assert!(std::mem::size_of::<Vertex>() == 52);
+
+/// The colour a vertex has when its mesh gives none.
+pub const WHITE: [u8; 4] = [255; 4];
 
 /// What bends a vertex with a skeleton, as the GPU reads it: 16 bytes,
 /// beside its [`Vertex`].
@@ -50,14 +58,69 @@ const _: () = assert!(std::mem::size_of::<SkinVertex>() == 16);
 
 /// A checked triangle list: every index points at a vertex, and every
 /// vertex has a unit normal and tangent.
-#[derive(Clone, Debug, Default, PartialEq)]
+#[derive(Debug, Default, PartialEq)]
 pub struct MeshData {
     vertices: Vec<Vertex>,
     indices: Vec<u32>,
     /// One per vertex for a skinned mesh, none for another.
     skin: Vec<SkinVertex>,
+    /// Each submesh's range of `indices`, one after another from 0 to the
+    /// end; one for a mesh that doesn't split.
+    submeshes: Vec<Range<u32>>,
     /// The smallest and largest corner of the box around every vertex.
     bounds: (Vec3, Vec3),
+    /// Changed often: the GPU's copy has room to grow and is written in
+    /// place ([`MeshData::mark_dynamic`]).
+    dynamic: bool,
+    /// Which setting of the indices it has, so a copy into a mesh that has
+    /// the same ones already leaves them.
+    indices_made: Made,
+}
+
+/// A number for each time a mesh's indices are set, never the same twice;
+/// two meshes are equal whatever theirs are.
+#[derive(Clone, Copy, Debug, Default)]
+struct Made(u64);
+
+impl Made {
+    fn next() -> Self {
+        static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+        Made(LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
+    }
+}
+
+impl PartialEq for Made {
+    fn eq(&self, _: &Self) -> bool {
+        true
+    }
+}
+
+impl Clone for MeshData {
+    fn clone(&self) -> Self {
+        MeshData {
+            vertices: self.vertices.clone(),
+            indices: self.indices.clone(),
+            skin: self.skin.clone(),
+            submeshes: self.submeshes.clone(),
+            bounds: self.bounds,
+            dynamic: self.dynamic,
+            indices_made: self.indices_made,
+        }
+    }
+
+    /// Into the room it already has, so a copy kept for the next change
+    /// allocates nothing.
+    fn clone_from(&mut self, source: &Self) {
+        self.vertices.clone_from(&source.vertices);
+        if self.indices_made.0 == 0 || self.indices_made.0 != source.indices_made.0 {
+            self.indices.clone_from(&source.indices);
+            self.indices_made = source.indices_made;
+        }
+        self.skin.clone_from(&source.skin);
+        self.submeshes.clone_from(&source.submeshes);
+        self.bounds = source.bounds;
+        self.dynamic = source.dynamic;
+    }
 }
 
 /// What [`MeshData::new`] takes. Only positions and indices are required.
@@ -77,8 +140,13 @@ pub struct MeshParts<'a> {
     pub tangents: Option<&'a [[f32; 4]]>,
     /// (0, 0) when left out.
     pub uvs: Option<&'a [[f32; 2]]>,
+    /// White when left out.
+    pub colors: Option<&'a [[u8; 4]]>,
     /// Three per triangle.
     pub indices: &'a [u32],
+    /// Where each submesh after the first starts in `indices`, in order:
+    /// empty for one submesh.
+    pub submeshes: &'a [u32],
     /// For a mesh a skeleton bends: each vertex's four joints, and how
     /// much each moves it. Weights are 0 or more; they're scaled to add up
     /// to 1, and a vertex with none follows its first joint alone.
@@ -122,6 +190,14 @@ pub enum MeshError {
     NegativeWeight {
         at: usize,
     },
+    /// A submesh starts before the one before it, past the end, or in the
+    /// middle of a triangle.
+    BadSubmesh {
+        at: usize,
+        start: u32,
+    },
+    /// A skinned mesh can't be changed (stage 13 §5).
+    Skinned,
 }
 
 impl fmt::Display for MeshError {
@@ -142,6 +218,12 @@ impl fmt::Display for MeshError {
             MeshError::ZeroLength { what, at } => write!(f, "{what} {at} has no direction (zero length)"),
             MeshError::TangentSign { at, w } => write!(f, "tangent {at} has w = {w}; it must be 1 or -1"),
             MeshError::NegativeWeight { at } => write!(f, "vertex {at} has a skin weight below 0"),
+            MeshError::BadSubmesh { at, start } => write!(
+                f,
+                "submesh {} starts at index {start}: each must start on a triangle, in order, within the indices",
+                at + 1
+            ),
+            MeshError::Skinned => write!(f, "a skinned mesh can't be changed"),
         }
     }
 }
@@ -156,7 +238,7 @@ impl MeshData {
     /// out (see [`MeshParts`]). The result may have more vertices than
     /// `parts`, when generated tangents split some.
     pub fn new(parts: MeshParts<'_>) -> Result<Self, MeshError> {
-        let MeshParts { positions, normals, tangents, uvs, indices, skin } = parts;
+        let MeshParts { positions, normals, tangents, uvs, colors, indices, submeshes, skin } = parts;
         let n = positions.len();
         if indices.is_empty() {
             return Err(MeshError::NoTriangles);
@@ -171,6 +253,7 @@ impl MeshData {
             ("normals", normals.map(<[_]>::len)),
             ("tangents", tangents.map(<[_]>::len)),
             ("uvs", uvs.map(<[_]>::len)),
+            ("colors", colors.map(<[_]>::len)),
             ("joints", skin.map(|(j, _)| j.len())),
             ("weights", skin.map(|(_, w)| w.len())),
         ] {
@@ -178,9 +261,8 @@ impl MeshData {
                 return Err(MeshError::WrongLength { what, len, positions: n });
             }
         }
-        if let Some((at, &index)) = indices.iter().enumerate().find(|&(_, &i)| i as usize >= n) {
-            return Err(MeshError::IndexOutOfRange { at, index, vertices: n });
-        }
+        in_range(indices, n)?;
+        let submeshes = submesh_ranges(indices.len(), submeshes)?;
         finite("position", positions.iter().flatten().copied(), 3)?;
         finite("uv", uvs.unwrap_or_default().iter().flatten().copied(), 2)?;
         let skin = match skin {
@@ -206,15 +288,23 @@ impl MeshData {
             None => angle_weighted_normals(positions, indices),
         };
         let uv = |i: usize| uvs.map_or([0.0; 2], |uvs| uvs[i]);
+        let color = |i: usize| colors.map_or(WHITE, |colors| colors[i]);
         let mut mesh = Self {
             vertices: (0..n)
-                .map(|i| Vertex { position: positions[i], normal: normals[i].into(), tangent: [0.0; 4], uv: uv(i) })
+                .map(|i| Vertex {
+                    position: positions[i],
+                    normal: normals[i].into(),
+                    tangent: [0.0; 4],
+                    uv: uv(i),
+                    color: color(i),
+                })
                 .collect(),
             indices: indices.to_vec(),
             skin,
-            bounds: positions.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), &p| {
-                (lo.min(Vec3::from(p)), hi.max(Vec3::from(p)))
-            }),
+            submeshes,
+            bounds: bounds(positions.iter().copied()),
+            dynamic: false,
+            indices_made: Made::next(),
         };
 
         match (tangents, uvs) {
@@ -246,6 +336,12 @@ impl MeshData {
 
     pub fn indices(&self) -> &[u32] {
         &self.indices
+    }
+
+    /// Each submesh's range of [`MeshData::indices`]: one for a mesh that
+    /// doesn't split.
+    pub fn submeshes(&self) -> &[Range<u32>] {
+        &self.submeshes
     }
 
     /// Each vertex's joints and weights, for a mesh a skeleton bends.
@@ -301,6 +397,268 @@ impl MeshData {
             }
         }
     }
+}
+
+/// What [`MeshData::change`] replaces: each channel given replaces that
+/// channel, and the rest stay (stage 13 §3.1).
+#[derive(Clone, Copy, Debug, Default)]
+pub struct MeshChange<'a> {
+    /// A different count from the mesh's resets every channel not given
+    /// with it: normals and tangents are worked out again, UVs go to
+    /// (0, 0) and colours to white.
+    pub positions: Option<&'a [[f32; 3]]>,
+    pub normals: Option<&'a [[f32; 3]]>,
+    pub tangents: Option<&'a [[f32; 4]]>,
+    pub uvs: Option<&'a [[f32; 2]]>,
+    pub colors: Option<&'a [[u8; 4]]>,
+    /// Every submesh's triangles, one after another, and where each after
+    /// the first starts (as [`MeshParts::submeshes`]).
+    pub indices: Option<(&'a [u32], &'a [u32])>,
+    /// Each vertex's normal again from the faces around it, weighted by
+    /// their area (Unity's `RecalculateNormals`): quicker than
+    /// [`MeshData::new`]'s weighting by angle, for a mesh that changes each
+    /// frame.
+    pub recalculate_normals: bool,
+    /// Each vertex's tangent again from its UVs, without splitting any
+    /// vertex (Unity's `RecalculateTangents`): quicker than MikkTSpace.
+    pub recalculate_tangents: bool,
+}
+
+impl MeshData {
+    /// A mesh with nothing in it yet, to [`change`](MeshData::change): it
+    /// draws nothing.
+    pub fn empty() -> Self {
+        Self { submeshes: std::iter::once(0..0).collect(), ..Self::default() }
+    }
+
+    /// Replaces what `change` gives, in place. The mesh is checked as
+    /// [`MeshData::new`] checks one, but may have no triangles; a refused
+    /// change leaves it as it was, with a message saying why. A skinned
+    /// mesh is refused.
+    pub fn change(&mut self, change: MeshChange<'_>) -> Result<(), MeshError> {
+        if !self.skin.is_empty() {
+            return Err(MeshError::Skinned);
+        }
+        let MeshChange { positions, normals, tangents, uvs, colors, indices, .. } = change;
+        let n = positions.map_or(self.vertices.len(), <[_]>::len);
+        if u32::try_from(n).is_err() {
+            return Err(MeshError::TooManyVertices(n));
+        }
+        for (what, len) in [
+            ("normals", normals.map(<[_]>::len)),
+            ("tangents", tangents.map(<[_]>::len)),
+            ("uvs", uvs.map(<[_]>::len)),
+            ("colors", colors.map(<[_]>::len)),
+        ] {
+            if let Some(len) = len.filter(|&len| len != n) {
+                return Err(MeshError::WrongLength { what, len, positions: n });
+            }
+        }
+        if let Some((indices, _)) = indices
+            && !indices.len().is_multiple_of(3)
+        {
+            return Err(MeshError::NotTriangles(indices.len()));
+        }
+        // The triangles it has already point at its vertices: they're
+        // looked at again only when new, or the count changes.
+        if indices.is_some() || n != self.vertices.len() {
+            in_range(indices.map_or(&self.indices[..], |(i, _)| i), n)?;
+        }
+        let submeshes = match indices {
+            Some((indices, starts)) => Some(submesh_ranges(indices.len(), starts)?),
+            None => None,
+        };
+        let position_bounds = positions.map(checked_bounds).transpose()?;
+        finite("normal", normals.unwrap_or_default().iter().flatten().copied(), 3)?;
+        finite("tangent", tangents.unwrap_or_default().iter().flatten().copied(), 4)?;
+        finite("uv", uvs.unwrap_or_default().iter().flatten().copied(), 2)?;
+        for (at, &v) in normals.unwrap_or_default().iter().enumerate() {
+            if Vec3::from(v).length_squared() < 1e-12 {
+                return Err(MeshError::ZeroLength { what: "normal", at });
+            }
+        }
+        for (at, &t) in tangents.unwrap_or_default().iter().enumerate() {
+            if Vec3::from_slice(&t[..3]).length_squared() < 1e-12 {
+                return Err(MeshError::ZeroLength { what: "tangent", at });
+            }
+            if t[3].abs() != 1.0 {
+                return Err(MeshError::TangentSign { at, w: t[3] });
+            }
+        }
+
+        // Checked: nothing below fails.
+        let resized = n != self.vertices.len();
+        let blank = Vertex {
+            position: [0.0; 3],
+            normal: FALLBACK_NORMAL.into(),
+            tangent: [1.0, 0.0, 0.0, 1.0],
+            uv: [0.0; 2],
+            color: WHITE,
+        };
+        if resized {
+            self.vertices.clear();
+            self.vertices.resize(n, blank);
+        }
+        if let Some(positions) = positions {
+            for (v, &p) in self.vertices.iter_mut().zip(positions) {
+                v.position = p;
+            }
+            self.bounds = position_bounds.unwrap_or_default();
+        }
+        if let Some(normals) = normals {
+            for (v, &m) in self.vertices.iter_mut().zip(normals) {
+                v.normal = Vec3::from(m).normalize().into();
+            }
+        }
+        if let Some(tangents) = tangents {
+            for (v, &t) in self.vertices.iter_mut().zip(tangents) {
+                v.tangent = Vec3::from_slice(&t[..3]).normalize().extend(t[3]).into();
+            }
+        }
+        if let Some(uvs) = uvs {
+            for (v, &uv) in self.vertices.iter_mut().zip(uvs) {
+                v.uv = uv;
+            }
+        }
+        if let Some(colors) = colors {
+            for (v, &c) in self.vertices.iter_mut().zip(colors) {
+                v.color = c;
+            }
+        }
+        if let (Some((indices, _)), Some(submeshes)) = (indices, submeshes) {
+            self.indices.clear();
+            self.indices.extend_from_slice(indices);
+            self.indices_made = Made::next();
+            self.submeshes = submeshes;
+        }
+        if change.recalculate_normals || (resized && normals.is_none()) {
+            self.recalculate_normals();
+        }
+        if change.recalculate_tangents || (resized && tangents.is_none()) {
+            self.recalculate_tangents();
+        }
+        Ok(())
+    }
+
+    /// Says the mesh changes often, as Unity's `MarkDynamic`: each view
+    /// keeps its vertices and triangles on the GPU with room to grow, half
+    /// again, and writes a change into them where they are. Its outline
+    /// is pushed out along its own normals, not along ones averaged where
+    /// corners split.
+    pub fn mark_dynamic(&mut self) {
+        self.dynamic = true;
+    }
+
+    pub fn is_dynamic(&self) -> bool {
+        self.dynamic
+    }
+
+    /// Each vertex's normal from the faces around it, weighted by their
+    /// area. A vertex no face with an area touches faces +Y.
+    pub fn recalculate_normals(&mut self) {
+        // Summed in the normals themselves, so nothing is allocated.
+        for v in &mut self.vertices {
+            v.normal = [0.0; 3];
+        }
+        let vertices = &mut self.vertices;
+        for tri in self.indices.chunks_exact(3) {
+            let p = [0, 1, 2].map(|k| Vec3::from(vertices[tri[k] as usize].position));
+            // Twice the triangle's area long, so bigger faces count more.
+            let face = (p[1] - p[0]).cross(p[2] - p[0]);
+            for &i in tri {
+                let n = &mut vertices[i as usize].normal;
+                *n = (Vec3::from(*n) + face).into();
+            }
+        }
+        for v in vertices {
+            v.normal = Vec3::from(v.normal).try_normalize().unwrap_or(FALLBACK_NORMAL).into();
+        }
+    }
+
+    /// Each vertex's tangent from its UVs (Lengyel's method): along u, at
+    /// right angles to the normal, w for the side the image's up is on.
+    /// No vertex is split, so a mirrored seam averages; MikkTSpace
+    /// ([`MeshData::new`]) splits it.
+    pub fn recalculate_tangents(&mut self) {
+        let mut along_u = vec![Vec3::ZERO; self.vertices.len()];
+        let mut along_v = vec![Vec3::ZERO; self.vertices.len()];
+        for tri in self.indices.chunks_exact(3) {
+            let v = [0, 1, 2].map(|k| self.vertices[tri[k] as usize]);
+            let (e1, e2) = (
+                Vec3::from(v[1].position) - Vec3::from(v[0].position),
+                Vec3::from(v[2].position) - Vec3::from(v[0].position),
+            );
+            let (du1, dv1) = (v[1].uv[0] - v[0].uv[0], v[1].uv[1] - v[0].uv[1]);
+            let (du2, dv2) = (v[2].uv[0] - v[0].uv[0], v[2].uv[1] - v[0].uv[1]);
+            let det = du1 * dv2 - du2 * dv1;
+            if det.abs() < 1e-12 {
+                continue;
+            }
+            let u = (e1 * dv2 - e2 * dv1) / det;
+            let w = (e2 * du1 - e1 * du2) / det;
+            for &i in tri {
+                along_u[i as usize] += u;
+                along_v[i as usize] += w;
+            }
+        }
+        for ((vertex, u), v) in self.vertices.iter_mut().zip(along_u).zip(along_v) {
+            let n = Vec3::from(vertex.normal);
+            let Some(t) = (u - n * n.dot(u)).try_normalize() else {
+                vertex.tangent = any_tangent(n).into();
+                continue;
+            };
+            // v grows down the image; the bitangent points up it.
+            let w = if n.cross(t).dot(v) > 0.0 { -1.0 } else { 1.0 };
+            vertex.tangent = t.extend(w).into();
+        }
+    }
+}
+
+/// Fails on the first index past the last of `n` vertices.
+fn in_range(indices: &[u32], n: usize) -> Result<(), MeshError> {
+    match indices.iter().enumerate().find(|&(_, &i)| i as usize >= n) {
+        Some((at, &index)) => Err(MeshError::IndexOutOfRange { at, index, vertices: n }),
+        None => Ok(()),
+    }
+}
+
+/// The submeshes' ranges of `count` indices, from where each after the
+/// first starts.
+fn submesh_ranges(count: usize, starts: &[u32]) -> Result<Vec<Range<u32>>, MeshError> {
+    let count = count as u32;
+    let mut ranges = Vec::with_capacity(starts.len() + 1);
+    let mut from = 0;
+    for (at, &start) in starts.iter().enumerate() {
+        if start < from || start > count || !start.is_multiple_of(3) {
+            return Err(MeshError::BadSubmesh { at, start });
+        }
+        ranges.push(from..start);
+        from = start;
+    }
+    ranges.push(from..count);
+    Ok(ranges)
+}
+
+/// The smallest and largest corner of the box around `positions`; the
+/// origin for none.
+/// The box around `positions`, refusing one that isn't finite: one pass
+/// for both.
+fn checked_bounds(positions: &[[f32; 3]]) -> Result<(Vec3, Vec3), MeshError> {
+    let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for (at, &p) in positions.iter().enumerate() {
+        let p = Vec3::from(p);
+        if !p.is_finite() {
+            return Err(MeshError::NotFinite { what: "position", at });
+        }
+        (lo, hi) = (lo.min(p), hi.max(p));
+    }
+    Ok(if lo.x > hi.x { (Vec3::ZERO, Vec3::ZERO) } else { (lo, hi) })
+}
+
+fn bounds(positions: impl Iterator<Item = [f32; 3]>) -> (Vec3, Vec3) {
+    let (lo, hi) = positions
+        .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), p| (lo.min(Vec3::from(p)), hi.max(Vec3::from(p))));
+    if lo.x > hi.x { (Vec3::ZERO, Vec3::ZERO) } else { (lo, hi) }
 }
 
 /// A vertex's joints and weights, the weights scaled to add up to 65535

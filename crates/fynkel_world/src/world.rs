@@ -169,7 +169,11 @@ pub struct World {
     pub(crate) entities: IdMap<ObjectId, hecs::Entity>,
     pub(crate) hierarchy: Hierarchy,
     object_ids: IdCounter,
-    meshes: IdMap<MeshId, Arc<MeshData>>,
+    /// Each mesh, and its version: a new one each time it's set.
+    meshes: IdMap<MeshId, (Arc<MeshData>, u64)>,
+    /// The materials an object's mesh's submeshes after the first are
+    /// drawn with (stage 13), for those that have any.
+    submesh_materials: IdMap<ObjectId, Vec<MaterialId>>,
     mesh_ids: IdCounter,
     materials: IdMap<MaterialId, Material>,
     material_ids: IdCounter,
@@ -231,6 +235,7 @@ impl World {
             hierarchy: Hierarchy::default(),
             object_ids: IdCounter::new(),
             meshes: IdMap::default(),
+            submesh_materials: IdMap::default(),
             mesh_ids: IdCounter::new(),
             materials: IdMap::default(),
             material_ids: IdCounter::new(),
@@ -277,6 +282,9 @@ impl World {
             }
             if !self.skins.is_empty() {
                 self.skins.remove(&id);
+            }
+            if !self.submesh_materials.is_empty() {
+                self.submesh_materials.remove(&id);
             }
             if !self.camera_effects.is_empty() {
                 self.camera_effects.remove(&id);
@@ -429,17 +437,56 @@ impl World {
     /// it from here, and raycasts read it.
     pub fn add_mesh(&mut self, mesh: impl Into<Arc<MeshData>>) -> MeshId {
         let id = MeshId::new(self.mesh_ids.next());
-        self.meshes.insert(id, mesh.into());
+        self.meshes.insert(id, (mesh.into(), 0));
         id
     }
 
     pub fn mesh(&self, id: MeshId) -> Result<&Arc<MeshData>> {
-        self.meshes.get(&id).ok_or(WorldError::NoMesh(id))
+        self.meshes.get(&id).map(|(mesh, _)| mesh).ok_or(WorldError::NoMesh(id))
     }
 
-    /// Every mesh, in no particular order.
-    pub fn meshes(&self) -> impl Iterator<Item = (MeshId, &Arc<MeshData>)> + '_ {
-        self.meshes.iter().map(|(&id, mesh)| (id, mesh))
+    /// Changes a mesh (stage 13): every object drawn with it, and each
+    /// view, has the new one from the next frame. The data is shared, not
+    /// copied.
+    pub fn set_mesh(&mut self, id: MeshId, mesh: impl Into<Arc<MeshData>>) -> Result<()> {
+        let (data, version) = self.meshes.get_mut(&id).ok_or(WorldError::NoMesh(id))?;
+        *data = mesh.into();
+        *version += 1;
+        Ok(())
+    }
+
+    /// Every mesh, and its version, in no particular order.
+    pub fn meshes(&self) -> impl Iterator<Item = (MeshId, &Arc<MeshData>, u64)> + '_ {
+        self.meshes.iter().map(|(&id, (mesh, version))| (id, mesh, *version))
+    }
+
+    /// The materials `object`'s mesh's submeshes after the first are drawn
+    /// with, one each (its `MeshRenderer`'s material draws the first), as
+    /// Unity's `Renderer.materials`. A submesh without one isn't drawn.
+    /// None takes them away.
+    pub fn set_submesh_materials(&mut self, object: ObjectId, materials: &[MaterialId]) -> Result<()> {
+        self.entity(object)?;
+        if let Some(&missing) = materials.iter().find(|m| !self.materials.contains_key(m)) {
+            return Err(WorldError::NoMaterial(missing));
+        }
+        if materials.is_empty() {
+            self.submesh_materials.remove(&object);
+        } else {
+            let kept = self.submesh_materials.entry(object).or_default();
+            kept.clear();
+            kept.extend_from_slice(materials);
+        }
+        Ok(())
+    }
+
+    /// [`World::set_submesh_materials`]' materials for `object`.
+    pub fn submesh_materials(&self, object: ObjectId) -> &[MaterialId] {
+        self.submesh_materials.get(&object).map_or(&[], Vec::as_slice)
+    }
+
+    /// Whether any object has materials for submeshes after the first.
+    pub fn has_submesh_materials(&self) -> bool {
+        !self.submesh_materials.is_empty()
     }
 
     /// Removes a mesh. Refused while any object's [`MeshRenderer`] uses it,
@@ -551,6 +598,9 @@ impl World {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         if let Some((&object, _)) = self.trails.iter().find(|(_, t)| t.settings().material == Some(id)) {
+            return Err(WorldError::MaterialInUse { material: id, object });
+        }
+        if let Some((&object, _)) = self.submesh_materials.iter().find(|(_, m)| m.contains(&id)) {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
         self.materials.remove(&id);

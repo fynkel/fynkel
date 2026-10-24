@@ -851,6 +851,11 @@ final class MeshRenderer extends Component {
   Color? _color;
   bool _castShadows = true, _receiveShadows = true;
 
+  // The materials of the mesh's parts after the first, and whether the
+  // engine has some.
+  List<Material>? _more;
+  bool _moreSent = false;
+
   // Its numbers for its material's shader, its `PerObject`'s, in order.
   List<double>? _own;
 
@@ -879,6 +884,23 @@ final class MeshRenderer extends Component {
     _material = value;
     if (_write() case final failed?) {
       _material = old;
+      failed.raise();
+    }
+  }
+
+  /// One material for each part of its mesh (Unity's `sharedMaterials`):
+  /// the first is [material], and draws the first part; each after it
+  /// draws the next part ([Mesh.setTriangles]' `submeshStarts`). A part
+  /// without one isn't drawn. A list of one is [material] alone.
+  List<Material> get materials => List.unmodifiable([?_material, ...?_more]);
+  set materials(List<Material> value) {
+    _checkChangeable();
+    final (oldMaterial, oldMore) = (_material, _more);
+    _material = value.isEmpty ? null : value.first;
+    _more = value.length > 1 ? List.unmodifiable(value.skip(1)) : null;
+    if (_write() case final failed?) {
+      _material = oldMaterial;
+      _more = oldMore;
       failed.raise();
     }
   }

@@ -25,7 +25,7 @@ pub use components::{Camera, Component, Light, LightKind, MeshRenderer, Transfor
 pub use debug::DebugLine;
 pub use describe::{Describe, Field, FieldError, FieldKind, Range, Value};
 pub use fynkel_load::{ClipData, HdrData, ImageData, ImageError, MaterialData, ModelData, ModelError};
-pub use fynkel_mesh::{MeshData, MeshError, MeshParts, Vertex};
+pub use fynkel_mesh::{MeshChange, MeshData, MeshError, MeshParts, Vertex};
 pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
 pub use id::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};

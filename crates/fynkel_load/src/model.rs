@@ -683,6 +683,8 @@ impl<'a> Reader<'a> {
                 uvs: uvs.as_deref(),
                 indices: &indices,
                 skin,
+                // COLOR_0 isn't read yet: models draw as they did.
+                ..MeshParts::default()
             })
         };
         let mesh_data = match given(true, true) {

@@ -129,6 +129,7 @@ fn light_units_match_the_documented_maths() {
         },
         cast_shadows: true,
         receive_shadows: true,
+        submesh: 0,
     };
     let surface = Surface { albedo, metallic: 0.0, roughness: 1.0 };
     let (n, v) = (Vec3::Z, Vec3::Z); // at the centre pixel
@@ -211,6 +212,7 @@ fn a_sphere_is_lit_from_where_the_sun_is() {
                 },
                 cast_shadows: true,
                 receive_shadows: true,
+                submesh: 0,
             }],
         };
         let (image, _) = render(&gpu, &mut r, &scene, 128, 128);
@@ -279,6 +281,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
             material: material(0xFFE0613A, 0.0),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -288,6 +291,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
             material: material(0xFF3A8EE0, 0.0),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -297,6 +301,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
             material: material(0xFF4CC26B, 1.0),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -306,6 +311,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
             material: material(0xFFE0D23A, 1.0),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
         Draw {
             skin: None,
@@ -315,6 +321,7 @@ fn draws_sharing_a_mesh_are_instanced_together() {
             material: material(0xFFB03AE0, 0.0),
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         },
     ];
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 160);
@@ -348,6 +355,7 @@ fn an_orthographic_camera_keeps_sizes_at_any_distance() {
             material,
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         })
         .to_vec();
     let (image, _) = render(&gpu, &mut r, &scene, 256, 128);
@@ -393,6 +401,7 @@ fn draws_outside_the_view_are_culled() {
         material: PbrMaterial::DEFAULT,
         cast_shadows: true,
         receive_shadows: true,
+        submesh: 0,
     };
     let at = |x: f32, y: f32, z: f32| Mat4::from_translation(Vec3::new(x, y, z));
     // At 5 away the view is 2.89 either side of the middle (60°, square).
@@ -492,6 +501,7 @@ fn frames_in_flight_keep_their_own_data() {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         })
         .collect();
     let mut empty = stage1_scene();
@@ -564,6 +574,7 @@ fn non_uniform_scale_keeps_normals_right() {
             },
             cast_shadows: true,
             receive_shadows: true,
+            submesh: 0,
         }],
     };
     let got = render(&gpu, &mut r, &scene, 64, 64).0.pixel(32, 32);
@@ -656,6 +667,7 @@ fn edges_are_smoothed_by_the_samples_asked_for() {
         },
         cast_shadows: false,
         receive_shadows: false,
+        submesh: 0,
     };
     let scene = |quality: Quality| RenderScene {
         camera: Some(camera),
