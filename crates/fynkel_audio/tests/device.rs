@@ -41,6 +41,19 @@ fn a_chord_plays_through_the_default_output() {
     eprintln!("{stats:?}");
     assert!(stats.callbacks > 10, "{stats:?}");
     assert_eq!(stats.voices, 0, "{stats:?}");
+
+    // A device that plays, or is paused on purpose, isn't taken for one
+    // that stopped by itself.
+    for suspended in [false, true, false] {
+        audio.suspend(suspended).unwrap();
+        for _ in 0..30 {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+            audio.update(0.1);
+        }
+    }
+    let stats = audio.stats();
+    assert!(stats.device, "{stats:?}");
+    assert_eq!(stats.reopened, 0, "{stats:?}");
 }
 
 /// The lab's chase track, streamed and looping, through the speaker for

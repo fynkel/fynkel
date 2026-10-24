@@ -37,6 +37,11 @@ const CHUNK: usize = 1024;
 /// How often a phone's call is looked for, with a device.
 const CALL_CHECK: Duration = Duration::from_millis(500);
 
+/// A playing device that asks for no sound for this long has stopped
+/// (iOS can stop it with a route change that seemed to keep the output):
+/// it's lost, and opened again.
+const SILENCE: Duration = Duration::from_secs(2);
+
 /// A playing voice, for as long as it plays: its slot and which use of
 /// that slot it is. Never 0.
 pub type Handle = u64;
@@ -172,6 +177,9 @@ pub struct Audio {
     in_call: bool,
     last_call_check: Option<Instant>,
     last_try: Option<Instant>,
+    /// The device's callbacks when they last moved on, and when: none
+    /// while it isn't meant to play.
+    heard: Option<(u64, Instant)>,
     stopped: Vec<Stopped>,
     /// Without a device: frames of time not yet rendered, and where.
     owed: f64,
@@ -213,6 +221,7 @@ impl Audio {
             in_call: false,
             last_call_check: None,
             last_try: None,
+            heard: None,
             // A steal per command, and an end per return, at most.
             stopped: Vec::with_capacity(COMMANDS + RETURNS),
             owed: 0.0,
@@ -248,6 +257,7 @@ impl Audio {
             device.suspend(true)?;
         }
         self.device = Some(device);
+        self.heard = None;
         self.owed = 0.0;
         Ok(())
     }
@@ -272,6 +282,7 @@ impl Audio {
     /// While the app is away: the device stops, and so does the sound.
     pub fn suspend(&mut self, suspended: bool) -> Result<(), String> {
         self.suspended = suspended;
+        self.heard = None;
         match &self.device {
             Some(device) => device.suspend(suspended || self.in_call),
             None => Ok(()),
@@ -538,6 +549,20 @@ impl Audio {
             }
         }
         if let Some(device) = &self.device
+            && !self.suspended
+            && !self.in_call
+        {
+            let callbacks = self.shared.callbacks.load(Ordering::Relaxed);
+            match self.heard {
+                Some((heard, at)) if heard == callbacks => {
+                    if at.elapsed() >= SILENCE {
+                        device.lost.store(true, Ordering::Relaxed);
+                    }
+                }
+                _ => self.heard = Some((callbacks, Instant::now())),
+            }
+        }
+        if let Some(device) = &self.device
             && device.lost.load(Ordering::Relaxed)
         {
             self.drop_device();
@@ -554,6 +579,7 @@ impl Audio {
             let in_call = session::in_call();
             if in_call != self.in_call {
                 self.in_call = in_call;
+                self.heard = None;
                 if let Some(device) = &self.device {
                     // A device that can't pause or play again is lost, and
                     // opened again.
