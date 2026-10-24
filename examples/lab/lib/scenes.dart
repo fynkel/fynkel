@@ -37,6 +37,7 @@ import 'scenes/lifecycle.dart';
 import 'scenes/look.dart';
 import 'scenes/menus_basics.dart';
 import 'scenes/mesh_colliders_basics.dart';
+import 'scenes/meshes_build.dart';
 import 'scenes/meshes_change.dart';
 import 'scenes/motion.dart';
 import 'scenes/motion_basics.dart';
@@ -128,4 +129,5 @@ final List<LabScene Function()> scenes = [
   ParticlesLookScene.new,
   ParticlesWorldScene.new,
   MeshesChangeScene.new,
+  MeshesBuildScene.new,
 ];

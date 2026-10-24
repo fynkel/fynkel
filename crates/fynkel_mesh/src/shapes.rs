@@ -80,8 +80,15 @@ impl MeshData {
     /// once from +Z, its top at the top end; each part takes the share of
     /// its height that its length is of the outline.
     pub fn capsule(segments: u32, rings: u32) -> Self {
+        Self::capsule_sized(0.5, 2.0, segments, rings)
+    }
+
+    /// A capsule along Y centred on the origin, `height` from end to end
+    /// (at least twice the radius; less is a sphere) and of `radius`,
+    /// textured as [`MeshData::capsule`].
+    pub fn capsule_sized(radius: f32, height: f32, segments: u32, rings: u32) -> Self {
         assert!(segments >= 3 && rings >= 1, "a capsule needs at least 3 segments and 1 ring");
-        let (radius, half) = (0.5f32, 0.5f32);
+        let half = (height * 0.5 - radius).max(0.0);
         // From the top pole down: each row's angle from +Y on its
         // half-sphere and its centre's height, the top half-sphere's
         // equator and the bottom's both present, so the side is one band.
@@ -115,6 +122,11 @@ impl MeshData {
             for segment in 0..segments {
                 let a = band * row + segment;
                 let b = a + row;
+                // No side between the half-spheres when there's no height
+                // for one.
+                if band == rings && half == 0.0 {
+                    continue;
+                }
                 if band != 0 {
                     s.indices.extend([a, b, a + 1]);
                 }
@@ -131,8 +143,15 @@ impl MeshData {
     /// around once from +Z, its top at the top; each cap shows the texture
     /// as the plane does from outside, with its own flat normal.
     pub fn cylinder(segments: u32) -> Self {
+        Self::cylinder_sized(0.5, 2.0, segments, true)
+    }
+
+    /// A cylinder along Y centred on the origin, `height` high and of
+    /// `radius`, textured as [`MeshData::cylinder`]; without `caps`, an
+    /// open tube.
+    pub fn cylinder_sized(radius: f32, height: f32, segments: u32, caps: bool) -> Self {
         assert!(segments >= 3, "a cylinder needs at least 3 segments");
-        let (radius, half) = (0.5f32, 1.0f32);
+        let half = height * 0.5;
         let mut s = Shape::default();
         for (y, v) in [(half, 0.0), (-half, 1.0)] {
             for segment in 0..=segments {
@@ -151,25 +170,9 @@ impl MeshData {
         // The caps: a centre and a ring each. Seen from outside, image-right
         // is +X on both; image-up is -Z on the top, +Z on the bottom, as the
         // cube's.
-        for (normal, up) in [(Vec3::Y, Vec3::NEG_Z), (Vec3::NEG_Y, Vec3::Z)] {
-            let base = s.positions.len() as u32;
-            let uv = |p: Vec3| [0.5 + p.dot(Vec3::X) / (2.0 * radius), 0.5 - p.dot(up) / (2.0 * radius)];
-            s.push(normal * half, normal, Vec3::X, [0.5, 0.5]);
-            for segment in 0..segments {
-                let phi = std::f32::consts::TAU * segment as f32 / segments as f32;
-                let p = Vec3::new(phi.sin(), 0.0, phi.cos()) * radius;
-                s.push(p + normal * half, normal, Vec3::X, uv(p));
-            }
-            for segment in 0..segments {
-                let (a, b) = (base + 1 + segment, base + 1 + (segment + 1) % segments);
-                // Counter-clockwise seen from outside: from +Z towards +X
-                // is counter-clockwise seen from +Y, and clockwise from -Y.
-                if normal == Vec3::Y {
-                    s.indices.extend([base, a, b]);
-                } else {
-                    s.indices.extend([base, b, a]);
-                }
-            }
+        if caps {
+            s.cap(Vec3::Y * half, Vec3::Y, radius, segments);
+            s.cap(Vec3::NEG_Y * half, Vec3::NEG_Y, radius, segments);
         }
         s.build()
     }
@@ -205,23 +208,48 @@ impl MeshData {
 /// A shape's arrays, filled vertex by vertex. Every tangent's w is +1: the
 /// shapes show their texture unmirrored.
 #[derive(Default)]
-struct Shape {
-    positions: Vec<[f32; 3]>,
+pub(crate) struct Shape {
+    pub(crate) positions: Vec<[f32; 3]>,
     normals: Vec<[f32; 3]>,
     tangents: Vec<[f32; 4]>,
     uvs: Vec<[f32; 2]>,
-    indices: Vec<u32>,
+    pub(crate) indices: Vec<u32>,
 }
 
 impl Shape {
-    fn push(&mut self, position: Vec3, normal: Vec3, tangent: Vec3, uv: [f32; 2]) {
+    pub(crate) fn push(&mut self, position: Vec3, normal: Vec3, tangent: Vec3, uv: [f32; 2]) {
         self.positions.push(position.into());
         self.normals.push(normal.into());
         self.tangents.push(tangent.extend(1.0).into());
         self.uvs.push(uv);
     }
 
-    fn build(&self) -> MeshData {
+    /// A flat round end facing `normal` (+Y or -Y) at `centre`: a centre
+    /// and a ring of `segments`. Seen from outside, image-right is +X;
+    /// image-up is -Z facing up, +Z facing down, as the cube's.
+    pub(crate) fn cap(&mut self, centre: Vec3, normal: Vec3, radius: f32, segments: u32) {
+        let up = if normal.y > 0.0 { Vec3::NEG_Z } else { Vec3::Z };
+        let base = self.positions.len() as u32;
+        let uv = |p: Vec3| [0.5 + p.dot(Vec3::X) / (2.0 * radius), 0.5 - p.dot(up) / (2.0 * radius)];
+        self.push(centre, normal, Vec3::X, [0.5, 0.5]);
+        for segment in 0..segments {
+            let phi = std::f32::consts::TAU * segment as f32 / segments as f32;
+            let p = Vec3::new(phi.sin(), 0.0, phi.cos()) * radius;
+            self.push(p + centre, normal, Vec3::X, uv(p));
+        }
+        for segment in 0..segments {
+            let (a, b) = (base + 1 + segment, base + 1 + (segment + 1) % segments);
+            // Counter-clockwise seen from outside: from +Z towards +X is
+            // counter-clockwise seen from +Y, and clockwise from -Y.
+            if normal.y > 0.0 {
+                self.indices.extend([base, a, b]);
+            } else {
+                self.indices.extend([base, b, a]);
+            }
+        }
+    }
+
+    pub(crate) fn build(&self) -> MeshData {
         MeshData::new(MeshParts {
             positions: &self.positions,
             normals: Some(&self.normals),

@@ -20,7 +20,11 @@ use std::ops::Range;
 
 use glam::{Vec3, Vec4};
 
+mod made;
+mod outline;
 mod shapes;
+
+pub use outline::fill;
 
 /// One vertex, as the GPU reads it: 52 bytes.
 #[repr(C)]
@@ -80,10 +84,10 @@ pub struct MeshData {
 /// A number for each time a mesh's indices are set, never the same twice;
 /// two meshes are equal whatever theirs are.
 #[derive(Clone, Copy, Debug, Default)]
-struct Made(u64);
+pub(crate) struct Made(u64);
 
 impl Made {
-    fn next() -> Self {
+    pub(crate) fn next() -> Self {
         static LAST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         Made(LAST.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1)
     }
@@ -198,6 +202,8 @@ pub enum MeshError {
     },
     /// A skinned mesh can't be changed (stage 13 §5).
     Skinned,
+    /// An outline or profile to make a mesh from that can't be one.
+    Outline(String),
 }
 
 impl fmt::Display for MeshError {
@@ -224,6 +230,7 @@ impl fmt::Display for MeshError {
                 at + 1
             ),
             MeshError::Skinned => write!(f, "a skinned mesh can't be changed"),
+            MeshError::Outline(why) => f.write_str(why),
         }
     }
 }
@@ -624,7 +631,7 @@ fn in_range(indices: &[u32], n: usize) -> Result<(), MeshError> {
 
 /// The submeshes' ranges of `count` indices, from where each after the
 /// first starts.
-fn submesh_ranges(count: usize, starts: &[u32]) -> Result<Vec<Range<u32>>, MeshError> {
+pub(crate) fn submesh_ranges(count: usize, starts: &[u32]) -> Result<Vec<Range<u32>>, MeshError> {
     let count = count as u32;
     let mut ranges = Vec::with_capacity(starts.len() + 1);
     let mut from = 0;
@@ -655,7 +662,7 @@ fn checked_bounds(positions: &[[f32; 3]]) -> Result<(Vec3, Vec3), MeshError> {
     Ok(if lo.x > hi.x { (Vec3::ZERO, Vec3::ZERO) } else { (lo, hi) })
 }
 
-fn bounds(positions: impl Iterator<Item = [f32; 3]>) -> (Vec3, Vec3) {
+pub(crate) fn bounds(positions: impl Iterator<Item = [f32; 3]>) -> (Vec3, Vec3) {
     let (lo, hi) = positions
         .fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), p| (lo.min(Vec3::from(p)), hi.max(Vec3::from(p))));
     if lo.x > hi.x { (Vec3::ZERO, Vec3::ZERO) } else { (lo, hi) }

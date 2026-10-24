@@ -38,6 +38,8 @@ extension _Resources on World {
   int _meshId(Mesh mesh) {
     final known = _meshIds[mesh];
     if (known != null) return known;
+    // The normals and tangents it's owed, before a world first has it.
+    mesh._settle();
     check(fy_mesh_add(pointer, mesh._live, scratch.id));
     final id = scratch.id.value;
     _meshIds[mesh] = id;

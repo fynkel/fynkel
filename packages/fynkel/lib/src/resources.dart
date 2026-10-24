@@ -79,26 +79,184 @@ final class Mesh implements Finalizable {
 
   /// A sphere of radius 0.5 (720 triangles, as light as Unity's). The
   /// texture wraps around it once, with its top at the north pole.
-  factory Mesh.sphere() => _sphere;
+  ///
+  /// With any setting given, a new sphere of its own: [radius], [segments]
+  /// slices around (3 or more) and [rings] bands from pole to pole (2 or
+  /// more).
+  factory Mesh.sphere({double? radius, int? segments, int? rings}) {
+    if (radius == null && segments == null && rings == null) return _sphere;
+    return _made('Mesh.sphere()', (out) => fy_mesh_new_sphere(radius ?? 0.5, segments ?? 24, rings ?? 16, out));
+  }
 
   /// A capsule along Y, 2 high from end to end and of radius 0.5: the
   /// shape of a default `CapsuleCollider` or `CharacterController`, as Unity's. The
   /// texture wraps around it once, its top at the top.
-  factory Mesh.capsule() => _capsule;
+  ///
+  /// With any setting given, a new capsule of its own: [height] from end
+  /// to end (less than twice the [radius] is a sphere), [segments] slices
+  /// around and [rings] bands in each round end.
+  factory Mesh.capsule({double? radius, double? height, int? segments, int? rings}) {
+    if (radius == null && height == null && segments == null && rings == null) return _capsule;
+    return _made(
+      'Mesh.capsule()',
+      (out) => fy_mesh_new_capsule(radius ?? 0.5, height ?? 2, segments ?? 24, rings ?? 6, out),
+    );
+  }
 
   /// A cylinder along Y, 2 high and of radius 0.5, with flat ends, as
   /// Unity's. The texture wraps around its side once.
-  factory Mesh.cylinder() => _cylinder;
+  ///
+  /// With any setting given, a new cylinder of its own: [radius],
+  /// [height], [segments] slices around, and its flat ends unless [caps]
+  /// is false (an open tube).
+  factory Mesh.cylinder({double? radius, double? height, int? segments, bool? caps}) {
+    if (radius == null && height == null && segments == null && caps == null) return _cylinder;
+    return _made(
+      'Mesh.cylinder()',
+      (out) => fy_mesh_new_cylinder(radius ?? 0.5, height ?? 2, segments ?? 24, caps ?? true, out),
+    );
+  }
 
   /// A 1×1 plane facing +Y. Seen from above, the texture's top is towards
   /// -Z. Unity's Plane primitive is 10×10: this one is Unity's Quad,
-  /// lying face up. Scale it for a ground.
+  /// lying face up. Scale it for a ground, or make a [Mesh.grid].
   factory Mesh.plane() => _plane;
 
   /// A 1×1 square standing in XY, facing +Z: a camera looking along its
   /// forward (-Z) sees its front, the texture upright. Its back isn't
   /// drawn unless the material is [Material.doubleSided].
   factory Mesh.quad() => _quad;
+
+  /// A box of [size] around the origin, each face cut into squares:
+  /// [segmentsX], [segmentsY] and [segmentsZ] along each axis. Its faces
+  /// show the texture as [Mesh.cube]'s do, but by the metre: [uvPerMetre]
+  /// repeats each metre, so a long wall and a short one tile alike.
+  factory Mesh.box({
+    Vec3 size = Vec3.one,
+    int segmentsX = 1,
+    int segmentsY = 1,
+    int segmentsZ = 1,
+    double uvPerMetre = 1,
+  }) {
+    return _made('Mesh.box()', (out) {
+      return fy_mesh_new_box(scratch.vec3.ref..write(size), segmentsX, segmentsY, segmentsZ, uvPerMetre, out);
+    });
+  }
+
+  /// A flat grid [width] along X by [depth] along Z, facing up and cut
+  /// into [segmentsX] by [segmentsZ] squares: a ground, or a mesh to bend
+  /// (water, a flag). Textured as [Mesh.plane], by the metre.
+  factory Mesh.grid({
+    double width = 10,
+    double depth = 10,
+    int segmentsX = 10,
+    int segmentsZ = 10,
+    double uvPerMetre = 1,
+  }) {
+    return _made('Mesh.grid()', (out) => fy_mesh_new_grid(width, depth, segmentsX, segmentsZ, uvPerMetre, out));
+  }
+
+  /// A cone along Y around the origin, [height] high with its point at the
+  /// top and a base of [radius]: [segments] slices around, and a flat base
+  /// unless [cap] is false. The texture wraps around its side once, its
+  /// top at the point.
+  factory Mesh.cone({double radius = 0.5, double height = 1, int segments = 24, bool cap = true}) {
+    return _made('Mesh.cone()', (out) => fy_mesh_new_cone(radius, height, segments, cap, out));
+  }
+
+  /// A ring around Y lying flat, as a doughnut: its tube's middle [radius]
+  /// from the centre and the tube [tube] thick each way, with [segments]
+  /// slices around Y and [sides] around the tube. The texture wraps once
+  /// each way.
+  factory Mesh.torus({double radius = 0.5, double tube = 0.15, int segments = 32, int sides = 16}) {
+    return _made('Mesh.torus()', (out) => fy_mesh_new_torus(radius, tube, segments, sides, out));
+  }
+
+  /// A flat round disc of [radius] facing up, with [segments] around; a
+  /// ring, with a hole of radius [inner], when that's more than 0. The
+  /// texture lies across it as on [Mesh.plane].
+  factory Mesh.disc({double radius = 0.5, double inner = 0, int segments = 32}) {
+    return _made('Mesh.disc()', (out) => fy_mesh_new_disc(radius, inner, segments, out));
+  }
+
+  /// [shape] made solid: a slab [depth] thick along Z, around the origin,
+  /// its front facing +Z, with [Shape2D.holes] going right through. The
+  /// front and back show the texture flat, [uvPerMetre] repeats a metre;
+  /// the sides wrap it along the outline. Corners sharper than 40° are
+  /// sharp, the rest smooth, so a circle is round and a square square.
+  /// Throws an [ArgumentError] for an outline of fewer than 3 points.
+  factory Mesh.extrude(Shape2D shape, {double depth = 1, double uvPerMetre = 1}) {
+    final loops = [shape.outline, ...shape.holes];
+    final count = loops.fold(0, (n, loop) => n + loop.length);
+    return using((arena) {
+      final points = arena<FyVec2>(count);
+      final sizes = arena<Uint32>(loops.length);
+      var i = 0;
+      for (var k = 0; k < loops.length; k++) {
+        sizes[k] = loops[k].length;
+        for (final p in loops[k]) {
+          points[i]
+            ..x = p.x
+            ..y = p.y;
+          i++;
+        }
+      }
+      return _made(
+        'Mesh.extrude()',
+        (out) => fy_mesh_extrude(points, count, sizes, loops.length, depth, uvPerMetre, out),
+      );
+    });
+  }
+
+  /// [profile] turned around Y with [sides] slices, as on a lathe: a
+  /// vase, a bottle, a chess piece, a column. Each point is (distance from
+  /// the Y axis, height). The outside is on the right of the way the
+  /// profile goes, so a vase's goes from the middle of its base out, then
+  /// up (and back down inside, for a thick wall). The texture wraps around
+  /// once; corners sharper than 40° are sharp.
+  factory Mesh.lathe(List<Vec2> profile, {int sides = 24}) {
+    return using((arena) {
+      final points = arena<FyVec2>(profile.length);
+      for (var i = 0; i < profile.length; i++) {
+        points[i]
+          ..x = profile[i].x
+          ..y = profile[i].y;
+      }
+      return _made('Mesh.lathe()', (out) => fy_mesh_lathe(points, profile.length, sides, out));
+    });
+  }
+
+  /// [parts] as one mesh, each placed by its position, rotation and scale
+  /// (Unity's `Mesh.CombineMeshes`): many things that never move apart,
+  /// such as the houses of a town or the rocks of a field, drawn with one
+  /// draw for each material instead of one each. Part n of each mesh goes
+  /// into part n of the result, so houses with walls (0) and roofs (1)
+  /// make a town that's two draws, with `MeshRenderer.materials` for each.
+  /// Throws an [ArgumentError] for a skinned mesh, or for none.
+  factory Mesh.combine(List<CombineInstance> parts) {
+    if (parts.isEmpty) throw ArgumentError.value(parts, 'parts', 'must have at least one mesh');
+    return using((arena) {
+      final meshes = arena<Pointer<FyMesh>>(parts.length);
+      final transforms = arena<FyTransform>(parts.length);
+      for (var i = 0; i < parts.length; i++) {
+        final part = parts[i];
+        part.mesh._settle();
+        meshes[i] = part.mesh._live;
+        transforms[i].position.write(part.position);
+        transforms[i].rotation.write(part.rotation);
+        transforms[i].scale.write(part.scale);
+      }
+      return _made('Mesh.combine()', (out) => fy_mesh_combine(meshes.cast(), transforms, parts.length, out));
+    });
+  }
+
+  /// A mesh made by [make], with its normals and tangents its own.
+  static Mesh _made(String name, int Function(Pointer<Pointer<FyMesh>> out) make) {
+    ensureEngine();
+    final out = scratch.mesh;
+    check(make(out));
+    return Mesh._(out.value, name);
+  }
 
   static final _cube = Mesh._shape(FY_MESH_CUBE, 'Mesh.cube()');
   static final _sphere = Mesh._shape(FY_MESH_SPHERE, 'Mesh.sphere()');

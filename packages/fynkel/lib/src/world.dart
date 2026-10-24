@@ -23,6 +23,7 @@ part 'game_object.dart';
 part 'input.dart';
 part 'keys.dart';
 part 'layers.dart';
+part 'mesh_building.dart';
 part 'model.dart';
 part 'motion.dart';
 part 'motion_kinds.dart';

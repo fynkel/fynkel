@@ -778,6 +778,116 @@ fn a_broken_mesh_is_refused_with_a_clear_message() {
     assert_eq!(last_error(), "mesh is null");
 }
 
+/// Made by `make`, or the status it failed with.
+fn made(make: impl FnOnce(*mut *mut FyMesh) -> FyStatus) -> Result<Mesh, FyStatus> {
+    let mut mesh = ptr::null_mut();
+    match make(&mut mesh) {
+        FyStatus::Ok => Ok(Mesh(mesh)),
+        status => {
+            assert!(mesh.is_null(), "nothing written on failure");
+            Err(status)
+        }
+    }
+}
+
+/// The shapes with settings, outlines and combining (stage 13 phase 2)
+/// make what they say through the C interface, and refuse sizes and
+/// counts they can't make, saying which.
+#[test]
+fn shapes_with_settings_are_made_and_bad_settings_refused() {
+    let size = FyVec3 { x: 2.0, y: 1.0, z: 1.0 };
+    // SAFETY: each writes only to out.
+    unsafe {
+        let b = made(|out| fy_mesh_new_box(size, 2, 1, 1, 1.0, out)).unwrap();
+        // Two ends of 1 square, four sides of 2 squares: 10 squares.
+        assert_eq!(b.counts().1 / 3, 2 * 10);
+        let g = made(|out| fy_mesh_new_grid(4.0, 2.0, 4, 2, 1.0, out)).unwrap();
+        assert_eq!(g.counts(), (5 * 3, 4 * 2 * 6));
+        made(|out| fy_mesh_new_sphere(2.0, 8, 4, out)).unwrap();
+        made(|out| fy_mesh_new_capsule(0.5, 3.0, 8, 2, out)).unwrap();
+        let tube = made(|out| fy_mesh_new_cylinder(1.0, 2.0, 8, false, out)).unwrap();
+        assert_eq!(tube.counts().1, 8 * 6);
+        made(|out| fy_mesh_new_cone(1.0, 2.0, 8, true, out)).unwrap();
+        made(|out| fy_mesh_new_torus(1.0, 0.25, 8, 6, out)).unwrap();
+        let ring = made(|out| fy_mesh_new_disc(1.0, 0.5, 8, out)).unwrap();
+        assert_eq!(ring.counts(), (16, 8 * 6));
+
+        let zero = FyVec3 { x: 0.0, ..size };
+        assert_eq!(made(|out| fy_mesh_new_box(zero, 1, 1, 1, 1.0, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "size.x is 0; it must be more than 0");
+        assert_eq!(made(|out| fy_mesh_new_sphere(1.0, 2, 4, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "segments is 2; it must be from 3 to 1024");
+        assert_eq!(made(|out| fy_mesh_new_grid(1.0, 1.0, 5000, 1, 1.0, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "segments_x is 5000; it must be from 1 to 1024");
+        assert_eq!(made(|out| fy_mesh_new_disc(1.0, 1.0, 8, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "inner is 1; it must be less than 1");
+        assert_eq!(made(|out| fy_mesh_new_torus(f32::NAN, 0.25, 8, 6, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "radius is NaN; it must be more than 0");
+    }
+}
+
+#[test]
+fn an_outline_with_a_hole_is_extruded_and_a_profile_lathed() {
+    let v = |x: f32, y: f32| FyVec2 { x, y };
+    let points = [
+        v(-1.0, -1.0),
+        v(1.0, -1.0),
+        v(1.0, 1.0),
+        v(-1.0, 1.0),
+        v(-0.5, -0.5),
+        v(0.5, -0.5),
+        v(0.5, 0.5),
+        v(-0.5, 0.5),
+    ];
+    // SAFETY: arrays of the counts given, and out.
+    unsafe {
+        let slab = made(|out| fy_mesh_extrude(points.as_ptr(), 8, [4, 4].as_ptr(), 2, 0.5, 1.0, out)).unwrap();
+        // 8 triangles on each end; 8 sides of 2.
+        assert_eq!(slab.counts().1 / 3, 8 * 2 + 8 * 2);
+        assert_eq!(
+            made(|out| fy_mesh_extrude(points.as_ptr(), 8, [4, 3].as_ptr(), 2, 0.5, 1.0, out)).err(),
+            Some(FyStatus::InvalidValue)
+        );
+        assert_eq!(last_error(), "the loops have 7 points between them, but there are 8");
+        assert_eq!(
+            made(|out| fy_mesh_extrude(points.as_ptr(), 8, [2, 6].as_ptr(), 2, 0.5, 1.0, out)).err(),
+            Some(FyStatus::InvalidValue)
+        );
+        assert_eq!(last_error(), "the outline has 2 points; it needs at least 3");
+
+        let profile = [v(0.0, 0.0), v(0.5, 0.0), v(0.5, 1.0), v(0.0, 1.0)];
+        let can = made(|out| fy_mesh_lathe(profile.as_ptr(), 4, 12, out)).unwrap();
+        assert_eq!(can.counts().1 / 3, 12 * 4);
+        let left = [v(0.0, 0.0), v(-0.5, 1.0)];
+        assert_eq!(made(|out| fy_mesh_lathe(left.as_ptr(), 2, 12, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "profile point 1 is left of the axis (x below 0)");
+    }
+}
+
+#[test]
+fn meshes_are_combined_where_their_transforms_put_them() {
+    use fynkel_world::{Transform, Vec3};
+    // SAFETY: arrays of the counts given, and out.
+    unsafe {
+        let cube = made(|out| fy_mesh_new_shape(FY_MESH_CUBE, out)).unwrap();
+        let at = |x: f32| transform(Transform::from_position(Vec3::new(x, 0.0, 0.0)));
+        let meshes = [cube.0.cast_const(), cube.0.cast_const()];
+        let both = made(|out| fy_mesh_combine(meshes.as_ptr(), [at(0.0), at(3.0)].as_ptr(), 2, out)).unwrap();
+        assert_eq!(both.counts(), (48, 72));
+        let mut positions = vec![0.0f32; 48 * 3];
+        ok(fy_mesh_read(both.0, positions.as_mut_ptr(), 48, ptr::null_mut(), 0));
+        let xs: Vec<f32> = positions.chunks_exact(3).map(|p| p[0]).collect();
+        assert_eq!(xs.iter().cloned().fold(f32::INFINITY, f32::min), -0.5);
+        assert_eq!(xs.iter().cloned().fold(f32::NEG_INFINITY, f32::max), 3.5);
+        let none = [ptr::null()];
+        assert_eq!(
+            made(|out| fy_mesh_combine(none.as_ptr(), [at(0.0)].as_ptr(), 1, out)).err(),
+            Some(FyStatus::NullPointer)
+        );
+        assert_eq!(last_error(), "meshes[0] is null");
+    }
+}
+
 /// A texture mirrored down the middle: the two vertices on the mirror line
 /// need opposite tangents, so they're split, and the counts say so.
 #[test]
