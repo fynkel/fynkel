@@ -1514,10 +1514,12 @@ Mesh shed(double w, double d, double h) {
   a material instead of one each:
 
 ```dart
-final town = Mesh.combine([
-  for (final (x, z) in plots) CombineInstance(shed(1, 1, 1), position: Vec3(x, 0, z)),
-]);
-add(GameObject(components: [MeshRenderer(town)..materials = [walls, roofs]]));
+GameObject town(List<(double, double)> plots, Material walls, Material roofs) {
+  final town = Mesh.combine([
+    for (final (x, z) in plots) CombineInstance(shed(1, 1, 1), position: Vec3(x, 0, z)),
+  ]);
+  return GameObject(components: [MeshRenderer(town)..materials = [walls, roofs]]);
+}
 ```
 
   Part n of each mesh goes into part n of the result, so the town above
