@@ -30,6 +30,56 @@ void main() {
 
     expect(await madeEachFrame(world, 2000), isEmpty);
   });
+
+  test('a frame that rebuilds a mesh with a builder big enough allocates nothing', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(Stairs());
+    expect(await madeEachFrame(world, 2000), isEmpty);
+  });
+}
+
+/// Stairs rebuilt each frame with a [MeshBuilder], one more step every
+/// frame up to 40 and back to 1: the builder's lists grow once and are
+/// used again. The corners are made once, so what's counted is the
+/// builder's.
+class Stairs extends GameObject {
+  static const most = 40;
+  final mesh = Mesh()..markDynamic();
+  final builder = MeshBuilder();
+  final _corners = [
+    for (var i = 0; i < most; i++)
+      for (final (dy, dz) in [(0.0, 0.0), (0.2, 0.0), (0.2, -0.3)])
+        for (final x in [-1.0, 1.0]) Vec3(x, i * 0.2 + dy, -i * 0.3 + dz),
+  ];
+  var _frame = 0;
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    _build(most);
+    addComponent(MeshRenderer(mesh, Material()));
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    _frame++;
+    _build(1 + _frame % most);
+  }
+
+  void _build(int steps) {
+    builder.clear();
+    final c = _corners;
+    for (var i = 0, k = 0; i < steps; i++, k += 6) {
+      // Each step: its front, then its top.
+      builder
+        ..submesh(i % 2)
+        ..addQuad(c[k], c[k + 1], c[k + 3], c[k + 2])
+        ..addQuad(c[k + 2], c[k + 3], c[k + 5], c[k + 4]);
+    }
+    builder.applyTo(mesh);
+  }
 }
 
 /// A 100 × 100 grid of water rippling each frame: its heights and colours
