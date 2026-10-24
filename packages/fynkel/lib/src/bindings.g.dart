@@ -244,6 +244,21 @@ external int fy_material_values_set(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_mesh_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<ffi.Pointer<FyMesh>>,
+    ffi.Pointer<FyTransform>,
+    ffi.Size,
+    ffi.Pointer<ffi.Pointer<FyMesh>>,
+  )
+>(isLeaf: true)
+external int fy_mesh_combine(
+  ffi.Pointer<ffi.Pointer<FyMesh>> meshes,
+  ffi.Pointer<FyTransform> transforms,
+  int count,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Size>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
 external int fy_mesh_counts(
   ffi.Pointer<FyMesh> mesh,
@@ -251,8 +266,34 @@ external int fy_mesh_counts(
   ffi.Pointer<ffi.Size> out_indices,
 );
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyVec2>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Size,
+    ffi.Float,
+    ffi.Float,
+    ffi.Pointer<ffi.Pointer<FyMesh>>,
+  )
+>(isLeaf: true)
+external int fy_mesh_extrude(
+  ffi.Pointer<FyVec2> points,
+  int point_count,
+  ffi.Pointer<ffi.Uint32> loop_sizes,
+  int loop_count,
+  double depth,
+  double uv_per_metre,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
 @ffi.Native<ffi.Void Function(ffi.Pointer<FyMesh>)>(isLeaf: true)
 external void fy_mesh_free(ffi.Pointer<FyMesh> mesh);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyVec2>, ffi.Size, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(
+  isLeaf: true,
+)
+external int fy_mesh_lathe(ffi.Pointer<FyVec2> profile, int count, int sides, ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>)>(isLeaf: true)
 external int fy_mesh_mark_dynamic(ffi.Pointer<FyMesh> mesh);
@@ -260,11 +301,85 @@ external int fy_mesh_mark_dynamic(ffi.Pointer<FyMesh> mesh);
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMeshData>, ffi.Pointer<ffi.Pointer<FyMesh>>)>()
 external int fy_mesh_new(ffi.Pointer<FyMeshData> mesh, ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
+@ffi.Native<
+  ffi.Int32 Function(FyVec3, ffi.Uint32, ffi.Uint32, ffi.Uint32, ffi.Float, ffi.Pointer<ffi.Pointer<FyMesh>>)
+>(isLeaf: true)
+external int fy_mesh_new_box(
+  FyVec3 size,
+  int segments_x,
+  int segments_y,
+  int segments_z,
+  double uv_per_metre,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(
+  isLeaf: true,
+)
+external int fy_mesh_new_capsule(
+  double radius,
+  double height,
+  int segments,
+  int rings,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Bool, ffi.Pointer<ffi.Pointer<FyMesh>>)>(
+  isLeaf: true,
+)
+external int fy_mesh_new_cone(
+  double radius,
+  double height,
+  int segments,
+  bool cap,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Bool, ffi.Pointer<ffi.Pointer<FyMesh>>)>(
+  isLeaf: true,
+)
+external int fy_mesh_new_cylinder(
+  double radius,
+  double height,
+  int segments,
+  bool caps,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
+external int fy_mesh_new_disc(double radius, double inner, int segments, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
 external int fy_mesh_new_empty(ffi.Pointer<ffi.Pointer<FyMesh>> out);
 
+@ffi.Native<
+  ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Uint32, ffi.Float, ffi.Pointer<ffi.Pointer<FyMesh>>)
+>(isLeaf: true)
+external int fy_mesh_new_grid(
+  double width,
+  double depth,
+  int segments_x,
+  int segments_z,
+  double uv_per_metre,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
 external int fy_mesh_new_shape(int shape, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(isLeaf: true)
+external int fy_mesh_new_sphere(double radius, int segments, int rings, ffi.Pointer<ffi.Pointer<FyMesh>> out);
+
+@ffi.Native<ffi.Int32 Function(ffi.Float, ffi.Float, ffi.Uint32, ffi.Uint32, ffi.Pointer<ffi.Pointer<FyMesh>>)>(
+  isLeaf: true,
+)
+external int fy_mesh_new_torus(
+  double radius,
+  double tube,
+  int segments,
+  int sides,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
 
 @ffi.Native<
   ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size, ffi.Pointer<ffi.Uint32>, ffi.Size)
@@ -735,7 +850,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 42;
+const int FY_ABI_VERSION = 43;
 
 const int FY_APPLE_MORE = 2;
 

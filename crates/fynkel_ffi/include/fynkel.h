@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 42
+#define FY_ABI_VERSION 43
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1369,6 +1369,153 @@ FyStatus fy_mesh_new(const struct FyMeshData *mesh, struct FyMesh **out);
 //
 // `out` is null or writable.
 FyStatus fy_mesh_new_empty(struct FyMesh **out);
+
+// Makes a box of `size` centred on the origin, each face cut into a grid
+// of `segments_x`, `segments_y` and `segments_z` squares along X, Y and Z
+// (1 or more each), its UVs in metres times `uv_per_metre`, and writes it
+// to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_box(struct FyVec3 size,
+                         uint32_t segments_x,
+                         uint32_t segments_y,
+                         uint32_t segments_z,
+                         float uv_per_metre,
+                         struct FyMesh **out);
+
+// Makes a flat grid `width` along X by `depth` along Z facing +Y,
+// centred on the origin, cut into `segments_x` by `segments_z` squares,
+// its UVs in metres times `uv_per_metre`, and writes it to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_grid(float width,
+                          float depth,
+                          uint32_t segments_x,
+                          uint32_t segments_z,
+                          float uv_per_metre,
+                          struct FyMesh **out);
+
+// Makes a sphere of `radius` with `segments` slices around (3 or more)
+// and `rings` bands from pole to pole (2 or more), and writes it to
+// `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_sphere(float radius, uint32_t segments, uint32_t rings, struct FyMesh **out);
+
+// Makes a capsule along Y, `height` from end to end (less than twice the
+// radius is a sphere) and of `radius`, with `segments` slices around (3
+// or more) and `rings` bands in each round end (1 or more), and writes it
+// to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_capsule(float radius,
+                             float height,
+                             uint32_t segments,
+                             uint32_t rings,
+                             struct FyMesh **out);
+
+// Makes a cylinder along Y, `height` high and of `radius`, with
+// `segments` slices around (3 or more), flat ends unless `caps` is
+// false, and writes it to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_cylinder(float radius,
+                              float height,
+                              uint32_t segments,
+                              bool caps,
+                              struct FyMesh **out);
+
+// Makes a cone along Y, `height` high with its point at the top and a
+// base of `radius`, with `segments` slices around (3 or more), a flat
+// base unless `cap` is false, and writes it to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_cone(float radius,
+                          float height,
+                          uint32_t segments,
+                          bool cap,
+                          struct FyMesh **out);
+
+// Makes a ring around Y, its middle `radius` from the centre and its
+// tube of radius `tube`, with `segments` slices around Y and `sides`
+// around the tube (3 or more each), and writes it to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_torus(float radius,
+                           float tube,
+                           uint32_t segments,
+                           uint32_t sides,
+                           struct FyMesh **out);
+
+// Makes a flat disc of `radius` facing +Y with `segments` around (3 or
+// more), a ring when `inner` (less than `radius`) is more than 0, and
+// writes it to `out`.
+//
+// # Safety
+//
+// `out` is null or writable.
+FyStatus fy_mesh_new_disc(float radius, float inner, uint32_t segments, struct FyMesh **out);
+
+// Makes a slab `depth` thick along Z from an outline less its holes, and
+// writes it to `out`. The `points` are the outline's, then each hole's;
+// `loop_sizes` says how many each has, the outline first (each 3 or
+// more). Either way round is fine. The front faces +Z; the ends show the
+// texture flat, `uv_per_metre` times a metre. Corners sharper than 40°
+// are sharp, the rest smooth.
+//
+// # Safety
+//
+// `points` is valid for `point_count` items and `loop_sizes` for
+// `loop_count`; `out` is null or writable.
+FyStatus fy_mesh_extrude(const struct FyVec2 *points,
+                         size_t point_count,
+                         const uint32_t *loop_sizes,
+                         size_t loop_count,
+                         float depth,
+                         float uv_per_metre,
+                         struct FyMesh **out);
+
+// Makes a mesh by turning `profile` around Y with `sides` slices (3 or
+// more), as on a lathe, and writes it to `out`. Each point is (distance
+// from Y, height); the outside is on the right of the way the profile
+// goes. Corners sharper than 40° are sharp, the rest smooth.
+//
+// # Safety
+//
+// `profile` is valid for `count` items; `out` is null or writable.
+FyStatus fy_mesh_lathe(const struct FyVec2 *profile,
+                       size_t count,
+                       uint32_t sides,
+                       struct FyMesh **out);
+
+// Makes one mesh of `count` meshes, each placed by its transform, and
+// writes it to `out` (Unity's `CombineMeshes`). Submesh n of each goes
+// into submesh n of the result, so it's one draw per material. A
+// transform that mirrors turns its triangles round. A skinned mesh, or
+// one with no triangles, is refused.
+//
+// # Safety
+//
+// `meshes` and `transforms` are valid for `count` items, each mesh live;
+// `out` is null or writable.
+FyStatus fy_mesh_combine(const struct FyMesh *const *meshes,
+                         const struct FyTransform *transforms,
+                         size_t count,
+                         struct FyMesh **out);
 
 // Sets the vertices' positions, three floats each (x, y, z). A different
 // count from the mesh's resets every other channel: normals and tangents

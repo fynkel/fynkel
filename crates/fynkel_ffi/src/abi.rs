@@ -32,7 +32,7 @@ use crate::extract::Extract;
 use crate::worker::Worker;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 42;
+pub const FY_ABI_VERSION: u32 = 43;
 
 // --- Plain types ---------------------------------------------------------------
 
@@ -2129,6 +2129,397 @@ pub unsafe extern "C" fn fy_mesh_new(mesh: *const FyMeshData, out: *mut *mut FyM
 pub unsafe extern "C" fn fy_mesh_new_empty(out: *mut *mut FyMesh) -> FyStatus {
     // SAFETY: per this function's contract.
     guard(|| unsafe { new_mesh(MeshData::empty(), out) })
+}
+
+// --- Shapes with settings, outlines, combining (stage 13 phase 2) ------------
+
+/// The most segments a shape takes along any one direction.
+const MAX_SEGMENTS: u32 = 1024;
+
+/// `value` if it's finite and more than 0.
+fn length(value: f32, what: &str) -> Result<f32, Error> {
+    if value.is_finite() && value > 0.0 {
+        Ok(value)
+    } else {
+        Err(Error::new(FyStatus::InvalidValue, format!("{what} is {value}; it must be more than 0")))
+    }
+}
+
+/// `value` if it's finite and 0 or more.
+fn at_least_0(value: f32, what: &str) -> Result<f32, Error> {
+    if value.is_finite() && value >= 0.0 {
+        Ok(value)
+    } else {
+        Err(Error::new(FyStatus::InvalidValue, format!("{what} is {value}; it must be 0 or more")))
+    }
+}
+
+/// `n` if it's from `least` to [`MAX_SEGMENTS`].
+fn segment_count(n: u32, least: u32, what: &str) -> Result<u32, Error> {
+    if (least..=MAX_SEGMENTS).contains(&n) {
+        Ok(n)
+    } else {
+        Err(Error::new(FyStatus::InvalidValue, format!("{what} is {n}; it must be from {least} to {MAX_SEGMENTS}")))
+    }
+}
+
+/// Makes a box of `size` centred on the origin, each face cut into a grid
+/// of `segments_x`, `segments_y` and `segments_z` squares along X, Y and Z
+/// (1 or more each), its UVs in metres times `uv_per_metre`, and writes it
+/// to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_box(
+    size: FyVec3,
+    segments_x: u32,
+    segments_y: u32,
+    segments_z: u32,
+    uv_per_metre: f32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let size = Vec3::new(length(size.x, "size.x")?, length(size.y, "size.y")?, length(size.z, "size.z")?);
+        let counts = [
+            segment_count(segments_x, 1, "segments_x")?,
+            segment_count(segments_y, 1, "segments_y")?,
+            segment_count(segments_z, 1, "segments_z")?,
+        ];
+        let data = MeshData::box_shape(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?);
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a flat grid `width` along X by `depth` along Z facing +Y,
+/// centred on the origin, cut into `segments_x` by `segments_z` squares,
+/// its UVs in metres times `uv_per_metre`, and writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_grid(
+    width: f32,
+    depth: f32,
+    segments_x: u32,
+    segments_z: u32,
+    uv_per_metre: f32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let size = Vec2::new(length(width, "width")?, length(depth, "depth")?);
+        let counts = [segment_count(segments_x, 1, "segments_x")?, segment_count(segments_z, 1, "segments_z")?];
+        let data = MeshData::grid(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?);
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a sphere of `radius` with `segments` slices around (3 or more)
+/// and `rings` bands from pole to pole (2 or more), and writes it to
+/// `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_sphere(radius: f32, segments: u32, rings: u32, out: *mut *mut FyMesh) -> FyStatus {
+    guard(|| {
+        let data = MeshData::sphere_sized(
+            length(radius, "radius")?,
+            segment_count(segments, 3, "segments")?,
+            segment_count(rings, 2, "rings")?,
+        );
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a capsule along Y, `height` from end to end (less than twice the
+/// radius is a sphere) and of `radius`, with `segments` slices around (3
+/// or more) and `rings` bands in each round end (1 or more), and writes it
+/// to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_capsule(
+    radius: f32,
+    height: f32,
+    segments: u32,
+    rings: u32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let data = MeshData::capsule_sized(
+            length(radius, "radius")?,
+            at_least_0(height, "height")?,
+            segment_count(segments, 3, "segments")?,
+            segment_count(rings, 1, "rings")?,
+        );
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a cylinder along Y, `height` high and of `radius`, with
+/// `segments` slices around (3 or more), flat ends unless `caps` is
+/// false, and writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_cylinder(
+    radius: f32,
+    height: f32,
+    segments: u32,
+    caps: bool,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let data = MeshData::cylinder_sized(
+            length(radius, "radius")?,
+            length(height, "height")?,
+            segment_count(segments, 3, "segments")?,
+            caps,
+        );
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a cone along Y, `height` high with its point at the top and a
+/// base of `radius`, with `segments` slices around (3 or more), a flat
+/// base unless `cap` is false, and writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_cone(
+    radius: f32,
+    height: f32,
+    segments: u32,
+    cap: bool,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let data = MeshData::cone(
+            length(radius, "radius")?,
+            length(height, "height")?,
+            segment_count(segments, 3, "segments")?,
+            cap,
+        );
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a ring around Y, its middle `radius` from the centre and its
+/// tube of radius `tube`, with `segments` slices around Y and `sides`
+/// around the tube (3 or more each), and writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_torus(
+    radius: f32,
+    tube: f32,
+    segments: u32,
+    sides: u32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let data = MeshData::torus(
+            length(radius, "radius")?,
+            length(tube, "tube")?,
+            segment_count(segments, 3, "segments")?,
+            segment_count(sides, 3, "sides")?,
+        );
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a flat disc of `radius` facing +Y with `segments` around (3 or
+/// more), a ring when `inner` (less than `radius`) is more than 0, and
+/// writes it to `out`.
+///
+/// # Safety
+///
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_new_disc(radius: f32, inner: f32, segments: u32, out: *mut *mut FyMesh) -> FyStatus {
+    guard(|| {
+        let radius = length(radius, "radius")?;
+        let inner = at_least_0(inner, "inner")?;
+        if inner >= radius {
+            return Err(Error::new(FyStatus::InvalidValue, format!("inner is {inner}; it must be less than {radius}")));
+        }
+        let data = MeshData::disc(radius, inner, segment_count(segments, 3, "segments")?);
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// The loops of `points`: `loop_count` of them, each `loop_sizes[k]`
+/// points long, one after another.
+///
+/// # Safety
+///
+/// `points` is valid for `point_count` items and `loop_sizes` for
+/// `loop_count`.
+unsafe fn loops<'a>(
+    points: *const FyVec2,
+    point_count: usize,
+    loop_sizes: *const u32,
+    loop_count: usize,
+) -> Result<Vec<&'a [Vec2]>, Error> {
+    if points.is_null() {
+        return Err(Error::null("points"));
+    }
+    if loop_sizes.is_null() || loop_count == 0 {
+        return Err(Error::null("loop_sizes"));
+    }
+    // SAFETY: not null, and the caller promises the counts; FyVec2 is two
+    // f32s, as Vec2.
+    let (points, sizes) = unsafe {
+        (
+            std::slice::from_raw_parts(points.cast::<Vec2>(), point_count),
+            std::slice::from_raw_parts(loop_sizes, loop_count),
+        )
+    };
+    let total: usize = sizes.iter().map(|&n| n as usize).sum();
+    if total != point_count {
+        return Err(Error::new(
+            FyStatus::InvalidValue,
+            format!("the loops have {total} points between them, but there are {point_count}"),
+        ));
+    }
+    let mut from = 0;
+    Ok(sizes
+        .iter()
+        .map(|&n| {
+            let ring = &points[from..from + n as usize];
+            from += n as usize;
+            ring
+        })
+        .collect())
+}
+
+const _: () = assert!(std::mem::size_of::<FyVec2>() == std::mem::size_of::<Vec2>());
+
+/// Makes a slab `depth` thick along Z from an outline less its holes, and
+/// writes it to `out`. The `points` are the outline's, then each hole's;
+/// `loop_sizes` says how many each has, the outline first (each 3 or
+/// more). Either way round is fine. The front faces +Z; the ends show the
+/// texture flat, `uv_per_metre` times a metre. Corners sharper than 40°
+/// are sharp, the rest smooth.
+///
+/// # Safety
+///
+/// `points` is valid for `point_count` items and `loop_sizes` for
+/// `loop_count`; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_extrude(
+    points: *const FyVec2,
+    point_count: usize,
+    loop_sizes: *const u32,
+    loop_count: usize,
+    depth: f32,
+    uv_per_metre: f32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let rings = unsafe { loops(points, point_count, loop_sizes, loop_count) }?;
+        let data = MeshData::extrude(
+            rings[0],
+            &rings[1..],
+            length(depth, "depth")?,
+            at_least_0(uv_per_metre, "uv_per_metre")?,
+        )
+        .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes a mesh by turning `profile` around Y with `sides` slices (3 or
+/// more), as on a lathe, and writes it to `out`. Each point is (distance
+/// from Y, height); the outside is on the right of the way the profile
+/// goes. Corners sharper than 40° are sharp, the rest smooth.
+///
+/// # Safety
+///
+/// `profile` is valid for `count` items; `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_lathe(
+    profile: *const FyVec2,
+    count: usize,
+    sides: u32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        let size = [count as u32];
+        // SAFETY: per this function's contract.
+        let rings = unsafe { loops(profile, count, size.as_ptr(), 1) }?;
+        if let Some(at) = rings[0].iter().position(|p| p.x < 0.0) {
+            return Err(Error::new(
+                FyStatus::InvalidValue,
+                format!("profile point {at} is left of the axis (x below 0)"),
+            ));
+        }
+        let data = MeshData::lathe(rings[0], segment_count(sides, 3, "sides")?)
+            .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Makes one mesh of `count` meshes, each placed by its transform, and
+/// writes it to `out` (Unity's `CombineMeshes`). Submesh n of each goes
+/// into submesh n of the result, so it's one draw per material. A
+/// transform that mirrors turns its triangles round. A skinned mesh, or
+/// one with no triangles, is refused.
+///
+/// # Safety
+///
+/// `meshes` and `transforms` are valid for `count` items, each mesh live;
+/// `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_combine(
+    meshes: *const *const FyMesh,
+    transforms: *const FyTransform,
+    count: usize,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        if meshes.is_null() {
+            return Err(Error::null("meshes"));
+        }
+        if transforms.is_null() {
+            return Err(Error::null("transforms"));
+        }
+        // SAFETY: not null; the caller promises count items.
+        let (meshes, transforms) =
+            unsafe { (std::slice::from_raw_parts(meshes, count), std::slice::from_raw_parts(transforms, count)) };
+        let mut parts = Vec::with_capacity(count);
+        for (k, (&mesh, &t)) in meshes.iter().zip(transforms).enumerate() {
+            // SAFETY: the caller promises each is live.
+            let mesh = unsafe { mesh.as_ref() }.ok_or_else(|| Error::null(&format!("meshes[{k}]")))?;
+            parts.push((&*mesh.0, t.to_component()?.matrix()));
+        }
+        let data = MeshData::combine(&parts).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
 }
 
 /// Changes `mesh`'s own data, as `change` says. Worlds that have it keep
