@@ -11,6 +11,7 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{ErrorKind, SampleFormat, StreamConfig};
 
 use crate::mixer::Mixer;
+use crate::session;
 
 pub(crate) struct Device {
     stream: cpal::Stream,
@@ -70,6 +71,8 @@ impl Device {
         let lost = Arc::new(AtomicBool::new(false));
         let underruns = Arc::new(AtomicU64::new(0));
         let (lost_in, underruns_in, playing) = (lost.clone(), underruns.clone(), mixer.clone());
+        let opened = Arc::new(Mutex::new(None));
+        let opened_in = opened.clone();
         let stream = device
             .build_output_stream(
                 config,
@@ -81,6 +84,13 @@ impl Device {
                     ErrorKind::Xrun => {
                         underruns_in.fetch_add(1, Ordering::Relaxed);
                     }
+                    // A route change that kept the output (iOS): the stream
+                    // plays on. Should it not, the callbacks stop, and
+                    // `Audio::update` finds it lost.
+                    ErrorKind::StreamInvalidated
+                        if opened_in
+                            .lock()
+                            .is_ok_and(|o| o.as_ref().is_some_and(|o| Some(o) == session::output().as_ref())) => {}
                     ErrorKind::DeviceNotAvailable | ErrorKind::StreamInvalidated => {
                         lost_in.store(true, Ordering::Relaxed)
                     }
@@ -90,6 +100,9 @@ impl Device {
             )
             .map_err(|e| format!("the sound output can't be opened: {e}"))?;
         stream.play().map_err(|e| format!("the sound output can't start: {e}"))?;
+        if let Ok(mut o) = opened.lock() {
+            *o = session::output();
+        }
         Ok(Self { stream, rate, channels, lost, underruns })
     }
 

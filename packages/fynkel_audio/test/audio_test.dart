@@ -105,6 +105,7 @@ void main() {
     expect(ended, [clip]);
     expect(world.audio.stats.voices, 0);
     expect(world.audio.stats.device, isFalse);
+    expect(world.audio.stats.reopened, 0);
   });
 
   test('a source that doesn\'t play on awake waits for play, and play starts again', () {

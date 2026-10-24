@@ -91,6 +91,7 @@ final class AudioStats {
       refused = s.refused,
       callbacks = s.callbacks,
       underruns = s.underruns,
+      reopened = s.reopened,
       starved = s.starved;
 
   /// Whether a sound output plays it. Not in tests, nor before the world
@@ -111,6 +112,10 @@ final class AudioStats {
   /// Times the output asked for sound, and times it wasn't given it in
   /// time (a crackle).
   final int callbacks, underruns;
+
+  /// Times the output was lost (unplugged, or taken by the system) and
+  /// opened again: a few over a game, not one a second.
+  final int reopened;
 
   /// Times the output asked for sound and a [AudioClip.streamed] clip
   /// hadn't been decoded far enough (a gap): never, while its decoding
