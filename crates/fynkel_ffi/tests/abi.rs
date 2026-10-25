@@ -864,6 +864,55 @@ fn an_outline_with_a_hole_is_extruded_and_a_profile_lathed() {
     }
 }
 
+/// An outline swept along a path (stage 13 phase 3), and swept again into
+/// the same mesh: ten floats a point, the outline's loops as an
+/// extrusion's.
+#[test]
+fn an_outline_is_swept_along_a_path_and_again_into_its_mesh() {
+    // Along +X, up +Y: position, forward, up, distance.
+    let path = |sag: f32| -> Vec<f32> {
+        (0..5)
+            .flat_map(|i| {
+                let x = i as f32;
+                [x, -sag * (x * 0.785).sin(), 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, x]
+            })
+            .collect()
+    };
+    let square = [-0.5f32, -0.5, 0.5, -0.5, 0.5, 0.5, -0.5, 0.5];
+    // SAFETY: arrays of the counts given, and out.
+    unsafe {
+        let straight = path(0.0);
+        let beam = made(|out| fy_mesh_sweep(straight.as_ptr(), 5, square.as_ptr(), 4, [4].as_ptr(), 1, true, 1.0, out))
+            .unwrap();
+        // Four sides of 4 quads, and two caps of 2 triangles.
+        let (vertices, indices) = beam.counts();
+        assert_eq!(indices / 3, 4 * 4 * 2 + 2 * 2);
+        let sagged = path(0.3);
+        assert_eq!(
+            fy_mesh_set_sweep(beam.0, sagged.as_ptr(), 5, square.as_ptr(), 4, [4].as_ptr(), 1, true, 1.0),
+            FyStatus::Ok
+        );
+        assert_eq!(beam.counts(), (vertices, indices));
+        assert_eq!(
+            made(|out| fy_mesh_sweep(straight.as_ptr(), 1, square.as_ptr(), 4, [4].as_ptr(), 1, true, 1.0, out)).err(),
+            Some(FyStatus::InvalidValue)
+        );
+        assert_eq!(last_error(), "a path needs at least 2 points; this has 1");
+        let mut still = path(0.0);
+        still[13..16].fill(0.0);
+        assert_eq!(
+            made(|out| fy_mesh_sweep(still.as_ptr(), 5, square.as_ptr(), 4, [4].as_ptr(), 1, true, 1.0, out)).err(),
+            Some(FyStatus::InvalidValue)
+        );
+        assert_eq!(last_error(), "path point 1 has no direction: its forward is 0");
+        assert_eq!(
+            fy_mesh_set_sweep(beam.0, sagged.as_ptr(), 5, square.as_ptr(), 4, [3].as_ptr(), 1, true, 1.0),
+            FyStatus::InvalidValue
+        );
+        assert_eq!(beam.counts(), (vertices, indices), "a refused sweep changes nothing");
+    }
+}
+
 #[test]
 fn meshes_are_combined_where_their_transforms_put_them() {
     use fynkel_world::{Transform, Vec3};

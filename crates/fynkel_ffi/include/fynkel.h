@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 43
+#define FY_ABI_VERSION 44
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1516,6 +1516,52 @@ FyStatus fy_mesh_combine(const struct FyMesh *const *meshes,
                          const struct FyTransform *transforms,
                          size_t count,
                          struct FyMesh **out);
+
+// Makes a mesh of an outline swept along a path (a road, a rope, a pipe)
+// and writes it to `out`. The path is `path_count` points (2 or more),
+// ten floats each: its position, the way it goes (any length but 0),
+// which way is up across it, and how far along it is in metres. The
+// outline is drawn across the path at each, its X to the right and Y
+// up; `points` are its points, two floats each, then each hole's, and
+// `loop_sizes` says how many each has, the outline first (each 3 or
+// more, either way round). `caps` fills the ends; a path that closes
+// (its last point where its first is) has none. The texture repeats
+// `uv_per_metre` times a metre around the outline and along the path.
+// Corners of the outline sharper than 40° are sharp, the rest smooth.
+//
+// # Safety
+//
+// `path` is valid for `path_count * 10` floats, `points` for
+// `point_count * 2` and `loop_sizes` for `loop_count` items; `out` is
+// null or writable.
+FyStatus fy_mesh_sweep(const float *path,
+                       size_t path_count,
+                       const float *points,
+                       size_t point_count,
+                       const uint32_t *loop_sizes,
+                       size_t loop_count,
+                       bool caps,
+                       float uv_per_metre,
+                       struct FyMesh **out);
+
+// Sweeps into `mesh` in place of what it had, as `fy_mesh_sweep` makes
+// one: a rope swept again each frame. Worlds that have it keep what they
+// had until `fy_mesh_update`; when the triangles come out as they were,
+// they're kept. A skinned mesh is refused.
+//
+// # Safety
+//
+// `mesh` is null or live, used on no other thread meanwhile; the rest as
+// `fy_mesh_sweep`.
+FyStatus fy_mesh_set_sweep(struct FyMesh *mesh,
+                           const float *path,
+                           size_t path_count,
+                           const float *points,
+                           size_t point_count,
+                           const uint32_t *loop_sizes,
+                           size_t loop_count,
+                           bool caps,
+                           float uv_per_metre);
 
 // Sets the vertices' positions, three floats each (x, y, z). A different
 // count from the mesh's resets every other channel: normals and tangents
