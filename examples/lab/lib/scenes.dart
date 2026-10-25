@@ -57,6 +57,7 @@ import 'scenes/rigidbody_stack.dart';
 import 'scenes/rigidbody_walls.dart';
 import 'scenes/routines.dart';
 import 'scenes/shapes_basics.dart';
+import 'scenes/splines.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/skinned.dart';
@@ -130,4 +131,5 @@ final List<LabScene Function()> scenes = [
   ParticlesWorldScene.new,
   MeshesChangeScene.new,
   MeshesBuildScene.new,
+  SplinesScene.new,
 ];
