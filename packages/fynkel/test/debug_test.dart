@@ -237,4 +237,30 @@ void main() {
     expect(world.debug.count, 0, reason: 'drawn each frame, kept for none');
     expectGolden('debug_particle_shapes_on', view.read(view.frame()).rgba, 256, 256);
   });
+
+  test('drawSplines shows each container\'s splines and their knots', () {
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 4, 6), rotation: Quat.lookRotation(Vec3(0, -4, -6))),
+        components: [Camera(clearColor: Color(0xFF202020), bloom: null, ambientOcclusion: null)],
+      ),
+    );
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, -1)),
+        components: [
+          SplineContainer([
+            Spline.smooth([Vec3(-3, 0, 1), Vec3(-1, 1, -1), Vec3(1, 0, 1), Vec3(3, 1, -1)]),
+            Spline.linear([Vec3(-2, 0, 2), Vec3(2, 0, 2), Vec3(0, 0, 3)], closed: true),
+          ]),
+        ],
+      ),
+    );
+    final view = HeadlessView(world, width: 256, height: 256);
+    addTearDown(view.dispose);
+    world.debug.drawSplines = true;
+    world.update(1 / 60);
+    expect(world.debug.count, 0, reason: 'drawn each frame, kept for none');
+    expectGolden('debug_splines', view.read(view.frame()).rgba, 256, 256);
+  });
 }
