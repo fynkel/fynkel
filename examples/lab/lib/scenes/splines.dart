@@ -173,9 +173,17 @@ class SplinesScene extends LabScene {
     );
   }
 
+  // With [printRates], the 100 m road is timed by itself once the page
+  // has settled, for a run on a device with no one to tap.
+  var _timedOnce = false;
+
   @override
   void onUpdate() {
     super.onUpdate();
+    if (printRates && !_timedOnce && time.sinceStart > 3) {
+      _timedOnce = true;
+      _timeRoad();
+    }
     final timing = _timing;
     if (timing != null && timing.step()) {
       _timed = timing.result;
@@ -220,12 +228,14 @@ class SplinesScene extends LabScene {
       min: 0.4,
       max: 2,
     ),
-    Button('time a 100 m road', () {
-      if (_timing != null) return;
-      _timing = add(Timing());
-      log.add('timing a 100 m road for 120 frames');
-    }),
+    Button('time a 100 m road', _timeRoad),
   ];
+
+  void _timeRoad() {
+    if (_timing != null) return;
+    _timing = add(Timing());
+    log.add('timing a 100 m road for 120 frames');
+  }
 }
 
 /// A road 1.6 m wide along a spline of five knots, swept again whenever a
