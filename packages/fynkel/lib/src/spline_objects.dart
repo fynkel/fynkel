@@ -159,8 +159,9 @@ final class SplineInstantiate extends Behaviour {
   void _checkSettings() {
     if (!(_spacing > 0 && _spacing.isFinite)) throw ArgumentError.value(_spacing, 'spacing', 'must be more than 0');
     if (_count case final n? when n < 0) throw ArgumentError.value(n, 'count', 'can\'t be less than 0');
-    if (!(_offset.x.isFinite && _offset.y.isFinite && _offset.z.isFinite))
+    if (!(_offset.x.isFinite && _offset.y.isFinite && _offset.z.isFinite)) {
       throw ArgumentError.value(_offset, 'offset', 'must be finite');
+    }
   }
 
   SplineContainer get _container {
