@@ -226,6 +226,107 @@ final class Mesh implements Finalizable {
     });
   }
 
+  /// [shape] swept along [path], as Unity's `SplineExtrude`: a road, a
+  /// rope, a pipe, a rail. The shape is drawn across the path all along
+  /// it, its X to the right and Y up seen going along, and its edges are
+  /// joined from each sample to the next; a shape with holes is a pipe.
+  ///
+  /// The path is cut into [segmentsPerMetre] samples a metre and more
+  /// where it bends (one every 8°), at most [maxSegments]. [caps] fills
+  /// its ends (a closed spline has none). The texture repeats [uvPerMetre]
+  /// times a metre around the shape (u) and along the path (v). Corners of
+  /// the shape sharper than 40° are sharp, the rest smooth. For a path
+  /// that changes, sweep again into the same mesh with [setSweep]. Throws
+  /// an [ArgumentError] for a path with no length.
+  factory Mesh.sweep(
+    Spline path,
+    Shape2D shape, {
+    double segmentsPerMetre = 2,
+    int maxSegments = 2000,
+    bool caps = true,
+    double uvPerMetre = 1,
+  }) {
+    _sampled(path, segmentsPerMetre, maxSegments);
+    final packed = shape._packed, sizes = shape._sizes;
+    final count = path._pathCount, closed = path.closed;
+    final mesh = _made(
+      'Mesh.sweep()',
+      (out) => fy_mesh_sweep(
+        path._path.address,
+        count,
+        packed.address,
+        packed.length ~/ 2,
+        sizes.address,
+        sizes.length,
+        caps && !closed,
+        uvPerMetre,
+        out,
+      ),
+    );
+    return mesh;
+  }
+
+  /// [Mesh.sweep] again, into this mesh in place of what it had: a rope
+  /// that swings, a road whose knots are dragged. As the other changes, it
+  /// goes to the worlds that have it at the end of the frame; mark a mesh
+  /// swept every frame dynamic ([markDynamic]). With the same number of
+  /// samples and the same shape the triangles are kept, and filling the
+  /// spline with [Spline.setPositions] each frame makes no garbage.
+  // Inlined where it's called, so a JIT build (the tests) passes its
+  // settings on unboxed before it would have optimised this by itself.
+  @pragma('vm:prefer-inline')
+  void setSweep(
+    Spline path,
+    Shape2D shape, {
+    double segmentsPerMetre = 2,
+    int maxSegments = 2000,
+    bool caps = true,
+    double uvPerMetre = 1,
+  }) {
+    _changeable();
+    // The setting through a field, not passed on: a JIT build boxes a
+    // double passed to a call, or kept for a throw. (It boxes one passed
+    // to the engine too, unless it's a constant; a release build doesn't.)
+    path._perMetre = segmentsPerMetre;
+    _checkSweep(path, maxSegments);
+    path._sample(maxSegments);
+    final packed = shape._packed, sizes = shape._sizes;
+    check(
+      fy_mesh_set_sweep(
+        _live,
+        path._path.address,
+        path._pathCount,
+        packed.address,
+        packed.length ~/ 2,
+        sizes.address,
+        sizes.length,
+        caps && !path.closed,
+        uvPerMetre,
+      ),
+    );
+    // Its normals, tangents and UVs are the sweep's.
+    _ownNormals = _ownTangents = _hasUvs = true;
+    _staleNormals = _staleTangents = false;
+  }
+
+  /// [path]'s samples, after checking the settings.
+  static void _sampled(Spline path, double segmentsPerMetre, int maxSegments) {
+    ensureEngine();
+    path._perMetre = segmentsPerMetre;
+    _checkSweep(path, maxSegments);
+    path._sample(maxSegments);
+  }
+
+  /// Throws for a sweep's settings that make no samples: [path]'s
+  /// [Spline._perMetre] and [maxSegments].
+  static void _checkSweep(Spline path, int maxSegments) {
+    final perMetre = path._perMetre;
+    if (!(perMetre > 0 && perMetre < double.infinity)) {
+      throw ArgumentError.value(perMetre, 'segmentsPerMetre', 'must be more than 0');
+    }
+    if (maxSegments < 1) throw ArgumentError.value(maxSegments, 'maxSegments', 'must be at least 1');
+  }
+
   /// [parts] as one mesh, each placed by its position, rotation and scale
   /// (Unity's `Mesh.CombineMeshes`): many things that never move apart,
   /// such as the houses of a town or the rocks of a field, drawn with one

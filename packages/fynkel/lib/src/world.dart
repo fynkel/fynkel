@@ -35,6 +35,7 @@ part 'routines.dart';
 part 'shader.dart';
 part 'signals.dart';
 part 'sky.dart';
+part 'splines.dart';
 part 'systems.dart';
 part 'time.dart';
 part 'trails.dart';

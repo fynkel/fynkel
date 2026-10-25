@@ -67,6 +67,21 @@ final class Shape2D {
   /// This shape with [hole]'s outline cut out of it as well.
   Shape2D withHole(Shape2D hole) => Shape2D(outline, holes: [...holes, hole.outline]);
 
+  // Its points two floats each, the outline's then each hole's, and how
+  // many each loop has: what the engine takes, made once.
+  late final Float32List _packed = () {
+    final out = Float32List(_sizes.fold(0, (n, size) => n + size) * 2);
+    var i = 0;
+    for (final loop in [outline, ...holes]) {
+      for (final p in loop) {
+        out[i++] = p.x;
+        out[i++] = p.y;
+      }
+    }
+    return out;
+  }();
+  late final Uint32List _sizes = Uint32List.fromList([outline.length, for (final hole in holes) hole.length]);
+
   @override
   String toString() => 'Shape2D(${outline.length} points, ${holes.length} holes)';
 }

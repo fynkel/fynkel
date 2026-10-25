@@ -445,6 +445,31 @@ external int fy_mesh_set_normals(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
 external int fy_mesh_set_positions(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> positions, int count);
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<FyMesh>,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Size,
+    ffi.Bool,
+    ffi.Float,
+  )
+>(isLeaf: true)
+external int fy_mesh_set_sweep(
+  ffi.Pointer<FyMesh> mesh,
+  ffi.Pointer<ffi.Float> path,
+  int path_count,
+  ffi.Pointer<ffi.Float> points,
+  int point_count,
+  ffi.Pointer<ffi.Uint32> loop_sizes,
+  int loop_count,
+  bool caps,
+  double uv_per_metre,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Float>, ffi.Size)>(isLeaf: true)
 external int fy_mesh_set_tangents(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> tangents, int count);
 
@@ -464,6 +489,31 @@ external int fy_mesh_set_uvs(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Float> uv
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Size>)>(isLeaf: true)
 external int fy_mesh_submesh_count(ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Size> out);
+
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Float>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint32>,
+    ffi.Size,
+    ffi.Bool,
+    ffi.Float,
+    ffi.Pointer<ffi.Pointer<FyMesh>>,
+  )
+>(isLeaf: true)
+external int fy_mesh_sweep(
+  ffi.Pointer<ffi.Float> path,
+  int path_count,
+  ffi.Pointer<ffi.Float> points,
+  int point_count,
+  ffi.Pointer<ffi.Uint32> loop_sizes,
+  int loop_count,
+  bool caps,
+  double uv_per_metre,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMesh>)>(isLeaf: true)
 external int fy_mesh_update(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMesh> mesh);
@@ -850,7 +900,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 43;
+const int FY_ABI_VERSION = 44;
 
 const int FY_APPLE_MORE = 2;
 
