@@ -35,6 +35,8 @@ part 'routines.dart';
 part 'shader.dart';
 part 'signals.dart';
 part 'sky.dart';
+part 'spline_objects.dart';
+part 'splines.dart';
 part 'systems.dart';
 part 'time.dart';
 part 'trails.dart';
@@ -346,6 +348,8 @@ final class World implements Finalizable {
   final _animators = <int, Animator>{};
   // The particle systems in the engine, by their objects' ids.
   final _particleSystems = <int, ParticleSystem>{};
+  // The enabled spline containers, for [Debug.drawSplines].
+  final _splineContainers = <SplineContainer>[];
   // Systems written before their sub emitters' or planes' objects were in
   // the world: written again before the next step.
   final _waitingParticles = <ParticleSystem>{};

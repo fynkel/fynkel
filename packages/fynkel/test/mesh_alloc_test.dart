@@ -31,6 +31,15 @@ void main() {
     expect(await madeEachFrame(world, 2000), isEmpty);
   });
 
+  test('a frame that moves a rope\'s spline and sweeps it again allocates nothing', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final rope = Rope();
+    world.add(rope);
+    expect(rope.mesh.vertexCount, greaterThan(0));
+    expect(await madeEachFrame(world, 2000), isEmpty);
+  });
+
   test('a frame that rebuilds a mesh with a builder big enough allocates nothing', () async {
     final world = World();
     addTearDown(world.dispose);
@@ -130,5 +139,44 @@ class Water extends GameObject {
     }
     mesh.setPositions(_positions);
     mesh.setColors(_colors);
+  }
+}
+
+/// A rope of 12 knots between two posts, swinging: its knots worked out
+/// into the same list each frame, then the spline moved and swept into
+/// the same mesh.
+class Rope extends GameObject {
+  static const knots = 12;
+  final mesh = Mesh()..markDynamic();
+  final spline = Spline.smooth([for (var i = 0; i < knots; i++) Vec3(i / (knots - 1) * 4, 0, 0)]);
+  final shape = Shape2D.circle(0.04, segments: 8);
+  final _points = Float32List(knots * 3);
+  var _frame = 0;
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    _swing();
+    addComponent(MeshRenderer(mesh, Material()));
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    _frame++;
+    _swing();
+  }
+
+  void _swing() {
+    final sway = math.sin(_frame * 0.05) * 0.5;
+    for (var i = 0; i < knots; i++) {
+      final s = i / (knots - 1);
+      final sag = math.sin(s * math.pi);
+      _points[i * 3] = s * 4;
+      _points[i * 3 + 1] = -sag * 0.8;
+      _points[i * 3 + 2] = sag * sway;
+    }
+    spline.setPositions(_points);
+    mesh.setSweep(spline, shape, segmentsPerMetre: 8, maxSegments: 64);
   }
 }

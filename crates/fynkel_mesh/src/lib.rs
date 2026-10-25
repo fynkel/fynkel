@@ -23,8 +23,10 @@ use glam::{Vec3, Vec4};
 mod made;
 mod outline;
 mod shapes;
+mod sweep;
 
 pub use outline::fill;
+pub use sweep::{PathPoint, Sweep};
 
 /// One vertex, as the GPU reads it: 52 bytes.
 #[repr(C)]

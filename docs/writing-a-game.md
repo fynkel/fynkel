@@ -1535,6 +1535,78 @@ The lab's "Building meshes" has every shape with sliders for its
 settings, a letter B with its holes, a vase, and a town built and
 combined (examples/lab/lib/scenes/meshes_build.dart).
 
+### Splines: roads, ropes and tracks
+
+A `Spline` is a smooth curve through knots, as Unity's: a road, a river,
+a rope, a cart's track, where the fence posts go. It's plain Dart, so a
+game uses it to move and place things as much as to make meshes.
+
+```dart
+// Smooth through every point (Unity's auto tangents), or straight lines
+// between them (Spline.linear), or knots with their own handles.
+final river = Spline.smooth([Vec3(0, 0, 0), Vec3(8, 0, -4), Vec3(16, 0, 2)]);
+final arch = Spline([
+  Knot(Vec3(0, 0, 0), mode: TangentMode.bezier, tangentOut: Vec3(0, 3, 0)),
+  Knot(Vec3(5, 0, 0), mode: TangentMode.bezier, tangentIn: Vec3(0, 3, 0)),
+]);
+
+// Everything along it is by distance in metres.
+final halfway = river.positionAt(river.length / 2);
+final facing = river.rotationAt(3); // -Z along it, up as upAt
+final closest = river.nearest(Vec3(5, 0, 5)); // (distance:, position:)
+
+// A road: a profile swept along it, caps on its ends, UVs in metres.
+final road = Mesh.sweep(river, Shape2D.rect(4, 0.3), segmentsPerMetre: 2);
+```
+
+- **By distance, not t.** `positionAt`, `directionAt`, `upAt` and
+  `rotationAt` take metres along it, so things go at an even speed and
+  are evenly spaced; Unity's normalised t is `distance / length`. A
+  `closed` spline joins its last knot to its first and distances go
+  round.
+- **Up** turns as little as it can along the curve (a rotation-minimising
+  frame), so a tube doesn't twist where it bends; it starts as +Y, and a
+  knot's `roll` turns it, clockwise seen going along: a banked turn.
+- **Changing it**: `spline[i] = Knot(...)`, `add`, `insert`, `removeAt`,
+  or `setPositions(floats)` for every knot at once; `version` goes up
+  each time. `mesh.setSweep(spline, shape)` sweeps again into the same
+  mesh: a road whose knots are dragged, or a rope that swings each frame,
+  which makes no garbage when it's filled with `setPositions`.
+- **Samples**: `segmentsPerMetre` (2 unless given) and more where it
+  bends, at most `maxSegments`. A 100 m road with a 12-point profile
+  takes about 0.1 ms in Rust on a Mac.
+
+On objects, as Unity's Splines package has them:
+
+```dart
+/// A track round [points] with sleepers along it, and a cart riding it.
+List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObject cart) {
+  final track = GameObject(components: [
+    SplineContainer([Spline.smooth(points, closed: true)]),
+    // Sleepers every 35 cm, placed again when the spline changes.
+    SplineInstantiate((i) => GameObject(components: [MeshRenderer(sleeper, wood)]), spacing: 0.35),
+  ]);
+  cart.addComponent(SplineAnimate(track.get<SplineContainer>()!, speed: 2, loop: SplineLoop.loop));
+  return [track, cart];
+}
+```
+
+- **`SplineContainer`** holds splines in its object's space: move the
+  object and they move with it. Its `positionAt` and the rest answer in
+  the world.
+- **`SplineInstantiate`** makes copies with its function, hung from its
+  object, `spacing` metres apart or `count` of them, turned along the
+  spline unless `align` is false, `offset` from it.
+- **`SplineAnimate`** moves its object along at a `speed` or over
+  `seconds`, `once`, `loop` or `pingPong`, turned to face the way it goes;
+  `play`, `pause`, `restart`, `distance` and `normalizedTime`.
+- **`world.debug.drawSplines = true`** draws every container's splines
+  and knots.
+
+The lab's "Splines" has a road whose knots can be dragged, a rope that
+swings between two posts, a fence and a cart on a track
+(examples/lab/lib/scenes/splines.dart).
+
 ## 13. Animation
 
 A model's animations come with it: `model.clips` lists them, and each
@@ -3929,6 +4001,9 @@ What keeps a game fast:
 | ProBuilder's shapes with settings | `Mesh.box`, `grid`, `sphere`, `cylinder`, `cone`, `torus`, `disc`, `capsule` with sizes and segments |
 | ProBuilder's extrude, a lathe | `Mesh.extrude(Shape2D, depth:)` with holes, `Mesh.lathe(profile)` |
 | `Mesh.CombineMeshes(CombineInstance[])` | `Mesh.combine([CombineInstance(mesh, position:, ...)])`, a part each kept apart |
+| Splines: `Spline`, `BezierKnot`, `TangentMode`, `Evaluate`, `GetLength`, `SplineUtility.GetNearestPoint` | `Spline` with `Knot`s and `TangentMode`, `positionAt` / `directionAt` / `upAt` / `rotationAt` by distance, `length`, `nearest` |
+| `SplineContainer`, `SplineInstantiate`, `SplineAnimate` | the same three, as components |
+| `SplineExtrude` | `Mesh.sweep(spline, shape)` for any profile, `setSweep` to sweep again |
 | `BoxCollider`, `SphereCollider`, `CapsuleCollider`, `MeshCollider` | the same, from `fynkel_physics` |
 | A non-convex `MeshCollider` on a dynamic `Rigidbody` (refused) | collides as its hull |
 | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicMaterial` | `Rigidbody`, `ForceMode`, `RigidbodyConstraints`, `PhysicsMaterial` |
@@ -4034,6 +4109,10 @@ What keeps a game fast:
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Splines** (2026-10-25): an outline swept along a path has
+  `fy_mesh_sweep` and `fy_mesh_set_sweep` (ABI 44). Code that only uses
+  package:fynkel changes nothing.
 
 - **Building meshes** (2026-10-24): shapes with settings, outlines
   extruded and lathed, and meshes combined have functions of their own

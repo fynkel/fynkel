@@ -176,6 +176,40 @@ final class Debug implements Finalizable {
     }
   }
 
+  /// Draws each [SplineContainer]'s splines each frame, and a cross at
+  /// each knot, as Unity's Scene view shows them. Off unless set.
+  bool drawSplines = false;
+
+  static const _splineColor = Color(0xFF66FF99);
+  static const _knotColor = Color(0xFFFFFFFF);
+
+  /// The frame's splines, with [drawSplines].
+  void _drawSplines() {
+    _addSeconds = null;
+    for (final container in _world._splineContainers) {
+      if (!container.gameObject.activeInHierarchy) continue;
+      for (final spline in container.splines) {
+        final length = spline.length;
+        if (spline.knotCount < 2 || length == 0) continue;
+        // A line every half metre, and at least 8 a curve.
+        final curves = spline.closed ? spline.knotCount : spline.knotCount - 1;
+        final n = math.min(math.max((length * 2).ceil(), curves * 8), 2048);
+        var before = container.transformPoint(spline.positionAt(0));
+        for (var i = 1; i <= n; i++) {
+          final at = container.transformPoint(spline.positionAt(length * i / n));
+          _add(before, at, _splineColor);
+          before = at;
+        }
+        for (var k = 0; k < spline.knotCount; k++) {
+          final at = container.transformPoint(spline[k].position);
+          for (final axis in const [Vec3(0.15, 0, 0), Vec3(0, 0.15, 0), Vec3(0, 0, 0.15)]) {
+            _add(at - axis, at + axis, _knotColor);
+          }
+        }
+      }
+    }
+  }
+
   /// A circle of [radius] round [center], turned by [turn], round [axis]
   /// (0 X, 1 Y, 2 Z); only its upper half with [upper].
   void _ring(Vec3 center, Quat turn, double radius, int axis, bool upper) {
@@ -258,6 +292,7 @@ final class Debug implements Finalizable {
   void _flush() {
     if (!enabled) _count = 0;
     if (enabled && drawShapes) _drawShapes();
+    if (enabled && drawSplines) _drawSplines();
     _now = _world.time._unscaledSinceStart;
     _keep(oneFrame: true);
     if (_count == 0 && _sent == 0) return;

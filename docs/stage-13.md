@@ -309,6 +309,42 @@ and their tests, and a combined town is one draw.
 dragging a knot of a 100 m road rebuilds it within a frame on the
 Note10+.
 
+**As built** (2026-10-25, engine ABI 44):
+
+- `Spline` in plain Dart: `Knot`s with `TangentMode.auto` (weighted
+  Catmull-Rom, through every knot), `linear` and `bezier` (its own
+  handles), and a `roll` each. A table of 32 entries a curve gives
+  `positionAt`, `directionAt`, `upAt` and `rotationAt` by distance;
+  `nearest` searches the table, then closer along the curve. Up is
+  rotation-minimising (double reflection); a closed spline's twist is
+  spread round it so its ends meet. Changes go through `[]=`, `add`,
+  `insert`, `removeAt` and `setPositions`, and `version` counts them.
+- `Mesh.sweep(spline, shape)` and `setSweep`: Dart samples the spline
+  (`segmentsPerMetre`, more where it bends, at most `maxSegments`,
+  corners mitred) and Rust sweeps the outline along the samples
+  (`fy_mesh_sweep`, `fy_mesh_set_sweep`): walls as an extrusion's, caps
+  filled as its ends, UVs in metres, the triangles kept when they come
+  out the same. A Rust test checks a straight sweep is exactly
+  `Mesh.extrude`. Writing it found that extrude's tangents weren't at
+  right angles to its smoothed normals: both now square them.
+- Sweeping a rope each frame makes no garbage (a test). In the JIT the
+  tests run in, a double passed to a leaf FFI call is boxed unless it's
+  a constant, so `setSweep` is inlined where it's called; AOT builds
+  don't box.
+- `SplineContainer`, `SplineInstantiate` (copies made by a function,
+  `spacing` apart or `count` of them, placed again when the spline
+  changes), `SplineAnimate` (`speed` or `seconds`, `once`, `loop`,
+  `pingPong`, `align`) and `world.debug.drawSplines` (golden
+  debug_splines.png).
+- A 100 m road of 201 samples with a 12-point profile, swept again: the
+  Mac 0.09 ms in Rust; the Note10+ (profile, low) 1.05 ms for the whole
+  call from Dart, 0.03 ms to send, against the 2 ms bar. The lab's
+  "Splines" holds 59.9 fps on the Note10+ with the rope swinging.
+- The lab's "Splines": a road whose knots are dragged, a rope swinging
+  between two posts, a fence with its posts placed by SplineInstantiate
+  and rails swept along it, a cart on a closed track; its golden is
+  tests/golden/splines.png. Every golden from before is the same.
+
 ### Phase 4: cutting, a game, and measuring
 
 - `slice(plane, inside:)`; `subtract`, `union`, `intersect`.

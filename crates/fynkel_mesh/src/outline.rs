@@ -52,7 +52,7 @@ pub fn fill(outline: &[Vec2], holes: &[&[Vec2]]) -> Result<Vec<u32>, MeshError> 
 }
 
 /// Twice the signed area: more than 0 for counter-clockwise.
-fn area(points: &[Vec2], ids: &[u32]) -> f32 {
+pub(crate) fn area(points: &[Vec2], ids: &[u32]) -> f32 {
     let mut sum = 0.0;
     for i in 0..ids.len() {
         let (a, b) = (points[ids[i] as usize], points[ids[(i + 1) % ids.len()] as usize]);
@@ -177,7 +177,7 @@ fn clip_ears(points: &[Vec2], mut polygon: Vec<u32>) -> Vec<u32> {
 /// Each corner's normal on the edges either side of it: the two edges'
 /// own for a sharp corner, one between them for a smooth one. Edge k runs
 /// from point k to k + 1; `normal` gives an edge's outward normal.
-fn edge_ends(edges: &[Vec2], closed: bool) -> Vec<(Vec2, Vec2)> {
+pub(crate) fn edge_ends(edges: &[Vec2], closed: bool) -> Vec<(Vec2, Vec2)> {
     let n = edges.len();
     let limit = SMOOTH_DEGREES.to_radians().cos();
     (0..n)
@@ -192,6 +192,12 @@ fn edge_ends(edges: &[Vec2], closed: bool) -> Vec<(Vec2, Vec2)> {
             (blend(start), blend(end))
         })
         .collect()
+}
+
+/// `tangent` made square to `normal`: at a smoothed corner the normal is
+/// between the two edges', so the edge's own direction isn't quite.
+pub(crate) fn square_to(tangent: Vec3, normal: Vec3) -> Vec3 {
+    (tangent - normal * normal.dot(tangent)).normalize_or(tangent)
 }
 
 impl MeshData {
@@ -239,10 +245,11 @@ impl MeshData {
                 let (na, nb) = (ends[i].0.extend(0.0), ends[i].1.extend(0.0));
                 let (u0, u1) = (distance * k, (distance + length) * k);
                 let base = s.positions.len() as u32;
-                s.push(a.extend(half), na, tangent, [u0, 0.0]);
-                s.push(b.extend(half), nb, tangent, [u1, 0.0]);
-                s.push(b.extend(-half), nb, tangent, [u1, depth * k]);
-                s.push(a.extend(-half), na, tangent, [u0, depth * k]);
+                let (ta, tb) = (square_to(tangent, na), square_to(tangent, nb));
+                s.push(a.extend(half), na, ta, [u0, 0.0]);
+                s.push(b.extend(half), nb, tb, [u1, 0.0]);
+                s.push(b.extend(-half), nb, tb, [u1, depth * k]);
+                s.push(a.extend(-half), na, ta, [u0, depth * k]);
                 // Front a, back a, back b; front a, back b, front b.
                 s.indices.extend([base, base + 3, base + 2, base, base + 2, base + 1]);
                 distance += length;
