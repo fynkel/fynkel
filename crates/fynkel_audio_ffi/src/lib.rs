@@ -119,7 +119,7 @@ pub struct FaSpatial {
     pub rolloff: u32,
 }
 
-/// How to play a clip: its settings; `priority` 0 (kept longest) to 256
+/// How to play a clip: its settings; `priority` 0 (never given up) to 256
 /// (given up first); `pausable` 1 to hold while the game is paused; whose
 /// it is (`owner`, 0 for no one's); where to start, in seconds; whether
 /// it's 3D, and where it is; and the seconds it fades in over, from

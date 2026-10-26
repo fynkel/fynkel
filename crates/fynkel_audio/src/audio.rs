@@ -50,7 +50,7 @@ pub type Handle = u64;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Play {
     pub settings: Settings,
-    /// 0 (kept longest) to 256 (stolen first).
+    /// 0 (never stolen: music) to 256 (stolen first).
     pub priority: u16,
     /// Falls silent and holds while the game is paused.
     pub pausable: bool,
@@ -319,7 +319,8 @@ impl Audio {
     }
 
     /// Plays `clip`. `Ok(None)` if every voice is busy with one at least as
-    /// important; a stolen voice is in the next [`Audio::stopped`].
+    /// important, or of priority 0, which is never stolen; a stolen voice
+    /// is in the next [`Audio::stopped`].
     pub fn play(&mut self, clip: &Arc<Clip>, play: Play) -> Result<Option<Handle>, String> {
         check_settings(play.settings)?;
         check_fade(play.fade_in)?;
@@ -340,12 +341,13 @@ impl Audio {
                 // One stopped (its stop's few milliseconds) before all;
                 // then the least important at or below this one's
                 // importance, one fading out to its stop before the rest
-                // of its importance, and the oldest of equals. The mixer
-                // fades out the voice that was there, so none clicks.
+                // of its importance, and the oldest of equals; never one
+                // of priority 0 (music). The mixer fades out the voice
+                // that was there, so none clicks.
                 let victim = (0..MAX_VOICES)
                     .filter(|&i| {
                         let s = &self.slots[i];
-                        (s.stopped && !s.fading) || s.priority >= play.priority
+                        (s.stopped && !s.fading) || (s.priority > 0 && s.priority >= play.priority)
                     })
                     .max_by_key(|&i| {
                         let s = &self.slots[i];

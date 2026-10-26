@@ -189,6 +189,25 @@ fn a_voice_stopping_gives_way_first() {
 }
 
 #[test]
+fn a_voice_of_priority_0_is_never_given_up() {
+    // Stage 14's AU-new: music plays at priority 0, and was stolen, the
+    // oldest of equals, by the next sound of priority 0.
+    let mut audio = Audio::new();
+    let clip = level(QUIET_RATE, 5.0, 0.01);
+    let music = play(&mut audio, &clip, Play { priority: 0, ..Play::default() });
+    for _ in 1..MAX_VOICES {
+        play(&mut audio, &clip, Play { priority: 0, ..Play::default() });
+    }
+    assert_eq!(audio.play(&clip, Play { priority: 0, ..Play::default() }).unwrap(), None);
+    assert!(audio.playing(music));
+    let stats = audio.stats();
+    assert_eq!((stats.stolen, stats.refused), (0, 1));
+    // Fading out to its stop, too.
+    audio.fade(music, 0.0, 3.0, true).unwrap();
+    assert_eq!(audio.play(&clip, Play { priority: 0, ..Play::default() }).unwrap(), None);
+}
+
+#[test]
 fn a_stolen_voice_fades_out_rather_than_being_cut() {
     // Stage 14's AU2: a steal took the voice between two samples, a click.
     let mut audio = Audio::new();
