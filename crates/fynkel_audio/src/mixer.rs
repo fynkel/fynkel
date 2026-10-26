@@ -19,6 +19,11 @@ use crate::stream::Tap;
 /// How many sounds play at once, as Unity's 32 real voices.
 pub const MAX_VOICES: usize = 32;
 
+/// Voices kept out of sight to fade out one that was stolen, or started
+/// over in its slot, over a stop's few milliseconds rather than cut
+/// between two samples (a click).
+pub(crate) const TAILS: usize = 8;
+
 /// How many groups a voice may be in ([`Settings::group`]): group 0 is
 /// none, under the master volume alone.
 pub const MAX_GROUPS: usize = 16;
@@ -27,9 +32,9 @@ pub const MAX_GROUPS: usize = 16;
 pub(crate) const COMMANDS: usize = 1024;
 
 /// Room for every voice's return: at most one for each command since the
-/// game last read them, and one for each voice that ends on its own. So
-/// the ring is never full while the game reads it once a frame.
-pub(crate) const RETURNS: usize = COMMANDS + MAX_VOICES;
+/// game last read them, and one for each voice, or tail, that ends on its
+/// own. So the ring is never full while the game reads it once a frame.
+pub(crate) const RETURNS: usize = COMMANDS + MAX_VOICES + TAILS;
 
 /// How long a start, stop or pause ramps the gain, so none clicks.
 const RAMP_SECONDS: f32 = 0.005;
@@ -319,7 +324,8 @@ pub struct Mixer {
     ramp: f32,
     /// The high cut's coefficient for a sound right behind.
     dull: f32,
-    voices: [Voice; MAX_VOICES],
+    /// The game's slots, then the [`TAILS`].
+    voices: [Voice; MAX_VOICES + TAILS],
     groups: [Fader; MAX_GROUPS],
     /// Each group's way across this callback.
     spans: [Span; MAX_GROUPS],
@@ -328,7 +334,7 @@ pub struct Mixer {
     commands: rtrb::Consumer<Command>,
     returns: rtrb::Producer<Ended>,
     /// Ends the return ring couldn't take, kept to send next time.
-    held: [Option<Ended>; MAX_VOICES],
+    held: [Option<Ended>; MAX_VOICES + TAILS],
     shared: Arc<Shared>,
 }
 
@@ -345,7 +351,7 @@ impl Mixer {
             channels: 1,
             ramp: 1.0,
             dull: 1.0,
-            voices: [Voice::IDLE; MAX_VOICES],
+            voices: [Voice::IDLE; MAX_VOICES + TAILS],
             groups: [Fader::FULL; MAX_GROUPS],
             spans: [Span::still(1.0); MAX_GROUPS],
             game_paused: false,
@@ -393,8 +399,28 @@ impl Mixer {
         }
     }
 
+    /// Makes way in `slot` for a new voice: the one there fades out in a
+    /// tail, or, with every tail busy, ends now.
+    fn retire(&mut self, slot: usize) {
+        if self.voices[slot].clip.is_none() {
+            return;
+        }
+        match (MAX_VOICES..MAX_VOICES + TAILS).find(|&t| self.voices[t].clip.is_none()) {
+            Some(tail) => {
+                let mut voice = std::mem::replace(&mut self.voices[slot], Voice::IDLE);
+                voice.stopping = true;
+                self.voices[tail] = voice;
+            }
+            None => self.end(slot, false),
+        }
+    }
+
     fn voice(&mut self, slot: u8, generation: u32) -> Option<&mut Voice> {
-        let voice = self.voices.get_mut(usize::from(slot))?;
+        let slot = usize::from(slot);
+        if slot >= MAX_VOICES {
+            return None;
+        }
+        let voice = &mut self.voices[slot];
         (voice.clip.is_some() && voice.generation == generation).then_some(voice)
     }
 
@@ -408,7 +434,7 @@ impl Mixer {
                         self.give_back(Ended { slot: 0, generation, clip, stream, finished: false });
                         continue;
                     }
-                    self.end(i, false);
+                    self.retire(i);
                     let place = from.max(0.0);
                     let mut fade = Fader::FULL;
                     if fade_in > 0.0 {
@@ -480,7 +506,7 @@ impl Mixer {
     /// Fills `out`, interleaved in the output's channels, with every voice
     /// added up. Allocates nothing.
     pub fn render(&mut self, out: &mut [f32]) {
-        for slot in 0..MAX_VOICES {
+        for slot in 0..MAX_VOICES + TAILS {
             if let Some(ended) = self.held[slot].take() {
                 self.give_back(ended);
             }
@@ -495,7 +521,7 @@ impl Mixer {
         let ramp = self.ramp;
         let mut playing = 0;
         let mut starved = false;
-        for slot in 0..MAX_VOICES {
+        for slot in 0..MAX_VOICES + TAILS {
             let voice = &mut self.voices[slot];
             let Some(clip) = voice.clip.as_ref() else { continue };
             let held = voice.paused || (voice.pausable && self.game_paused);
@@ -659,12 +685,15 @@ impl Mixer {
             let (generation, stopping) = (voice.generation, voice.stopping);
             // A streamed clip's place in it, whichever time round it is.
             let shown = if voice.stream.is_some() && length > 0 { place % length as f64 } else { place };
-            self.shared.voices[slot].write(generation, shown);
+            // A tail's place is no one's.
+            if let Some(shared) = self.shared.voices.get(slot) {
+                shared.write(generation, shown);
+            }
             if finished {
                 self.end(slot, true);
             } else if stopping && (gain < SILENT || faded_out) {
                 self.end(slot, false);
-            } else {
+            } else if slot < MAX_VOICES {
                 playing += 1;
             }
         }

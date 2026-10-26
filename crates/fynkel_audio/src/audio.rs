@@ -123,6 +123,9 @@ struct Slot {
     busy: bool,
     /// Told to stop: it isn't playing, but the mixer still fades it.
     stopped: bool,
+    /// Stopping at the end of a fade that's heard still: it keeps its
+    /// priority until it's done.
+    fading: bool,
     priority: u16,
     owner: u64,
     /// When it started, to steal the oldest of equals.
@@ -139,6 +142,7 @@ impl Slot {
         generation: 0,
         busy: false,
         stopped: false,
+        fading: false,
         priority: 0,
         owner: 0,
         order: 0,
@@ -333,11 +337,20 @@ impl Audio {
         let slot = match self.slots.iter().position(|s| !s.busy) {
             Some(free) => free,
             None => {
-                // The least important at or below this one's importance,
-                // the oldest of equals, and one already stopping before all.
+                // One stopped (its stop's few milliseconds) before all;
+                // then the least important at or below this one's
+                // importance, one fading out to its stop before the rest
+                // of its importance, and the oldest of equals. The mixer
+                // fades out the voice that was there, so none clicks.
                 let victim = (0..MAX_VOICES)
-                    .filter(|&i| self.slots[i].stopped || self.slots[i].priority >= play.priority)
-                    .max_by_key(|&i| (self.slots[i].stopped, self.slots[i].priority, u64::MAX - self.slots[i].order));
+                    .filter(|&i| {
+                        let s = &self.slots[i];
+                        (s.stopped && !s.fading) || s.priority >= play.priority
+                    })
+                    .max_by_key(|&i| {
+                        let s = &self.slots[i];
+                        (s.stopped && !s.fading, s.priority, s.stopped, u64::MAX - s.order)
+                    });
                 let Some(victim) = victim else {
                     self.stats.refused += 1;
                     return Ok(None);
@@ -357,6 +370,7 @@ impl Audio {
             generation,
             busy: true,
             stopped: false,
+            fading: false,
             priority: play.priority,
             owner: play.owner,
             order: self.order,
@@ -422,6 +436,7 @@ impl Audio {
         self.send(Command::Fade { slot: slot as u8, generation, to, seconds, stop })?;
         if stop {
             self.slots[slot].stopped = true;
+            self.slots[slot].fading = seconds > 0.0;
         }
         Ok(())
     }

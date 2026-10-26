@@ -1910,7 +1910,10 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   game, and holds when the game's time stands still.
 - **32 voices.** As many sounds as that play at once. Past it the least
   important gives way: `priority` 0 is the most important, 256 the
-  least, 128 unless set; of equals, the oldest goes.
+  least, 128 unless set; of equals, one fading out goes first, then the
+  oldest. A sound fading out (`music.crossFade`, `stop(fadeOut:)`) keeps
+  its importance until it's done. The one that gives way fades out over
+  a few milliseconds, so it doesn't click.
 - **The iPhone's silent switch** mutes the game and the player's own
   music plays on under it, as most games do. `audio.session =
   AudioSession.playback` plays through the switch and stops their music,
@@ -4148,6 +4151,10 @@ For code written before: each change that breaks it, newest first.
   - `Animator.removeMark(clip, time, callback)` and `removeMarks([clip])`
     take away what `at` added; before, a pooled object that called `at`
     each time it came back was called once more each time.
+  - A sound fading out keeps its `priority` until it's done: a less
+    important one no longer takes its voice and cuts it off, and a
+    sound that takes a voice fades the old one out over a few
+    milliseconds instead of cutting it.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

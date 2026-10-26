@@ -189,6 +189,75 @@ fn a_voice_stopping_gives_way_first() {
 }
 
 #[test]
+fn a_stolen_voice_fades_out_rather_than_being_cut() {
+    // Stage 14's AU2: a steal took the voice between two samples, a click.
+    let mut audio = Audio::new();
+    let loud = level(QUIET_RATE, 5.0, 0.02);
+    let silent = level(QUIET_RATE, 5.0, 0.0);
+    for _ in 0..MAX_VOICES {
+        play(&mut audio, &loud, Play::default());
+    }
+    let before = render(&mut audio, 4096);
+    let before = before[before.len() - 2];
+    assert!((before - 0.64).abs() < 0.01, "{before}");
+    play(&mut audio, &silent, Play::default());
+    assert_eq!(audio.stats().stolen, 1);
+    let out = render(&mut audio, 1024);
+    let mut worst = (before - out[0]).abs();
+    for f in 1..1024 {
+        worst = worst.max((out[2 * f] - out[2 * (f - 1)]).abs());
+    }
+    assert!(worst < 0.001, "the steal steps by {worst} in one frame");
+    // Gone within a few milliseconds all the same.
+    assert!((out[out.len() - 2] - 0.62).abs() < 0.001, "{}", out[out.len() - 2]);
+    // And so is a restart's: a source's play stops its voice and starts
+    // again in the same slot.
+    let mut audio = Audio::new();
+    let first = play(&mut audio, &loud, Play::default());
+    for _ in 1..MAX_VOICES {
+        play(&mut audio, &silent, Play::default());
+    }
+    let before = render(&mut audio, 1024);
+    let before = before[before.len() - 2];
+    audio.stop(first).unwrap();
+    play(&mut audio, &silent, Play::default());
+    let out = render(&mut audio, 1024);
+    let mut worst = (before - out[0]).abs();
+    for f in 1..1024 {
+        worst = worst.max((out[2 * f] - out[2 * (f - 1)]).abs());
+    }
+    assert!(worst < 0.001, "the restart steps by {worst} in one frame");
+}
+
+#[test]
+fn a_fade_out_keeps_its_priority() {
+    // Stage 14's AU2: a voice fading out was taken first, by the least
+    // important sound, and cut.
+    let mut audio = Audio::new();
+    let music = level(QUIET_RATE, 10.0, 0.5);
+    let silent = level(QUIET_RATE, 10.0, 0.0);
+    let track = play(&mut audio, &music, Play { priority: 10, ..Play::default() });
+    for _ in 1..MAX_VOICES {
+        play(&mut audio, &silent, Play { priority: 10, ..Play::default() });
+    }
+    audio.fade(track, 0.0, 3.0, true).unwrap();
+    let out = render(&mut audio, QUIET_RATE as usize);
+    let at_1s = out[out.len() - 2];
+    assert!(at_1s > 0.3, "{at_1s}");
+    assert_eq!(audio.play(&silent, Play { priority: 256, ..Play::default() }).unwrap(), None);
+    assert_eq!(audio.play(&silent, Play { priority: 11, ..Play::default() }).unwrap(), None);
+    let out = render(&mut audio, 1024);
+    assert!(out[out.len() - 2] > 0.3, "the fade-out was cut: {at_1s} → {}", out[out.len() - 2]);
+    // As important or more, it gives way first, fading out quickly.
+    play(&mut audio, &silent, Play { priority: 10, ..Play::default() });
+    let out = render(&mut audio, 1024);
+    assert!((out[0] - at_1s).abs() < 0.01, "cut: {at_1s} → {}", out[0]);
+    assert!(out[out.len() - 2] < 0.01, "{}", out[out.len() - 2]);
+    // Stopped by the game, a stop's own few milliseconds, its voice is
+    // anyone's (a_voice_stopping_gives_way_first).
+}
+
+#[test]
 fn an_owner_stops_all_its_sounds() {
     let mut audio = Audio::new();
     let clip = level(QUIET_RATE, 1.0, 0.1);
