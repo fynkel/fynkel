@@ -121,6 +121,14 @@ final class Spline {
   var _ups = Float64List(0);
   var _length = 0.0;
 
+  // For a container scaled unevenly: the table's distances with each step
+  // scaled by [_sx], [_sy] and [_sz], and the length so, made again when
+  // the spline or the scale changes ([_scaleTo]).
+  var _scaled = Float64List(0);
+  var _scaledLength = 0.0;
+  var _sx = 1.0, _sy = 1.0, _sz = 1.0;
+  var _scaledFor = -1;
+
   // Where a lookup is: the piece of curve, how far along it (0 to 1), the
   // table entry before it and how far to the next.
   var _curve = 0;
@@ -368,6 +376,62 @@ final class Spline {
     var distance = (lo + hi) / 2;
     if (_closed) distance %= _length;
     return (distance: distance, position: positionAt(distance));
+  }
+
+  // --- Scaled unevenly, for a container ---
+
+  /// Makes [_scaled] for the scale [x], [y] and [z] (each 0 or more), if
+  /// it isn't for it already.
+  void _scaleTo(double x, double y, double z) {
+    _update();
+    if (_scaledFor == _version && x == _sx && y == _sy && z == _sz) return;
+    _scaledFor = _version;
+    _sx = x;
+    _sy = y;
+    _sz = z;
+    _scaledLength = 0;
+    if (_curves == 0) return;
+    final entries = _curves * _steps + 1;
+    if (_scaled.length < entries) _scaled = Float64List(_distances.length);
+    _scaled[0] = 0;
+    for (var e = 1; e < entries; e++) {
+      final i = e * 3;
+      final dx = (_points[i] - _points[i - 3]) * x;
+      final dy = (_points[i + 1] - _points[i - 2]) * y;
+      final dz = (_points[i + 2] - _points[i - 1]) * z;
+      _scaled[e] = _scaled[e - 1] + math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+    _scaledLength = _scaled[entries - 1];
+  }
+
+  /// [distance] along it scaled as [_scaleTo] says, as a distance along
+  /// it unscaled: clamped to its ends, or round again for a [closed] one.
+  double _unscaled(double distance) => _convert(distance, _scaled, _scaledLength, _distances);
+
+  /// [distance] along it unscaled, as a distance along it scaled as
+  /// [_scaleTo] says.
+  double _toScaled(double distance) => _convert(distance, _distances, _length, _scaled);
+
+  double _convert(double distance, Float64List from, double length, Float64List to) {
+    if (_curves == 0 || length == 0) return 0;
+    var d = distance;
+    if (_closed) {
+      d %= length;
+    } else {
+      d = d < 0 ? 0 : (d > length ? length : d);
+    }
+    var lo = 0, hi = _curves * _steps;
+    while (hi - lo > 1) {
+      final mid = (lo + hi) >> 1;
+      if (from[mid] <= d) {
+        lo = mid;
+      } else {
+        hi = mid;
+      }
+    }
+    final span = from[lo + 1] - from[lo];
+    final f = span > 0 ? (d - from[lo]) / span : 0.0;
+    return to[lo] + (to[lo + 1] - to[lo]) * f;
   }
 
   // --- Working it out ---

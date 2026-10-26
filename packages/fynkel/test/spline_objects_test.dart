@@ -133,6 +133,52 @@ void main() {
     expect(cart.position, near(const Vec3(5, 0, 0)));
   });
 
+  // Stage 14's DF6: a scaled container.
+  test('along a scaled container, distances are metres in the world, and it faces the way it goes', () {
+    // Scaled 2 evenly: a 10 m spline is 20 m long in the world.
+    final track = world.add(
+      GameObject(
+        transform: Transform(scale: Vec3.all(2)),
+        components: [
+          SplineContainer([
+            Spline.linear([Vec3.zero, const Vec3(10, 0, 0)]),
+          ]),
+        ],
+      ),
+    );
+    final c = track.get<SplineContainer>()!;
+    expect(c.length(), closeTo(20, 1e-9));
+    expect(c.positionAt(5), near(const Vec3(5, 0, 0)));
+    expect(c.nearest(const Vec3(6, 3, 0)).distance, closeTo(6, 1e-4));
+    final cart = world.add(GameObject(components: [SplineAnimate(c, speed: 4)]));
+    world.update(0.25);
+    expect(cart.position, near(Vec3.right), reason: 'a metre a frame, as on one not scaled');
+    expect(cart.get<SplineAnimate>()!.normalizedTime, closeTo(0.05, 1e-9));
+
+    // Scaled unevenly: a diagonal leans over, and is longer.
+    final leaning = world
+        .add(
+          GameObject(
+            transform: Transform(scale: const Vec3(2, 1, 1)),
+            components: [
+              SplineContainer([
+                Spline.linear([Vec3.zero, const Vec3(1, 0, -1), const Vec3(1, 0, -3)]),
+              ]),
+            ],
+          ),
+        )
+        .get<SplineContainer>()!;
+    final diagonal = math.sqrt(5);
+    expect(leaning.length(), closeTo(diagonal + 2, 1e-9));
+    expect(leaning.positionAt(diagonal / 2), near(const Vec3(1, 0, -0.5)));
+    expect(leaning.positionAt(diagonal + 1), near(const Vec3(2, 0, -2)));
+    expect(leaning.nearest(const Vec3(3, 0, -2)).distance, closeTo(diagonal + 1, 1e-4));
+    final along = leaning.directionAt(1);
+    expect(along, near(Vec3(2, 0, -1).normalized));
+    expect(leaning.rotationAt(1).rotate(Vec3.forward), near(along));
+    expect(leaning.rotationAt(1).rotate(Vec3.up), near(leaning.upAt(1)));
+  });
+
   test('once stops at the end and says so; ping-pong comes back facing back', () {
     final c = world
         .add(

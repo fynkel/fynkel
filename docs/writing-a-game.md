@@ -1594,10 +1594,12 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
 
 - **`SplineContainer`** holds splines in its object's space: move the
   object and they move with it. Its `positionAt` and the rest answer in
-  the world.
+  the world, distances included: on an object scaled 2, `length()` is
+  twice the spline's, and `positionAt(5)` is 5 m along in the world.
 - **`SplineInstantiate`** makes copies with its function, hung from its
-  object, `spacing` metres apart or `count` of them, turned along the
-  spline unless `align` is false, `offset` from it.
+  object, `spacing` metres apart (along the spline in its own space, so
+  scaling the object spaces them out with it) or `count` of them, turned
+  along the spline unless `align` is false, `offset` from it.
 - **`SplineAnimate`** moves its object along at a `speed` or over
   `seconds`, `once`, `loop` or `pingPong`, turned to face the way it goes;
   `play`, `pause`, `restart`, `distance` and `normalizedTime`.
@@ -4133,6 +4135,11 @@ For code written before: each change that breaks it, newest first.
     its last loop would: a yoyo of 2 back at the start, a `moveBy`
     sequence of 3 loops three times as far. It used to stop at the end
     of the loop it was in.
+  - A `SplineContainer`'s distances are metres in the world, as its
+    points are: on an object scaled 2, `positionAt(5)` is 5 m along, not
+    10, and a `SplineAnimate` at `speed: 1` goes 1 m a second, not 2.
+    `length()` is new, the length in the world. On one scaled unevenly,
+    `rotationAt` faces along `directionAt`.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more
