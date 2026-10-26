@@ -4174,6 +4174,9 @@ For code written before: each change that breaks it, newest first.
     joined in, with triangles outside the shape, and one to the right
     dropped. Ends with two holes or more (a B, an 8) are now filled
     right, as is an outline that touches itself.
+  - `world.raycast` hits a skinned character where it's drawn, not where
+    it was bound; a mesh's parts only when they're drawn (with a
+    material of their own); and each part from its own material's sides.
   - A prewarmed particle system meets its collision planes while it
     prewarms, and fires no sub emitters for that time: its first frame
     threw particles up through the floor, and burst every death at once.

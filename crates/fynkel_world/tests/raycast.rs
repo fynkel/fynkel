@@ -315,3 +315,79 @@ fn only_objects_on_the_masks_layers_are_hit() {
     assert_eq!(hit(1), Some(far), "layer 0 only");
     assert_eq!(hit(0), None, "no layers");
 }
+
+/// Every object from `root` down.
+fn tree(world: &World, root: ObjectId) -> Vec<ObjectId> {
+    let mut all = vec![root];
+    for &child in world.children(root).unwrap() {
+        all.extend(tree(world, child));
+    }
+    all
+}
+
+// Stage 14's WO3: a skinned mesh was hit where it was bound, not where its
+// joints have bent it to and it's drawn.
+#[test]
+fn a_skinned_mesh_is_hit_where_its_joints_have_put_it() {
+    let path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../tests/assets/gltf/Knight.glb");
+    let model = ModelData::from_glb(&std::fs::read(path).unwrap()).unwrap();
+    let mut world = World::new();
+    let ids = world.add_model(&model).unwrap();
+    let knight = world.spawn_model(&model, &ids.meshes, &ids.materials, Transform::default()).unwrap();
+    let all = tree(&world, knight);
+    let part = all.iter().copied().find(|&id| world.skin(id).is_some()).unwrap();
+    let mesh = world.mesh(world.get::<MeshRenderer>(part).unwrap().mesh.unwrap()).unwrap();
+    let (lo, hi) = mesh.bounds();
+    let centre = world.world_matrix(part).unwrap().transform_point3((lo + hi) * 0.5);
+    // Cast at it alone, on a layer of its own.
+    world.set_layer(part, 7).unwrap();
+    let down = |at: Vec3| Ray::new(at + Vec3::new(0.0, 0.0, 20.0), Vec3::NEG_Z).unwrap();
+    let hit = |world: &World, at: Vec3| world.raycast(down(at), 100.0, 1 << 7).map(|h| h.object);
+    assert_eq!(hit(&world, centre), Some(part), "at rest, where it was bound");
+    // The skeleton moved 10 m along X: the part goes with it.
+    let root = all.iter().copied().find(|&id| world.name(id).unwrap() == Some("root")).unwrap();
+    let mut t = world.get::<Transform>(root).unwrap();
+    t.position.x += 10.0;
+    world.insert(root, t).unwrap();
+    assert_eq!(hit(&world, centre), None, "where it was bound is empty");
+    assert_eq!(hit(&world, centre + Vec3::new(10.0, 0.0, 0.0)), Some(part));
+}
+
+// Stage 14's WO3: every submesh was hit, drawn or not, and all from the
+// sides the first material is seen from.
+#[test]
+fn only_the_submeshes_drawn_are_hit_each_from_its_own_sides() {
+    // Two squares facing +Z, at z = 0 and z = -2, a submesh each.
+    let positions = [
+        [-1.0, -1.0, 0.0],
+        [1.0, -1.0, 0.0],
+        [1.0, 1.0, 0.0],
+        [-1.0, 1.0, 0.0],
+        [-1.0, -1.0, -2.0],
+        [1.0, -1.0, -2.0],
+        [1.0, 1.0, -2.0],
+        [-1.0, 1.0, -2.0],
+    ];
+    let indices = [0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7];
+    let parts = MeshParts { positions: &positions, indices: &indices, submeshes: &[6], ..MeshParts::default() };
+    let two = |s: &mut Scene, first: MaterialId| {
+        let mesh = s.world.add_mesh(MeshData::new(parts).unwrap());
+        s.spawn(mesh, first, Transform::default())
+    };
+    let from_behind = |s: &Scene| s.cast(Vec3::new(0.0, 0.0, -5.0), Vec3::Z).map(|h| h.point.z);
+    // The first double-sided, the second with no material: it isn't
+    // drawn, so it's passed through and the first's back is hit.
+    let mut s = scene();
+    let first = s.two_sided;
+    let object = two(&mut s, first);
+    assert_eq!(from_behind(&s), Some(0.0));
+    // The second drawn one-sided: from behind, still passed through.
+    s.world.set_submesh_materials(object, &[s.one_sided]).unwrap();
+    assert_eq!(from_behind(&s), Some(0.0));
+    // The first one-sided, the second double-sided: its back is hit.
+    let mut s = scene();
+    let first = s.one_sided;
+    let object = two(&mut s, first);
+    s.world.set_submesh_materials(object, &[s.two_sided]).unwrap();
+    assert_eq!(from_behind(&s), Some(-2.0));
+}

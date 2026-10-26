@@ -890,7 +890,10 @@ final class World implements Finalizable {
   ///
   /// It hits what a view draws: objects with a [Transform] and a
   /// [MeshRenderer] with both a mesh and a material, from the side they're
-  /// drawn from (both sides for a [Material.doubleSided] one). Cut-outs
+  /// drawn from (both sides for a [Material.doubleSided] one), each part
+  /// ([Mesh.submeshCount]) only with a material of its own and from its
+  /// own material's sides, and a skinned character where its skeleton
+  /// has bent it to. Cut-outs
   /// ([Material.alphaCutoff]) are hit as if solid, and only objects on
   /// [layers] are hit ([GameObject.layer]): the ray goes through the rest.
   /// No physics is involved: each object's box is tested, then the
