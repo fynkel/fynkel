@@ -76,9 +76,21 @@ impl Device {
         let stream = device
             .build_output_stream(
                 config,
-                move |out: &mut [f32], _: &cpal::OutputCallbackInfo| match playing.try_lock() {
-                    Ok(mut mixer) => mixer.render(out),
-                    Err(_) => out.fill(0.0),
+                // A panic here would abort the app (cpal catches none):
+                // it's silence instead, and the poisoned mixer says so to
+                // the game's next call.
+                move |out: &mut [f32], _: &cpal::OutputCallbackInfo| {
+                    let rendered =
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match playing.try_lock() {
+                            Ok(mut mixer) => {
+                                mixer.render(out);
+                                true
+                            }
+                            Err(_) => false,
+                        }));
+                    if !matches!(rendered, Ok(true)) {
+                        out.fill(0.0);
+                    }
                 },
                 move |error: cpal::Error| match error.kind() {
                     ErrorKind::Xrun => {

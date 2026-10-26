@@ -214,6 +214,30 @@ fn a_sound_can_start_part_way_and_its_settings_change_while_it_plays() {
 }
 
 #[test]
+fn a_sound_started_at_or_past_its_end_ends_or_comes_round() {
+    // At its very end, and a stereo clip whose length in seconds isn't a
+    // whole number of frames (stage 14, AU1: the mixer panicked).
+    let mut audio = Audio::new();
+    let mono = level(QUIET_RATE, 1.0, 0.5);
+    let stereo = Arc::new(Clip::new(22_050, 2, vec![0.5; 2 * 1000]).unwrap());
+    let a = play(&mut audio, &mono, Play { from: 1.0, ..Play::default() });
+    let b = play(&mut audio, &stereo, Play { from: 1000.0 / 22_050.0, ..Play::default() });
+    let c = play(&mut audio, &mono, Play { from: 5.0, ..Play::default() });
+    render(&mut audio, 16);
+    assert!(!audio.playing(a) && !audio.playing(b) && !audio.playing(c));
+    // A looping one comes round to its start.
+    let looping = Settings { volume: 1.0, pitch: 1.0, looping: true, group: 0 };
+    let d = play(&mut audio, &mono, Play { from: 2.25, settings: looping, ..Play::default() });
+    render(&mut audio, 16);
+    assert!(audio.playing(d));
+    assert!((audio.time(d).unwrap() - 0.25).abs() < 0.01, "{:?}", audio.time(d));
+    // And the mixer still works.
+    let e = play(&mut audio, &mono, Play::default());
+    let out = render(&mut audio, 1024);
+    assert!(audio.playing(e) && out[out.len() - 1] > 0.4);
+}
+
+#[test]
 fn the_whole_volume_scales_every_voice() {
     let mut audio = Audio::new();
     let clip = level(QUIET_RATE, 1.0, 0.5);

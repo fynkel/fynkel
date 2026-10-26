@@ -512,6 +512,15 @@ impl Mixer {
             let mut place = voice.place;
             let mut gain = voice.gain;
             let mut finished = length == 0 && voice.stream.is_none();
+            // A decoded clip started at or past its end (its length in
+            // seconds, rounded) plays nothing, or comes round if it loops.
+            if voice.stream.is_none() && length > 0 && place >= length as f64 {
+                if looping {
+                    place %= length as f64;
+                } else {
+                    finished = true;
+                }
+            }
             // The fade (which waits while the voice is held) and the group.
             let fade = if held { Span::still(voice.fade.gain) } else { voice.fade.advance(frames) };
             let group = self.spans.get(usize::from(voice.settings.group)).copied().unwrap_or(Span::still(1.0));
