@@ -47,7 +47,23 @@ extension _Objects on World {
     _logMoved(child);
     _reparented.add(child);
     _shape++;
+    if (!child._appeared) _moveWait(child, parent);
     _refresh(child);
+  }
+
+  /// [child], still loading, now under [parent]: the object above it that
+  /// waits for it is [parent] if that's loading too, else none, and the
+  /// one that waited before goes on without it.
+  void _moveWait(GameObject child, GameObject? parent) {
+    final before = child._waiter;
+    final waiter = parent != null && !parent._appeared ? parent : null;
+    if (identical(before, waiter)) return;
+    child._waiter = waiter;
+    if (waiter != null) waiter._pending++;
+    if (before != null) {
+      before._pending--;
+      _appearIfDone(before);
+    }
   }
 
   void _link(GameObject child, GameObject? parent) {
