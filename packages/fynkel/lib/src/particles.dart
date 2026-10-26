@@ -740,8 +740,8 @@ final class ParticleSystem extends Component {
   ParticleCollision? _collision;
   List<SubEmitter> _subEmitters;
 
-  /// How long its timeline is, in seconds, at least 0.05: one round of a
-  /// looping system, the whole of one that isn't.
+  /// How long its timeline is, in seconds, from 0.05 to 100,000 (as
+  /// Unity's): one round of a looping system, the whole of one that isn't.
   double get duration => _duration;
   set duration(double value) => _set(() => _duration, (v) => _duration = v, value);
 
@@ -940,14 +940,16 @@ final class ParticleSystem extends Component {
   /// Takes its particles away; it plays on.
   void clear() => _command(FY_PARTICLES_CLEAR, 0);
 
-  /// Makes [count] particles now, as its shape would, playing or not.
+  /// Makes [count] particles now, as its shape would, playing or not: as
+  /// many of them as fit in [maxParticles].
   void emit(int count) {
     if (count < 0) throw ArgumentError.value(count, 'count', 'must be 0 or more');
     _command(FY_PARTICLES_EMIT, count);
   }
 
   /// Moves it [seconds] on at once, as if that much time had passed: an
-  /// effect seen half-way through.
+  /// effect seen half-way through. In steps of 1/30 s; past a minute, in
+  /// longer ones, so a long span costs no more than a minute's.
   void simulate(double seconds) {
     final object = _command(-1, 0);
     if (object == null) return;
