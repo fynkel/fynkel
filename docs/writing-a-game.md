@@ -1659,7 +1659,10 @@ class Hero extends GameObject {
   `stop()` keeps the pose it's in. Game time scales it: a paused world
   pauses its clips.
 - `at(clip, seconds, callback)` calls back each time a clip passes that
-  time: footsteps, the moment a sword hits.
+  time: footsteps, the moment a sword hits. Each call adds one more:
+  `removeMark(clip, seconds, callback)` takes one away (a pooled object
+  that adds it in `onSpawn` takes it away in `onRelease`), and
+  `removeMarks(clip)` all of a clip's, or `removeMarks()` all.
 - The clips play in the engine, once a frame after `onUpdate` and the
   tweens and before `onLateUpdate`. Each moves only the parts it moves.
   To turn a part a clip moves (a head that looks at you), set it in
@@ -4068,7 +4071,7 @@ What keeps a game fast:
 | `TrailRenderer`: Time, Min Vertex Distance, Width, Color, Emitting, `Clear()` | `TrailRenderer(time:, minVertexDistance:, widthMultiplier:, widthCurve:, colorGradient:, emitting:)`, `clear()` |
 | Quality's Soft Particles | `Quality.softParticles` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
-| Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
+| Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `removeMark`, `removeMarks`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
@@ -4142,6 +4145,9 @@ For code written before: each change that breaks it, newest first.
     `rotationAt` faces along `directionAt`.
   - `Follow` with `lookAhead` stays as far ahead as it was while the
     game is paused; it used to jump back to the target and out again.
+  - `Animator.removeMark(clip, time, callback)` and `removeMarks([clip])`
+    take away what `at` added; before, a pooled object that called `at`
+    each time it came back was called once more each time.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

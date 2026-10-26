@@ -146,6 +146,40 @@ void main() {
     expect(() => animator.at('Wheels', 2, () {}), throwsArgumentError);
   });
 
+  // Stage 14's DF9: marks taken away, as a pooled object's must be.
+  test('events at a time can be taken away, one or all of a clip', () {
+    final copy = world.add(truck.instantiate());
+    final animator = copy.animator!;
+    var steps = 0, others = 0;
+    void step() => steps++;
+    // A pooled copy's onSpawn adds its mark each time; its onRelease
+    // takes it away.
+    for (var reuse = 0; reuse < 3; reuse++) {
+      animator.at('Wheels', 0.3, step);
+      if (reuse < 2) animator.removeMark('Wheels', 0.3, step);
+    }
+    animator.at('Wheels', 0.6, () => others++);
+    animator.play('Wheels');
+    for (var i = 0; i < 5; i++) {
+      world.update(0.25);
+    }
+    expect((steps, others), (1, 1), reason: 'once a pass, not once for each time it was added');
+    animator.removeMark('Wheels', 0.6, step);
+    animator.removeMark('Wheels', 0.3, () {});
+    animator.removeMarks('Wheels');
+    for (var i = 0; i < 5; i++) {
+      world.update(0.25);
+    }
+    expect((steps, others), (1, 1));
+    expect(() => animator.removeMarks('run'), throwsArgumentError);
+    animator.at('Wheels', 0.3, step);
+    animator.removeMarks();
+    for (var i = 0; i < 5; i++) {
+      world.update(0.25);
+    }
+    expect(steps, 1);
+  });
+
   test('a moved part is in the moved log, so a system following it sees it', () {
     final copy = world.add(truck.instantiate());
     final wheels = copy.find('Wheels')!;
