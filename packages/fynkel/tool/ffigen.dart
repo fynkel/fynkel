@@ -26,6 +26,27 @@ const _blocking = {
   'fy_texture_new_rgba', // copies the pixels
   'fy_model_load', // decodes the model's images and generates tangents
   'fy_quality_auto', // may create the GPU device
+  'fy_sky_image_decode', // a 2K sky takes about 8 ms
+  // Shapes with many segments take tens of milliseconds, as can
+  // building from a shape and working normals out again. Sweeps and
+  // fy_mesh_set_positions stay leaf: they're called every frame for a
+  // rope or a mesh that changes, with the game's own lists (a leaf
+  // call's .address), and take under 2 ms for a 1 km road. Only a new
+  // count on a mesh of a million vertices takes longer (31 ms).
+  'fy_mesh_new_box',
+  'fy_mesh_new_capsule',
+  'fy_mesh_new_cone',
+  'fy_mesh_new_cylinder',
+  'fy_mesh_new_disc',
+  'fy_mesh_new_grid',
+  'fy_mesh_new_sphere',
+  'fy_mesh_new_torus',
+  'fy_mesh_extrude',
+  'fy_mesh_lathe',
+  'fy_mesh_combine',
+  'fy_mesh_recalculate',
+  'fy_particles_simulate', // up to 1800 steps
+  'fy_shader_new', // parses and checks the WGSL
 };
 
 Future<void> main() async {
