@@ -1,7 +1,9 @@
 # Stage 13 plan: meshes made while the game runs
 
 Status: accepted 2026-10-23 ("go and build that"), with the
-recommended answer to each decision (§7). Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
+recommended answer to each decision (§7). Closed 2026-10-26 after
+phase 3 ([report](stage-13-report.md)); phase 4 was left out. Scope and
+rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 Stage 12 is done ([report](stage-12-report.md)).
 
 A Fynkel game can make a mesh from code once (`Mesh.custom`), but it
