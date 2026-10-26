@@ -476,6 +476,24 @@ void main() {
       expect(rig.position, const Vec3(4, 0, 0));
     });
 
+    // Stage 14's DF8: look-ahead over a pause.
+    test('Follow keeps its look-ahead while the game is paused, and after', () {
+      final rig = world.add(GameObject(components: [Follow(target, offset: Vec3.zero, lookAhead: 0.5)]));
+      frames(1);
+      target.position += const Vec3(1, 0, 0);
+      frames(1);
+      expect(rig.position, const Vec3(4, 0, 0));
+      world.paused = true;
+      frames(2);
+      expect(rig.position, const Vec3(4, 0, 0), reason: 'held where it was');
+      world.paused = false;
+      frames(1);
+      expect(rig.position, const Vec3(4, 0, 0), reason: 'the first frame back moves on nothing');
+      target.position += const Vec3(1, 0, 0);
+      frames(1);
+      expect(rig.position, const Vec3(5, 0, 0));
+    });
+
     test('LookAt turns to the target, from where a Follow on the same object put it this frame', () {
       final rig = world.add(
         GameObject(

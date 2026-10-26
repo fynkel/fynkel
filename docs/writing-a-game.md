@@ -4140,6 +4140,8 @@ For code written before: each change that breaks it, newest first.
     10, and a `SplineAnimate` at `speed: 1` goes 1 m a second, not 2.
     `length()` is new, the length in the world. On one scaled unevenly,
     `rotationAt` faces along `directionAt`.
+  - `Follow` with `lookAhead` stays as far ahead as it was while the
+    game is paused; it used to jump back to the target and out again.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

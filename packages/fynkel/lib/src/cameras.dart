@@ -185,6 +185,7 @@ final class Follow extends _Rig {
 
   /// Seconds ahead of [target] it aims for, where it would be at the speed
   /// it's going: a camera that shows more of where the player is heading.
+  /// While the game is paused it stays as far ahead as it was.
   double lookAhead;
 
   /// In a view taller than it's wide (a phone held upright), which sees
@@ -195,9 +196,14 @@ final class Follow extends _Rig {
   double portraitFit;
 
   Vec3? _at, _targetWas;
+  // How far ahead it aims, kept through frames with no time (a pause).
+  Vec3 _lead = Vec3.zero;
 
   @override
-  void _reset() => _at = _targetWas = null;
+  void _reset() {
+    _at = _targetWas = null;
+    _lead = Vec3.zero;
+  }
 
   @override
   void _move(double dt) {
@@ -213,7 +219,12 @@ final class Follow extends _Rig {
         };
     final was = _targetWas;
     _targetWas = p;
-    if (lookAhead != 0 && was != null && dt > 0) goal += (p - was) * (lookAhead / dt);
+    if (lookAhead == 0 || was == null) {
+      _lead = Vec3.zero;
+    } else {
+      if (dt > 0) _lead = (p - was) * (lookAhead / dt);
+      goal += _lead;
+    }
     final at = _at;
     final next = at == null ? goal : Vec3.lerp(at, goal, _damp(damping, dt));
     _at = next;
