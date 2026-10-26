@@ -4195,6 +4195,10 @@ For code written before: each change that breaks it, newest first.
     UVs no longer works out tangents from none when it changes.
   - `SplineInstantiate` with a `count` makes no copies on a spline with
     no knots, and makes them once it has some: it threw every frame.
+  - `Shader.reload` with code that turns a value into a texture of the
+    same name leaves the old value out until a texture is set: it threw
+    halfway, other worlds and screen effects kept the old code, and the
+    old code was never freed.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

@@ -115,8 +115,10 @@ final class Shader implements Finalizable {
 
   /// Puts [source] in place of its code, as when its file changes: every
   /// material using it, in every world, draws with the new code from the
-  /// next frame, its values set again by name. Throws a [ShaderError] and
-  /// keeps the code it had when [source] doesn't compile.
+  /// next frame, its values set again by name; one the new code doesn't
+  /// have, or has as another kind (a number now a texture), is left out
+  /// until it's set again. Throws a [ShaderError] and keeps the code it
+  /// had when [source] doesn't compile.
   void reload(String source) {
     final old = _live;
     final (pointer, layout) = _compile(source, name);
@@ -124,14 +126,17 @@ final class Shader implements Finalizable {
     _pointer = pointer;
     _layout = layout;
     _finalizer.attach(this, pointer.cast(), detach: this);
-    for (final world in _release.worlds) {
-      world._reloadShader(this);
+    try {
+      for (final world in _release.worlds) {
+        world._reloadShader(this);
+      }
+      _effects.removeWhere((e) => e.target == null);
+      for (final effect in _effects) {
+        effect.target?._changed();
+      }
+    } finally {
+      fy_shader_free(old);
     }
-    _effects.removeWhere((e) => e.target == null);
-    for (final effect in _effects) {
-      effect.target?._changed();
-    }
-    fy_shader_free(old);
   }
 
   /// Frees the shader: every world that has it lets it go. Throws a
@@ -217,10 +222,15 @@ final class ScreenEffect {
     _values[name] = value;
   }
 
-  /// The texture its shader's texture [index] is given, or null.
+  /// The texture its shader's texture [index] is given, or null: also
+  /// when what it has by that name is a value, from before a reload.
   Texture2D? _texture(int index) {
     final textures = shader._layout.textures;
-    return index < textures.length ? _values[textures[index].name] as Texture2D? : null;
+    if (index >= textures.length) return null;
+    return switch (_values[textures[index].name]) {
+      final Texture2D texture => texture,
+      _ => null,
+    };
   }
 
   /// Lays its values out for its shader as it is now and sends them to

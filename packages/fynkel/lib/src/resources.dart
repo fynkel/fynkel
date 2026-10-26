@@ -1148,11 +1148,15 @@ final class Material {
     _packedFor = shader?._layout;
   }
 
-  /// The texture its shader's texture [index] is given, or null.
+  /// The texture its shader's texture [index] is given, or null: also
+  /// when what it has by that name is a value, from before a reload.
   Texture2D? _shaderTexture(int index) {
     final layout = _shader?._layout;
     if (layout == null || index >= layout.textures.length) return null;
-    return _values[layout.textures[index].name] as Texture2D?;
+    return switch (_values[layout.textures[index].name]) {
+      final Texture2D texture => texture,
+      _ => null,
+    };
   }
 
   /// The base colour (albedo). Its alpha is the [opacity].
