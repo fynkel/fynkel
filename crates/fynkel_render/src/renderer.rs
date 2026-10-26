@@ -2855,7 +2855,7 @@ impl Pipelines {
                         include_str!("particles.wgsl")
                     )
                     .to_owned(),
-                    Some(shader) => format!("{}\n{}", shader.wgsl, include_str!("particles.wgsl")),
+                    Some(shader) => format!("{}\n{}", shader.wgsl, crate::shader::PARTICLES),
                 };
                 let label = shader.map_or_else(|| "particles".to_owned(), |s| format!("particles ({})", s.name));
                 self.device.create_shader_module(wgpu::ShaderModuleDescriptor {
