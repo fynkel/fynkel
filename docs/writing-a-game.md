@@ -4123,6 +4123,11 @@ For code written before: each change that breaks it, newest first.
   - Destroying the live virtual camera's object blends from where the
     view is to the next one, with `onLiveChanged`; it used to make the
     next `update` throw, then cut.
+  - An add the engine refuses (a camera's `fovY` of 500°, say) adds
+    nothing, wherever below the root the refused component is: the world
+    is as it was and the objects can be added once mended. A root used
+    to stay in the world half built, its later children could never be
+    added, and its lights stayed counted.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

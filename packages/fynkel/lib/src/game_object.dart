@@ -400,6 +400,8 @@ class GameObject with _Moving {
   ///
   /// Throws a [StateError] if [child] was already added (to move a live
   /// object, set its [parent]) or destroyed, or would end up below itself.
+  /// As [World.add], a component the engine refuses on [child] or below it
+  /// adds none of them.
   T add<T extends GameObject>(T child) {
     child._checkAddable();
     if (_destroyed) throw StateError('$this was destroyed, so nothing can be added to it');
