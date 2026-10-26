@@ -2989,7 +2989,9 @@ scale included, as in Unity: `Vec3(-0.5, 0, 0)` is the left face of a
 cube however wide the object is scaled (the door below is 1 wide; scaled
 to 3, the hinge would still be on its edge). `connectedAnchor` is the
 same on the other body, or in the world with none. It holds the bodies
-as they are when it joins them, at the scale they have then. With a `breakForce` or
+as they are when it joins them, at the scale they have then. If the
+other body's object is destroyed, `connectedBody` goes null and the
+joint holds its body to the world where it is, as in Unity. With a `breakForce` or
 `breakTorque`, a joint that holds harder than that breaks: `with
 JointBreaks` hears of it in `onJointBreak`, and the joint is taken off.
 
@@ -4109,6 +4111,14 @@ What keeps a game fast:
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 14's fixes** (2026-10-27): behaviour that was wrong, put
+  right; code that relied on it changes.
+  - A joint whose `connectedBody`'s object is destroyed holds its body
+    to the world where it is, and `connectedBody` goes null; it used to
+    wait for that body for good.
+  - A collider turned off and on again before a step gets no exit from
+    the trigger it's in (it used to get enter, then exit).
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more
