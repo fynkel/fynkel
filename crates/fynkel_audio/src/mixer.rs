@@ -681,7 +681,10 @@ impl Mixer {
             (voice.have, voice.drained) = (have, drained);
             voice.gain = gain;
             voice.mix = voice.target;
-            voice.low = [low_l, low_r];
+            // A high cut that's gone past what a float holds, or isn't a
+            // number (samples as loud as can be, added up), would stay so
+            // for good: it starts again from silence.
+            voice.low = if (low_l + low_r).is_finite() { [low_l, low_r] } else { [0.0; 2] };
             let (generation, stopping) = (voice.generation, voice.stopping);
             // A streamed clip's place in it, whichever time round it is.
             let shown = if voice.stream.is_some() && length > 0 { place % length as f64 } else { place };
@@ -698,7 +701,9 @@ impl Mixer {
             }
         }
         for sample in out.iter_mut() {
-            *sample = sample.clamp(-1.0, 1.0);
+            // Never a value that isn't a number, which some outputs take
+            // for silence until they're opened again.
+            *sample = if sample.is_nan() { 0.0 } else { sample.clamp(-1.0, 1.0) };
         }
         if starved {
             self.shared.starved.fetch_add(1, Ordering::Relaxed);

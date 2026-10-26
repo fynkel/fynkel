@@ -745,7 +745,10 @@ pub unsafe extern "C" fn fa_voice_spatial_set(audio: *mut FaAudio, voice: u64, s
 
 /// The frame's moves, in one call: the listener, at `listener`, and
 /// `count` voices at `places`, each where it is now. Heard from the next
-/// `fa_audio_update`. A voice that ended is skipped.
+/// `fa_audio_update`. A voice that ended is skipped, and so is a place
+/// that isn't finite (an object past what a float holds) or a listener
+/// that faces nowhere: heard from where it was last, so one bad object
+/// doesn't fail the frame's sound.
 ///
 /// # Safety
 ///
@@ -766,9 +769,11 @@ pub unsafe extern "C" fn fa_audio_place(
             }
             let places = slice(places, count, "places")?;
             let l = *listener;
-            a.audio.set_listener(Listener { position: l.position, rotation: l.rotation }).map_err(invalid)?;
+            // Each refused only for not being finite, or for facing
+            // nowhere: skipped.
+            let _ = a.audio.set_listener(Listener { position: l.position, rotation: l.rotation });
             for place in places {
-                a.audio.place(place.voice, place.position).map_err(invalid)?;
+                let _ = a.audio.place(place.voice, place.position);
             }
             Ok(())
         })

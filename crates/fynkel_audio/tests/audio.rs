@@ -348,6 +348,20 @@ fn a_sound_started_at_or_past_its_end_ends_or_comes_round() {
 }
 
 #[test]
+fn a_clip_as_loud_as_a_float_holds_doesnt_silence_the_rest() {
+    // Stage 14's AU5: samples each a number, but whose difference isn't,
+    // made the mix not a number, and every sound with it.
+    let mut audio = Audio::new();
+    let wild =
+        Arc::new(Clip::new(QUIET_RATE, 1, (0..4800).map(|i| if i % 2 == 0 { 3e38 } else { -3e38 }).collect()).unwrap());
+    play(&mut audio, &wild, Play { settings: Settings { volume: 0.0, ..Settings::default() }, ..Play::default() });
+    play(&mut audio, &level(QUIET_RATE, 1.0, 0.5), Play::default());
+    let out = render(&mut audio, 1024);
+    assert!(out.iter().all(|s| s.is_finite()));
+    assert!((out[out.len() - 2] - 0.5).abs() < 0.005, "{}", out[out.len() - 2]);
+}
+
+#[test]
 fn the_whole_volume_scales_every_voice() {
     let mut audio = Audio::new();
     let clip = level(QUIET_RATE, 1.0, 0.5);

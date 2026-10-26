@@ -130,6 +130,28 @@ fn a_moved_voice_is_heard_from_its_new_place_after_the_update() {
     assert!(audio.mix(handle).unwrap().ears().0 > 0.3);
 }
 
+#[test]
+fn a_sound_further_than_a_float_holds_is_heard_far_away_not_as_nan() {
+    // Stage 14's AU5: each place a float, but their difference past what
+    // one holds, gave a mix that isn't a number, and every sound went
+    // silent with it.
+    let far = Listener { position: [-3e38, 0.0, 0.0], ..Listener::default() };
+    let heard = mix(&THREE_D, [3e38, 0.0, 0.0], &far);
+    assert!(heard.gains.iter().all(|g| g.is_finite()) && heard.dull.is_finite(), "{heard:?}");
+    // As far as can be: the max distance's, from the right.
+    let (left, right) = heard.ears();
+    assert!(left < 1e-6 && (right - 1.0 / 50.0).abs() < 1e-4, "{left} {right}");
+    let mut audio = Audio::new();
+    audio.set_listener(far).unwrap();
+    audio.play(&tone(1.0), Play { spatial: THREE_D, position: [3e38, 0.0, 0.0], ..Play::default() }).unwrap();
+    let near = Arc::new(Clip::new(QUIET_RATE, 1, vec![0.25; QUIET_RATE as usize]).unwrap());
+    audio.play(&near, Play::default()).unwrap();
+    let mut out = vec![0.0; 2048];
+    audio.render(&mut out).unwrap();
+    assert!(out.iter().all(|s| s.is_finite()), "the mix isn't a number");
+    assert!((out[out.len() - 2] - 0.25).abs() < 0.02, "{}", out[out.len() - 2]);
+}
+
 // --- Goldens -------------------------------------------------------------------
 
 /// A 440 Hz tone, `seconds` long, at half volume, which loops without a

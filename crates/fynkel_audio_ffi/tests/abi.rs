@@ -240,6 +240,56 @@ fn a_3d_voice_is_heard_from_where_the_frames_moves_put_it() {
 }
 
 #[test]
+fn a_place_that_isnt_finite_is_skipped_and_the_frame_goes_on() {
+    // Stage 14's AU5: one source at a world place past what a float holds
+    // failed the whole call, every frame, until the sound was turned off.
+    let audio = Audio(fa_audio_new());
+    let clip = clip(48_000, &[0.5; 48_000]);
+    let spatial = FaSpatial { blend: 1.0, pan: 0.0, min_distance: 1.0, max_distance: 50.0, rolloff: 0 };
+    let (mut bad, mut good) = (0, 0);
+    // SAFETY: live audio and clip, a readable play and a writable out.
+    unsafe {
+        let p = FaPlay { spatial, position: [3.0, 0.0, 0.0], ..play(1.0) };
+        assert_eq!(fa_audio_play(audio.0, clip, &p, &mut bad), FaStatus::Ok);
+        assert_eq!(fa_audio_play(audio.0, clip, &p, &mut good), FaStatus::Ok);
+    }
+    let listener = FaListener { position: [0.0; 3], rotation: [0.0, 0.0, 0.0, 1.0] };
+    let places = [
+        FaPlace { voice: bad, position: [f32::INFINITY, 0.0, 0.0] },
+        FaPlace { voice: good, position: [-3.0, 0.0, 0.0] },
+    ];
+    let mut out = vec![0.0f32; 2_048 * 2];
+    let mut stopped = 0;
+    // SAFETY: live audio, a readable listener and places, and readable and
+    // writable outs.
+    unsafe {
+        assert_eq!(fa_audio_place(audio.0, &listener, places.as_ptr(), 2), FaStatus::Ok, "{}", last_error());
+        assert_eq!(fa_audio_update(audio.0, &0.0, &mut stopped), FaStatus::Ok);
+        assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_048), FaStatus::Ok);
+    }
+    // One on each side: the bad one where it was, the good one moved.
+    let (l, r) = (out[out.len() - 2], out[out.len() - 1]);
+    assert!((l - r).abs() < 1e-3 && l > 0.1, "{l} {r}");
+    // A listener that isn't finite, or faces nowhere, stays where it was.
+    for listener in [
+        FaListener { position: [f32::INFINITY, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0] },
+        FaListener { position: [0.0; 3], rotation: [0.0; 4] },
+    ] {
+        // SAFETY: live audio, a readable listener, none to place.
+        assert_eq!(unsafe { fa_audio_place(audio.0, &listener, ptr::null(), 0) }, FaStatus::Ok);
+        // SAFETY: as above.
+        unsafe {
+            assert_eq!(fa_audio_update(audio.0, &0.0, &mut stopped), FaStatus::Ok);
+            assert_eq!(fa_audio_render(audio.0, out.as_mut_ptr(), 2_048), FaStatus::Ok);
+        }
+        let (l, r) = (out[out.len() - 2], out[out.len() - 1]);
+        assert!((l - r).abs() < 1e-3 && l > 0.1, "{l} {r}");
+    }
+    // SAFETY: made above, not used after.
+    unsafe { fa_clip_free(clip) };
+}
+
+#[test]
 fn bad_3d_values_are_refused_and_say_why() {
     let audio = Audio(fa_audio_new());
     let clip = clip(48_000, &[0.1; 480]);
@@ -248,9 +298,6 @@ fn bad_3d_values_are_refused_and_say_why() {
     // SAFETY: live audio and clip, a readable play and a writable out.
     assert_eq!(unsafe { fa_audio_play(audio.0, clip, &bad, &mut handle) }, FaStatus::InvalidValue);
     assert!(last_error().contains("rolloff 9"), "{}", last_error());
-    let listener = FaListener { position: [f32::INFINITY, 0.0, 0.0], rotation: [0.0, 0.0, 0.0, 1.0] };
-    // SAFETY: live audio, a readable listener, none to place.
-    assert_eq!(unsafe { fa_audio_place(audio.0, &listener, ptr::null(), 0) }, FaStatus::InvalidValue);
     // SAFETY: a null listener and spatial are refused, not read.
     unsafe {
         assert_eq!(fa_audio_place(audio.0, ptr::null(), ptr::null(), 0), FaStatus::NullPointer);

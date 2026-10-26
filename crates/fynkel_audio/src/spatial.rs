@@ -156,17 +156,19 @@ pub fn mix(spatial: &Spatial, position: [f32; 3], listener: &Listener) -> Mix {
     if blend <= 0.0 {
         return Mix { gains: flat, dull: 0.0 };
     }
-    let to =
-        [position[0] - listener.position[0], position[1] - listener.position[1], position[2] - listener.position[2]];
+    // In doubles: two places a float holds can be further apart than one
+    // holds (stage 14, AU5), and that distance squared further still.
+    let to = [0, 1, 2].map(|i| f64::from(position[i]) - f64::from(listener.position[i]));
     let distance = (to[0] * to[0] + to[1] * to[1] + to[2] * to[2]).sqrt();
     let (side, behind) = if distance > 1e-4 {
         let (right, forward) = listener.axes();
-        let dot = |a: [f32; 3], b: [f32; 3]| a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
-        ((dot(to, right) / distance).clamp(-1.0, 1.0), (-dot(to, forward) / distance).max(0.0))
+        let dot = |a: [f64; 3], b: [f32; 3]| a[0] * f64::from(b[0]) + a[1] * f64::from(b[1]) + a[2] * f64::from(b[2]);
+        ((dot(to, right) / distance).clamp(-1.0, 1.0) as f32, (-dot(to, forward) / distance).max(0.0) as f32)
     } else {
         (0.0, 0.0)
     };
-    let gain = rolloff(spatial, distance) * (1.0 - BEHIND_QUIETER * behind);
+    // Past what a float holds, it's at the max distance anyway.
+    let gain = rolloff(spatial, distance.min(f64::from(f32::MAX)) as f32) * (1.0 - BEHIND_QUIETER * behind);
     let (al, ar) = pan_gains(side);
     // A 3D sound is heard from one place: both of the clip's sides, half
     // each, to each ear.

@@ -407,7 +407,10 @@ FaStatus fa_voice_spatial_set(struct FaAudio *audio,
 
 // The frame's moves, in one call: the listener, at `listener`, and
 // `count` voices at `places`, each where it is now. Heard from the next
-// `fa_audio_update`. A voice that ended is skipped.
+// `fa_audio_update`. A voice that ended is skipped, and so is a place
+// that isn't finite (an object past what a float holds) or a listener
+// that faces nowhere: heard from where it was last, so one bad object
+// doesn't fail the frame's sound.
 //
 // # Safety
 //
