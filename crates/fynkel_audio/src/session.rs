@@ -17,7 +17,9 @@ pub enum Session {
     /// The game talks and listens at once, like a call: the mic works
     /// alongside the game's sound (iOS's `playAndRecord`), which plays from
     /// the loudspeaker, not the earpiece, and ignores the silent switch. On
-    /// Android, as `Playback`.
+    /// Android, as `Playback`, but the phone's mode for a call over the
+    /// internet (which the game's own voice chat sets) doesn't pause it: a
+    /// phone call still does.
     VoiceChat,
 }
 
@@ -120,13 +122,58 @@ pub(crate) fn apply(_session: Session) -> Result<(), String> {
     Ok(())
 }
 
-/// Whether a phone call is on or ringing, when the sound should wait.
+/// Android's `AudioManager` modes.
+const MODE_RINGTONE: i32 = 1;
+const MODE_IN_CALL: i32 = 2;
+const MODE_IN_COMMUNICATION: i32 = 3;
+
+/// Whether the game's sound in `session` waits while the phone is in
+/// `mode` (Android's `AudioManager.getMode`): a call ringing or on. A
+/// game in `VoiceChat` talks itself, and its voice library (WebRTC's,
+/// say) puts the phone in `MODE_IN_COMMUNICATION` while it does: not a
+/// call to wait for. Since Android 11 the mode is the whole phone's, so
+/// another app's call in that mode doesn't pause it either.
+#[cfg_attr(not(any(test, target_os = "android")), allow(dead_code))]
+fn waits_for(session: Session, mode: i32) -> bool {
+    match mode {
+        MODE_RINGTONE | MODE_IN_CALL => true,
+        MODE_IN_COMMUNICATION => session != Session::VoiceChat,
+        _ => false,
+    }
+}
+
+/// Whether a phone call is on or ringing, when the sound in `session`
+/// should wait.
 #[cfg(target_os = "android")]
-pub(crate) fn in_call() -> bool {
-    crate::android::in_call()
+pub(crate) fn in_call(session: Session) -> bool {
+    crate::android::mode().is_some_and(|mode| waits_for(session, mode))
 }
 
 #[cfg(not(target_os = "android"))]
-pub(crate) fn in_call() -> bool {
+pub(crate) fn in_call(_session: Session) -> bool {
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn voice_chat_isnt_paused_by_its_own_call() {
+        // Stage 14's AU6: a voice chat's library (WebRTC's) puts the phone
+        // in MODE_IN_COMMUNICATION while it talks, which paused the game.
+        assert!(!waits_for(Session::VoiceChat, MODE_IN_COMMUNICATION));
+        // A phone call, ringing or on, still pauses it.
+        assert!(waits_for(Session::VoiceChat, MODE_IN_CALL));
+        assert!(waits_for(Session::VoiceChat, MODE_RINGTONE));
+        // As every call pauses a game that doesn't talk itself.
+        for session in [Session::Ambient, Session::Playback] {
+            for mode in [MODE_RINGTONE, MODE_IN_CALL, MODE_IN_COMMUNICATION] {
+                assert!(waits_for(session, mode), "{session:?} {mode}");
+            }
+        }
+        // Not the phone's normal mode, nor one it doesn't say.
+        assert!(!waits_for(Session::Ambient, 0));
+        assert!(!waits_for(Session::Ambient, -2));
+    }
 }

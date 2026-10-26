@@ -599,7 +599,7 @@ impl Audio {
         }
         if self.device.is_some() && self.last_call_check.is_none_or(|at| at.elapsed() >= CALL_CHECK) {
             self.last_call_check = Some(Instant::now());
-            let in_call = session::in_call();
+            let in_call = session::in_call(self.session);
             if in_call != self.in_call {
                 self.in_call = in_call;
                 self.heard = None;

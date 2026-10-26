@@ -1925,7 +1925,9 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   which plays from the loudspeaker through the switch, and the mic's
   plugin is told to leave the session alone (`record`'s
   `IosRecordConfig(manageAudioSession: false)`). On both, the game's
-  sound waits while a call rings or is on.
+  sound waits while a call rings or is on; on Android, with `voiceChat`,
+  a call over the internet doesn't count (the game's own voice chat puts
+  the phone in that call's mode), only a phone call.
 - **The sound starts** when the world is first shown on screen. In a
   test, which shows nothing, the sound is made and timed the same way
   with no device: `world.update` steps it, a clip ends after its length,
@@ -4159,6 +4161,11 @@ For code written before: each change that breaks it, newest first.
   - A sound of `priority` 0 is never given up, as music isn't (it plays
     at 0): with every voice busy at 0, a new one isn't played, where the
     oldest gave way before.
+  - On Android, `AudioSession.voiceChat` no longer pauses the game's
+    sound while the phone is in a call's mode for talking over the
+    internet (`MODE_IN_COMMUNICATION`, which WebRTC's libraries set for
+    the game's own voice chat). A phone call, ringing or on, still
+    pauses it.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more
