@@ -959,9 +959,12 @@ final class Physics extends WorldSystem implements Finalizable {
     final keys = _contactKeys;
     final byKey = _byKey;
     for (var i = 0; i < count; i++) {
-      final a = byKey[keys[i * 7 + 1]];
-      final b = byKey[keys[i * 7 + 2]];
-      if (a == null || b == null) continue;
+      final keyA = keys[i * 7 + 1], keyB = keys[i * 7 + 2];
+      final a = byKey[keyA];
+      final b = byKey[keyB];
+      // A collider turned off and on again since has a new key: what the
+      // old one did ended with it, untold, as when it's off.
+      if (a == null || b == null || a._key != keyA || b._key != keyB) continue;
       final kind = uints[i * _contactWords];
       final trigger = uints[i * _contactWords + 1] != 0;
       _tell(kind, trigger, i, a, b, false);

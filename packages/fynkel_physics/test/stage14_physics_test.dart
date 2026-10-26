@@ -105,6 +105,36 @@ void main() {
       final d = (o.rotation.x - turned.x).abs() + (o.rotation.y - turned.y).abs() + (o.rotation.w - turned.w).abs();
       expect(d, lessThan(0.01), reason: 'rotation ${o.rotation} kept $turned');
     });
+
+    test('PH3 ($tag): a collider turned off and on in one frame inside a trigger stays inside', () {
+      final world = newWorld(betweenFrames: betweenFrames);
+      final zone = Zone();
+      world.add(
+        GameObject(
+          name: 'zone',
+          components: [
+            BoxCollider(size: const Vec3(4, 4, 4), isTrigger: true),
+            zone,
+          ],
+        ),
+      );
+      final cube = world.add(
+        GameObject(
+          name: 'cube',
+          components: [
+            BoxCollider(size: const Vec3(0.5, 0.5, 0.5)),
+            Rigidbody(useGravity: false),
+          ],
+        ),
+      );
+      frames(world, 10);
+      expect(zone.inside, hasLength(1));
+      zone.log.clear();
+      cube.active = false;
+      cube.active = true;
+      frames(world, 10);
+      expect(zone.inside, hasLength(1), reason: 'log after the toggle: ${zone.log}');
+    });
   }
 
   test('PH2: a collider added mid-frame to an interpolated moving body sits on the body', () {
