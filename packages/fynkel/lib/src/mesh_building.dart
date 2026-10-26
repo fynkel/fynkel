@@ -5,7 +5,9 @@ part of 'world.dart';
 /// plane; either way round is fine, for the outline and for each hole.
 final class Shape2D {
   /// An outline through [outline]'s points, with [holes] cut out of it.
-  /// Holes must lie inside the outline and not overlap.
+  /// Holes must lie inside the outline and not overlap; they may touch it,
+  /// or each other, at a point, and the outline may touch itself. Filling
+  /// it ([Mesh.extrude], a capped [Mesh.sweep]) refuses a hole outside.
   Shape2D(List<Vec2> outline, {List<List<Vec2>> holes = const []})
     : outline = List.unmodifiable(outline),
       holes = List.unmodifiable(holes.map(List<Vec2>.unmodifiable)) {

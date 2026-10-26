@@ -82,6 +82,13 @@ void main() {
       expect(hi, near(const Vec3(1, 1, 0.25)));
     });
 
+    // Stage 14's WO9: a hole outside the outline was joined to it, its
+    // triangles outside the slab, or quietly dropped.
+    test('a hole outside the outline is refused', () {
+      final apart = Shape2D.rect(2, 2).withHole(Shape2D.rect(1, 1, centre: const Vec2(-3, 0)));
+      expect(() => Mesh.extrude(apart), throwsRefusal(FynkelStatus.invalidValue, "hole 1 isn't inside the outline"));
+    });
+
     test('circles and rounded rectangles are outlines of the size asked for', () {
       final ring = Shape2D.circle(1, segments: 16);
       expect(ring.outline, hasLength(16));

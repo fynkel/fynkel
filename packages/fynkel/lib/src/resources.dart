@@ -184,7 +184,8 @@ final class Mesh implements Finalizable {
   /// front and back show the texture flat, [uvPerMetre] repeats a metre;
   /// the sides wrap it along the outline. Corners sharper than 40° are
   /// sharp, the rest smooth, so a circle is round and a square square.
-  /// Throws an [ArgumentError] for an outline of fewer than 3 points.
+  /// Throws an [ArgumentError] for an outline of fewer than 3 points, or a
+  /// hole that isn't inside the outline.
   factory Mesh.extrude(Shape2D shape, {double depth = 1, double uvPerMetre = 1}) {
     final loops = [shape.outline, ...shape.holes];
     final count = loops.fold(0, (n, loop) => n + loop.length);
@@ -237,7 +238,8 @@ final class Mesh implements Finalizable {
   /// times a metre around the shape (u) and along the path (v). Corners of
   /// the shape sharper than 40° are sharp, the rest smooth. For a path
   /// that changes, sweep again into the same mesh with [setSweep]. Throws
-  /// an [ArgumentError] for a path with no length.
+  /// an [ArgumentError] for a path with no length, or, with [caps], a hole
+  /// that isn't inside the outline.
   factory Mesh.sweep(
     Spline path,
     Shape2D shape, {

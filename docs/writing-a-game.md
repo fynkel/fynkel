@@ -1480,7 +1480,8 @@ final bowl = Mesh.lathe([Vec2(0, 0), Vec2(0.3, 0), Vec2(0.5, 0.3), Vec2(0.46, 0.
   an `ArgumentError` that says which.
 - **`Shape2D`** is an outline in the XY plane: `Shape2D.rect`, `circle`,
   `rounded`, or any list of points, either way round; `withHole` cuts
-  another out of it. `Mesh.extrude` fills the ends and walls the sides;
+  another out of it (inside it: a hole outside is refused, and holes
+  mustn't overlap). `Mesh.extrude` fills the ends and walls the sides;
   corners sharper than 40° are sharp and the rest smooth, so a circle
   comes out round and a square square.
 - **`MeshBuilder`** builds the rest a face at a time, in plain Dart:
@@ -4168,6 +4169,11 @@ For code written before: each change that breaks it, newest first.
     internet (`MODE_IN_COMMUNICATION`, which WebRTC's libraries set for
     the game's own voice chat). A phone call, ringing or on, still
     pauses it.
+  - `Mesh.extrude`, and `Mesh.sweep` with caps, throw an
+    `ArgumentError` for a hole outside the outline. One to the left was
+    joined in, with triangles outside the shape, and one to the right
+    dropped. Ends with two holes or more (a B, an 8) are now filled
+    right, as is an outline that touches itself.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more
