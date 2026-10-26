@@ -402,10 +402,12 @@ dependencies = [
 name = "fynkel_audio"
 version = "0.1.0"
 dependencies = [
+ "block2",
  "cpal",
  "jni-sys 0.3.1",
  "ndk-context",
  "objc2-avf-audio",
+ "objc2-foundation",
  "rtrb",
  "symphonia",
 ]

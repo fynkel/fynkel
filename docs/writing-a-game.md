@@ -1927,7 +1927,9 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   `IosRecordConfig(manageAudioSession: false)`). On both, the game's
   sound waits while a call rings or is on; on Android, with `voiceChat`,
   a call over the internet doesn't count (the game's own voice chat puts
-  the phone in that call's mode), only a phone call.
+  the phone in that call's mode), only a phone call. On the iPhone it
+  waits the same way while Siri, an alarm or a call shown over the game
+  holds the sound, and goes on where it was when that's over.
 - **The sound starts** when the world is first shown on screen. In a
   test, which shows nothing, the sound is made and timed the same way
   with no device: `world.update` steps it, a clip ends after its length,

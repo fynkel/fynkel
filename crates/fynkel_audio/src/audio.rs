@@ -177,8 +177,12 @@ pub struct Audio {
     /// The device was asked for: opened again when it's lost.
     wants_device: bool,
     suspended: bool,
-    /// A phone call is on: the device waits for it, as when suspended.
+    /// A phone call is on (Android), or an interruption holds the session
+    /// (iOS: a call, Siri, an alarm): the device waits for it, as when
+    /// suspended, and isn't taken for lost or opened again meanwhile.
     in_call: bool,
+    /// How many of iOS's interruptions had ended when last looked.
+    interruptions: u64,
     last_call_check: Option<Instant>,
     last_try: Option<Instant>,
     /// The device's callbacks when they last moved on, and when: none
@@ -226,6 +230,7 @@ impl Audio {
             wants_device: false,
             suspended: false,
             in_call: false,
+            interruptions: 0,
             last_call_check: None,
             last_try: None,
             heard: None,
@@ -291,6 +296,12 @@ impl Audio {
     pub fn suspend(&mut self, suspended: bool) -> Result<(), String> {
         self.suspended = suspended;
         self.heard = None;
+        if !suspended {
+            // An interruption that began while away may never say it
+            // ended: looked at again with the next update.
+            session::INTERRUPTIONS.clear();
+            self.last_call_check = None;
+        }
         match &self.device {
             Some(device) => device.suspend(suspended || self.in_call),
             None => Ok(()),
@@ -555,8 +566,9 @@ impl Audio {
 
     /// Once a frame, with the frame's real time in seconds: takes back the
     /// voices that ended (see [`Audio::stopped`]), renders the time
-    /// without a device, and opens a lost device again (at most once a
-    /// second).
+    /// without a device, holds the device through a call or (iOS) an
+    /// interruption, and opens a lost device again (at most once a
+    /// second, and not during either).
     pub fn update(&mut self, seconds: f64) {
         // What the last update said goes; the steals since stay, to be
         // said by this one.
@@ -568,6 +580,27 @@ impl Audio {
                 if s.busy && !s.stopped && s.spatial.blend > 0.0 && self.remix(slot).is_err() {
                     // The ring is full this frame: tried again next frame.
                     self.moved = true;
+                }
+            }
+        }
+        if self.wants_device && self.last_call_check.is_none_or(|at| at.elapsed() >= CALL_CHECK) {
+            self.last_call_check = Some(Instant::now());
+            let in_call = session::in_call(self.session);
+            let (_, ended) = session::INTERRUPTIONS.now();
+            if in_call != self.in_call || ended != self.interruptions {
+                // Over (or one began and ended between two looks, which
+                // cpal may not play again after): the session is made
+                // active, and the device plays.
+                if !in_call {
+                    session::resume();
+                }
+                self.in_call = in_call;
+                self.interruptions = ended;
+                self.heard = None;
+                if let Some(device) = &self.device {
+                    // A device that can't pause or play again is lost, and
+                    // opened again.
+                    let _ = device.suspend(self.suspended || in_call);
                 }
             }
         }
@@ -590,27 +623,17 @@ impl Audio {
         {
             self.drop_device();
         }
+        // Not during a call or an interruption, when the system wouldn't
+        // play it: opened when it's over.
         if self.device.is_none()
             && self.wants_device
+            && !self.in_call
             && self.last_try.is_none_or(|at| at.elapsed() >= Duration::from_secs(1))
             && self.try_device().is_ok()
         {
             self.stats.reopened += 1;
         }
-        if self.device.is_some() && self.last_call_check.is_none_or(|at| at.elapsed() >= CALL_CHECK) {
-            self.last_call_check = Some(Instant::now());
-            let in_call = session::in_call(self.session);
-            if in_call != self.in_call {
-                self.in_call = in_call;
-                self.heard = None;
-                if let Some(device) = &self.device {
-                    // A device that can't pause or play again is lost, and
-                    // opened again.
-                    let _ = device.suspend(self.suspended || in_call);
-                }
-            }
-        }
-        if self.device.is_none() && !self.suspended && seconds.is_finite() && seconds > 0.0 {
+        if self.device.is_none() && !self.suspended && !self.in_call && seconds.is_finite() && seconds > 0.0 {
             self.owed += seconds.min(1.0) * f64::from(QUIET_RATE);
             let frames = self.owed.floor() as usize;
             self.owed -= frames as f64;
