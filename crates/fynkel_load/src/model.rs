@@ -313,6 +313,20 @@ impl<'a> Reader<'a> {
 
     fn read_all(&mut self) -> Result<(), ModelError> {
         let document = self.document.clone();
+        // A sparse accessor, or one with no buffer view, needs no bytes for
+        // the values it leaves at 0, so a small file can claim billions of
+        // them, and reading them would ask for that much memory. Every real
+        // one has a byte or more each in the file: more than that, the file
+        // is damaged. Checked here for all of them: meshes, skins and
+        // animations.
+        let bytes = self.blob.len();
+        if let Some(accessor) = document.accessors().find(|a| a.count() > bytes) {
+            return Err(ModelError::Invalid(format!(
+                "accessor {} claims {} values, more than the file has bytes",
+                accessor.index(),
+                accessor.count()
+            )));
+        }
         for extension in document.extensions_used() {
             match extension {
                 "KHR_texture_transform" | "KHR_materials_emissive_strength" | "KHR_mesh_quantization" => {}
