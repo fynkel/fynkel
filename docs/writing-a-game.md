@@ -4110,6 +4110,19 @@ What keeps a game fast:
 
 For code written before: each change that breaks it, newest first.
 
+- **Limits instead of crashes** (2026-10-26, stage 14):
+  - A particle system's `duration` is from 0.05 to 100,000 s: more
+    throws, as less did. `emit`, bursts and the rate stop at what fits
+    in `maxParticles`, and `simulate` and a prewarm take at most 1,800
+    steps (a minute at 30 a second); a longer `simulate` is coarser,
+    not slower.
+  - A view's sides are at most what its device draws (8,192 on every
+    phone here): `FynkelView` asks for no more, and a bigger one is
+    refused instead of losing the device.
+  - A material's own shader that uses a name the particles' code has
+    too (`fy_soft`, say) is refused as it's made, as any other mistake
+    in it is, rather than when a particle system first draws with it.
+
 - **Splines** (2026-10-25): an outline swept along a path has
   `fy_mesh_sweep` and `fy_mesh_set_sweep` (ABI 44). Code that only uses
   package:fynkel changes nothing.
