@@ -161,4 +161,31 @@ void main() {
     expect(hit!.collider, same(box));
     expect(hit.point.x - 0.5, closeTo(rb.position.x, 0.01), reason: 'box offset from the body');
   });
+
+  test('PH10: a joint whose connected body is destroyed holds its body to the world where it is', () {
+    final world = newWorld();
+    final joint = FixedJoint();
+    final anchor = world.add(
+      GameObject(
+        name: 'anchor',
+        transform: Transform(position: const Vec3(0, 2, 0)),
+        components: [BoxCollider(), Rigidbody(isKinematic: true)],
+      ),
+    );
+    final hung = world.add(
+      GameObject(
+        name: 'hung',
+        transform: Transform(position: const Vec3(0, 0.5, 0)),
+        components: [BoxCollider(), Rigidbody(), joint..connectedBody = anchor.get<Rigidbody>()],
+      ),
+    );
+    frames(world, 3);
+    expect(joint.isJoined, isTrue);
+    final y = hung.position.y;
+    anchor.destroy();
+    frames(world, 50);
+    expect(joint.connectedBody, isNull);
+    expect(joint.isJoined, isTrue);
+    expect(hung.position.y, closeTo(y, 0.01), reason: 'held where it was');
+  });
 }

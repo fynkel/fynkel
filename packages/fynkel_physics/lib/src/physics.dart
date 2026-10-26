@@ -1108,7 +1108,13 @@ final class Physics extends WorldSystem implements Finalizable {
       final body = joint.gameObject.get<Rigidbody>();
       if (body == null || body._id == 0) continue;
       final connected = joint._connectedBody;
-      if (connected != null && connected._id == 0) continue;
+      // One gone for good leaves it joined to the world, as in Unity;
+      // one away for now, it waits for.
+      if (connected != null && (connected.isRemoved || connected.gameObject.isDestroyed)) {
+        joint._connectedBody = null;
+      } else if (connected != null && connected._id == 0) {
+        continue;
+      }
       waiting.removeAt(i);
       joint._writeSpec(_jointSpec.ref, body);
       checkPhysics(fp_joint_add(_world, joint._key, _jointSpec, _id));

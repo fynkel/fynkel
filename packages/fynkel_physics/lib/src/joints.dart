@@ -92,7 +92,10 @@ sealed class Joint extends Behaviour {
     _checkBreak();
   }
 
-  /// The rigidbody it's joined to; null for the world.
+  /// The rigidbody it's joined to; null for the world. If that one's
+  /// object is destroyed, or the rigidbody taken off, this goes null and
+  /// the joint holds its body to the world where it is (as in Unity); one
+  /// disabled for a while, it waits for.
   Rigidbody? get connectedBody => _connectedBody;
   set connectedBody(Rigidbody? value) => _rejoin(() => _connectedBody = value);
   Rigidbody? _connectedBody;
