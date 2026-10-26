@@ -81,9 +81,8 @@ Future<void> buildRustCrate(
 
   final fileName = os.dylibFileName(crate);
   final built = workspace.resolve('target/$triple/release/$fileName');
-  if (!File.fromUri(built).existsSync()) throw HookException('cargo succeeded but ${built.toFilePath()} is missing.');
   final dest = input.outputDirectory.resolve(fileName);
-  await File.fromUri(built).copy(dest.toFilePath());
+  await copyBuilt(File.fromUri(built), dest.toFilePath());
 
   output.assets.code.add(
     CodeAsset(package: input.packageName, name: asset, linkMode: DynamicLoadingBundled(), file: dest),

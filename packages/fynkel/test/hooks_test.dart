@@ -1,6 +1,7 @@
 // Hardening B1: the build hook works on any Mac with Flutter's own setup,
 // not only on the one it was written on.
 
+import 'dart:async';
 import 'dart:io';
 
 import 'package:code_assets/code_assets.dart';
@@ -122,5 +123,32 @@ void main() {
     expect(result.exitCode, 3);
     expect(result.stderr, contains('two'));
     expect(seen.join(), allOf(contains('one'), contains('two')));
+  });
+
+  // Stage 14's GD1: another cargo build of the same crate (a second app,
+  // or `flutter test` beside `flutter build`) takes the built library
+  // away for an instant as it links it again; the copy waits it out.
+  group('copying what cargo built', () {
+    late Directory dir;
+    setUp(() {
+      dir = Directory.systemTemp.createTempSync('fynkel_copy');
+      addTearDown(() => dir.deleteSync(recursive: true));
+    });
+
+    test('waits for a library another build is linking again', () async {
+      final built = File('${dir.path}/libfynkel.dylib');
+      final dest = '${dir.path}/copy.dylib';
+      Timer(const Duration(milliseconds: 30), () => built.writeAsStringSync('linked'));
+      await copyBuilt(built, dest);
+      expect(File(dest).readAsStringSync(), 'linked');
+    });
+
+    test('says what is missing if it never comes back', () async {
+      final built = File('${dir.path}/libfynkel.dylib');
+      await expectLater(
+        copyBuilt(built, '${dir.path}/copy.dylib', patience: const Duration(milliseconds: 100)),
+        throwsA(isA<HookException>().having((e) => e.message, 'message', contains(built.path))),
+      );
+    });
   });
 }
