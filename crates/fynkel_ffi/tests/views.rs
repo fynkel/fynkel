@@ -281,3 +281,38 @@ fn a_world_takes_a_quality_of_its_own() {
     // SAFETY: a live world, a local value.
     ok(unsafe { fy_world_quality_set(world.0, &off) });
 }
+
+/// Asks `view` for a frame now and then for half a second; the first
+/// failure, if any.
+fn fails_soon(view: &View) -> Option<FyStatus> {
+    for _ in 0..50 {
+        let mut n = 0;
+        // SAFETY: a live view, a local out-value.
+        let status = unsafe { fy_view_frame(view.0, &mut n) };
+        if status != FyStatus::Ok {
+            return Some(status);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    None
+}
+
+#[test]
+fn a_view_bigger_than_the_device_draws_is_refused_and_the_others_draw_on() {
+    // Stage 14, BR1: one past the device's largest texture was made, and
+    // the device was lost for every view; resized past it, its worker
+    // failed for good.
+    let world = World::new();
+    stage1(&world);
+    let (a, b) = (View::headless(&world, 64, 64), View::headless(&world, 64, 64));
+    a.read(a.frame(), 64, 64);
+    let mut big = std::ptr::null_mut();
+    // SAFETY: a live world and a local out-value.
+    assert_eq!(unsafe { fy_view_new_headless(world.0, 9000, 100, &mut big) }, FyStatus::InvalidValue);
+    assert!(last_error().contains("8192"), "{}", last_error());
+    // SAFETY: a live view.
+    assert_eq!(unsafe { fy_view_resize(a.0, 100, 9000) }, FyStatus::InvalidValue);
+    assert_eq!((fails_soon(&a), fails_soon(&b)), (None, None));
+    let image = b.read(b.frame(), 64, 64);
+    assert!(image.rgba.chunks(4).any(|p| p != &image.rgba[..4]), "b still draws the cube");
+}

@@ -145,6 +145,9 @@ const BEFORE: &str = concat!(
     include_str!("helpers.wgsl")
 );
 
+/// The particles' code, after a material's shader when particles draw it.
+pub(crate) const PARTICLES: &str = include_str!("particles.wgsl");
+
 /// The engine's code before a screen effect's.
 const EFFECT: &str = concat!(include_str!("effect.wgsl"), include_str!("helpers.wgsl"));
 
@@ -341,6 +344,12 @@ impl CustomShader {
         let reads_behind = module.global_variables.iter().any(|(handle, global)| {
             matches!(global.name.as_deref(), Some("fy_scene_depth" | "fy_scene_color")) && !uses[handle].is_empty()
         });
+
+        // Particles draw it too, with particles.wgsl after it: a name both
+        // have would be found only then, as the device is lost.
+        let as_particles = Joined::new(BEFORE, &declared, &own_source, &format!("{glue}\n{PARTICLES}"));
+        let particles = as_particles.parse().map_err(|e| e.into_error(name))?;
+        as_particles.validate(&particles).map_err(|e| e.into_error(name))?;
 
         let wgsl: Arc<str> = joined.source.into();
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -798,6 +807,20 @@ fn surface(in: SurfaceInput) -> Surface {
         .expect_err("there's no `colour`");
         assert_eq!((error.file.as_str(), error.line), ("broken.wgsl", Some(4)), "{error}");
         assert!(error.to_string().starts_with("broken.wgsl:4:"), "{error}");
+    }
+
+    #[test]
+    fn a_name_the_particles_code_has_too_is_refused_as_the_shader_is_made() {
+        // Particles draw a material's shader with particles.wgsl after it,
+        // so a clash was found only then, losing the device (stage 14, RN6).
+        let error = CustomShader::new(
+            "clash.wgsl",
+            "fn fy_soft(x: f32) -> f32 {\n    return x;\n}\n\n\
+             fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(fy_soft(1.0), 0.0, 0.0, 1.0);\n}\n",
+        )
+        .expect_err("fy_soft is particles.wgsl's");
+        assert!(error.message.contains("fy_soft"), "{error}");
+        assert_eq!(error.line, Some(1), "{error}");
     }
 
     #[test]

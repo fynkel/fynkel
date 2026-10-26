@@ -267,12 +267,17 @@ impl Clip {
     /// decoded clip.
     #[inline]
     pub(crate) fn frame(&self, frame: usize) -> (f32, f32) {
+        // Never past the end, which would panic on the audio thread.
         let Data::Decoded(samples) = &self.data else { return (0.0, 0.0) };
         if self.channels == 1 {
-            let s = samples[frame];
+            let s = samples.get(frame).copied().unwrap_or(0.0);
             (s, s)
         } else {
-            (samples[frame * 2], samples[frame * 2 + 1])
+            let at = frame * 2;
+            match samples.get(at..at + 2) {
+                Some(&[l, r]) => (l, r),
+                _ => (0.0, 0.0),
+            }
         }
     }
 }

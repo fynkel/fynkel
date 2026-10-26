@@ -55,6 +55,14 @@ pub const MAX_BURSTS: usize = 8;
 /// The most particles one system holds.
 pub const MAX_PARTICLES: u32 = 100_000;
 
+/// The longest a system's timeline is, in seconds, as Unity's.
+const MAX_DURATION: f32 = 100_000.0;
+
+/// The most steps a `simulate` or a prewarm takes (60 s of them at 30 a
+/// second): a longer span takes longer steps, so neither holds the world
+/// for long however far it goes.
+const MOST_STEPS: u32 = 1800;
+
 /// Gravity at `gravity_modifier` 1, in metres a second a second, down.
 pub const GRAVITY: f32 = 9.81;
 
@@ -565,8 +573,8 @@ impl ParticleSettings {
         if !finite {
             return Some("a particle system's numbers must be finite");
         }
-        if self.duration < 0.05 {
-            return Some("a particle system's duration is at least 0.05 s");
+        if !(0.05..=MAX_DURATION).contains(&self.duration) {
+            return Some("a particle system's duration is from 0.05 to 100,000 s");
         }
         if self.start_lifetime.min < 0.0 || self.start_lifetime.max < 0.0 {
             return Some("a particle's start lifetime can't be below 0");
@@ -1052,7 +1060,7 @@ impl ParticleSystem {
         self.play();
         if self.settings.prewarm && self.settings.looping {
             let delay = std::mem::take(&mut self.delay);
-            let steps = (self.settings.duration * 30.0).ceil().max(1.0) as u32;
+            let steps = ((self.settings.duration * 30.0).ceil() as u32).clamp(1, MOST_STEPS);
             let dt = self.settings.duration / steps as f32;
             for _ in 0..steps {
                 self.step(dt / self.settings.simulation_speed.max(1e-6), emitter);
@@ -1080,9 +1088,16 @@ impl ParticleSystem {
         self.count = 0;
     }
 
+    /// How many more particles fit. The loops that make them go no further:
+    /// a count of billions, or a teleport leaving some each metre, would
+    /// otherwise run on with nowhere to put them.
+    fn room(&self) -> u32 {
+        (self.settings.max_particles as usize).saturating_sub(self.count) as u32
+    }
+
     /// Makes `n` particles now, as its shape would, played or not.
     fn emit(&mut self, n: u32, emitter: Mat4) {
-        for _ in 0..n {
+        for _ in 0..n.min(self.room()) {
             self.spawn(emitter, 0.0);
         }
         if self.count > 0 {
@@ -1207,7 +1222,8 @@ impl ParticleSystem {
                     self.distance_carry += (here - from).length() * self.settings.rate_over_distance;
                     let n = self.distance_carry.floor();
                     self.distance_carry -= n;
-                    let n = n as u32;
+                    // Spread over the way, however many fit.
+                    let n = (n as u32).min(self.room());
                     for k in 0..n {
                         let f = (k as f32 + 0.5) / n as f32;
                         let mut at = emitter;
@@ -1239,6 +1255,18 @@ impl ParticleSystem {
     /// each particle made is as old as it would be.
     fn run_timeline(&mut self, mut dt: f32, emitter: Mat4) {
         let duration = self.settings.duration;
+        if self.settings.looping && dt > duration {
+            // Whole loops that make nothing that lives to the end of `dt`
+            // are skipped, the timeline where it would be: with no room,
+            // or long enough ago that what they made has died.
+            let to_loop_end = duration - self.time;
+            let gone =
+                if self.room() == 0 { dt - to_loop_end } else { dt - to_loop_end - self.settings.start_lifetime.max };
+            let whole = (gone / duration).floor();
+            if whole >= 1.0 {
+                dt -= whole * duration;
+            }
+        }
         while dt > 0.0 {
             let span = dt.min(duration - self.time);
             let (from, to) = (self.time, self.time + span);
@@ -1246,7 +1274,7 @@ impl ParticleSystem {
             self.carry += self.settings.rate_over_time * span;
             let n = self.carry.floor();
             self.carry -= n;
-            let n = n as u32;
+            let n = (n as u32).min(self.room());
             for k in 0..n {
                 let born = from + span * (k as f32 + 0.5) / n as f32;
                 self.spawn(emitter, to - born + (dt - span));
@@ -1266,7 +1294,7 @@ impl ParticleSystem {
                     if burst.probability < 1.0 && self.rng.unit() >= burst.probability {
                         continue;
                     }
-                    let count = burst.count.pick(&mut self.rng).round() as u32;
+                    let count = (burst.count.pick(&mut self.rng).round() as u32).min(self.room());
                     for _ in 0..count {
                         self.spawn(emitter, (to - at.max(from)) + (dt - span));
                     }
@@ -1429,7 +1457,7 @@ impl ParticleSystem {
                     continue;
                 }
                 for b in 0..self.settings.bursts.len() {
-                    let count = self.settings.bursts[b].count.pick(&mut self.rng).round() as u32;
+                    let count = (self.settings.bursts[b].count.pick(&mut self.rng).round() as u32).min(self.room());
                     for _ in 0..count {
                         self.spawn_from(at(parent.position), 0.0, Some((parent, link.inherit)), into_local);
                     }
@@ -1769,7 +1797,8 @@ impl World {
     }
 
     /// Moves `object`'s system `seconds` on at once, as if that much time
-    /// had passed (Unity's `Simulate`), in steps of at most 1/30 s.
+    /// had passed (Unity's `Simulate`), in steps of 1/30 s, or longer past
+    /// 60 s: at most 1800 of them.
     pub fn simulate_particles(&mut self, object: ObjectId, seconds: f32) -> Result<()> {
         self.entity(object)?;
         if !seconds.is_finite() || seconds < 0.0 {
@@ -1781,7 +1810,7 @@ impl World {
         self.find_planes(&mut system, emitter);
         self.particles.insert(object, system);
         let system = self.particles.get_mut(&object).expect("put back above");
-        let steps = (seconds * 30.0).ceil() as u32;
+        let steps = ((seconds * 30.0).ceil() as u32).min(MOST_STEPS);
         for _ in 0..steps {
             system.step(seconds / steps as f32, emitter);
         }

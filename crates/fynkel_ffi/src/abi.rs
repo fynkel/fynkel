@@ -5166,10 +5166,8 @@ unsafe fn new_view<T: fynkel_present::Target + 'static>(
         Arc::increment_strong_count(world);
         Arc::from_raw(world)
     };
-    if width == 0 || height == 0 {
-        return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
-    }
     let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+    check_view_size(&device, width, height)?;
     let gpu = {
         let mut held = world.gpu.lock().map_err(|_| Error::new(FyStatus::Poisoned, "a view of this world panicked"))?;
         match held.upgrade() {
@@ -5195,6 +5193,19 @@ unsafe fn new_view<T: fynkel_present::Target + 'static>(
     let view = FyView { world, gpu, clock: Mutex::default(), worker, output };
     // SAFETY: checked non-null above; the caller promises it's writable.
     unsafe { out.write(Box::into_raw(Box::new(view))) };
+    Ok(())
+}
+
+/// Whether `device` can draw a view of `width` × `height`: past its largest
+/// texture, making the targets would lose the device for every view.
+fn check_view_size(device: &Device, width: u32, height: u32) -> Result<(), Error> {
+    let most = device.gpu.device.limits().max_texture_dimension_2d;
+    if width == 0 || height == 0 || width > most || height > most {
+        return Err(Error::new(
+            FyStatus::InvalidValue,
+            format!("a view can't be {width} × {height}: each side is from 1 to {most} on this device"),
+        ));
+    }
     Ok(())
 }
 
@@ -5475,9 +5486,7 @@ pub unsafe extern "C" fn fy_view_resize(view: *const FyView, width: u32, height:
     guard(|| {
         // SAFETY: per this function's contract.
         let view = unsafe { handle(view, "view") }?;
-        if width == 0 || height == 0 {
-            return Err(Error::new(FyStatus::InvalidValue, format!("a view can't be {width} × {height}")));
-        }
+        check_view_size(&view.gpu.device, width, height)?;
         view.worker.resize(width, height)
     })
 }

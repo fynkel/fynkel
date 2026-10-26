@@ -913,3 +913,50 @@ fn sub_emitters_and_planes_are_refused_when_they_cant_be() {
     };
     assert!(world.set_particles(id, bad).is_err());
 }
+
+/// Runs `f`, failing if it takes longer than `most` (stage 14, WO6: huge
+/// counts and spans ran for seconds to minutes, holding the world).
+fn quickly(most: std::time::Duration, what: &str, f: impl FnOnce()) {
+    let start = std::time::Instant::now();
+    f();
+    assert!(start.elapsed() < most, "{what} took {:?}", start.elapsed());
+}
+
+#[test]
+fn huge_counts_and_spans_take_no_longer_than_what_fits() {
+    let ms = std::time::Duration::from_millis;
+    // Emit, a burst and a sub-emitter's burst of billions, on a pool of 10.
+    let small = ParticleSettings { max_particles: 10, rate_over_time: 0.0, play_on_awake: false, ..Default::default() };
+    let (mut world, id) = world_with(small.clone());
+    quickly(ms(50), "Emit(u32::MAX)", || world.particle_command(id, ParticleCommand::Emit(u32::MAX)).unwrap());
+    assert_eq!(world.particles(id).unwrap().count(), 10);
+    let (mut world, id) = world_with(ParticleSettings { max_particles: 10, ..burst(4e9, 1.0) });
+    quickly(ms(50), "a burst of 4e9", || {
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    });
+    assert_eq!(world.particles(id).unwrap().count(), 10);
+    // A teleport of 10,000 km leaving 100 a metre.
+    let (mut world, id) = world_with(ParticleSettings { rate_over_distance: 100.0, ..small.clone() });
+    world.particle_command(id, ParticleCommand::Play).unwrap();
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    world.insert(id, Transform { position: Vec3::new(1e7, 0.0, 0.0), ..Transform::default() }).unwrap();
+    quickly(ms(50), "a 10,000 km teleport", || {
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    });
+    // Simulating ten million seconds, and a prewarm of a long loop.
+    let steady = ParticleSettings { rate_over_time: 50.0, ..Default::default() };
+    let (mut world, id) = world_with(steady.clone());
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    quickly(ms(500), "simulate(1e7)", || world.simulate_particles(id, 1e7).unwrap());
+    let count = world.particles(id).unwrap().count();
+    assert!(count.abs_diff(50 * 5) <= 2, "{count}: the steady state is 50 a second living 5 s");
+    let long = ParticleSettings { prewarm: true, duration: 100_000.0, ..steady };
+    let (mut world, id) = world_with(long.clone());
+    quickly(ms(500), "a prewarm of 100,000 s", || {
+        step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    });
+    assert!(world.particles(id).unwrap().count() > 0);
+    // Past Unity's longest, refused.
+    let (mut world, id) = world_with(ParticleSettings::default());
+    assert!(world.set_particles(id, ParticleSettings { duration: 1e9, ..long }).is_err());
+}

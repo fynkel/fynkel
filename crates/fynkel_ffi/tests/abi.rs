@@ -345,7 +345,7 @@ fn a_resized_headless_view_reads_back_frames_of_the_new_size() {
     assert_eq!(image.rgba.len(), 24 * 8 * 4);
     // SAFETY: a live view.
     assert_eq!(unsafe { fy_view_resize(view.0, 0, 8) }, FyStatus::InvalidValue);
-    assert_eq!(last_error(), "a view can't be 0 × 8");
+    assert!(last_error().starts_with("a view can't be 0 × 8: each side is from 1 to "), "{}", last_error());
 }
 
 /// The children through `fy_children_get`, asking again when the first

@@ -3,7 +3,10 @@
 // one-shots, and the values refused. No world here is on screen, so no
 // device opens: the sound is made and timed without one.
 
+import 'dart:ffi';
 import 'dart:typed_data';
+
+import 'package:ffi/ffi.dart';
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_audio/fynkel_audio.dart';
@@ -274,5 +277,40 @@ void main() {
     final audio = world.audio;
     world.dispose();
     expect(() => audio.volume = 0.5, throwsStateError);
+  });
+
+  test('playTime set to the end of a playing clip ends it, and sound goes on (stage 14, AU1)', () {
+    final world = newWorld();
+    final clip = tone(1);
+    final source = AudioSource(clip: clip);
+    world.add(GameObject(components: [source]));
+    world.update(1 / 60);
+    source.playTime = clip.length;
+    for (var i = 0; i < 3; i++) {
+      world.update(1 / 60);
+    }
+    expect(world.audio.isTurnedOff, isFalse);
+    world.audio.playOneShot(tone(1));
+    world.update(1 / 60);
+    expect(world.audio.stats.voices, 1);
+  });
+
+  test('a call after dispose writes into no memory it gave back (stage 14, AU4)', () {
+    final world = World();
+    final clip = tone(0.1);
+    final audio = world.audio;
+    world.update(1 / 60);
+    world.dispose();
+    // Blocks the size of the scratch a play writes, zeroed: malloc hands
+    // back the ones just freed, if any were.
+    final blocks = [for (var i = 0; i < 64; i++) calloc<Uint8>(80)];
+    expect(() => audio.playOneShot(clip, volume: 0.5, pitch: 0.75), throwsStateError);
+    var written = 0;
+    for (final block in blocks) {
+      final floats = block.cast<Float>();
+      if (floats[0] == 0.5 && floats[1] == 0.75) written++;
+      calloc.free(block);
+    }
+    expect(written, 0, reason: 'playOneShot wrote its volume and pitch into freed memory');
   });
 }
