@@ -71,7 +71,8 @@ final class AudioGroup {
 ///
 /// It plays on while the game is [World.paused] (a pause menu's music)
 /// unless it doesn't [ignorePause], and is never given up for other
-/// sounds.
+/// sounds: it plays at priority 0 ([AudioSource.priority]), even while it
+/// fades out.
 final class AudioMusic {
   AudioMusic._(this._audio) : _owner = _audio._nextOwner++;
 

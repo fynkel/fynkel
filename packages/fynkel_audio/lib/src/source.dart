@@ -118,8 +118,9 @@ final class AudioSource extends Behaviour {
   bool _mute;
 
   /// How important its sounds are, 0 (most) to 256 (least), as Unity's:
-  /// when every voice is busy, the least important gives way. 128 unless
-  /// set. From the next sound it plays.
+  /// when every voice is busy, the least important gives way. A sound of
+  /// priority 0 never does, as [Audio.music]'s, so one is for music
+  /// alone. 128 unless set. From the next sound it plays.
   int get priority => _priority;
   set priority(int value) {
     _checkPriority(value);

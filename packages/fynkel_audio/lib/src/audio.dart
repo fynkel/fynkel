@@ -320,7 +320,7 @@ final class Audio extends WorldSystem implements Finalizable {
   /// given) are its own; it holds while the game is paused unless
   /// [ignorePause], and is under [group]'s volume, if given. Nothing plays
   /// it if every voice is busy with something more important than
-  /// [priority].
+  /// [priority], or of priority 0, which never gives way.
   void playOneShot(
     AudioClip clip, {
     double? volume,
