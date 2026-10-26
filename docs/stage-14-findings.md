@@ -1,8 +1,8 @@
 # Stage 14 findings: what the audit found
 
 Phase 1 of [stage 14](stage-14.md), done 2026-10-26 at `44ea4697`.
-**Proposed**: phases 2 to 5's rows below wait for the user's OK, and
-§6 has four decisions.
+**Accepted** 2026-10-26 with the recommended answer to each of §6's
+four decisions (the user: "let's go with them").
 
 ## 1. How it was done
 
