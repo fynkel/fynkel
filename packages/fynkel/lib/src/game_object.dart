@@ -121,11 +121,13 @@ class GameObject with _Moving {
   Transform? _worldAbove;
 
   // Loading: how many loads this object waits for (its own, and those of
-  // the objects added during it), the object waiting for this one, and
-  // whether it's hidden until they're done. [_activeSelf] is the game's
-  // own flag, which the engine's follows once the object has appeared.
+  // the objects added during it), the object waiting for this one,
+  // whether its loads have been run, and whether it's hidden until
+  // they're done. [_activeSelf] is the game's own flag, which the
+  // engine's follows once the object has appeared.
   int _pending = 0;
   GameObject? _waiter;
+  bool _loadsRun = false;
   bool _appeared = false;
   bool _hiddenForLoad = false;
   bool _activeSelf = true;

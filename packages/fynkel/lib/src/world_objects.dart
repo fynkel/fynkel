@@ -242,6 +242,7 @@ extension _Objects on World {
   /// else when its future completes. The object waits for all of them.
   void _runLoad(GameObject object) {
     if (object._destroyed) return;
+    object._loadsRun = true;
     final behaviours = [
       for (final c in object._components ?? const <Component>[])
         if (c is Behaviour && !c._removed) c,
@@ -311,7 +312,8 @@ extension _Objects on World {
 
   /// Puts [component] on [object], which is live: the engine's are written
   /// by the caller; a behaviour loads, with the object if it's still
-  /// loading, else by itself (a failed load removes only the behaviour).
+  /// loading (with its own loads, if those haven't run yet), else by
+  /// itself (a failed load removes only the behaviour).
   void _componentAdded(GameObject object, Component component) {
     _register(component);
     _announce(object, component);
@@ -319,6 +321,7 @@ extension _Objects on World {
     _enterLoop(object);
     _starting.add(component);
     if (!object._appeared) {
+      if (!object._loadsRun) return;
       object._pending++;
       _load(object, component, component.onLoad);
       return;
