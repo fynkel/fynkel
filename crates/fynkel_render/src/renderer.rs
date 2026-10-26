@@ -566,6 +566,15 @@ fn made<K: Eq + std::hash::Hash>(
     map.lock().unwrap_or_else(PoisonError::into_inner).get(key).cloned()
 }
 
+/// An error scope's error: on native backends it's ready at once.
+fn now(pop: impl std::future::Future<Output = Option<wgpu::Error>>) -> Option<wgpu::Error> {
+    let mut pop = std::pin::pin!(pop);
+    match pop.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())) {
+        std::task::Poll::Ready(error) => error,
+        std::task::Poll::Pending => None,
+    }
+}
+
 /// The pipelines that draw into one target format, shared by every
 /// renderer on a device that draws into it ([`Kit`]).
 ///
@@ -629,6 +638,9 @@ pub(crate) struct Pipelines {
     effects: Mutex<HashMap<u64, wgpu::RenderPipeline>>,
     /// Own shaders' pipelines being made on threads of their own.
     building: Mutex<HashSet<Building>>,
+    /// Those the GPU refused when made on a thread of their own: never
+    /// drawn, nor made again.
+    failed: Mutex<HashSet<Building>>,
 }
 
 /// Draws [`RenderScene`]s into textures of one format: a view's. What it
@@ -2260,6 +2272,7 @@ impl Pipelines {
             effect_depth_layout: kit.effects.depth_layout.clone(),
             effects: Mutex::new(HashMap::new()),
             building: Mutex::default(),
+            failed: Mutex::default(),
         }
     }
 
@@ -2286,10 +2299,23 @@ impl Pipelines {
         if wait {
             return Some(make(self));
         }
+        if self.failed.lock().unwrap_or_else(PoisonError::into_inner).contains(&key) {
+            return None;
+        }
         if self.building.lock().unwrap_or_else(PoisonError::into_inner).insert(key) {
             let pipelines = Arc::clone(self);
             let spawned = std::thread::Builder::new().name("fynkel shader".into()).spawn(move || {
+                // Error scopes are a thread's own: without these, an error
+                // here would reach the device's handler and lose it, for
+                // every view (the render thread's scopes don't cover it).
+                let memory = pipelines.device.push_error_scope(wgpu::ErrorFilter::OutOfMemory);
+                let validation = pipelines.device.push_error_scope(wgpu::ErrorFilter::Validation);
                 make(&pipelines);
+                let refused = now(validation.pop()).is_some() | now(memory.pop()).is_some();
+                if refused {
+                    pipelines.failed.lock().unwrap_or_else(PoisonError::into_inner).insert(key);
+                    pipelines.forget(key);
+                }
                 pipelines.building.lock().unwrap_or_else(PoisonError::into_inner).remove(&key);
             });
             if spawned.is_err() {
@@ -2298,6 +2324,23 @@ impl Pipelines {
             }
         }
         None
+    }
+
+    /// Takes the pipeline under `key` out of its map: one the GPU refused.
+    /// A frame that took it in the moment before fails in the render
+    /// thread's scopes, rather than losing the device.
+    fn forget(&self, key: Building) {
+        fn out<K: Eq + std::hash::Hash>(map: &Mutex<HashMap<K, wgpu::RenderPipeline>>, key: &K) {
+            map.lock().unwrap_or_else(PoisonError::into_inner).remove(key);
+        }
+        match key {
+            Building::Own(hash, variant) => out(&self.own, &(hash, variant)),
+            Building::Shadow(hash, spot, skinned, cutout) => out(&self.own_shadows, &(hash, spot, skinned, cutout)),
+            Building::Depth(hash, skinned) => out(&self.own_depths, &(hash, skinned)),
+            Building::Outline(key) => out(&self.outlines, &key),
+            Building::Effect(hash) => out(&self.effects, &hash),
+            Building::Particles(key) => out(&self.particles, &key),
+        }
     }
 
     /// [`Pipelines::own`] when it's ready ([`Pipelines::ready`]).
@@ -3513,4 +3556,70 @@ fn srgb_bits(shader: &CustomShader) -> u8 {
         .iter()
         .enumerate()
         .fold(0, |bits, (i, t)| if t.space == ColorSpace::Srgb { bits | 1 << i } else { bits })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::time::{Duration, Instant};
+
+    use super::*;
+
+    /// Stage 14's BR2: a pipeline the GPU refuses on the shader thread
+    /// fails there, in scopes of its own, instead of reaching the device's
+    /// handler (which loses the device for every view); it's never drawn,
+    /// nor made again.
+    #[test]
+    fn a_pipeline_refused_on_the_shader_thread_is_dropped_and_the_device_lives() {
+        let Ok(gpu) = Gpu::headless() else { return };
+        let unscoped = Arc::new(AtomicUsize::new(0));
+        gpu.device.on_uncaptured_error(Arc::new({
+            let unscoped = Arc::clone(&unscoped);
+            move |_| {
+                unscoped.fetch_add(1, Ordering::SeqCst);
+            }
+        }));
+        let pipelines = Arc::new(Pipelines::new(&Kit::new(&gpu), wgpu::TextureFormat::Rgba8UnormSrgb, 1));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let make = {
+            let calls = Arc::clone(&calls);
+            move |p: &Pipelines| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let module = p.device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                    label: Some("refused"),
+                    source: wgpu::ShaderSource::Wgsl("not wgsl".into()),
+                });
+                let pipeline = p.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                    label: Some("refused"),
+                    layout: None,
+                    vertex: wgpu::VertexState {
+                        module: &module,
+                        entry_point: Some("vs"),
+                        compilation_options: Default::default(),
+                        buffers: &[],
+                    },
+                    primitive: wgpu::PrimitiveState::default(),
+                    depth_stencil: None,
+                    multisample: wgpu::MultisampleState::default(),
+                    fragment: None,
+                    multiview_mask: None,
+                    cache: None,
+                });
+                p.effects.lock().unwrap().insert(7, pipeline.clone());
+                pipeline
+            }
+        };
+        assert!(pipelines.ready(false, Building::Effect(7), None, make.clone()).is_none());
+        let start = Instant::now();
+        while pipelines.waiting() > 0 {
+            assert!(start.elapsed() < Duration::from_secs(10), "the shader thread finishes");
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(unscoped.load(Ordering::SeqCst), 0, "no error reached the device's handler");
+        assert!(made(&pipelines.effects, &7).is_none(), "the refused pipeline isn't kept");
+        assert!(pipelines.ready(false, Building::Effect(7), None, make).is_none());
+        assert_eq!(pipelines.waiting(), 0, "nor made again");
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+    }
 }
