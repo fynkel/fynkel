@@ -465,7 +465,8 @@ final class Mesh implements Finalizable {
       data.ref.indices.asTypedList(indices.length).setAll(0, indices);
       final out = arena<Pointer<FyMesh>>();
       check(fy_mesh_new(data, out));
-      return Mesh._(out.value, 'Mesh.custom', ownNormals: normals != null, ownTangents: tangents != null);
+      return Mesh._(out.value, 'Mesh.custom', ownNormals: normals != null, ownTangents: tangents != null)
+        .._hasUvs = uvs != null;
     });
   }
 
@@ -473,14 +474,16 @@ final class Mesh implements Finalizable {
   /// so a big mesh doesn't hold up the UI thread: generating tangents
   /// takes about a microsecond per triangle.
   static Future<Mesh> inBackground(Mesh Function() build) async {
-    final (address, name, ownNormals, ownTangents) = await inHelper(() {
+    final (address, name, (ownNormals, ownTangents), (hasUvs, dynamic)) = await inHelper(() {
       final mesh = build();
       mesh._settle();
       // This isolate ends next; the mesh now belongs to the caller's.
       _finalizer.detach(mesh);
-      return (mesh._pointer.address, mesh._name, mesh._ownNormals, mesh._ownTangents);
+      return (mesh._pointer.address, mesh._name, (mesh._ownNormals, mesh._ownTangents), (mesh._hasUvs, mesh._dynamic));
     });
-    return Mesh._(Pointer<FyMesh>.fromAddress(address), name, ownNormals: ownNormals, ownTangents: ownTangents);
+    return Mesh._(Pointer<FyMesh>.fromAddress(address), name, ownNormals: ownNormals, ownTangents: ownTangents)
+      .._hasUvs = hasUvs
+      .._dynamic = dynamic;
   }
 
   // --- Changing it ---
