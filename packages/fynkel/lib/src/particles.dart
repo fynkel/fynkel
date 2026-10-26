@@ -749,7 +749,9 @@ final class ParticleSystem extends Component {
   bool get looping => _looping;
   set looping(bool value) => _set(() => _looping, (v) => _looping = v, value);
 
-  /// A looping system starts as if it had played a whole [duration], full.
+  /// A looping system starts as if it had played a whole [duration], full:
+  /// its particles have met its collision planes, but fired no sub emitters
+  /// and told of no hits.
   bool get prewarm => _prewarm;
   set prewarm(bool value) => _set(() => _prewarm, (v) => _prewarm = v, value);
 
