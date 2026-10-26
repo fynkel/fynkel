@@ -464,7 +464,8 @@ final class Physics extends WorldSystem implements Finalizable {
   void _addNative(Collider collider, int key, Rigidbody? body) {
     final object = collider.gameObject;
     collider._writeSpec(_spec.ref, _listensFor(collider, body));
-    final Transform(:position, :rotation, :scale) = object.worldTransform;
+    var Transform(:position, :rotation, :scale) = object.worldTransform;
+    if (body != null && body._interpolatedAt >= 0) (position, rotation) = body._againstStep(position, rotation);
     final t = _transform.ref;
     t.position.set(position);
     t.rotation.set(rotation);
@@ -719,6 +720,10 @@ final class Physics extends WorldSystem implements Finalizable {
     final batch = _batch;
     try {
       world.readWorldTransforms(_objectIds, count, _transforms);
+      for (var i = 0; i < count; i++) {
+        final body = batch[i]._body;
+        if (body != null && body._interpolatedAt >= 0) body._againstStepAt(_transforms + i * 10);
+      }
       checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
       // Seen only once taken: a refused batch is tried again next time.
       for (var i = 0; i < batch.length; i++) {

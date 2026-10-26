@@ -453,6 +453,28 @@ final class Rigidbody extends Behaviour {
     _put(position, rotation);
   }
 
+  /// [position] and [rotation] in the world, moved from where its object
+  /// is drawn to where the last step left it, as the native world has it:
+  /// the same against both. They differ only while it's interpolated.
+  (Vec3, Quat) _againstStep(Vec3 position, Quat rotation) {
+    final drawn = gameObject.worldTransform;
+    final turn = _r1 * drawn.rotation.inverse;
+    return (_p1 + turn.rotate(position - drawn.position), (turn * rotation).normalized);
+  }
+
+  /// [_againstStep] on the position and rotation at [at], as
+  /// [World.readWorldTransforms] writes them.
+  void _againstStepAt(Pointer<Float> at) {
+    final (position, rotation) = _againstStep(Vec3(at[0], at[1], at[2]), Quat(at[3], at[4], at[5], at[6]));
+    at[0] = position.x;
+    at[1] = position.y;
+    at[2] = position.z;
+    at[3] = rotation.x;
+    at[4] = rotation.y;
+    at[5] = rotation.z;
+    at[6] = rotation.w;
+  }
+
   /// It's at [position] and [rotation] now, not moving between steps.
   void _reset(Vec3 position, Quat rotation) {
     _p0 = _p1 = position;

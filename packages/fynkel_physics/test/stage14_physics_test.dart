@@ -51,6 +51,29 @@ void main() {
   for (final betweenFrames in [false, true]) {
     final tag = betweenFrames ? 'between frames' : 'in the fixed step';
 
+    test('PH1 ($tag): changing a resting ball\'s radius keeps its collider on it', () {
+      final world = newWorld(betweenFrames: betweenFrames);
+      floor(world);
+      final collider = SphereCollider(radius: 0.5);
+      final rb = Rigidbody();
+      final ball = world.add(
+        GameObject(
+          name: 'ball',
+          transform: Transform(position: const Vec3(0, 5, 0)),
+          components: [collider, rb],
+        ),
+      );
+      frames(world, 150);
+      expect(ball.position.y, closeTo(0.5, 0.02), reason: 'rests on the floor first');
+      collider.radius = 0.6;
+      world.update(0);
+      final found = world.physics.overlapSphere(ball.position, 0.05);
+      frames(world, 50);
+      final y = ball.position.y;
+      expect(found, contains(collider), reason: 'the collider is where the ball is; 50 frames later y = $y');
+      expect(ball.position.y, closeTo(0.6, 0.03), reason: 'rests on the floor with its new radius');
+    });
+
     test('PH4 ($tag): moveRotation on a falling dynamic body keeps its position', () {
       final world = newWorld(betweenFrames: betweenFrames);
       final rb = Rigidbody();
@@ -83,4 +106,29 @@ void main() {
       expect(d, lessThan(0.01), reason: 'rotation ${o.rotation} kept $turned');
     });
   }
+
+  test('PH2: a collider added mid-frame to an interpolated moving body sits on the body', () {
+    final world = newWorld(betweenFrames: false);
+    final rb = Rigidbody(useGravity: false, interpolation: RigidbodyInterpolation.interpolate);
+    final o = world.add(GameObject(name: 'mover', components: [SphereCollider(radius: 0.1), rb]));
+    world.update(0);
+    rb.linearVelocity = const Vec3(10, 0, 0);
+    // Find a frame between steps where the drawn pose trails the stepped one.
+    var gap = 0.0;
+    for (var i = 0; i < 40; i++) {
+      world.update(1 / 120);
+      gap = (rb.position.x - o.position.x).abs();
+      if (gap > 0.05) break;
+    }
+    expect(gap, greaterThan(0.05), reason: 'drawn and stepped poses apart');
+    final box = BoxCollider(size: const Vec3(1, 1, 1));
+    o.addComponent(box);
+    frames(world, 6, 1 / 120);
+    world.update(0);
+    // A ray from far ahead along -x hits the box's front face at body.x + 0.5.
+    final hit = world.physics.raycast(Ray(Vec3(rb.position.x + 50, 0, 0), const Vec3(-1, 0, 0)), maxDistance: 100);
+    expect(hit, isNotNull);
+    expect(hit!.collider, same(box));
+    expect(hit.point.x - 0.5, closeTo(rb.position.x, 0.01), reason: 'box offset from the body');
+  });
 }
