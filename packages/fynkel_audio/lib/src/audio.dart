@@ -721,7 +721,9 @@ final class Audio extends WorldSystem implements Finalizable {
       final stopped = _stopped[i];
       final source = _sources[stopped.owner];
       if (source != null) source._ended(stopped.handle, stolen: stopped.stolen == 1);
-      if (music != null && stopped.owner == music._owner) music._ended(stopped.handle);
+      if (music != null && stopped.owner == music._owner) {
+        music._ended(stopped.handle, stolen: stopped.stolen == 1);
+      }
     }
   }
 

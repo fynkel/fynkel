@@ -295,6 +295,35 @@ void main() {
     expect(world.audio.stats.voices, 1);
   });
 
+  test("a source hears of its stolen one-shots, so its volume reaches the next (stage 14, AU3)", () {
+    final world = newWorld();
+    final source = AudioSource();
+    world.add(GameObject(components: [source]));
+    final silent = AudioClip.fromSamples(Float32List(48000 * 5), name: 'silent');
+    for (var i = 0; i < Audio.maxVoices; i++) {
+      source.playOneShot(silent);
+    }
+    run(world);
+    // Every one of them taken by sounds as important, which end soon.
+    final short = AudioClip.fromSamples(Float32List(4800), name: 'short');
+    for (var i = 0; i < Audio.maxVoices; i++) {
+      world.audio.playOneShot(short);
+    }
+    run(world);
+    expect(world.audio.stats.stolen, Audio.maxVoices);
+    run(world, frames: 12);
+    expect(world.audio.stats.voices, 0);
+    final loud = AudioClip.fromSamples(Float32List(48000 * 5)..fillRange(0, 48000 * 5, 0.5), name: 'loud');
+    source.playOneShot(loud);
+    run(world);
+    var out = world.audio.render(2048);
+    expect(out[out.length - 2], closeTo(0.5, 0.01));
+    source.volume = 0;
+    run(world);
+    out = world.audio.render(2048);
+    expect(out[out.length - 2], closeTo(0, 1e-3), reason: 'the volume reaches the newest one-shot');
+  });
+
   test('a call after dispose writes into no memory it gave back (stage 14, AU4)', () {
     final world = World();
     final clip = tone(0.1);

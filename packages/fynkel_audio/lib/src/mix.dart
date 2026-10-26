@@ -181,12 +181,14 @@ final class AudioMusic {
     _clip = _voice == 0 ? null : clip;
   }
 
-  void _ended(int handle) {
+  /// [handle] stopped on its own: at its end, or [stolen], which music
+  /// never is (it plays at priority 0), and which isn't an end.
+  void _ended(int handle, {required bool stolen}) {
     if (handle != _voice) return;
     final clip = _clip;
     _voice = 0;
     _clip = null;
-    if (clip == null) return;
+    if (clip == null || stolen) return;
     try {
       onEnd?.call(clip);
     } catch (error, stack) {
