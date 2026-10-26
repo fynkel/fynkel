@@ -387,7 +387,8 @@ final class Orbit extends _Rig {
 /// the live [VirtualCamera] is, with its lens, blending when the live one
 /// changes, and shakes it. A shake moves the camera only where it's drawn
 /// ([shakeOf]), never its transform. With no virtual camera it leaves the
-/// camera where it is (still shaking it).
+/// camera where it is (still shaking it). When the live one's object is
+/// destroyed, the view blends from where it is to the next one.
 final class Cameras {
   Cameras._(this._world);
 
@@ -504,7 +505,7 @@ final class Cameras {
     if (_virtual.isEmpty && _live == null && _shakes.isEmpty && _shaken == null) return;
 
     final camera = _world._cameraObject;
-    _choose();
+    _choose(camera);
     final live = _live;
     if (live != null && camera != null && camera != live._owner) {
       final pose = _poseNow(live, unscaled ? time._unscaledDelta : dt);
@@ -522,8 +523,9 @@ final class Cameras {
     }
   }
 
-  /// Makes the best virtual camera the live one, blending from the last.
-  void _choose() {
+  /// Makes the best virtual camera the live one, blending from the last;
+  /// from where the view's [camera] is when the last one's object is gone.
+  void _choose(GameObject? camera) {
     VirtualCamera? best;
     for (final v in _virtual) {
       if (best == null || v._priority > best._priority || (v._priority == best._priority && v._order > best._order)) {
@@ -533,15 +535,21 @@ final class Cameras {
     final last = _live;
     if (best == last) return;
     _live = best;
+    final lastThere = last != null && _present(last._owner!);
     final blend = best == null || last == null ? Blend.cut : _blendFor(last, best);
-    if (blend.isCut) {
+    if (blend.isCut || (!lastThere && camera == null)) {
       _blend = null;
     } else {
-      // From a blend still going: from where it got to, held there.
+      // From a blend still going: from where it got to, held there. From
+      // a destroyed one: from where the view's camera is, held there.
       final current = _current;
       final blending = _blend != null && current != null;
-      _from = blending ? null : last;
-      _fromPose = blending ? current : last!._pose;
+      _from = blending || !lastThere ? null : last;
+      _fromPose = blending
+          ? current
+          : lastThere
+          ? last._pose
+          : _poseOf(camera!);
       _blend = blend;
       _blendTime = 0;
     }
@@ -567,6 +575,13 @@ final class Cameras {
       lerp(fromPose.fovY, to.fovY, t),
       lerp(fromPose.size, to.size, t),
     );
+  }
+
+  /// Where [camera] is, with its lens.
+  static _Pose _poseOf(GameObject camera) {
+    final t = camera.parent == null ? camera.transform : camera.worldTransform;
+    final lens = camera.get<Camera>();
+    return _Pose(t.position, t.rotation, lens?.fovY ?? 60 * (math.pi / 180), lens?.orthographicSize ?? 5);
   }
 
   static void _put(GameObject camera, _Pose pose) {

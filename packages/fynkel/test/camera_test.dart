@@ -371,6 +371,27 @@ void main() {
       frames(2);
       expectVec(view.position, const Vec3(2, 0, 0));
     });
+
+    // Stage 14's DF1: the live one's object destroyed.
+    test('the live one destroyed blends from where the view is to the next, and says so', () {
+      final view = camera();
+      world.cameras.defaultBlend = const Blend(1, ease: Ease.linear);
+      final a = at(Vec3.zero, priority: 1);
+      final b = at(const Vec3(4, 0, 0)).get<VirtualCamera>()!;
+      final seen = <VirtualCamera?>[];
+      world.cameras.onLiveChanged.listen(seen.add);
+      frames(1);
+      expect(seen, [a.get<VirtualCamera>()]);
+      a.destroy();
+      frames(1);
+      expect(world.cameras.live, b);
+      expect(seen, [a.get<VirtualCamera>(), b]);
+      expect(world.cameras.isBlending, isTrue);
+      expectVec(view.position, const Vec3(1, 0, 0));
+      frames(3);
+      expect(world.cameras.isBlending, isFalse);
+      expectVec(view.position, const Vec3(4, 0, 0));
+    });
   });
 
   group('rigs', () {
