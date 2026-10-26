@@ -4187,6 +4187,9 @@ For code written before: each change that breaks it, newest first.
   - A collision plane whose object is destroyed is left out of the
     particle system, which goes on being changed as before: every setter
     threw. A destroyed one given to `collision` is still refused.
+  - A `MeshBuilder` keeps the normals it's given, and its flat faces',
+    when some vertices have none: only those are worked out from the
+    faces. One vertex without a normal had every normal worked out.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

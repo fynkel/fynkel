@@ -226,6 +226,42 @@ void main() {
       expect(() => b.build(), throwsStateError);
     });
 
+    // Stage 14's DF10: with one vertex without a normal, every normal was
+    // worked out from the faces, the ones given too.
+    test('given normals are kept when other vertices have none', () {
+      const n = Vec3(0, 0.6, 0.8);
+      final b = MeshBuilder();
+      final i0 = b.addVertex(const Vec3(0, 0, 0), normal: n);
+      final i1 = b.addVertex(const Vec3(1, 0, 0), normal: n);
+      final i2 = b.addVertex(const Vec3(1, 1, 0), normal: n);
+      final i3 = b.addVertex(const Vec3(0, 1, 0), normal: n);
+      b
+        ..addIndices(i0, i1, i2)
+        ..addIndices(i0, i2, i3);
+      // Two vertices without normals, in a face of their own facing +X.
+      final j0 = b.addVertex(const Vec3(5, 0, 0));
+      final j1 = b.addVertex(const Vec3(5, 1, 0));
+      final j2 = b.addVertex(const Vec3(5, 0, -1), normal: const Vec3(0, 0, 1));
+      b.addIndices(j0, j2, j1);
+      final normals = b.build().normals;
+      List<double> at(int i) => normals.sublist(i * 3, i * 3 + 3);
+      for (var i = 0; i < 4; i++) {
+        expect(
+          at(i),
+          pairwiseCompare(<double>[0, 0.6, 0.8], (double a, double b) => (a - b).abs() < 1e-5, 'given'),
+          reason: '$i',
+        );
+      }
+      expect(at(6), [0, 0, 1]);
+      for (final i in [4, 5]) {
+        expect(
+          at(i),
+          pairwiseCompare(<double>[1, 0, 0], (double a, double b) => (a - b).abs() < 1e-5, 'from the face'),
+          reason: '$i',
+        );
+      }
+    });
+
     test('a built mesh draws in a world as one object', () {
       final world = World();
       addTearDown(world.dispose);
