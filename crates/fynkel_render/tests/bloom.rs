@@ -183,3 +183,38 @@ fn a_games_own_quality_decides_bloom() {
     let plain = render(&gpu, &mut r, &scene, SIZE, SIZE).0;
     assert_eq!(beside(&plain, 3), 0, "high, without bloom: black beside the square");
 }
+
+/// A black sphere with an outline of `color`, a fifth of a metre wide, on
+/// black, seen through a camera with `bloom`.
+fn outlined(color: [f32; 3], bloom: Option<Bloom>, quality: QualityLevel) -> RenderScene {
+    let mut camera = CameraView::looking_at(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO);
+    camera.bloom = bloom;
+    let material = PbrMaterial {
+        base_color: [0.0, 0.0, 0.0, 1.0],
+        outline: Some(Outline { width: 0.2, color }),
+        ..PbrMaterial::DEFAULT
+    };
+    RenderScene {
+        camera: Some(camera),
+        quality: Some(quality.quality()),
+        draws: vec![Draw::new(SPHERE, Mat4::IDENTITY, material)],
+        ..RenderScene::default()
+    }
+}
+
+/// Stage 14's RN1: an outline is a colour shown as picked, not light, so
+/// a white or pure green one doesn't glow, as a sky's gradient doesn't.
+#[test]
+fn outlines_dont_glow() {
+    // Big enough for the outline to be a few pixels wide.
+    const WIDE: u32 = 96;
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    for color in [[1.0, 1.0, 1.0], [0.0, 1.0, 0.0]] {
+        for quality in [QualityLevel::Medium, QualityLevel::High] {
+            let plain = render(&gpu, &mut r, &outlined(color, None, quality), WIDE, WIDE).0;
+            let glow = render(&gpu, &mut r, &outlined(color, Some(Bloom::DEFAULT), quality), WIDE, WIDE).0;
+            assert!(max_difference(&plain, &glow) <= 2, "a {color:?} outline glows at {quality:?}");
+        }
+    }
+}

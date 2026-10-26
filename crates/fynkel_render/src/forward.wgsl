@@ -307,10 +307,11 @@ fn outlined(in: VertexIn, placed: VertexOut) -> VertexOut {
     return out;
 }
 
-// Its colour as it was picked, unlit and not tone mapped, behind the fog.
+// Its colour as it was picked, unlit and not tone mapped, behind the fog;
+// alpha 0, as it's not light that glows (bloom.wgsl's `light`).
 @fragment
 fn fs_outline(in: VertexOut) -> @location(0) vec4<f32> {
-    return vec4<f32>(fogged(in.base_color.rgb, in.world_position), 1.0);
+    return vec4<f32>(fogged(in.base_color.rgb, in.world_position), 0.0);
 }
 
 const PI: f32 = 3.14159265359;

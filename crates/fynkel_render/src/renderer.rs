@@ -2591,7 +2591,9 @@ impl Pipelines {
                 targets: &[Some(wgpu::ColorTargetState {
                     format: self.format,
                     blend: None,
-                    write_mask: wgpu::ColorWrites::ALL,
+                    // Its alpha 0 tells bloom it isn't light; a view (low)
+                    // keeps its own.
+                    write_mask: if self.format.is_srgb() { wgpu::ColorWrites::COLOR } else { wgpu::ColorWrites::ALL },
                 })],
             }),
             multiview_mask: None,
