@@ -736,8 +736,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   void _sizeFromLayout() {
     final world = this.world;
     final scale = world.isDisposed ? 1.0 : (world.quality ?? (_deviceQuality ??= Quality.device)).renderScale;
-    final width = (_logical.width * _ratio * scale).round().clamp(0, 16384);
-    final height = (_logical.height * _ratio * scale).round().clamp(0, 16384);
+    // No device here draws a texture past 8192 on a side; the engine
+    // refuses a view past what its device draws.
+    final width = (_logical.width * _ratio * scale).round().clamp(0, 8192);
+    final height = (_logical.height * _ratio * scale).round().clamp(0, 8192);
     if (width != _layoutWidth || height != _layoutHeight) _steadyFrames = 0;
     _layoutWidth = width;
     _layoutHeight = height;
