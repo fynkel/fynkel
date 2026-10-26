@@ -303,6 +303,27 @@ void main() {
       );
     });
 
+    // Stage 14's DF4: once a plane's object was destroyed, every setter
+    // threw, and the system was written again on every spawn.
+    test('a destroyed plane is left out, and the system can still be changed', () {
+      final floor = world.add(GameObject());
+      final wall = world.add(GameObject(transform: Transform(position: Vec3(2, 0, 0))));
+      final system = ParticleSystem(collision: ParticleCollision(planes: [floor, wall]));
+      world.add(GameObject(components: [system]));
+      world.update(dt);
+      floor.destroy();
+      world.update(dt);
+      expect(() => system.gravityModifier = 2, returnsNormally);
+      expect(system.gravityModifier, 2);
+      world.add(GameObject());
+      world.update(dt);
+      expect(
+        () => system.collision = ParticleCollision(planes: [floor]),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'text', contains('destroyed'))),
+        reason: 'given a destroyed one, refused',
+      );
+    });
+
     test('a death sub emitter bursts where each dies, its system a child added after', () {
       final sparks = ParticleSystem(
         startLifetime: Range(5),

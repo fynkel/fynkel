@@ -4177,6 +4177,9 @@ For code written before: each change that breaks it, newest first.
   - A prewarmed particle system meets its collision planes while it
     prewarms, and fires no sub emitters for that time: its first frame
     threw particles up through the floor, and burst every death at once.
+  - A collision plane whose object is destroyed is left out of the
+    particle system, which goes on being changed as before: every setter
+    threw. A destroyed one given to `collision` is still refused.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

@@ -1321,13 +1321,15 @@ class GameObject with _Moving {
       i.curve._write(s.inherit_velocity.curve);
     }
     // Planes and sub emitters not in this world yet are left out, and the
-    // system written again once they may be.
+    // system written again once they may be. A destroyed plane is left
+    // out for good.
     var waiting = false;
     s.has_collision = value.collision != null;
     if (value.collision case final c?) {
       var n = 0;
       for (final plane in c.planes) {
-        if (!identical(plane._world, world) || plane.isDestroyed) {
+        if (plane.isDestroyed) continue;
+        if (!identical(plane._world, world)) {
           waiting = true;
           continue;
         }

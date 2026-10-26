@@ -694,7 +694,7 @@ final class ParticleSystem extends Component {
        _colorOverLifetime = colorOverLifetime,
        _colorTable = _colors(colorOverLifetime),
        super._() {
-    if (_refused() case final error?) throw error;
+    if (_refused() ?? _destroyedPlane(_collision) case final error?) throw error;
   }
 
   /// Called when it's done, with [StopAction.callback] (Unity's
@@ -919,9 +919,18 @@ final class ParticleSystem extends Component {
   InheritVelocity? get inheritVelocity => _inheritVelocity;
   set inheritVelocity(InheritVelocity? value) => _set(() => _inheritVelocity, (v) => _inheritVelocity = v, value);
 
-  /// Its particles bounce off planes.
+  /// Its particles bounce off planes. A plane whose object is destroyed
+  /// later is left out; one destroyed already is refused.
   ParticleCollision? get collision => _collision;
-  set collision(ParticleCollision? value) => _set(() => _collision, (v) => _collision = v, value);
+  set collision(ParticleCollision? value) {
+    if (_destroyedPlane(value) case final error?) throw error;
+    _set(() => _collision, (v) => _collision = v, value);
+  }
+
+  static ArgumentError? _destroyedPlane(ParticleCollision? collision) =>
+      collision != null && collision.planes.any((p) => p.isDestroyed)
+      ? ArgumentError('collision: a plane\'s object is destroyed')
+      : null;
 
   /// Other systems that emit where its particles are born, hit a plane or
   /// die: at most 4.
@@ -1069,7 +1078,6 @@ final class ParticleSystem extends Component {
     if (_collision case final c?) {
       if (c.planes.length > 6) return ArgumentError('a ParticleSystem collides with at most 6 planes');
       if (!c._finite) return ArgumentError('collision\'s numbers must be finite');
-      if (c.planes.any((p) => p.isDestroyed)) return ArgumentError('collision: a plane\'s object is destroyed');
     }
     if (_subEmitters.length > 4) return ArgumentError('a ParticleSystem has at most 4 sub emitters');
     for (final sub in _subEmitters) {
