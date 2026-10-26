@@ -101,6 +101,31 @@ void main() {
     }
   });
 
+  // Stage 14's DF11: with a count, a spline with no knots threw every frame.
+  test('a count of copies on a spline with no knots makes none, until it has some', () async {
+    final errors = <ObjectError>[];
+    world.errors.listen(errors.add);
+    final spline = Spline([]);
+    final row = world.add(
+      GameObject(
+        components: [
+          SplineContainer([spline]),
+          SplineInstantiate((_) => GameObject(), count: 5),
+        ],
+      ),
+    );
+    for (var i = 0; i < 3; i++) {
+      world.update(1 / 60);
+    }
+    await pumpEventQueue();
+    expect(errors, isEmpty);
+    expect(row.get<SplineInstantiate>()!.copies, isEmpty);
+    spline.add(const Knot(Vec3.zero));
+    spline.add(const Knot(Vec3(4, 0, 0)));
+    world.update(1 / 60);
+    expect(row.get<SplineInstantiate>()!.copies.map((c) => c.position.x), [0, 1, 2, 3, 4]);
+  });
+
   test('an object rides a spline at a speed, looping', () {
     final track = world.add(
       GameObject(
