@@ -11,6 +11,7 @@ import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
 
 import 'bindings.g.dart';
+import 'owned_memory.dart';
 
 part 'clip.dart';
 part 'listener.dart';
@@ -182,24 +183,26 @@ final class Audio extends WorldSystem implements Finalizable {
   late final Pointer<FaAudio> _audio;
   var _disposed = false;
 
-  // Scratch for calls, kept: one each, allocated once.
-  final _play = calloc<FaPlay>();
-  final _settings = calloc<FaSettings>();
-  final _voice = calloc<FaVoice>();
-  final _count = calloc<Size>();
-  final _seconds = calloc<Double>();
-  final _handle = calloc<Uint64>();
-  var _stopped = calloc<FaStopped>(8);
+  // Scratch for calls, kept: one each, allocated once, and freed when this
+  // is collected, not by [dispose] (see [WorldSystem.dispose]).
+  late final _memory = OwnedMemory(this);
+  late final _play = _memory<FaPlay>();
+  late final _settings = _memory<FaSettings>();
+  late final _voice = _memory<FaVoice>();
+  late final _count = _memory<Size>();
+  late final _seconds = _memory<Double>();
+  late final _handle = _memory<Uint64>();
+  late var _stopped = _memory<FaStopped>(8);
   var _stoppedRoom = 8;
-  final _spatial = calloc<FaSpatial>();
-  final _listener = calloc<FaListener>();
-  final _fade = calloc<FaFade>();
+  late final _spatial = _memory<FaSpatial>();
+  late final _listener = _memory<FaListener>();
+  late final _fade = _memory<FaFade>();
   // Room for every voice's place each frame, and the ids and transforms
   // read for them: the listener's object, then the 3D sources'.
   static const _placeRoom = 2 * maxVoices;
-  final _places = calloc<FaPlace>(_placeRoom);
-  var _ids = calloc<Uint64>(8);
-  var _transforms = calloc<Float>(8 * 10);
+  late final _places = _memory<FaPlace>(_placeRoom);
+  late var _ids = _memory<Uint64>(8);
+  late var _transforms = _memory<Float>(8 * 10);
   var _idRoom = 8;
 
   // The scratch structs as memory, written and read on each frame without
@@ -417,16 +420,16 @@ final class Audio extends WorldSystem implements Finalizable {
   /// Room for [count] ids and their transforms, keeping the ids written.
   void _room(int count) {
     if (count <= _idRoom) return;
-    final ids = calloc<Uint64>(count * 2);
+    final ids = _memory<Uint64>(count * 2);
     for (var i = 0; i < _idRoom; i++) {
       ids[i] = _ids[i];
     }
-    calloc
+    _memory
       ..free(_ids)
       ..free(_transforms);
     _idRoom = count * 2;
     _ids = ids;
-    _transforms = calloc<Float>(_idRoom * 10);
+    _transforms = _memory<Float>(_idRoom * 10);
   }
 
   /// Writes [source]'s 2D and 3D settings to the next play, and, for a 3D
@@ -708,9 +711,9 @@ final class Audio extends WorldSystem implements Finalizable {
     final count = _count.value;
     if (count == 0) return;
     if (count > _stoppedRoom) {
-      calloc.free(_stopped);
+      _memory.free(_stopped);
       _stoppedRoom = count;
-      _stopped = calloc<FaStopped>(count);
+      _stopped = _memory<FaStopped>(count);
     }
     _check(fa_stopped_read(_native, _stopped, count));
     final music = _music;
@@ -749,20 +752,8 @@ final class Audio extends WorldSystem implements Finalizable {
     _sources.clear();
     _finalizer.detach(this);
     fa_audio_free(_audio);
-    calloc
-      ..free(_play)
-      ..free(_settings)
-      ..free(_voice)
-      ..free(_count)
-      ..free(_seconds)
-      ..free(_handle)
-      ..free(_stopped)
-      ..free(_spatial)
-      ..free(_listener)
-      ..free(_fade)
-      ..free(_places)
-      ..free(_ids)
-      ..free(_transforms);
+    // The scratch stays until this is collected: a call after this one
+    // writes into it, then throws.
   }
 }
 
