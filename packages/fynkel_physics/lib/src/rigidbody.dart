@@ -321,7 +321,7 @@ final class Rigidbody extends Behaviour {
   /// it isn't in the world.
   void movePosition(Vec3 position) {
     final physics = _inWorld('movePosition');
-    final rotation = _movedAt == physics._steps ? _moveRotation : this.rotation;
+    final rotation = _moveAskedAt == physics._steps ? _moveRotation : this.rotation;
     _move(physics, position, rotation);
   }
 
@@ -329,7 +329,7 @@ final class Rigidbody extends Behaviour {
   /// [movePosition] moves it.
   void moveRotation(Quat rotation) {
     final physics = _inWorld('moveRotation');
-    final position = _movedAt == physics._steps ? _movePosition : this.position;
+    final position = _moveAskedAt == physics._steps ? _movePosition : this.position;
     _move(physics, position, rotation);
   }
 
@@ -361,9 +361,11 @@ final class Rigidbody extends Behaviour {
   var _toRotation = Quat.identity;
   var _clean = false;
 
-  // Where movePosition and moveRotation send it, and the step count then.
+  // Where movePosition and moveRotation send it, and the step count then:
+  // what the other keeps, if both are asked before the next step.
   var _movePosition = Vec3.zero;
   var _moveRotation = Quat.identity;
+  var _moveAskedAt = -1;
 
   @override
   void onEnable() {
@@ -439,7 +441,7 @@ final class Rigidbody extends Behaviour {
     checkPhysics(fp_rigidbody_move(physics._world, _id, physics._pose));
     _movePosition = position;
     _moveRotation = rotation;
-    _movedAt = physics._steps;
+    _moveAskedAt = physics._steps;
   }
 
   void _teleport(Vec3 position, Quat rotation) {
