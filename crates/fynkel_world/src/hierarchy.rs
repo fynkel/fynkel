@@ -76,6 +76,8 @@ impl Hierarchy {
         }
     }
 
+    /// Takes `child` from its parent. The trees change, so the version
+    /// moves on: a leaf despawned has no node left to say so later.
     fn detach(&mut self, child: ObjectId) {
         let Some(parent) = self.nodes.get_mut(&child).and_then(|n| n.parent.take()) else { return };
         if let Some(node) = self.nodes.get_mut(&parent) {
@@ -83,6 +85,7 @@ impl Hierarchy {
         }
         self.prune(parent);
         self.prune(child);
+        self.version += 1;
     }
 }
 
