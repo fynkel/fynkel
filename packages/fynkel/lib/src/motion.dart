@@ -245,12 +245,14 @@ sealed class Motion implements Future<void> {
   }
 
   /// Jumps it to its end, as if its time had run out, and calls
-  /// [onComplete]; one that loops for ever ends at the end of the play
-  /// it's in. Completing a part of a group completes the group.
+  /// [onComplete]: one that loops a number of times ends where its last
+  /// play would (a yoyo's second back at the start, a `moveBy`'s third
+  /// three times as far); one that loops for ever ends at the end of the
+  /// play it's in. Completing a part of a group completes the group.
   void complete() {
     if (_group != null) return _root.complete();
     if (!isRunning) return;
-    _lastPlay = true;
+    if (loops < 0) _lastPlay = true;
     try {
       _seek(double.infinity);
     } catch (error, stack) {

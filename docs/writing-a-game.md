@@ -1011,8 +1011,9 @@ class Door extends GameObject {
   `onComplete:`.
 - **`sequence([...])`** plays one after another, **`together([...])`** all
   at once.
-- Each returns a **`Motion`**: `stop()`, `complete()`, and it's a future,
-  so `await open();` waits for it to end.
+- Each returns a **`Motion`**: `stop()`, `complete()` (to where its last
+  loop ends; one that loops for ever ends the loop it's in), and it's a
+  future, so `await open();` waits for it to end.
 
 ## 9. Routines
 
@@ -4128,6 +4129,10 @@ For code written before: each change that breaks it, newest first.
     is as it was and the objects can be added once mended. A root used
     to stay in the world half built, its later children could never be
     added, and its lights stayed counted.
+  - `Motion.complete()` on one that loops a number of times ends where
+    its last loop would: a yoyo of 2 back at the start, a `moveBy`
+    sequence of 3 loops three times as far. It used to stop at the end
+    of the loop it was in.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

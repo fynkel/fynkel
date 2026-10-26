@@ -261,6 +261,19 @@ void main() {
       expect((values.last, m.isCompleted), (0.0, true), reason: 'its second play goes back, to 0');
     });
 
+    // Stage 14's DF5: complete() on a finite loop.
+    test('completing one that loops a number of times ends where its last play would', () {
+      final values = <double>[];
+      final yoyo = thing.tween(0.0, 1.0, seconds: 1, ease: Ease.linear, loops: 2, yoyo: true, onUpdate: values.add);
+      frame();
+      yoyo.complete();
+      expect((values.last, yoyo.isCompleted), (0.0, true), reason: 'its second play comes back, to 0');
+
+      final other = world.add(GameObject());
+      other.sequence([other.moveBy(const Vec3(1, 0, 0), seconds: 1, ease: Ease.linear)], loops: 3).complete();
+      expectVec(other.position, const Vec3(3, 0, 0));
+    });
+
     test('what onUpdate throws goes to world.errors and stops it; the others go on', () async {
       final errors = <ObjectError>[];
       world.errors.listen(errors.add);
