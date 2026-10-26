@@ -79,7 +79,7 @@ final class AudioClip implements Finalizable {
   /// A sound made in code: [samples] from -1 to 1, interleaved in
   /// [channels] (1 or 2), at [rate] frames a second. Throws an
   /// [ArgumentError] for samples that aren't whole frames, or aren't
-  /// numbers.
+  /// numbers; one past 8 times full scale is taken as that.
   factory AudioClip.fromSamples(Float32List samples, {int rate = 48000, int channels = 1, String name = ''}) {
     _library;
     final copy = malloc<Float>(samples.isEmpty ? 1 : samples.length);

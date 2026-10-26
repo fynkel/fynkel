@@ -187,4 +187,36 @@ void main() {
     expect(() => world.audio.playAt(level(), Vec3.zero, minDistance: -1), throwsArgumentError);
     expect(() => world.audio.playAt(level(), Vec3.zero, maxDistance: 0.5), throwsArgumentError);
   });
+
+  test("a source further away than a float holds doesn't turn the sound off (stage 14, AU5)", () {
+    final world = newWorld();
+    world.add(GameObject(name: 'camera', components: [Camera()]));
+    final ended = <AudioClip>[];
+    final short = AudioClip.fromSamples(Float32List(24000)..fillRange(0, 24000, 0.1), name: 'short');
+    final source = AudioSource(clip: short, spatialBlend: 1)..onEnd = ended.add;
+    // Each place a float, but the source's in the world 6e38 m away, past
+    // what the engine's floats hold.
+    final parent = world.add(GameObject(name: 'parent'));
+    parent.add(
+      GameObject(
+        transform: Transform(position: Vec3(3e38, 0, 0)),
+        components: [source],
+      ),
+    );
+    world.update(1 / 60);
+    parent.transform = Transform(position: Vec3(3e38, 0, 0));
+    for (var i = 0; i < 6; i++) {
+      world.update(1 / 60);
+    }
+    expect(world.audio.isTurnedOff, isFalse);
+    // Brought back, it's heard where it is, and ends.
+    parent.transform = Transform(position: Vec3(-3e38, 0, 0));
+    world.update(1 / 60);
+    expect(source.isPlaying, isTrue);
+    for (var i = 0; i < 60; i++) {
+      world.update(1 / 60);
+    }
+    expect(world.audio.isTurnedOff, isFalse);
+    expect(ended, [short]);
+  });
 }
