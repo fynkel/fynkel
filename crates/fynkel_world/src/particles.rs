@@ -569,7 +569,8 @@ impl ParticleSettings {
             && self.shape.size.is_finite()
             && [self.start_lifetime, self.start_speed, self.start_size, self.start_rotation]
                 .iter()
-                .all(|r| r.is_finite());
+                .all(|r| r.is_finite())
+            && self.start_color.iter().all(|c| [c.r, c.g, c.b, c.a].iter().all(|v| v.is_finite()));
         if !finite {
             return Some("a particle system's numbers must be finite");
         }

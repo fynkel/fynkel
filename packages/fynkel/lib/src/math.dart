@@ -324,9 +324,12 @@ final class Quat {
   double get length => math.sqrt(x * x + y * y + z * z + w * w);
 
   /// This rotation with length exactly 1 again. Many multiplied rotations
-  /// drift from 1; the engine refuses a drift above 1e-3.
+  /// drift from 1; the engine refuses a drift above 1e-3. Throws, as
+  /// [Vec3.normalized] does, for a quaternion of length 0 or one that
+  /// isn't finite, which is no rotation.
   Quat get normalized {
     final l = length;
+    if (l < 1e-12 || !l.isFinite) throw ArgumentError('$this is no rotation: it has no length to normalize');
     return Quat(x / l, y / l, z / l, w / l);
   }
 

@@ -1056,3 +1056,20 @@ fn a_plane_seen_from_a_stretched_local_system_is_where_it_is_drawn() {
     }
     assert!((normal.length() - 1.0).abs() < 1e-5);
 }
+
+// Stage 14's WO12: a start colour that wasn't finite was taken, and drew
+// its particles NaN.
+#[test]
+fn a_start_colour_that_isnt_finite_is_refused() {
+    let (mut world, id) = world_with(burst(3.0, 2.0));
+    for bad in [
+        Color::rgba(f32::NAN, 0.0, 0.0, 1.0),
+        Color::rgba(0.0, f32::INFINITY, 0.0, 1.0),
+        Color::rgba(0.0, 0.0, 0.0, f32::NAN),
+    ] {
+        for start_color in [[bad, Color::WHITE], [Color::WHITE, bad]] {
+            let settings = ParticleSettings { start_color, ..ParticleSettings::default() };
+            assert!(matches!(world.set_particles(id, settings), Err(WorldError::Particles(_))), "{bad:?}");
+        }
+    }
+}

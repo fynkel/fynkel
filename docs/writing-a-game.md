@@ -4202,6 +4202,10 @@ For code written before: each change that breaks it, newest first.
   - A `TrailRenderer`'s points still fade after days of play: its clock
     stopped after about 3 days at 120 fps (6 at 60), and the trail grew
     to its 512 points.
+  - A particle system's `startColor` with a number that isn't finite is
+    refused (an `ArgumentError`), and `Quat.normalized` throws for a
+    quaternion of length 0 or one that isn't finite, as `Vec3.normalized`
+    does: both gave NaNs.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

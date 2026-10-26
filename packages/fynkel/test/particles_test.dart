@@ -161,6 +161,20 @@ void main() {
     expect(() => ParticleSystem(maxParticles: 200000), throwsArgumentError);
   });
 
+  // Stage 14's WO12: a start colour that wasn't finite was taken.
+  test('a start colour that is not finite is refused', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final system = ParticleSystem();
+    world.add(GameObject(components: [system]));
+    expect(() => system.startColor = const Color.rgb(double.nan, 0, 0), throwsArgumentError);
+    expect(
+      () => system.startColor = ColorRange(Color.white, const Color.rgb(0, 0, double.infinity)),
+      throwsArgumentError,
+    );
+    expect(system.startColor, Color.white, reason: 'kept');
+  });
+
   test('a system draws with its material, which stays while it does', () {
     final glow = Material(color: Color(0xFFFFAA33), blending: Blending.additive);
     final system = ParticleSystem(material: glow);
