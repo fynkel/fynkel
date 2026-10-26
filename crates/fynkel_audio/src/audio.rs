@@ -185,6 +185,9 @@ pub struct Audio {
     /// while it isn't meant to play.
     heard: Option<(u64, Instant)>,
     stopped: Vec<Stopped>,
+    /// How many of `stopped` the last update said: the next one drops
+    /// those, and keeps the steals made since.
+    said: usize,
     /// Without a device: frames of time not yet rendered, and where.
     owed: f64,
     scratch: Vec<f32>,
@@ -228,6 +231,7 @@ impl Audio {
             heard: None,
             // A steal per command, and an end per return, at most.
             stopped: Vec::with_capacity(COMMANDS + RETURNS),
+            said: 0,
             owed: 0.0,
             scratch: vec![0.0; CHUNK * 2],
             stats: Stats::default(),
@@ -554,7 +558,9 @@ impl Audio {
     /// without a device, and opens a lost device again (at most once a
     /// second).
     pub fn update(&mut self, seconds: f64) {
-        self.stopped.clear();
+        // What the last update said goes; the steals since stay, to be
+        // said by this one.
+        self.stopped.drain(..self.said);
         if self.moved {
             self.moved = false;
             for slot in 0..MAX_VOICES {
@@ -611,6 +617,7 @@ impl Audio {
             self.render_quietly(frames);
         }
         self.take_returns();
+        self.said = self.stopped.len();
     }
 
     fn render_quietly(&mut self, mut frames: usize) {
@@ -643,8 +650,10 @@ impl Audio {
         }
     }
 
-    /// The voices that stopped on their own in the last [`Audio::update`]:
-    /// those that reached their end, and those stolen since.
+    /// The voices that stopped on their own: after an [`Audio::update`],
+    /// those stolen since the update before and those that reached their
+    /// end in it; then, until the next, those stolen since too. Each is in
+    /// one update's.
     pub fn stopped(&self) -> &[Stopped] {
         &self.stopped
     }

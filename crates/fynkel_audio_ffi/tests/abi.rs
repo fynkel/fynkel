@@ -322,3 +322,42 @@ fn a_streamed_clip_fades_in_a_group_and_fades_out_to_its_stop() {
         fa_clip_free(clip);
     }
 }
+
+#[test]
+fn a_steal_reaches_the_next_update() {
+    // Stage 14's AU3: a steal was made during the frame, then cleared by
+    // the update that was to say so.
+    let audio = Audio(fa_audio_new());
+    let samples = vec![0.01; 48_000];
+    let clip = clip(48_000, &samples);
+    let mut handles = Vec::new();
+    for owner in 1..=32 {
+        let mut handle = 0;
+        let p = FaPlay { priority: 200, owner, ..play(1.0) };
+        // SAFETY: live audio and clip, a readable play and a writable out.
+        assert_eq!(unsafe { fa_audio_play(audio.0, clip, &p, &mut handle) }, FaStatus::Ok);
+        handles.push(handle);
+    }
+    let mut count = 0;
+    // SAFETY: live audio and a writable out.
+    assert_eq!(unsafe { fa_audio_update(audio.0, &0.01, &mut count) }, FaStatus::Ok);
+    assert_eq!(count, 0);
+    let mut handle = 0;
+    let p = FaPlay { priority: 10, owner: 99, ..play(1.0) };
+    // SAFETY: as above.
+    assert_eq!(unsafe { fa_audio_play(audio.0, clip, &p, &mut handle) }, FaStatus::Ok);
+    assert_ne!(handle, 0);
+    // SAFETY: live audio and a writable out.
+    assert_eq!(unsafe { fa_audio_update(audio.0, &0.01, &mut count) }, FaStatus::Ok);
+    assert_eq!(count, 1);
+    let mut stopped = [FaStopped::default()];
+    // SAFETY: room for count.
+    assert_eq!(unsafe { fa_stopped_read(audio.0, stopped.as_mut_ptr(), count) }, FaStatus::Ok);
+    assert_eq!(stopped, [FaStopped { handle: handles[0], owner: 1, stolen: 1 }]);
+    // Said once.
+    // SAFETY: live audio and a writable out.
+    assert_eq!(unsafe { fa_audio_update(audio.0, &0.01, &mut count) }, FaStatus::Ok);
+    assert_eq!(count, 0);
+    // SAFETY: made above, not used after.
+    unsafe { fa_clip_free(clip) };
+}

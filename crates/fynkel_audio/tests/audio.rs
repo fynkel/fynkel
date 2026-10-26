@@ -175,6 +175,28 @@ fn the_least_important_oldest_voice_gives_way_and_a_less_important_sound_doesnt_
 }
 
 #[test]
+fn a_steal_is_in_the_update_after_it_with_that_updates_ends() {
+    // Stage 14's AU3: the steal was cleared by the update that was to say
+    // so (the C interface reads stopped() after update).
+    let mut audio = Audio::new();
+    let long = level(QUIET_RATE, 5.0, 0.01);
+    let short = level(QUIET_RATE, 0.005, 0.01);
+    let ending = play(&mut audio, &short, Play { owner: 1, ..Play::default() });
+    let handles: Vec<_> = (1..MAX_VOICES)
+        .map(|i| play(&mut audio, &long, Play { priority: 200, owner: i as u64 + 1, ..Play::default() }))
+        .collect();
+    let thief = play(&mut audio, &long, Play { priority: 10, ..Play::default() });
+    assert!(audio.playing(thief));
+    audio.update(0.01);
+    assert_eq!(
+        audio.stopped(),
+        [Stopped { handle: handles[0], owner: 2, stolen: true }, Stopped { handle: ending, owner: 1, stolen: false }]
+    );
+    audio.update(0.01);
+    assert!(audio.stopped().is_empty());
+}
+
+#[test]
 fn a_voice_stopping_gives_way_first() {
     let mut audio = Audio::new();
     let clip = level(QUIET_RATE, 5.0, 0.01);
