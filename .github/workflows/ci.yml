@@ -157,6 +157,17 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
+      # The phones' own code, compiled (stage 14's GT4): the lab uses all
+      # three packages, so building it for an iPhone and for Android
+      # compiles the plugin's Kotlin and iOS-only Swift, and every crate
+      # (sound's session code too) for the phones' targets, through the
+      # build hooks as an app does. Neither is signed or run here.
+      - name: phone builds (the lab, iOS and Android)
+        working-directory: examples/lab
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          flutter build ios --debug --no-codesign
+          flutter build apk --debug
       # docs/writing-a-game.md's code, in a throwaway app: it must compile,
       # and its test pass, so the guide never drifts from the API.
       - name: the guide
