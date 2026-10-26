@@ -1838,7 +1838,10 @@ impl World {
             let (mut point, mut normal) = (m.w_axis.truncate(), m.y_axis.truncate());
             if let Some(into) = into {
                 point = into.transform_point3(point);
-                normal = into.transform_vector3(normal);
+                // A normal goes by the inverse transpose of what points go
+                // by, here the emitter's own transposed, so a stretched
+                // emitter sees the plane lean as it's drawn.
+                normal = emitter.transpose().transform_vector3(normal);
             }
             system.planes[system.plane_count] = (point, normal.normalize_or(Vec3::Y), Some(plane));
             system.plane_count += 1;

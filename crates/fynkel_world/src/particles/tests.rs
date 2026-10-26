@@ -1024,3 +1024,35 @@ fn a_prewarm_fires_no_sub_emitter() {
     let first = world.particles(sub).unwrap().count();
     assert!(first <= 10, "{first} on the first frame");
 }
+
+// Stage 14's WO5: a local system on a stretched object turned the plane's
+// normal by the inverse, not its transpose, so the plane leant the wrong
+// way and particles stopped on the wrong side.
+#[test]
+fn a_plane_seen_from_a_stretched_local_system_is_where_it_is_drawn() {
+    let mut world = World::new();
+    let plane = world.spawn();
+    let tilt = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+    world.insert(plane, Transform { rotation: tilt, ..Transform::default() }).unwrap();
+    let id = world.spawn();
+    world.insert(id, Transform { scale: Vec3::new(4.0, 1.0, 1.0), ..Transform::default() }).unwrap();
+    let collision = Some(Collision { planes: vec![plane], ..Collision::default() });
+    world
+        .set_particles(
+            id,
+            ParticleSettings { space: Space::Local, rate_over_time: 0.0, collision, ..Default::default() },
+        )
+        .unwrap();
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    let (point, normal, _) = world.particles(id).unwrap().planes[0];
+    // Local points either side: the system must say the side the world
+    // does.
+    let m = world.world_matrix(id).unwrap();
+    let up = tilt * Vec3::Y;
+    for local in [Vec3::new(1.0, 0.3, 0.0), Vec3::new(-0.2, 0.5, 0.0), Vec3::new(0.3, -1.0, 0.0)] {
+        let in_world = m.transform_point3(local).dot(up);
+        let seen = (local - point).dot(normal);
+        assert_eq!(in_world > 0.0, seen > 0.0, "{local}: the world says {in_world}, the system {seen}");
+    }
+    assert!((normal.length() - 1.0).abs() < 1e-5);
+}
