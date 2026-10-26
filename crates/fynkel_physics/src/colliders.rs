@@ -120,6 +120,10 @@ impl ObjectPose {
 pub(crate) struct Followed {
     pub(crate) spec: ColliderSpec,
     pub(crate) object: ObjectPose,
+    /// The object against its body, as it was when last told: where the
+    /// collider goes on the body when its spec changes, however far the
+    /// body has moved since. Without a body, `object`.
+    pub(crate) local: ObjectPose,
     pub(crate) body: Option<RigidBodyHandle>,
     pub(crate) character: bool,
 }
@@ -254,7 +258,8 @@ impl Physics {
         self.check_spec(&spec)?;
         check_object(object)?;
         let body = body.map(|id| body_handle(&self.world.bodies, id)).transpose()?;
-        let (shape, pose) = spec.place(object, &self.meshes, self.dynamic(body));
+        let local = self.against(body, object);
+        let (shape, pose) = spec.place(local, &self.meshes, self.dynamic(body));
         let builder = ColliderBuilder::new(shape)
             .sensor(spec.is_trigger)
             .active_collision_types(collision_types(spec.is_trigger))
@@ -266,8 +271,7 @@ impl Physics {
         let handle = match body {
             Some(parent) => {
                 // Its mass comes from the body (bodies.rs), so its own is 0.
-                let relative = w.bodies[parent].position().inverse() * pose;
-                let builder = builder.position(relative).density(0.0);
+                let builder = builder.position(pose).density(0.0);
                 w.colliders.insert_with_parent(builder, parent, &mut w.bodies)
             }
             None => w.colliders.insert(builder.position(pose)),
@@ -276,7 +280,7 @@ impl Physics {
         if self.followed.len() <= index {
             self.followed.resize(index + 1, None);
         }
-        self.followed[index] = Some(Followed { spec, object, body, character: false });
+        self.followed[index] = Some(Followed { spec, object, local, body, character: false });
         self.listening_changed(0, spec.listens);
         self.dirty.push(handle);
         if let Some(body) = body {
@@ -293,9 +297,9 @@ impl Physics {
         let followed = self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed");
         let before = followed.spec.listens;
         followed.spec = spec;
-        let object = followed.object;
+        let local = followed.local;
         self.listening_changed(before, spec.listens);
-        self.replace(handle, spec, object);
+        self.replace(handle, spec, local);
         Ok(())
     }
 
@@ -321,17 +325,21 @@ impl Physics {
         }
         for (&id, &object) in ids.iter().zip(objects) {
             let handle = self.followed_handle(id).expect("checked above");
-            let followed = self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed");
+            let index = handle.into_raw_parts().0 as usize;
+            let followed = self.followed[index].as_ref().expect("followed");
             if followed.object == object {
                 continue;
             }
             let rescaled = followed.object.scale != object.scale;
+            let local = self.against(followed.body, object);
+            let followed = self.followed[index].as_mut().expect("followed");
             followed.object = object;
+            followed.local = local;
             let spec = followed.spec;
             if rescaled {
-                self.replace(handle, spec, object);
+                self.replace(handle, spec, local);
             } else {
-                self.put(handle, spec.pose(object));
+                self.put(handle, spec.pose(local));
             }
         }
         Ok(())
@@ -403,15 +411,16 @@ impl Physics {
         for handle in colliders {
             let Some(Some(followed)) = self.followed.get(handle.into_raw_parts().0 as usize) else { continue };
             if followed.spec.hull_on_dynamic() {
-                let (spec, object) = (followed.spec, followed.object);
-                self.replace(handle, spec, object);
+                let (spec, local) = (followed.spec, followed.local);
+                self.replace(handle, spec, local);
             }
         }
     }
 
-    pub(crate) fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, object: ObjectPose) {
+    /// Gives a collider `spec`, on its object at `local` ([`Followed::local`]).
+    pub(crate) fn replace(&mut self, handle: ColliderHandle, spec: ColliderSpec, local: ObjectPose) {
         let body = collider_body(&self.followed, handle);
-        let (shape, pose) = spec.place(object, &self.meshes, self.dynamic(body));
+        let (shape, pose) = spec.place(local, &self.meshes, self.dynamic(body));
         let groups = self.contacts.groups(spec.layer);
         let collider = &mut self.world.colliders[handle];
         collider.set_shape(shape);
@@ -429,22 +438,30 @@ impl Physics {
         }
     }
 
-    /// Puts a collider at `pose` in the world: relative to its body, where
-    /// the body is now, when it has one.
+    /// Puts a collider at `pose`: on its body there, when it has one, else
+    /// there in the world.
     fn put(&mut self, handle: ColliderHandle, pose: Pose) {
         let w = &mut self.world;
         match collider_body(&self.followed, handle) {
             Some(body) => {
-                let relative = w.bodies[body].position().inverse() * pose;
+                let world = *w.bodies[body].position() * pose;
                 let collider = &mut w.colliders[handle];
-                collider.set_position_wrt_parent(relative);
+                collider.set_position_wrt_parent(pose);
                 // The step works the world pose out again; until then the
                 // queries need it now.
-                collider.set_position(pose);
+                collider.set_position(world);
             }
             None => w.colliders[handle].set_position(pose),
         }
         self.dirty.push(handle);
+    }
+
+    /// `object` against `body`'s pose now, if there's a body.
+    fn against(&self, body: Option<RigidBodyHandle>, object: ObjectPose) -> ObjectPose {
+        let Some(body) = body else { return object };
+        let back = self.world.bodies[body].position().inverse();
+        let ObjectPose { position, rotation, scale } = object;
+        ObjectPose { position: back * position, rotation: (back.rotation * rotation).normalize(), scale }
     }
 
     pub(crate) fn followed_handle(&self, id: u64) -> Result<ColliderHandle, PhysicsError> {
@@ -570,6 +587,24 @@ mod tests {
             Vector::new(1.0, 0.0, 1.0),
         ));
         assert!(shape.as_cuboid().unwrap().half_extents.y > 0.0);
+    }
+
+    /// Stage 14's PH1: a body's collider whose spec changes after the body
+    /// moved stays where it is on the body, not where the body was when
+    /// the collider was added.
+    #[test]
+    fn a_collider_respecced_on_a_moved_body_stays_on_it() {
+        let mut physics = Physics::new();
+        let body = physics
+            .add_rigidbody(1, crate::BodySpec::default(), Pose::from_translation(Vector::new(0.0, 5.0, 0.0)))
+            .unwrap();
+        let ball = spec(ColliderShape::Sphere { radius: 0.5 });
+        let at = on(Vector::new(0.0, 5.0, 0.0), Rotation::IDENTITY, Vector::ONE);
+        let collider = physics.add_object_collider(1, ball, at, Some(body)).unwrap();
+        physics.set_body_pose(body, Pose::from_translation(Vector::new(3.0, 1.0, 0.0))).unwrap();
+        physics.set_collider_spec(collider, spec(ColliderShape::Sphere { radius: 0.6 })).unwrap();
+        let (_, pose) = physics.collider_shape(collider).unwrap();
+        assert!(pose.translation.abs_diff_eq(Vector::new(3.0, 1.0, 0.0), 1e-5), "{}", pose.translation);
     }
 
     #[test]

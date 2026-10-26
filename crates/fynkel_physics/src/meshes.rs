@@ -192,12 +192,12 @@ impl Physics {
                 matches!(followed.spec.shape, ColliderShape::Mesh { mesh, .. } if mesh == id).then_some((
                     handle,
                     followed.spec,
-                    followed.object,
+                    followed.local,
                 ))
             })
             .collect();
-        for (handle, spec, object) in using {
-            self.replace(handle, spec, object);
+        for (handle, spec, local) in using {
+            self.replace(handle, spec, local);
         }
         Ok(())
     }
