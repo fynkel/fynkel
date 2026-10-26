@@ -180,6 +180,26 @@ void main() {
     expect(steps, 1);
   });
 
+  // Stage 14's WO13: played backwards, an event came only when the clip
+  // went round, and then for the span it would have gone through forwards.
+  test('events at a time come once a pass played backwards too', () {
+    final copy = world.add(truck.instantiate());
+    final animator = copy.animator!;
+    final heard = <String>[];
+    animator.at('Wheels', 0.6, () => heard.add('0.6'));
+    animator.at('Wheels', 1.1, () => heard.add('1.1'));
+    animator.play('Wheels');
+    animator
+      ..speed = -1
+      ..time = 1;
+    // 1 s back to 0.75, 0.5 (past 0.6), 0.25, 0, round to 1 (past 1.1)
+    // and 0.75.
+    for (var i = 0; i < 6; i++) {
+      world.update(0.25);
+    }
+    expect(heard, ['0.6', '1.1']);
+  });
+
   test('a moved part is in the moved log, so a system following it sees it', () {
     final copy = world.add(truck.instantiate());
     final wheels = copy.find('Wheels')!;

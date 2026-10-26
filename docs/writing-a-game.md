@@ -4177,6 +4177,10 @@ For code written before: each change that breaks it, newest first.
   - `world.raycast` hits a skinned character where it's drawn, not where
     it was bound; a mesh's parts only when they're drawn (with a
     material of their own); and each part from its own material's sides.
+  - An animator's crossfades go at its `speed`, so a paused one holds its
+    fade instead of finishing it. Played backwards, `at` events come each
+    time the clip passes them, round its start too: they came only as it
+    went round, and then for the times it would have passed forwards.
   - A prewarmed particle system meets its collision planes while it
     prewarms, and fires no sub emitters for that time: its first frame
     threw particles up through the floor, and burst every death at once.
