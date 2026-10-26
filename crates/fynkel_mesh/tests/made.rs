@@ -202,6 +202,206 @@ fn a_broken_outline_is_refused() {
     assert_eq!(fill(&nan, &[]).unwrap_err().to_string(), "outline point 2 isn't finite");
 }
 
+/// Whether `q` is inside the loop `ring`, by the even-odd rule.
+fn inside_loop(q: Vec2, ring: &[Vec2]) -> bool {
+    let mut inside = false;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+            inside = !inside;
+        }
+    }
+    inside
+}
+
+/// The area inside a loop.
+fn ring_area(ring: &[Vec2]) -> f32 {
+    (0..ring.len()).map(|i| ring[i].perp_dot(ring[(i + 1) % ring.len()])).sum::<f32>().abs() * 0.5
+}
+
+/// Checks a fill as a grid of samples over the shape's bounds: each one
+/// inside the outline and outside every hole is covered by exactly one
+/// triangle, and every other by none. The area is the outline's less the
+/// holes', and every triangle faces up.
+fn check_fill(outline: &[Vec2], holes: &[&[Vec2]], triangles: &[u32]) {
+    let points: Vec<Vec2> = std::iter::once(outline).chain(holes.iter().copied()).flatten().copied().collect();
+    let want = ring_area(outline) - holes.iter().map(|h| ring_area(h)).sum::<f32>();
+    let got = filled_area(&points, triangles);
+    assert!(close(got, want, 1e-3 * want.max(1.0)), "area {got}, want {want}");
+    for tri in triangles.chunks_exact(3) {
+        assert!(filled_area(&points, tri) >= 0.0, "a triangle faces down");
+    }
+    let (min, max) = outline.iter().fold((Vec2::MAX, Vec2::MIN), |(lo, hi), &p| (lo.min(p), hi.max(p)));
+    let steps = 48;
+    let (mut twice, mut outside, mut missed) = (0, 0, 0);
+    for gy in 0..steps {
+        for gx in 0..steps {
+            // Off the grid a little, so few samples lie on an edge.
+            let f = Vec2::new(gx as f32 + 0.5137, gy as f32 + 0.4871) / steps as f32;
+            let q = min + (max - min) * f;
+            // Covered inside a triangle, and on its edges too.
+            let (mut within, mut touching) = (0, 0);
+            for t in triangles.chunks_exact(3) {
+                let [a, b, c] = [0, 1, 2].map(|k| points[t[k] as usize]);
+                let d = [(b - a).perp_dot(q - a), (c - b).perp_dot(q - b), (a - c).perp_dot(q - c)];
+                within += d.iter().all(|&d| d > 0.0) as usize;
+                touching += d.iter().all(|&d| d >= 0.0) as usize;
+            }
+            let inside = inside_loop(q, outline) && !holes.iter().any(|h| inside_loop(q, h));
+            twice += (within > 1) as usize;
+            outside += (within > 0 && !inside) as usize;
+            missed += (touching == 0 && inside) as usize;
+        }
+    }
+    assert_eq!(
+        (twice, outside, missed),
+        (0, 0, 0),
+        "samples covered twice, covered outside the shape or in a hole, left uncovered"
+    );
+}
+
+// Stage 14's WO9: a B and an 8, each with two holes, once filled with
+// triangles over each other and over the holes.
+#[test]
+fn a_b_and_an_8_keep_both_their_holes() {
+    // A B: a straight back, two bowls, two holes the same width.
+    let bowl = |at: Vec2| {
+        (0..=12).map(move |i| {
+            at + Vec2::from_angle(-std::f32::consts::FRAC_PI_2 + std::f32::consts::PI * i as f32 / 12.0) * 0.6
+        })
+    };
+    let mut b: Vec<Vec2> = vec![Vec2::new(0.0, 0.0)];
+    b.extend(bowl(Vec2::new(1.2, 0.6)));
+    b.extend(bowl(Vec2::new(1.2, 1.8)).skip(1));
+    b.push(Vec2::new(0.0, 2.4));
+    let holes_b = [square(0.25, Vec2::new(0.9, 0.6)), square(0.25, Vec2::new(0.9, 1.8))];
+    let refs: Vec<&[Vec2]> = holes_b.iter().map(Vec::as_slice).collect();
+    let t = fill(&b, &refs).unwrap();
+    check_fill(&b, &refs, &t);
+    // An 8: a tall rounded outline, two round holes one above the other.
+    let eight: Vec<Vec2> = (0..64)
+        .map(|i| {
+            let a = std::f32::consts::TAU * i as f32 / 64.0;
+            Vec2::new(a.cos() * (1.0 - 0.3 * (2.0 * a).cos().max(0.0) * a.cos().abs()), 2.0 * a.sin())
+        })
+        .collect();
+    let holes_8 = [circle(0.45, Vec2::new(0.0, 0.9), 20), circle(0.45, Vec2::new(0.0, -0.9), 20)];
+    let refs: Vec<&[Vec2]> = holes_8.iter().map(Vec::as_slice).collect();
+    let t = fill(&eight, &refs).unwrap();
+    check_fill(&eight, &refs, &t);
+    // An 8 on its side, coarse: both holes are cut to the same corner, on
+    // the right, and the second cut once went in at the wrong one of the
+    // corner's two visits.
+    let points = |xy: &[(f32, f32)]| xy.iter().map(|&(x, y)| Vec2::new(x, y)).collect::<Vec<_>>();
+    let side = points(&[
+        (3.129_141_8, 0.0),
+        (1.942_408, 1.411_242),
+        (0.794_105_2, 2.444_004_5),
+        (-1.351_300_1, 4.158_873_6),
+        (-2.546_645_9, 1.850_246_2),
+        (-4.735_096, -4.139_552_3e-7),
+        (-2.077_305_3, -1.509_251_1),
+        (-1.354_524_1, -4.168_802),
+        (1.470_043_9, -4.524_328),
+        (3.250_333, -2.361_505_5),
+    ]);
+    let holes_side = [
+        points(&[(0.857_964_9, 0.395_539_28), (0.548_866_6, 0.573_997_2), (0.548_866_7, 0.217_081_37)]),
+        points(&[(0.268_200_93, 0.002_021_828_4), (-0.121_326_91, 0.226_915_82), (-0.121_326_864, -0.222_872_17)]),
+    ];
+    let refs: Vec<&[Vec2]> = holes_side.iter().map(Vec::as_slice).collect();
+    let t = fill(&side, &refs).unwrap();
+    check_fill(&side, &refs, &t);
+}
+
+// Stage 14's WO9: many outlines with up to five holes, each filled
+// exactly: the area less the holes, nothing twice, nothing outside.
+#[test]
+fn outlines_with_many_holes_are_filled_exactly() {
+    let mut seed = 0x1234_5678_u64;
+    let mut random = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 7;
+        seed ^= seed << 17;
+        (seed >> 40) as f32 / (1u64 << 24) as f32
+    };
+    for _ in 0..200 {
+        // A star-shaped outline, its nearest edge at least 1.5 from the
+        // centre; holes no more than 1.15 from it, apart from each other.
+        let n = 5 + (random() * 40.0) as usize;
+        let outline: Vec<Vec2> = (0..n)
+            .map(|i| Vec2::from_angle(std::f32::consts::TAU * i as f32 / n as f32) * (2.0 + random() * 3.0))
+            .collect();
+        let mut holes: Vec<Vec<Vec2>> = Vec::new();
+        for _ in 0..(random() * 6.0) as usize {
+            let at = Vec2::from_angle(random() * std::f32::consts::TAU) * random() * 0.8;
+            if holes.iter().all(|h| (h[0] - at).length() > 0.8) {
+                holes.push(circle(0.12 + random() * 0.2, at, 3 + (random() * 8.0) as usize));
+            }
+        }
+        let refs: Vec<&[Vec2]> = holes.iter().map(Vec::as_slice).collect();
+        let t = fill(&outline, &refs).unwrap();
+        check_fill(&outline, &refs, &t);
+    }
+}
+
+// Stage 14's WO9: a hole outside the outline was joined to it when to its
+// left, putting triangles outside, and dropped when to its right.
+#[test]
+fn a_hole_outside_the_outline_is_refused() {
+    let sq = square(0.5, Vec2::splat(0.5));
+    for at in [Vec2::new(-2.0, 0.5), Vec2::new(3.0, 0.5), Vec2::new(0.5, 4.0)] {
+        let hole = circle(0.2, at, 6);
+        assert_eq!(fill(&sq, &[&hole]).unwrap_err().to_string(), "hole 1 isn't inside the outline");
+        assert!(MeshData::extrude(&sq, &[&hole], 0.5, 1.0).is_err());
+    }
+}
+
+// Stage 14's WO9: an outline that touches itself at a corner (two squares
+// walked as one loop) was filled outside itself.
+#[test]
+fn an_outline_touching_itself_is_filled_inside_only() {
+    let touching: Vec<Vec2> =
+        [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (2.0, 1.0), (2.0, 2.0), (1.0, 2.0), (1.0, 1.0), (0.0, 1.0)]
+            .iter()
+            .map(|&(x, y)| Vec2::new(x, y))
+            .collect();
+    let t = fill(&touching, &[]).unwrap();
+    check_fill(&touching, &[], &t);
+    // A notch whose point touches the far wall.
+    let notch: Vec<Vec2> = [(0.0, 0.0), (3.0, 0.0), (3.0, 3.0), (0.0, 3.0), (0.0, 2.0), (3.0, 1.5), (0.0, 1.0)]
+        .iter()
+        .map(|&(x, y)| Vec2::new(x, y))
+        .collect();
+    let t = fill(&notch, &[]).unwrap();
+    check_fill(&notch, &[], &t);
+}
+
+// Stage 14's WO9: filling took time by the square of the points, 120 ms
+// for a circle of 10,000 in release. Debug builds are some ten times
+// slower, so they're given more.
+#[test]
+fn ten_thousand_points_are_filled_quickly() {
+    let big = circle(1.0, Vec2::ZERO, 10_000);
+    let star: Vec<Vec2> = (0..10_000)
+        .map(|i| Vec2::from_angle(std::f32::consts::TAU * i as f32 / 10_000.0) * if i % 2 == 0 { 1.0 } else { 0.6 })
+        .collect();
+    let holes: Vec<Vec<Vec2>> =
+        (0..8).map(|k| circle(0.05, Vec2::from_angle(std::f32::consts::TAU * k as f32 / 8.0) * 0.3, 100)).collect();
+    let refs: Vec<&[Vec2]> = holes.iter().map(Vec::as_slice).collect();
+    let bound = if cfg!(debug_assertions) { 400.0 } else { 20.0 };
+    for (outline, holes) in [(&big, &[][..]), (&star, &refs[..])] {
+        let start = std::time::Instant::now();
+        let t = fill(outline, holes).unwrap();
+        let ms = start.elapsed().as_secs_f64() * 1000.0;
+        assert!(ms < bound, "{} points took {ms:.1} ms", outline.len());
+        // Too many triangles to sample in a debug build: the area only.
+        let points: Vec<Vec2> = std::iter::once(&outline[..]).chain(holes.iter().copied()).flatten().copied().collect();
+        let want = ring_area(outline) - holes.iter().map(|h| ring_area(h)).sum::<f32>();
+        assert!(close(filled_area(&points, &t), want, 1e-4), "area {}", filled_area(&points, &t));
+    }
+}
+
 #[test]
 fn an_extruded_outline_with_a_hole_is_closed_with_the_volume_it_should_have() {
     let outer = square(1.0, Vec2::ZERO);

@@ -20,6 +20,7 @@ use std::ops::Range;
 
 use glam::{Vec3, Vec4};
 
+mod ears;
 mod made;
 mod outline;
 mod shapes;

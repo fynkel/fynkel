@@ -7,6 +7,7 @@ use std::f32::consts::TAU;
 
 use glam::{Vec2, Vec3};
 
+use crate::ears;
 use crate::shapes::Shape;
 use crate::{MeshData, MeshError};
 
@@ -17,38 +18,31 @@ const SMOOTH_DEGREES: f32 = 40.0;
 /// Triangles that fill `outline` (counter-clockwise or not) less its
 /// `holes`, three indices each into the points taken in order: the
 /// outline's, then each hole's. Wound counter-clockwise as seen with X
-/// right and Y up.
+/// right and Y up. Each hole must be inside the outline (its leftmost
+/// point inside or on it); holes may touch it or each other at a point,
+/// and the outline may touch itself, but neither may cross.
 pub fn fill(outline: &[Vec2], holes: &[&[Vec2]]) -> Result<Vec<u32>, MeshError> {
-    let mut loops: Vec<Vec<u32>> = Vec::with_capacity(holes.len() + 1);
-    let mut points: Vec<Vec2> = Vec::new();
+    let mut rings = Vec::with_capacity(holes.len() + 1);
+    let mut at = 0;
     for (k, ring) in std::iter::once(outline).chain(holes.iter().copied()).enumerate() {
+        let name = || if k == 0 { "the outline".to_string() } else { format!("hole {k}") };
         if ring.len() < 3 {
-            return Err(MeshError::Outline(format!(
-                "{} has {} points; it needs at least 3",
-                if k == 0 { "the outline".to_string() } else { format!("hole {k}") },
-                ring.len()
-            )));
+            return Err(MeshError::Outline(format!("{} has {} points; it needs at least 3", name(), ring.len())));
         }
-        if let Some(at) = ring.iter().position(|p| !p.is_finite()) {
-            return Err(MeshError::NotFinite { what: "outline point", at: points.len() + at });
+        if let Some(i) = ring.iter().position(|p| !p.is_finite()) {
+            return Err(MeshError::NotFinite { what: "outline point", at: at + i });
         }
-        let start = points.len() as u32;
-        points.extend_from_slice(ring);
-        let mut ids: Vec<u32> = (start..start + ring.len() as u32).collect();
-        // The outline counter-clockwise, the holes clockwise.
-        if (area(&points, &ids) > 0.0) != (k == 0) {
-            ids.reverse();
+        if k > 0 {
+            let leftmost = ring.iter().copied().min_by(|a, b| a.x.total_cmp(&b.x)).expect("at least three points");
+            if !within(leftmost, outline) {
+                return Err(MeshError::Outline(format!("{} isn't inside the outline", name())));
+            }
         }
-        loops.push(ids);
+        rings.push(at..at + ring.len());
+        at += ring.len();
     }
-    let mut polygon = loops.remove(0);
-    // Holes from the rightmost in, each joined to what's there by a cut to
-    // a point it can see.
-    loops.sort_by(|a, b| rightmost(&points, b).1.x.total_cmp(&rightmost(&points, a).1.x));
-    for hole in loops {
-        join(&points, &mut polygon, &hole);
-    }
-    Ok(clip_ears(&points, polygon))
+    let points: Vec<Vec2> = std::iter::once(outline).chain(holes.iter().copied()).flatten().copied().collect();
+    Ok(ears::triangulate(&points, &rings))
 }
 
 /// Twice the signed area: more than 0 for counter-clockwise.
@@ -61,117 +55,21 @@ pub(crate) fn area(points: &[Vec2], ids: &[u32]) -> f32 {
     sum
 }
 
-/// Where in `ids` its rightmost point is, and that point.
-fn rightmost(points: &[Vec2], ids: &[u32]) -> (usize, Vec2) {
-    let (at, &id) = ids
-        .iter()
-        .enumerate()
-        .max_by(|a, b| points[*a.1 as usize].x.total_cmp(&points[*b.1 as usize].x))
-        .expect("at least three points");
-    (at, points[id as usize])
-}
-
-/// Joins `hole` into `polygon` by a cut from the hole's rightmost point to
-/// a point of the polygon it can see to its right: the polygon then walks
-/// to it, round the hole, and back.
-fn join(points: &[Vec2], polygon: &mut Vec<u32>, hole: &[u32]) {
-    let p = |id: u32| points[id as usize];
-    let (m_at, m) = rightmost(points, hole);
-    // The nearest edge a ray from m to +X crosses, and the point on it.
-    let mut best: Option<(f32, usize)> = None;
-    for i in 0..polygon.len() {
-        let (a, b) = (p(polygon[i]), p(polygon[(i + 1) % polygon.len()]));
-        if (a.y > m.y) == (b.y > m.y) {
-            continue;
+/// Whether `q` is inside the loop `ring` or on one of its edges.
+fn within(q: Vec2, ring: &[Vec2]) -> bool {
+    let mut inside = false;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        let (along, to) = (b - a, q - a);
+        let on_line = along.perp_dot(to).abs() <= 1e-5 * along.length() * (1.0 + q.abs().max_element());
+        if on_line && to.dot(along) >= 0.0 && to.dot(along) <= along.length_squared() {
+            return true;
         }
-        let x = a.x + (m.y - a.y) / (b.y - a.y) * (b.x - a.x);
-        if x >= m.x && best.is_none_or(|(bx, _)| x < bx) {
-            best = Some((x, i));
+        if (a.y > q.y) != (b.y > q.y) && q.x < a.x + (q.y - a.y) / (b.y - a.y) * (b.x - a.x) {
+            inside = !inside;
         }
     }
-    let Some((x, i)) = best else {
-        // Outside the polygon altogether: nothing to join it to.
-        return;
-    };
-    let hit = Vec2::new(x, m.y);
-    let (a_at, b_at) = (i, (i + 1) % polygon.len());
-    let mut to = if p(polygon[a_at]).x > p(polygon[b_at]).x { a_at } else { b_at };
-    // A corner of the polygon inside the triangle m, hit, to would block
-    // the view: take the one at the smallest angle from the ray instead.
-    let candidate = p(polygon[to]);
-    let mut angle = f32::INFINITY;
-    for (k, &id) in polygon.iter().enumerate() {
-        let q = p(id);
-        if k == to || q == candidate || !inside(q, m, hit, candidate) {
-            continue;
-        }
-        let a = (q - m).angle_to(Vec2::X).abs();
-        if a < angle || (a == angle && (q - m).length() < (p(polygon[to]) - m).length()) {
-            angle = a;
-            to = k;
-        }
-    }
-    let mut walk = Vec::with_capacity(hole.len() + 2);
-    for k in 0..=hole.len() {
-        walk.push(hole[(m_at + k) % hole.len()]);
-    }
-    walk.push(polygon[to]);
-    polygon.splice(to + 1..to + 1, walk);
-}
-
-/// Whether `q` is inside the triangle a, b, c (either winding), or on its
-/// edges.
-fn inside(q: Vec2, a: Vec2, b: Vec2, c: Vec2) -> bool {
-    let (d1, d2, d3) = ((b - a).perp_dot(q - a), (c - b).perp_dot(q - b), (a - c).perp_dot(q - c));
-    let negative = d1 < 0.0 || d2 < 0.0 || d3 < 0.0;
-    let positive = d1 > 0.0 || d2 > 0.0 || d3 > 0.0;
-    !(negative && positive)
-}
-
-/// Cuts ears off a simple counter-clockwise `polygon` (which may visit a
-/// point twice, where a hole was joined) until it's all triangles.
-fn clip_ears(points: &[Vec2], mut polygon: Vec<u32>) -> Vec<u32> {
-    let p = |id: u32| points[id as usize];
-    let mut out = Vec::with_capacity((polygon.len().saturating_sub(2)) * 3);
-    while polygon.len() > 3 {
-        let n = polygon.len();
-        let ear = (0..n).find(|&i| {
-            let (a, b, c) = (polygon[(i + n - 1) % n], polygon[i], polygon[(i + 1) % n]);
-            let (pa, pb, pc) = (p(a), p(b), p(c));
-            if (pb - pa).perp_dot(pc - pb) <= 0.0 {
-                return false; // not a convex corner
-            }
-            // No other point in it; a point visited twice where a hole was
-            // joined is the same point as one of the corners, not inside.
-            !polygon.iter().any(|&id| {
-                let q = p(id);
-                q != pa && q != pb && q != pc && inside(q, pa, pb, pc)
-            })
-        });
-        // A polygon with no ear left is broken (it crosses itself): take
-        // the most convex corner, so it still ends.
-        let i = ear.unwrap_or_else(|| {
-            (0..n)
-                .max_by(|&x, &y| {
-                    let turn = |i: usize| {
-                        let (a, b, c) = (p(polygon[(i + n - 1) % n]), p(polygon[i]), p(polygon[(i + 1) % n]));
-                        (b - a).perp_dot(c - b)
-                    };
-                    turn(x).total_cmp(&turn(y))
-                })
-                .expect("more than three")
-        });
-        let (a, b, c) = (polygon[(i + n - 1) % n], polygon[i], polygon[(i + 1) % n]);
-        if (p(b) - p(a)).perp_dot(p(c) - p(b)) > 0.0 {
-            out.extend([a, b, c]);
-        }
-        polygon.remove(i);
-    }
-    let (a, b, c) = (p(polygon[0]), p(polygon[1]), p(polygon[2]));
-    if (b - a).perp_dot(c - b) > 0.0 {
-        out.extend_from_slice(&polygon);
-    }
-    out
+    inside
 }
 
 /// Each corner's normal on the edges either side of it: the two edges'
