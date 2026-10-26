@@ -27,7 +27,7 @@ As in the hardening pass:
 - **A failing test first** for every row that's a bug.
 - **Measured** if it's on the frame path: the Mac at least, the Note10+
   and the iPhone where the row says so.
-- **The guide**, where a row changes what a game writes, and §21 "What
+- **The guide**, where a row changes what a game writes, and §23 "What
   changed" for anything that breaks code written before.
 - **One PR per phase** or a few; shared-crate touches as their own
   commits. Sizes: S under a day, M a few days, L a week.
