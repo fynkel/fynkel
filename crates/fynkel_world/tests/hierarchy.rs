@@ -329,3 +329,25 @@ fn cached_world_matrices_always_match_the_walk_up() {
         }
     }
 }
+
+// Stage 14's WO2: a despawned leaf, with or without a sibling, kept the
+// matrix it last had, so a destroyed skin joint was drawn as bound.
+#[test]
+fn a_despawned_leaf_has_no_matrix_left() {
+    for siblings in [0, 1] {
+        let mut world = World::new();
+        let parent = spawn_at(&mut world, Vec3::new(5.0, 0.0, 0.0));
+        let leaf = spawn_at(&mut world, Vec3::Y);
+        world.set_parent(leaf, Some(parent)).unwrap();
+        for _ in 0..siblings {
+            let other = world.spawn();
+            world.set_parent(other, Some(parent)).unwrap();
+        }
+        let mut matrices = WorldMatrices::default();
+        matrices.update(&world);
+        assert!(matrices.matrix(&world, leaf).is_some());
+        world.despawn(leaf).unwrap();
+        matrices.update(&world);
+        assert_eq!(matrices.matrix(&world, leaf), None, "with {siblings} siblings");
+    }
+}

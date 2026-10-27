@@ -347,8 +347,9 @@ final class Animator with AnimatorPlays {
   void stop({double duration = 0}) => super.stop(duration: duration);
 
   /// How fast the clips play, on every layer: 1 as made, 2 twice as fast,
-  /// 0 paused, negative backwards. Game time scales it too ([Time.scale],
-  /// pausing).
+  /// 0 paused, negative backwards. Crossfades go at the same pace (forwards
+  /// either way), so a paused animator holds its fade. Game time scales it
+  /// too ([Time.scale], pausing).
   double get speed => _state().speed;
 
   set speed(double value) {
@@ -367,12 +368,12 @@ final class Animator with AnimatorPlays {
   }
 
   /// Calls [callback] each time clip [name] passes [time] seconds while
-  /// it plays forwards, on any layer or in a blend's mix: a footstep, the
-  /// moment a sword hits. A time of 0 comes each time a looping clip comes
-  /// round, not as it starts. Each call adds a mark, the same one again
-  /// too: take it away with [removeMark] (a pooled object adding it in its
-  /// `onSpawn` takes it away in its `onRelease`), or all with
-  /// [removeMarks].
+  /// it plays, forwards or backwards, on any layer or in a blend's mix: a
+  /// footstep, the moment a sword hits. A time of 0 comes each time a
+  /// looping clip comes round, not as it starts. Each call adds a mark, the
+  /// same one again too: take it away with [removeMark] (a pooled object
+  /// adding it in its `onSpawn` takes it away in its `onRelease`), or all
+  /// with [removeMarks].
   void at(String name, double time, void Function() callback) {
     final clip = _clip(name);
     if (!time.isFinite || time < 0 || time > clips[clip].length) {

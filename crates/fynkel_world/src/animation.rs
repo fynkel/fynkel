@@ -97,10 +97,12 @@ struct Play {
     ended: bool,
 }
 
-/// What an animator's clip did in a frame, for the game's events: its
-/// time went from `from` to `to`, passing its end `loops` times on the
-/// way (a looping clip), or reaching it (`ended`, one that doesn't loop).
-/// A blend's clips report each, while they're in its mix.
+/// What an animator's clip did in a frame, for the game's events: the
+/// span its time went through, from `from` on to `to`, passing the clip's
+/// end `loops` times on the way (a looping clip), or reaching it (`ended`,
+/// one that doesn't loop). Played backwards, it's the same span, earliest
+/// first: `to` is where it started, and `loops` how often it passed the
+/// start. A blend's clips report each, while they're in its mix.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AnimationEvent {
     pub root: ObjectId,
@@ -274,10 +276,11 @@ impl Animator {
         }
     }
 
-    /// Advances every playing motion by `dt` seconds (times the speed) and
-    /// its fade; reports to `events`.
+    /// Advances every playing motion and its fade by `dt` seconds times
+    /// the speed (forwards, for a fade); reports to `events`.
     fn advance(&mut self, root: ObjectId, dt: f32, events: &mut Vec<AnimationEvent>) {
         let step = dt * self.speed;
+        let fading = dt * self.speed.abs();
         for l in 0..self.layers.len() {
             for p in 0..self.layers[l].playing.len() {
                 let mut play = self.layers[l].playing[p];
@@ -294,7 +297,8 @@ impl Animator {
                 };
                 if play.looping && length > 0.0 {
                     let to = play.time + step;
-                    loops = (to / round).floor().max(0.0) as u32;
+                    // Forwards past the end, or backwards past the start.
+                    loops = (to / round).floor().abs() as u32;
                     play.time = to.rem_euclid(round);
                 } else {
                     play.time = (play.time + step).clamp(0.0, round);
@@ -303,21 +307,21 @@ impl Animator {
                         ended = true;
                     }
                 }
-                play.weight = (play.weight + play.fade * dt).clamp(0.0, 1.0);
+                play.weight = (play.weight + play.fade * fading).clamp(0.0, 1.0);
                 if (play.fade > 0.0 && play.weight >= 1.0) || (play.fade < 0.0 && play.weight <= 0.0) {
                     play.fade = 0.0;
                 }
                 self.layers[l].playing[p] = play;
                 if self.reporting && (play.time != from || loops > 0 || ended) {
+                    // The span gone through, earliest first.
+                    let (from, to) = if step < 0.0 { (play.time, from) } else { (from, play.time) };
                     match play.motion {
-                        Motion::Clip(c) => {
-                            events.push(AnimationEvent { root, clip: c, from, to: play.time, loops, ended })
-                        }
+                        Motion::Clip(c) => events.push(AnimationEvent { root, clip: c, from, to, loops, ended }),
                         Motion::Blend(b) => {
                             for (c, w) in self.blends[b as usize].weights() {
                                 if w > 0.0 {
                                     let length = self.clips[c].length;
-                                    let (from, to) = (from * length, play.time * length);
+                                    let (from, to) = (from * length, to * length);
                                     events.push(AnimationEvent { root, clip: c as u32, from, to, loops, ended });
                                 }
                             }

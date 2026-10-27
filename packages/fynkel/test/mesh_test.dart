@@ -267,6 +267,18 @@ void main() {
     });
   });
 
+  // Stage 14's DF12: a mesh made in the background came back not dynamic
+  // (and with UVs, so tangents were worked out from none), though the
+  // engine's was dynamic.
+  test('a mesh made in the background keeps what it was', () async {
+    final dynamic = await Mesh.inBackground(() => Mesh()..markDynamic());
+    expect(dynamic.isDynamic, isTrue);
+    final still = await Mesh.inBackground(Mesh.new);
+    expect(still.isDynamic, isFalse);
+    addTearDown(dynamic.dispose);
+    addTearDown(still.dispose);
+  });
+
   test('one mesh in two worlds, and a big one built in the background', () async {
     // A 128 × 128 terrain: about 33,000 vertices with UVs, so tangents are
     // generated, off the test's own isolate.

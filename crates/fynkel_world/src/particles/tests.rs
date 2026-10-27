@@ -960,3 +960,116 @@ fn huge_counts_and_spans_take_no_longer_than_what_fits() {
     let (mut world, id) = world_with(ParticleSettings::default());
     assert!(world.set_particles(id, ParticleSettings { duration: 1e9, ..long }).is_err());
 }
+
+// Stage 14's WO7: a prewarm ran before the planes were found, so its
+// particles fell through the floor and the first step threw them up at
+// the speed they'd gained (19 m/s from 1 m).
+#[test]
+fn a_prewarm_bounces_off_the_planes_already() {
+    let mut world = World::new();
+    let ground = floor(&mut world);
+    let id = world.spawn();
+    put(&mut world, id, Vec3::Y);
+    let settings = ParticleSettings {
+        prewarm: true,
+        duration: 2.0,
+        rate_over_time: 20.0,
+        start_speed: Range::constant(0.0),
+        start_lifetime: Range::constant(2.0),
+        space: Space::World,
+        shape: Shape { kind: ShapeKind::Point, ..Shape::default() },
+        collision: Some(Collision { planes: vec![ground], ..Collision::default() }),
+        seed: Some(3),
+        ..ParticleSettings::default()
+    };
+    world.set_particles(id, ParticleSettings { gravity_modifier: 1.0, ..settings.clone() }).unwrap();
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    // Dropped from 1 m with a full bounce, none goes up faster than
+    // the square root of 2 g, 4.43 m/s.
+    let fastest = velocities(&world, id).iter().map(|v| v.y).fold(f32::NEG_INFINITY, f32::max);
+    assert!(fastest < 4.6, "thrown up at {fastest} m/s");
+    // Played again by hand, the same.
+    world.particle_command(id, ParticleCommand::Play).unwrap();
+    let fastest = velocities(&world, id).iter().map(|v| v.y).fold(f32::NEG_INFINITY, f32::max);
+    assert!(fastest < 4.6, "played again, thrown up at {fastest} m/s");
+}
+
+// Stage 14's WO7: a prewarm's deaths fired the sub emitter on the first
+// frame, 30 at once.
+#[test]
+fn a_prewarm_fires_no_sub_emitter() {
+    let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Death, 0.0, 0.5);
+    world
+        .set_particles(
+            sub,
+            ParticleSettings {
+                rate_over_time: 0.0,
+                max_particles: 10_000,
+                ..world.particles(sub).unwrap().settings.clone()
+            },
+        )
+        .unwrap();
+    let looping = ParticleSettings {
+        prewarm: true,
+        looping: true,
+        duration: 2.0,
+        rate_over_time: 20.0,
+        bursts: Vec::new(),
+        ..world.particles(parent).unwrap().settings.clone()
+    };
+    world.set_particles(parent, looping).unwrap();
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    // A steady parent loses 20 a second, a third of one a frame: each
+    // death bursts 10.
+    let first = world.particles(sub).unwrap().count();
+    assert!(first <= 10, "{first} on the first frame");
+}
+
+// Stage 14's WO5: a local system on a stretched object turned the plane's
+// normal by the inverse, not its transpose, so the plane leant the wrong
+// way and particles stopped on the wrong side.
+#[test]
+fn a_plane_seen_from_a_stretched_local_system_is_where_it_is_drawn() {
+    let mut world = World::new();
+    let plane = world.spawn();
+    let tilt = Quat::from_rotation_z(std::f32::consts::FRAC_PI_4);
+    world.insert(plane, Transform { rotation: tilt, ..Transform::default() }).unwrap();
+    let id = world.spawn();
+    world.insert(id, Transform { scale: Vec3::new(4.0, 1.0, 1.0), ..Transform::default() }).unwrap();
+    let collision = Some(Collision { planes: vec![plane], ..Collision::default() });
+    world
+        .set_particles(
+            id,
+            ParticleSettings { space: Space::Local, rate_over_time: 0.0, collision, ..Default::default() },
+        )
+        .unwrap();
+    step(&mut world, 1.0 / 60.0, 1.0 / 60.0);
+    let (point, normal, _) = world.particles(id).unwrap().planes[0];
+    // Local points either side: the system must say the side the world
+    // does.
+    let m = world.world_matrix(id).unwrap();
+    let up = tilt * Vec3::Y;
+    for local in [Vec3::new(1.0, 0.3, 0.0), Vec3::new(-0.2, 0.5, 0.0), Vec3::new(0.3, -1.0, 0.0)] {
+        let in_world = m.transform_point3(local).dot(up);
+        let seen = (local - point).dot(normal);
+        assert_eq!(in_world > 0.0, seen > 0.0, "{local}: the world says {in_world}, the system {seen}");
+    }
+    assert!((normal.length() - 1.0).abs() < 1e-5);
+}
+
+// Stage 14's WO12: a start colour that wasn't finite was taken, and drew
+// its particles NaN.
+#[test]
+fn a_start_colour_that_isnt_finite_is_refused() {
+    let (mut world, id) = world_with(burst(3.0, 2.0));
+    for bad in [
+        Color::rgba(f32::NAN, 0.0, 0.0, 1.0),
+        Color::rgba(0.0, f32::INFINITY, 0.0, 1.0),
+        Color::rgba(0.0, 0.0, 0.0, f32::NAN),
+    ] {
+        for start_color in [[bad, Color::WHITE], [Color::WHITE, bad]] {
+            let settings = ParticleSettings { start_color, ..ParticleSettings::default() };
+            assert!(matches!(world.set_particles(id, settings), Err(WorldError::Particles(_))), "{bad:?}");
+        }
+    }
+}

@@ -161,6 +161,20 @@ void main() {
     expect(() => ParticleSystem(maxParticles: 200000), throwsArgumentError);
   });
 
+  // Stage 14's WO12: a start colour that wasn't finite was taken.
+  test('a start colour that is not finite is refused', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final system = ParticleSystem();
+    world.add(GameObject(components: [system]));
+    expect(() => system.startColor = const Color.rgb(double.nan, 0, 0), throwsArgumentError);
+    expect(
+      () => system.startColor = ColorRange(Color.white, const Color.rgb(0, 0, double.infinity)),
+      throwsArgumentError,
+    );
+    expect(system.startColor, Color.white, reason: 'kept');
+  });
+
   test('a system draws with its material, which stays while it does', () {
     final glow = Material(color: Color(0xFFFFAA33), blending: Blending.additive);
     final system = ParticleSystem(material: glow);
@@ -300,6 +314,27 @@ void main() {
         () => system.collision = ParticleCollision(planes: List.filled(7, floor)),
         throwsArgumentError,
         reason: 'at most 6 planes',
+      );
+    });
+
+    // Stage 14's DF4: once a plane's object was destroyed, every setter
+    // threw, and the system was written again on every spawn.
+    test('a destroyed plane is left out, and the system can still be changed', () {
+      final floor = world.add(GameObject());
+      final wall = world.add(GameObject(transform: Transform(position: Vec3(2, 0, 0))));
+      final system = ParticleSystem(collision: ParticleCollision(planes: [floor, wall]));
+      world.add(GameObject(components: [system]));
+      world.update(dt);
+      floor.destroy();
+      world.update(dt);
+      expect(() => system.gravityModifier = 2, returnsNormally);
+      expect(system.gravityModifier, 2);
+      world.add(GameObject());
+      world.update(dt);
+      expect(
+        () => system.collision = ParticleCollision(planes: [floor]),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'text', contains('destroyed'))),
+        reason: 'given a destroyed one, refused',
       );
     });
 

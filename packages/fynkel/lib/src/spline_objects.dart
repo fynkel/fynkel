@@ -173,7 +173,8 @@ final class SplineInstantiate extends Behaviour {
   set spacing(double value) => _set(() => _spacing = value);
 
   /// How many copies, spread evenly from its start to its end (around
-  /// it, for a closed one); null for as many as fit [spacing] apart.
+  /// it, for a closed one); null for as many as fit [spacing] apart. A
+  /// spline with no knots has none.
   int? get count => _count;
   set count(int? value) => _set(() => _count = value);
 
@@ -226,7 +227,9 @@ final class SplineInstantiate extends Behaviour {
     final spline = container._at(_index);
     final length = spline.length;
     final closed = spline.closed;
+    // A spline with no knots has nowhere to put any.
     final n = switch (_count) {
+      _ when spline.knotCount == 0 => 0,
       final n? => n,
       _ when spline.knotCount < 2 => 0,
       _ => closed ? (length / _spacing).floor() : (length / _spacing + 1e-9).floor() + 1,

@@ -319,6 +319,53 @@ fn unlit(in: SurfaceInput) -> vec4<f32> {
     invert.dispose();
   });
 
+  // Stage 14's DF7b: a reload that turned a value into a texture of the
+  // same name threw halfway, the other worlds, the effects and the old
+  // code's freeing left undone.
+  test('a reload that turns a value into a texture leaves the value out', () {
+    final scene = stage1();
+    final world = scene.world;
+    addTearDown(world.dispose);
+    final other = World();
+    addTearDown(other.dispose);
+    final view = HeadlessView(world, width: 32, height: 32);
+    addTearDown(view.dispose);
+    final shader = Shader(
+      'struct Values { grain: f32 }\n'
+      'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(values.grain, 0.0, 0.0, 1.0);\n}\n',
+      name: 'grain.wgsl',
+    );
+    final material = Material(shader: shader)..set('grain', 1.0);
+    scene.cube.get<MeshRenderer>()!.material = material;
+    other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
+    other.update(1 / 60);
+    final effect = Shader(
+      'struct Values { grain: f32 }\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return picture(in.uv) * values.grain;\n}\n',
+      name: 'grain_effect.wgsl',
+    );
+    world.camera!.effects = [
+      ScreenEffect(effect, values: {'grain': 1.0}),
+    ];
+    _centre(view);
+    shader.reload(
+      'var grain: color_texture;\n'
+      'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return sample(grain, in.uv);\n}\n',
+    );
+    effect.reload(
+      'var grain: color_texture;\n'
+      'fn effect(in: EffectInput) -> vec4<f32> {\n    return picture(in.uv) * sample(grain, in.uv);\n}\n',
+    );
+    expect(shader.textures, ['grain']);
+    _centre(view);
+    other.update(1 / 60);
+    // Given a texture now, it draws with it.
+    final green = Texture2D.rgba(1, 1, Uint8List.fromList([0, 255, 0, 255]));
+    material.set('grain', green);
+    world.camera!.effects = [];
+    expect(_centre(view), _near([0, 255, 0]));
+  });
+
   test('an array of values reaches the shader, each in its place', () {
     final world = World();
     final scene = stage1(world);

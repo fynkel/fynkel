@@ -184,7 +184,8 @@ final class Mesh implements Finalizable {
   /// front and back show the texture flat, [uvPerMetre] repeats a metre;
   /// the sides wrap it along the outline. Corners sharper than 40° are
   /// sharp, the rest smooth, so a circle is round and a square square.
-  /// Throws an [ArgumentError] for an outline of fewer than 3 points.
+  /// Throws an [ArgumentError] for an outline of fewer than 3 points, or a
+  /// hole that isn't inside the outline.
   factory Mesh.extrude(Shape2D shape, {double depth = 1, double uvPerMetre = 1}) {
     final loops = [shape.outline, ...shape.holes];
     final count = loops.fold(0, (n, loop) => n + loop.length);
@@ -237,7 +238,8 @@ final class Mesh implements Finalizable {
   /// times a metre around the shape (u) and along the path (v). Corners of
   /// the shape sharper than 40° are sharp, the rest smooth. For a path
   /// that changes, sweep again into the same mesh with [setSweep]. Throws
-  /// an [ArgumentError] for a path with no length.
+  /// an [ArgumentError] for a path with no length, or, with [caps], a hole
+  /// that isn't inside the outline.
   factory Mesh.sweep(
     Spline path,
     Shape2D shape, {
@@ -463,7 +465,8 @@ final class Mesh implements Finalizable {
       data.ref.indices.asTypedList(indices.length).setAll(0, indices);
       final out = arena<Pointer<FyMesh>>();
       check(fy_mesh_new(data, out));
-      return Mesh._(out.value, 'Mesh.custom', ownNormals: normals != null, ownTangents: tangents != null);
+      return Mesh._(out.value, 'Mesh.custom', ownNormals: normals != null, ownTangents: tangents != null)
+        .._hasUvs = uvs != null;
     });
   }
 
@@ -471,14 +474,16 @@ final class Mesh implements Finalizable {
   /// so a big mesh doesn't hold up the UI thread: generating tangents
   /// takes about a microsecond per triangle.
   static Future<Mesh> inBackground(Mesh Function() build) async {
-    final (address, name, ownNormals, ownTangents) = await inHelper(() {
+    final (address, name, (ownNormals, ownTangents), (hasUvs, dynamic)) = await inHelper(() {
       final mesh = build();
       mesh._settle();
       // This isolate ends next; the mesh now belongs to the caller's.
       _finalizer.detach(mesh);
-      return (mesh._pointer.address, mesh._name, mesh._ownNormals, mesh._ownTangents);
+      return (mesh._pointer.address, mesh._name, (mesh._ownNormals, mesh._ownTangents), (mesh._hasUvs, mesh._dynamic));
     });
-    return Mesh._(Pointer<FyMesh>.fromAddress(address), name, ownNormals: ownNormals, ownTangents: ownTangents);
+    return Mesh._(Pointer<FyMesh>.fromAddress(address), name, ownNormals: ownNormals, ownTangents: ownTangents)
+      .._hasUvs = hasUvs
+      .._dynamic = dynamic;
   }
 
   // --- Changing it ---
@@ -1143,11 +1148,15 @@ final class Material {
     _packedFor = shader?._layout;
   }
 
-  /// The texture its shader's texture [index] is given, or null.
+  /// The texture its shader's texture [index] is given, or null: also
+  /// when what it has by that name is a value, from before a reload.
   Texture2D? _shaderTexture(int index) {
     final layout = _shader?._layout;
     if (layout == null || index >= layout.textures.length) return null;
-    return _values[layout.textures[index].name] as Texture2D?;
+    return switch (_values[layout.textures[index].name]) {
+      final Texture2D texture => texture,
+      _ => null,
+    };
   }
 
   /// The base colour (albedo). Its alpha is the [opacity].

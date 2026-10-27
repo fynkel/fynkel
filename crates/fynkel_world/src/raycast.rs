@@ -7,18 +7,27 @@
 //!   both a mesh and a material, and it and its parents are active: the
 //!   extract's rule for drawing it.
 //! - Only objects on the layers in the cast's mask are hit.
-//! - A triangle is hit only from its front, unless the material is
-//!   double-sided, as back faces are culled. A mirrored object (negative
-//!   scale) keeps its fronts where they were, as the renderer's mirrored
-//!   pipelines do.
+//! - A triangle is hit only from its front, unless its submesh's material
+//!   is double-sided, as back faces are culled. A mirrored object
+//!   (negative scale) keeps its fronts where they were, as the renderer's
+//!   mirrored pipelines do.
+//! - A submesh after the first is hit only when it's drawn: when the
+//!   object has a material for it.
+//! - A skinned mesh is hit where its joints have bent it to, as it's
+//!   drawn; with a joint destroyed, where it was bound.
 //! - Cut-outs (`alpha_cutoff`) are hit as if solid: the texture isn't read.
 //!
 //! The test runs in each object's own space, so its matrix is inverted once
 //! and no triangle is moved. A ray's distance is the same number in both
-//! spaces when its direction is carried over unnormalised.
+//! spaces when its direction is carried over unnormalised. A skinned mesh
+//! is bent into the world first, as the renderer bends it, and tested
+//! there.
+
+use std::ops::Range;
 
 use glam::{Mat3, Mat4, Vec3};
 
+use crate::MeshData;
 use crate::components::{MeshRenderer, Transform};
 use crate::hierarchy::WorldMatrices;
 use crate::{ObjectId, World};
@@ -71,13 +80,18 @@ pub struct RayHit {
 #[derive(Debug, Default)]
 pub struct Raycaster {
     matrices: WorldMatrices,
+    /// A skin's joints as they bend its mesh, and its vertices bent.
+    joints: Vec<Mat4>,
+    bent: Vec<Vec3>,
 }
 
 impl Raycaster {
     /// The closest hit along `ray` no further than `max_distance`, on the
     /// layers in `mask` (bit `n` for layer `n`), in the world as it is now.
     pub fn cast(&mut self, world: &World, ray: Ray, max_distance: f32, mask: u32) -> Option<RayHit> {
-        self.matrices.update(world);
+        let Self { matrices, joints, bent } = self;
+        matrices.update(world);
+        let (has_skins, has_extra) = (world.has_skins(), world.has_submesh_materials());
         let mut best: Option<RayHit> = None;
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
@@ -86,44 +100,124 @@ impl Raycaster {
             }
             let Ok(mesh) = world.mesh(mesh) else { return };
             let reach = best.map_or(max_distance, |b| b.distance);
-            let Some(model) = self.matrices.world(world, id, t) else { return };
-            // The box around the object's box, in the world: far cheaper
-            // than the inverse, which only objects the ray may hit need.
-            let (lo, hi) = mesh.bounds();
-            let centre = model.transform_point3((lo + hi) * 0.5);
-            let half = Mat3::from_mat4(model).abs() * ((hi - lo) * 0.5);
-            if !hits_box(ray.origin, ray.direction, centre - half, centre + half, reach) {
-                return;
-            }
-            let inverse = model.inverse();
-            // A flattened object (a zero scale) has no inverse and covers
-            // no area.
-            if model.determinant() == 0.0 || !inverse.is_finite() {
-                return;
-            }
-            let Ok(material) = world.material(material) else { return };
-            let origin = inverse.transform_point3(ray.origin);
-            let direction = inverse.transform_vector3(ray.direction);
-            let positions = mesh.vertices();
-            let mut closest: Option<(f32, Vec3)> = None;
-            for triangle in mesh.indices().chunks_exact(3) {
-                let [a, b, c] = [0, 1, 2].map(|i| Vec3::from(positions[triangle[i] as usize].position));
-                let limit = closest.map_or(reach, |(d, _)| d);
-                if let Some(hit) = hit_triangle(origin, direction, a, b, c, material.double_sided, limit) {
-                    closest = Some(hit);
-                }
-            }
-            if let Some((distance, face)) = closest {
-                best = Some(RayHit {
-                    object: id,
-                    point: ray.at(distance),
-                    normal: world_normal(inverse, face, ray.direction),
-                    distance,
+            let Some(model) = matrices.world(world, id, t) else { return };
+            // Each submesh drawn, and whether it's seen from behind.
+            let extra = if has_extra { world.submesh_materials(id) } else { &[] };
+            let parts = mesh.submeshes().iter().enumerate().filter_map(|(k, range)| {
+                let material = if k == 0 { material } else { *extra.get(k - 1)? };
+                Some((range.clone(), world.material(material).ok()?.double_sided))
+            });
+            // A skinned mesh, all its joints there: bent as it's drawn.
+            joints.clear();
+            let skin = if has_skins { world.skin(id) } else { None };
+            let skinned = mesh.skin().is_some()
+                && skin.is_some_and(|skin| {
+                    skin.joints().iter().zip(skin.inverse_binds()).all(|(&joint, &inverse_bind)| {
+                        matrices.matrix(world, joint).map(|m| joints.push(m * inverse_bind)).is_some()
+                    })
                 });
+            let hit = if skinned {
+                hit_skinned(mesh, joints, bent, parts, ray, reach)
+            } else {
+                hit_still(mesh, model, parts, ray, reach)
+            };
+            if let Some((distance, normal)) = hit {
+                best = Some(RayHit { object: id, point: ray.at(distance), normal, distance });
             }
         });
         best
     }
+}
+
+/// The closest hit on `mesh` placed by `model`, no further than `reach`:
+/// the distance and the normal in the world.
+fn hit_still(
+    mesh: &MeshData,
+    model: Mat4,
+    parts: impl Iterator<Item = (Range<u32>, bool)>,
+    ray: Ray,
+    reach: f32,
+) -> Option<(f32, Vec3)> {
+    // The box around the object's box, in the world: far cheaper than the
+    // inverse, which only objects the ray may hit need.
+    let (lo, hi) = mesh.bounds();
+    let centre = model.transform_point3((lo + hi) * 0.5);
+    let half = Mat3::from_mat4(model).abs() * ((hi - lo) * 0.5);
+    if !hits_box(ray.origin, ray.direction, centre - half, centre + half, reach) {
+        return None;
+    }
+    let inverse = model.inverse();
+    // A flattened object (a zero scale) has no inverse and covers no area.
+    if model.determinant() == 0.0 || !inverse.is_finite() {
+        return None;
+    }
+    let origin = inverse.transform_point3(ray.origin);
+    let direction = inverse.transform_vector3(ray.direction);
+    let positions = mesh.vertices();
+    let at = |i: u32| Vec3::from(positions[i as usize].position);
+    let (distance, face) = closest(mesh, parts, at, origin, direction, reach)?;
+    Some((distance, world_normal(inverse, face, ray.direction)))
+}
+
+/// As [`hit_still`] for a skinned mesh, its vertices bent by `joints`
+/// (each joint's world matrix times its inverse bind) into `bent`.
+fn hit_skinned(
+    mesh: &MeshData,
+    joints: &[Mat4],
+    bent: &mut Vec<Vec3>,
+    parts: impl Iterator<Item = (Range<u32>, bool)>,
+    ray: Ray,
+    reach: f32,
+) -> Option<(f32, Vec3)> {
+    // Each vertex is a weighted mean of itself moved by some of the
+    // joints, so it's inside the box around the mesh's box moved by each.
+    let (lo, hi) = mesh.bounds();
+    let (middle, size) = ((lo + hi) * 0.5, (hi - lo) * 0.5);
+    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
+    for joint in joints {
+        let (centre, half) = (joint.transform_point3(middle), Mat3::from_mat4(*joint).abs() * size);
+        (min, max) = (min.min(centre - half), max.max(centre + half));
+    }
+    if !hits_box(ray.origin, ray.direction, min, max, reach) {
+        return None;
+    }
+    let skin = mesh.skin()?;
+    bent.clear();
+    bent.extend(mesh.vertices().iter().zip(skin).map(|(v, s)| {
+        let p = Vec3::from(v.position);
+        s.joints.iter().zip(&s.weights).fold(Vec3::ZERO, |at, (&j, &w)| match joints.get(usize::from(j)) {
+            Some(m) => at + m.transform_point3(p) * (f32::from(w) / 65535.0),
+            None => at,
+        })
+    }));
+    let (distance, face) = closest(mesh, parts, |i| bent[i as usize], ray.origin, ray.direction, reach)?;
+    let normal = face.normalize();
+    Some((distance, if normal.dot(ray.direction) > 0.0 { -normal } else { normal }))
+}
+
+/// The closest of `mesh`'s triangles in `parts` along origin, direction,
+/// their corners where `at` puts them: the distance and the unnormalised
+/// face normal.
+fn closest(
+    mesh: &MeshData,
+    parts: impl Iterator<Item = (Range<u32>, bool)>,
+    at: impl Fn(u32) -> Vec3,
+    origin: Vec3,
+    direction: Vec3,
+    reach: f32,
+) -> Option<(f32, Vec3)> {
+    let mut closest: Option<(f32, Vec3)> = None;
+    for (range, double_sided) in parts {
+        let Some(indices) = mesh.indices().get(range.start as usize..range.end as usize) else { continue };
+        for triangle in indices.chunks_exact(3) {
+            let [a, b, c] = [0, 1, 2].map(|i| at(triangle[i]));
+            let limit = closest.map_or(reach, |(d, _)| d);
+            if let Some(hit) = hit_triangle(origin, direction, a, b, c, double_sided, limit) {
+                closest = Some(hit);
+            }
+        }
+    }
+    closest
 }
 
 impl World {

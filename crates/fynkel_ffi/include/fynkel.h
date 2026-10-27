@@ -608,8 +608,9 @@ typedef struct FyAnimatorState {
 } FyAnimatorState;
 
 // What one of a reporting animator's clips did in `fy_world_animate`:
-// its time went from `from` to `to`, passing its end `loops` times on
-// the way (a looping clip), or reaching it (`ended`, one that doesn't).
+// the span its time went through, from `from` on to `to`, passing its
+// end `loops` times on the way (a looping clip), or reaching it (`ended`,
+// one that doesn't). Played backwards, the same span, earliest first.
 typedef struct FyAnimationEvent {
   uint64_t root;
   uint32_t clip;

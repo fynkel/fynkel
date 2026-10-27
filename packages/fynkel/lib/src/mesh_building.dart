@@ -5,7 +5,9 @@ part of 'world.dart';
 /// plane; either way round is fine, for the outline and for each hole.
 final class Shape2D {
   /// An outline through [outline]'s points, with [holes] cut out of it.
-  /// Holes must lie inside the outline and not overlap.
+  /// Holes must lie inside the outline and not overlap; they may touch it,
+  /// or each other, at a point, and the outline may touch itself. Filling
+  /// it ([Mesh.extrude], a capped [Mesh.sweep]) refuses a hole outside.
   Shape2D(List<Vec2> outline, {List<List<Vec2>> holes = const []})
     : outline = List.unmodifiable(outline),
       holes = List.unmodifiable(holes.map(List<Vec2>.unmodifiable)) {
@@ -145,8 +147,12 @@ final class MeshBuilder {
   var _uvs = Float32List(_start * 2);
   var _colors = Uint8List(_start * 4);
   var _count = 0;
-  // Every vertex has a normal of its own: the mesh is given them.
+  // Every vertex has a normal of its own: the mesh is given them. One
+  // without has NaN in [_normals]; with some of each, those are worked out
+  // here into [_filled] and the rest kept.
   var _allNormals = true;
+  var _someNormals = false;
+  var _filled = Float32List(0);
   final _parts = <_Indices>[_Indices()];
   var _part = 0;
 
@@ -175,14 +181,16 @@ final class MeshBuilder {
   }
 
   /// Adds a vertex and returns its index, for [addIndices]. Without a
-  /// [normal], one is worked out from the faces around it.
+  /// [normal], one is worked out from the faces around it; the normals
+  /// given to the others, and [addTriangle]'s and [addQuad]'s, are kept.
   int addVertex(Vec3 position, {Vec3? normal, Vec2 uv = Vec2.zero}) {
     if (normal == null) {
       _allNormals = false;
-      _nx = 0;
-      _ny = 1;
-      _nz = 0;
+      _nx = double.nan;
+      _ny = double.nan;
+      _nz = double.nan;
     } else {
+      _someNormals = true;
       _nx = normal.x;
       _ny = normal.y;
       _nz = normal.z;
@@ -206,6 +214,7 @@ final class MeshBuilder {
   /// from its front. The texture's bottom left is at [a], its bottom right
   /// at [b] and its top middle at [c].
   void addTriangle(Vec3 a, Vec3 b, Vec3 c) {
+    _someNormals = true;
     _faceNormal(a, b, c);
     final i = _add(a, 0, 1);
     _add(b, 1, 1);
@@ -220,6 +229,7 @@ final class MeshBuilder {
   /// counter-clockwise seen from its front, showing the whole texture: [a]
   /// is its bottom left, [b] bottom right, [c] top right, [d] top left.
   void addQuad(Vec3 a, Vec3 b, Vec3 c, Vec3 d) {
+    _someNormals = true;
     _faceNormal(a, b, c);
     final i = _add(a, 0, 1);
     _add(b, 1, 1);
@@ -242,6 +252,7 @@ final class MeshBuilder {
     final (p, n, uv, colors, indices) = (mesh.positions, mesh.normals, mesh.uvs, mesh.colors, mesh.indices);
     final base = _count;
     final tint = color;
+    if (p.isNotEmpty) _someNormals = true;
     for (var i = 0; i < p.length ~/ 3; i++) {
       final at = rotation.rotate(Vec3(p[i * 3] * scale.x, p[i * 3 + 1] * scale.y, p[i * 3 + 2] * scale.z)) + position;
       // Normals stretch the other way from positions.
@@ -275,6 +286,7 @@ final class MeshBuilder {
   void clear() {
     _count = 0;
     _allNormals = true;
+    _someNormals = false;
     for (var k = 0; k < _parts.length; k++) {
       _parts[k].length = 0;
     }
@@ -336,8 +348,9 @@ final class MeshBuilder {
     check(fy_mesh_counts(live, scratch.count, scratch.count2));
     if (count < scratch.count.value) check(fy_mesh_set_triangles(live, nullptr, 0, nullptr, 0));
     check(fy_mesh_set_positions(live, positions.address, count));
-    final ownNormals = _allNormals && !flat;
-    if (ownNormals) check(fy_mesh_set_normals(live, _normals.address, count));
+    // Given every normal, or some: then the others are worked out here.
+    final ownNormals = (_allNormals || _someNormals) && !flat;
+    if (ownNormals) check(fy_mesh_set_normals(live, (_allNormals ? _normals : _fill(total)).address, count));
     check(fy_mesh_set_uvs(live, uvs.address, count));
     check(fy_mesh_set_colors(live, colors.address, count));
     check(fy_mesh_set_triangles(live, _indices.address, total, _starts.address, _parts.length - 1));
@@ -347,6 +360,50 @@ final class MeshBuilder {
       .._hasUvs = true
       .._staleNormals = !ownNormals
       .._staleTangents = true;
+  }
+
+  /// [_normals] with each one not given worked out from the faces around
+  /// it, weighted by their area, as the engine does: into [_filled]. One
+  /// no face with an area touches faces +Y.
+  Float32List _fill(int total) {
+    final n = _count * 3;
+    if (_filled.length < n) _filled = Float32List(_grow(_count) * 3);
+    final out = _filled, p = _positions;
+    for (var i = 0; i < n; i++) {
+      out[i] = _normals[i].isNaN ? 0 : _normals[i];
+    }
+    for (var t = 0; t + 2 < total; t += 3) {
+      final a = _indices[t] * 3, b = _indices[t + 1] * 3, c = _indices[t + 2] * 3;
+      final ux = p[b] - p[a], uy = p[b + 1] - p[a + 1], uz = p[b + 2] - p[a + 2];
+      final vx = p[c] - p[a], vy = p[c + 1] - p[a + 1], vz = p[c + 2] - p[a + 2];
+      final fx = uy * vz - uz * vy, fy = uz * vx - ux * vz, fz = ux * vy - uy * vx;
+      _addFace(out, a, fx, fy, fz);
+      _addFace(out, b, fx, fy, fz);
+      _addFace(out, c, fx, fy, fz);
+    }
+    for (var v = 0; v < n; v += 3) {
+      if (!_normals[v].isNaN) continue;
+      final length = math.sqrt(out[v] * out[v] + out[v + 1] * out[v + 1] + out[v + 2] * out[v + 2]);
+      if (length > 0 && length.isFinite) {
+        out[v] /= length;
+        out[v + 1] /= length;
+        out[v + 2] /= length;
+      } else {
+        out[v] = 0;
+        out[v + 1] = 1;
+        out[v + 2] = 0;
+      }
+    }
+    return out;
+  }
+
+  /// Adds the face fx, fy, fz to [out]'s normal at [v], if not given.
+  @pragma('vm:prefer-inline')
+  void _addFace(Float32List out, int v, double fx, double fy, double fz) {
+    if (!_normals[v].isNaN) return;
+    out[v] += fx;
+    out[v + 1] += fy;
+    out[v + 2] += fz;
   }
 
   /// Adds a vertex at [p] with the normal in [_nx], [_ny] and [_nz].

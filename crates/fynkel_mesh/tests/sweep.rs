@@ -241,3 +241,25 @@ fn what_sweeping_costs() {
     let each = start.elapsed().as_secs_f64() * 1e3 / rounds as f64;
     println!("a 100 m road of 201 points, a 12-point outline: {each:.3} ms, {} triangles", mesh.indices().len() / 3);
 }
+
+// Stage 14's WO14: where the path went straight up its up, the right was
+// any line at right angles, turned 180° from the level part before it, and
+// the outline was swept inside out there. Now the right is carried along.
+#[test]
+fn a_path_going_straight_up_keeps_its_right_where_it_was() {
+    let point = |position: Vec3, forward: Vec3, distance: f32| PathPoint { position, forward, up: Vec3::Y, distance };
+    let path =
+        [point(Vec3::ZERO, Vec3::X, 0.0), point(Vec3::X, Vec3::Y, 1.0), point(Vec3::new(1.0, 1.0, 0.0), Vec3::Y, 2.0)];
+    let outline = [Vec2::new(1.0, 0.0), Vec2::new(-0.5, 0.5), Vec2::new(-0.5, -0.5)];
+    let mesh = MeshData::sweep(&sweep(&path, &outline, &[], false)).unwrap();
+    let near = |at: Vec3| mesh.vertices().iter().any(|v| Vec3::from(v.position).distance(at) < 1e-5);
+    // Level along +X, the outline's right is +Z.
+    assert!(near(Vec3::new(0.0, 0.0, 1.0)));
+    // Going up, it stays +Z.
+    assert!(near(Vec3::new(1.0, 0.0, 1.0)), "turned at the first upward point");
+    assert!(near(Vec3::new(1.0, 1.0, 1.0)), "turned at the second upward point");
+    // And going up from the start, it takes the right of the first level point.
+    let up_first = [point(Vec3::ZERO, Vec3::Y, 0.0), point(Vec3::Y, Vec3::X, 1.0)];
+    let mesh = MeshData::sweep(&sweep(&up_first, &outline, &[], false)).unwrap();
+    assert!(mesh.vertices().iter().any(|v| Vec3::from(v.position).distance(Vec3::new(0.0, 0.0, 1.0)) < 1e-5));
+}

@@ -75,12 +75,18 @@ impl MeshData {
 }
 
 /// Each point's frame: its position, then right and up, at right angles
-/// to each other and to the way the path goes, which is `forward`.
+/// to each other and to the way the path goes, which is `forward`. Where
+/// the point's up is (nearly) along its forward, the right is carried over
+/// from the point before (or the first point after, at the start), turned
+/// as little as it can be: an outline doesn't flip where a path goes
+/// straight up.
 fn frames(path: &[PathPoint]) -> Result<Vec<(Vec3, Vec3, Vec3, Vec3)>, MeshError> {
     if path.len() < 2 {
         return Err(MeshError::Outline(format!("a path needs at least 2 points; this has {}", path.len())));
     }
-    path.iter()
+    // Each point's forward, and its right where its up gives one.
+    let mut frames = path
+        .iter()
         .enumerate()
         .map(|(at, p)| {
             if !(p.position.is_finite() && p.forward.is_finite() && p.up.is_finite() && p.distance.is_finite()) {
@@ -90,10 +96,33 @@ fn frames(path: &[PathPoint]) -> Result<Vec<(Vec3, Vec3, Vec3, Vec3)>, MeshError
                 .forward
                 .try_normalize()
                 .ok_or_else(|| MeshError::Outline(format!("path point {at} has no direction: its forward is 0")))?;
-            let right = forward.cross(p.up).try_normalize().unwrap_or_else(|| forward.any_orthonormal_vector());
-            Ok((p.position, right, right.cross(forward), forward))
+            let right = forward.cross(p.up);
+            let right =
+                if right.length_squared() > 1e-8 * p.up.length_squared() { right.normalize() } else { Vec3::NAN };
+            Ok((p.position, right, Vec3::ZERO, forward))
         })
-        .collect()
+        .collect::<Result<Vec<_>, _>>()?;
+    // `from` at right angles to `forward`, turned as little as it can be.
+    let carried = |from: Vec3, forward: Vec3| {
+        (from - forward * from.dot(forward)).try_normalize().unwrap_or_else(|| forward.any_orthonormal_vector())
+    };
+    let good = |f: &(Vec3, Vec3, Vec3, Vec3)| !f.1.is_nan();
+    let first = frames.iter().position(good).unwrap_or_else(|| {
+        frames[0].1 = frames[0].3.any_orthonormal_vector();
+        0
+    });
+    for at in (0..first).rev() {
+        frames[at].1 = carried(frames[at + 1].1, frames[at].3);
+    }
+    for at in first + 1..frames.len() {
+        if !good(&frames[at]) {
+            frames[at].1 = carried(frames[at - 1].1, frames[at].3);
+        }
+    }
+    for (_, right, up, forward) in &mut frames {
+        *up = right.cross(*forward);
+    }
+    Ok(frames)
 }
 
 fn swept(sweep: &Sweep<'_>) -> Result<MeshData, MeshError> {

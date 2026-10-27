@@ -13,6 +13,19 @@ void main() {
     expect(Vec3(double.nan, 0, 0).normalizedOrZero, Vec3.zero);
   });
 
+  // Stage 14's DF14: a zero quaternion normalized gave NaNs, where a zero
+  // vector throws.
+  test('a quaternion of length 0 or not finite has no rotation to normalize, and says so', () {
+    for (final q in [const Quat(0, 0, 0, 0), const Quat(double.nan, 0, 0, 1), const Quat(0, double.infinity, 0, 1)]) {
+      expect(
+        () => q.normalized,
+        throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('no rotation'))),
+        reason: '$q',
+      );
+    }
+    expect(const Quat(0, 0, 0, 2).normalized, Quat.identity);
+  });
+
   test('lookRotation matches the engine: the camera at (0, 1.5, 4) looking at the origin', () {
     final q = Quat.lookRotation(Vec3.zero - Vec3(0, 1.5, 4));
     // A pure pitch down by atan(1.5 / 4), the value glam's look_at gives.

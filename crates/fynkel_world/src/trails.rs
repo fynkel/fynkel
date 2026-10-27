@@ -84,14 +84,16 @@ pub struct Trail {
     color_table: Option<Box<[[f32; 4]; TABLE]>>,
     /// Where each point is, in the world, and when it was added, the
     /// oldest first.
-    points: VecDeque<(Vec3, f32)>,
+    points: VecDeque<(Vec3, f64)>,
     /// The last point dropped, while the oldest is still alive: the tail
     /// is drawn between the two, where a point `time` old would be, so it
     /// shortens smoothly rather than a point at a time.
-    tail: Option<(Vec3, f32)>,
+    tail: Option<(Vec3, f64)>,
     /// Where the object was last step: the head.
     head: Option<Vec3>,
-    clock: f32,
+    /// Seconds since it was made: an f64, so a frame still counts after
+    /// days (an f32 stops taking 1/120 s at 3).
+    clock: f64,
     shown: bool,
 }
 
@@ -132,7 +134,7 @@ impl Trail {
 
     /// `seconds` on, its object at `here`.
     fn step(&mut self, seconds: f32, here: Vec3) {
-        self.clock += seconds;
+        self.clock += f64::from(seconds);
         let s = &self.settings;
         if s.emitting {
             let far = self.points.back().is_none_or(|&(last, _)| last.distance(here) >= s.min_vertex_distance);
@@ -143,7 +145,7 @@ impl Trail {
                 self.points.push_back((here, self.clock));
             }
         }
-        let gone = self.clock - s.time;
+        let gone = self.clock - f64::from(s.time);
         while self.points.front().is_some_and(|&(_, born)| born < gone) {
             self.tail = self.points.pop_front();
         }
@@ -162,8 +164,8 @@ impl Trail {
         let s = &self.settings;
         let head = self.head.filter(|_| s.emitting && !self.points.is_empty());
         let tail = self.tail.zip(self.points.front()).map(|((p, born), &(next, next_born))| {
-            let f = ((self.clock - s.time - born) / (next_born - born).max(1e-6)).clamp(0.0, 1.0);
-            p.lerp(next, f)
+            let f = ((self.clock - f64::from(s.time) - born) / (next_born - born).max(1e-6)).clamp(0.0, 1.0);
+            p.lerp(next, f as f32)
         });
         let from = out.len();
         let mut add = |position: Vec3| {
@@ -402,5 +404,23 @@ mod tests {
         assert!(world.set_trail(id, TrailSettings { time: -1.0, ..Default::default() }).is_err());
         world.despawn(id).unwrap();
         assert_eq!(world.trails().count(), 0);
+    }
+
+    // Stage 14's WO11: the trail's clock was an f32, so after days of play
+    // a frame's time was lost in it, the clock stopped and no point died.
+    #[test]
+    fn a_trail_still_ages_its_points_after_days() {
+        for hz in [60.0, 120.0] {
+            let (mut world, id) = trail(TrailSettings { time: 0.5, min_vertex_distance: 0.0, ..Default::default() });
+            // 2^22 s, about 48 days, gone by.
+            world.step_trails(4_194_304.0);
+            for k in 1..=hz as u32 {
+                moved(&mut world, id, k as f32 * 0.1);
+                world.step_trails(1.0 / hz);
+            }
+            let n = world.trail(id).unwrap().count();
+            let alive = (hz / 2.0) as usize;
+            assert!((alive..=alive + 1).contains(&n), "{n} points alive at {hz} Hz with a 0.5 s life");
+        }
     }
 }

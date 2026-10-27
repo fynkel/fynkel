@@ -198,3 +198,47 @@ fn crossfading_to_the_clip_already_fading_in_every_frame_ends_the_fade_on_time()
     // Its time went on all along.
     assert!((toy.world.animator_state(toy.root).unwrap().time - 0.5).abs() < 1e-5);
 }
+
+// Stage 14's WO13: a crossfade went on at its own pace whatever the
+// animator's speed, so a paused animator finished its fade.
+#[test]
+fn a_crossfade_goes_at_the_animators_speed() {
+    let mut toy = Toy::new();
+    toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();
+    toy.step(0.5);
+    toy.world.play(toy.root, HOP, 1.0, false).unwrap();
+    toy.step(0.25);
+    let weight = |toy: &Toy| toy.world.clip_weight(toy.root, SLIDE).unwrap();
+    assert!((weight(&toy) - 0.75).abs() < 1e-5);
+    toy.world.set_animation_speed(toy.root, 0.0).unwrap();
+    toy.step(1.0);
+    assert!((weight(&toy) - 0.75).abs() < 1e-5, "paused, the fade waits: {}", weight(&toy));
+    // At double speed, a quarter second fades it half as far again.
+    toy.world.set_animation_speed(toy.root, 2.0).unwrap();
+    toy.step(0.25);
+    assert!((weight(&toy) - 0.25).abs() < 1e-5, "{}", weight(&toy));
+}
+
+// Stage 14's WO13: played backwards past its start, a loop wasn't counted
+// and its event read as a step forward, so markers fired for the wrong
+// span. Now an event is the span it passed through, earliest first.
+#[test]
+fn a_loop_played_backwards_reports_the_span_it_went_through() {
+    let mut toy = Toy::new();
+    toy.world.play(toy.root, SLIDE, 0.0, true).unwrap(); // 2 s long
+    toy.world.set_animation_reporting(toy.root, true).unwrap();
+    toy.world.set_animation_speed(toy.root, -1.0).unwrap();
+    toy.world.set_animation_time(toy.root, 1.5).unwrap();
+    // 1.5 back to 1: from 1 to 1.5.
+    toy.step(0.5);
+    let [e] = toy.events.as_slice() else { panic!("{:?}", toy.events) };
+    assert_eq!((e.from, e.to, e.loops), (1.0, 1.5, 0));
+    // 1 back past 0 to 1.5: from 1.5 round to 1, once.
+    toy.step(1.5);
+    let [e] = toy.events.as_slice() else { panic!("{:?}", toy.events) };
+    assert_eq!((e.from, e.to, e.loops), (1.5, 1.0, 1));
+    // Two whole loops and a half back, 1.5 to 0.5.
+    toy.step(5.0);
+    let [e] = toy.events.as_slice() else { panic!("{:?}", toy.events) };
+    assert_eq!((e.from, e.to, e.loops), (0.5, 1.5, 2));
+}

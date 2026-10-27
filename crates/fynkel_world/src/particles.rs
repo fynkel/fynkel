@@ -569,7 +569,8 @@ impl ParticleSettings {
             && self.shape.size.is_finite()
             && [self.start_lifetime, self.start_speed, self.start_size, self.start_rotation]
                 .iter()
-                .all(|r| r.is_finite());
+                .all(|r| r.is_finite())
+            && self.start_color.iter().all(|c| [c.r, c.g, c.b, c.a].iter().all(|v| v.is_finite()));
         if !finite {
             return Some("a particle system's numbers must be finite");
         }
@@ -1055,7 +1056,9 @@ impl ParticleSystem {
         });
     }
 
-    /// Plays, then moves it a whole timeline on, for one that's prewarmed.
+    /// Plays, then moves it a whole timeline on, for one that's prewarmed:
+    /// against its planes as found, but firing no sub emitters and telling
+    /// of no hits, as that time went by before it was seen.
     fn play_from_start(&mut self, emitter: Mat4) {
         self.play();
         if self.settings.prewarm && self.settings.looping {
@@ -1066,6 +1069,10 @@ impl ParticleSystem {
                 self.step(dt / self.settings.simulation_speed.max(1e-6), emitter);
             }
             self.delay = delay;
+            self.triggers.clear();
+            self.living.clear();
+            self.hits = [0; MAX_PLANES];
+            self.stepped = 0.0;
         }
     }
 
@@ -1784,8 +1791,12 @@ impl World {
     pub fn particle_command(&mut self, object: ObjectId, command: ParticleCommand) -> Result<()> {
         self.entity(object)?;
         let emitter = self.world_matrix(object)?;
-        let system =
-            self.particles.get_mut(&object).ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })?;
+        let mut system =
+            self.particles.remove(&object).ok_or(WorldError::NoComponent { object, component: "ParticleSystem" })?;
+        // Where the planes are now, for a prewarm.
+        self.find_planes(&mut system, emitter);
+        self.particles.insert(object, system);
+        let system = self.particles.get_mut(&object).expect("put back above");
         match command {
             ParticleCommand::Play => system.play_from_start(emitter),
             ParticleCommand::Stop { clear } => system.stop(clear),
@@ -1828,7 +1839,10 @@ impl World {
             let (mut point, mut normal) = (m.w_axis.truncate(), m.y_axis.truncate());
             if let Some(into) = into {
                 point = into.transform_point3(point);
-                normal = into.transform_vector3(normal);
+                // A normal goes by the inverse transpose of what points go
+                // by, here the emitter's own transposed, so a stretched
+                // emitter sees the plane lean as it's drawn.
+                normal = emitter.transpose().transform_vector3(normal);
             }
             system.planes[system.plane_count] = (point, normal.normalize_or(Vec3::Y), Some(plane));
             system.plane_count += 1;
@@ -1851,6 +1865,10 @@ impl World {
             system.stepped = 0.0;
             let shown = self.active_in_hierarchy(object).unwrap_or(false);
             let Ok(emitter) = self.world_matrix(object) else { continue };
+            // Before playing, so a prewarm meets them too.
+            if shown {
+                self.find_planes(system, emitter);
+            }
             match (system.shown.replace(shown), shown) {
                 // New, shown: it plays on awake, unless it was played
                 // already, keeping what it was given.
@@ -1871,7 +1889,6 @@ impl World {
                 continue;
             }
             let dt = if system.settings.unscaled_time { unscaled } else { dt };
-            self.find_planes(system, emitter);
             let action = system.settings.stop_action;
             if system.step(dt, emitter) && action != StopAction::None && !system.is_sub {
                 events.push(ParticleEvent { object, kind: ParticleEventKind::Done(action) });
