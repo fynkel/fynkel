@@ -552,7 +552,7 @@ final class Physics extends WorldSystem implements Finalizable {
   }
 
   _HeldMesh _addMesh(Mesh mesh) {
-    final version = mesh.version;
+    final version = mesh.shapeVersion;
     _readMesh(mesh);
     checkPhysics(fp_mesh_add(_world, _meshPoints, mesh.vertexCount, _meshIndices, mesh.indexCount, _id));
     final held = _HeldMesh(_id.value, mesh, version);
@@ -586,7 +586,7 @@ final class Physics extends WorldSystem implements Finalizable {
     for (var i = 0; i < held.length; i++) {
       final h = held[i];
       final mesh = h.mesh;
-      final version = mesh.version;
+      final version = mesh.shapeVersion;
       if (version == h.version) continue;
       h.version = version;
       if (mesh.indexCount == 0) continue;
@@ -1336,7 +1336,7 @@ final class _HeldMesh {
 
   final int id;
   final Mesh mesh;
-  // The mesh's version when the native world was given it.
+  // The mesh's shape version when the native world was given it.
   int version;
   var users = 0;
 }

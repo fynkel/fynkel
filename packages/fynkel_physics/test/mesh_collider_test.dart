@@ -223,6 +223,38 @@ void main() {
       run(world, 2);
       expect(ball.position.y, closeTo(-0.75, 0.02));
     });
+
+    // Stage 14's PH5: any change rebuilt its colliders, colours too.
+    test('its colliders are made again only when its shape changes', () {
+      final world = newWorld();
+      final mesh = ground(0)..setUvs(Float32List(8));
+      world.add(GameObject(components: [MeshCollider(mesh: mesh)]));
+      final ball = world.add(
+        GameObject(
+          transform: Transform(position: const Vec3(0, 1, 0)),
+          components: [SphereCollider(radius: 0.25), Rigidbody()],
+        ),
+      );
+      run(world, 4);
+      final body = ball.get<Rigidbody>()!;
+      expect(body.isSleeping, isTrue, reason: 'settled');
+      final shape = mesh.shapeVersion;
+      // A flag of colours, waving its UVs: what it collides as stays.
+      for (var i = 0; i < 30; i++) {
+        mesh
+          ..setColors(Uint8List.fromList(List.filled(16, i * 8)))
+          ..setUvs(Float32List.fromList(List.filled(8, i / 30)))
+          ..setNormals(Float32List.fromList([0, 1, 0, 0, 1, 0, 0, 1, 0, 0, 1, 0]))
+          ..recalculateTangents();
+        world.update(1 / 60);
+      }
+      expect(mesh.version, greaterThan(30), reason: 'the worlds were given each change');
+      expect(mesh.shapeVersion, shape, reason: 'but not a new shape');
+      expect(body.isSleeping, isTrue, reason: 'nothing made again under it');
+      lower(mesh, 0);
+      world.update(1 / 60);
+      expect(mesh.shapeVersion, shape + 1, reason: 'its positions set');
+    });
   });
 }
 
