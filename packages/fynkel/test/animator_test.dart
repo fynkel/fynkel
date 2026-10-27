@@ -246,6 +246,43 @@ void main() {
     expect([for (var i = 0; i < moved.length; i++) moved[i]], contains(wheels));
   });
 
+  test('only animators the engine posed move their parts: not hidden ones, nor ones faded out (DC3, DF3)', () {
+    final copy = world.add(truck.instantiate());
+    final animator = copy.animator!..play('Wheels');
+    world.update(second);
+    final moved = world.movedReader();
+    addTearDown(moved.close);
+    world.update(second);
+    expect(moved.length, greaterThan(0), reason: 'playing and shown');
+
+    // Hidden: it keeps time, but poses nothing, so nothing moved.
+    copy.active = false;
+    world.update(second);
+    moved.markRead();
+    var version = world.transformVersion;
+    world.update(second);
+    expect(moved.length, 0, reason: 'hidden');
+    expect(world.transformVersion, version, reason: 'hidden');
+
+    // Shown again, it poses again.
+    copy.active = true;
+    world.update(second);
+    moved.markRead();
+    world.update(second);
+    expect(moved.length, greaterThan(0), reason: 'shown again');
+
+    // Faded out, it's done.
+    animator.stop(duration: second);
+    for (var i = 0; i < 3; i++) {
+      world.update(second);
+    }
+    moved.markRead();
+    version = world.transformVersion;
+    world.update(second);
+    expect(moved.length, 0, reason: 'faded out');
+    expect(world.transformVersion, version, reason: 'faded out');
+  });
+
   test('a destroyed copy takes its animator with it, and many copies play on their own', () {
     final a = world.add(truck.instantiate());
     final b = world.add(truck.instantiate());

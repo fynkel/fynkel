@@ -1856,7 +1856,9 @@ Each character also takes about 160 KB of the engine's memory (its
 objects and its animator); copies of one model share its meshes and
 textures. For a crowd on an older Android phone, keep it to a few dozen
 or turn the far ones' animators off (`stop()` holds their pose and costs
-nothing).
+nothing). A hidden character (`active = false`, waiting in a pool) keeps
+its clip's time but isn't posed, and costs nothing either: 200 of them
+take the animators 4 µs a frame on a Mac.
 
 ## 13b. Sound
 
