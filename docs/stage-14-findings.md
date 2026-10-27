@@ -155,7 +155,26 @@ spline fences and path), plus what the audit found at the seams:
 |---|---|---|
 | GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median over 200 ms at least, held to a bar of the Mac's time doubled; over it, tried again up to three times, the best held, as other work on the runner once slowed one 2.4×); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
 | GT7 | Per-system frame timing (only particles and meshes have one; the lab rebuilds a median timer in six scenes; the guide points at a Profiler that doesn't exist). **Done**: `world.profile`, the frame's parts and each system's own time (`WorldSystem.name`, `frameTime`), always on (scale's frame 0.49 → 0.51 ms, within its noise), no garbage; the lab shows its medians for every scene, and the guide (§6) points there. The six scenes' own timers stay: they time one thing each (a sweep, a step) for their readouts | M |
-| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts | M |
+| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts. **Curves done on the Mac** (`examples/lab/test/curves_test.dart`, `FYNKEL_CURVES=1`): each count a fresh lab scene, the median of 120 frames, the best of three tries, on the game's thread (`world.profile.total`) and drawn (a 256×256 headless view, so CPU, not fill). Every curve grows in step with its count or slower, except still objects on the game's thread: DC4, below. The budgets need the phones | M |
+
+**The curves** (Mac, 2026-10-27; ms over an empty world's, at the
+second count and the last; growth 1 = in step):
+
+| What | Counts | Game's thread | Drawn | Each, game |
+|---|---|---|---|---|
+| Moving objects | 4,000 → 32,000 | 0.47 → 4.8 (1.03–1.12) | 0.6 → 4.7 (0.91–0.98) | 0.15 µs |
+| Still objects | 4,000 → 32,000 | 0.09 → 1.3 (1.23–1.35, DC4) | 0.5 → 3.4 (0.88–0.98) | 0.04 µs at 32,000 |
+| Lamps over 1,000 objects | 16 → 64 | flat, 0.02 | +0.1 to +0.4 (0.5) | — |
+| Particles, one system | 2,500 → 10,000 | 0.013 → 0.043 (0.8–0.97) | flat | 4 ns |
+| Sounds looping in 3D, moved | 8 → 32 | 0.035 → 0.11 (0.8–0.9) | — | 3 µs |
+| Bodies, awake, in piles | 200 → 800 | 0.19 → 0.80 (0.94–1.12) | 0.15 → 0.25 | 1 µs |
+
+Moving objects cost more each past 4,000 or so (0.12 µs → 0.15), their
+data no longer in the cache; above that they're in step. Still objects
+should cost close to nothing, but the updates, late updates and fixed
+updates each visit every one (DC4): 0.1 ms at 4,000, 1.1–1.4 at 32,000,
+three times as much for each doubling at the top, as the walks fall
+out of the cache. The curve test marks it known until DC4 is fixed.
 
 **The costs found** (Mac numbers; a phone is slower):
 
@@ -165,7 +184,7 @@ spline fences and path), plus what the audit found at the seams:
 | WO8 | Sweeping and changing meshes allocate each frame | 87 allocations, 800 KB per road sweep | M |
 | WO4 | Raycasts recompute every matrix and test every triangle | 50 casts into 3000 objects: 14.2 ms | M |
 | DC3 + DF3 | Animators mark every part moved every frame, hidden or paused too | 50 hidden knights ~42 µs; physics then rescans | S |
-| DC4 | Plain objects visited every update; one destroy or reparent is a pass over all | 0.1 ms at 5000, 0.5 ms at 20000 | S/M |
+| DC4 | Plain objects visited every update; one destroy or reparent is a pass over all | 0.1 ms at 5000, 0.5 ms at 20000; the curves: 1.3 ms at 32,000, growing faster than the count | S/M |
 | DF2 | A particle or trail setter resends everything and relinks every system | 9 objects a set; 4.3 µs with 1000 systems | M |
 | DF7a | `material.set` packs every value again | ~70 objects a set (the guide's way to tween) | S |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects | M |
