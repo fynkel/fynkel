@@ -210,7 +210,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | Row | What | Size |
 |---|---|---|
 | RN8 | `renderer.rs` 3516 lines, `encode` one 630-line function, pipeline making repeated ~10 times: passes as their own units | L |
-| BR11 | `FynkelViewState`'s four platform hosts share one set of flags, where V1, V2, V4 and V12 lived: one class each | M |
+| BR11 | `FynkelViewState`'s four platform hosts share one set of flags, where V1, V2, V4 and V12 lived: one class each. **Done**: a `_Host` each (Apple texture, Apple layer, Android surface, texture or on screen), the state holding one | M |
 | BR10 | `abi.rs` 5730 lines into modules; the header stays byte-identical | M |
 | DC5 | (phase 3, above) | L |
 
