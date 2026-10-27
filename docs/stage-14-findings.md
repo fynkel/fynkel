@@ -140,10 +140,10 @@ spline fences and path), plus what the audit found at the seams:
   in no game. The everything-on scene and its tests close this.
   **Done**: the lab's 'All of it together', tested at each level.
 - **GT3**: the soak never draws, so GPU-side leaks can't show.
-  **Half done**: with `FYNKEL_SOAK_DRAW=1` it draws every 30th frame,
-  64×64. Not in CI: drawn, the process's footprint wanders on the runner
-  while the graphics memory holds flat; a check of the GPU's own memory
-  is phase 4's.
+  **Done**: it draws every 30th frame, 64×64, in CI too, and the GPU's
+  memory is held to a limit with the rest of what's outside the Dart
+  heap and malloc (GT2). A 512×512 view kept each round on purpose adds
+  9 MB a round there, against 0.1 allowed.
 - **AU9 ½**: a way to stop all world-level one-shots (no scene loads in
   Fynkel, so it's narrower than raised). **Done**: `audio.stopOneShots()`.
 
@@ -153,7 +153,7 @@ spline fences and path), plus what the audit found at the seams:
 
 | Row | What | Size |
 |---|---|---|
-| GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner | M |
+| GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median, held to a bar of the Mac's time doubled); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
 | GT7 | Per-system frame timing (only particles and meshes have one; the lab rebuilds a median timer in six scenes; the guide points at a Profiler that doesn't exist) | M |
 | — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts | M |
 
@@ -203,7 +203,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | Row | What | Size |
 |---|---|---|
 | GT4 | What a phone runs is never compiled in CI: Kotlin, iOS Swift branches, sound's session code, mobile Rust targets | S |
-| GT2 | The soak's memory check fails on noise (3 in 3 days, 1 on main) | S |
+| GT2 | The soak's memory check fails on noise (3 in 3 days, 1 on main). **Done**: the process's total wanders because the Dart VM's pages and malloc's freed ones come and go (both counted on their own already); the total was flat by category (`footprint`). It's now held only for the rest: 5.2 MB undrawn, the same every round; 21–24 MB drawn | S |
 | GT12 | One serial job, 16–19 min; `cancel-in-progress` cancels runs on main | S |
 | GT8 | 70 guide blocks analyzed, 4 run | S/M |
 | GT5 | Pocket Hole outside CI; `lab/tool` not format-checked | S |

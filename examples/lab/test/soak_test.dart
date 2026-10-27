@@ -1,8 +1,9 @@
 // A long run (stage 6, PR 13): round after round, every scene of the lab
 // added to one world, run, its controls used, and destroyed, then the
 // world disposed, as a game moves between levels for hours. The Dart heap
-// (after a full collection), what the engine has malloc'd and the memory
-// the process holds must stay flat, and nothing may throw.
+// (after a full collection), what the engine has malloc'd and the rest of
+// the memory the process holds (the GPU's among it) must stay flat, and
+// nothing may throw.
 //
 // Off by default; CI's long run sets the rounds, and the VM service it
 // collects with:
@@ -27,12 +28,9 @@ Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytes
 
 final rounds = int.tryParse(Platform.environment['FYNKEL_SOAK_ROUNDS'] ?? '') ?? 0;
 
-// FYNKEL_SOAK_DRAW=1 draws each round too (GT3). Not in CI yet: drawn,
-// the process's lowest readings wander by 30 MB or more over a run on the
-// runner (0.85 MB a round, against 0.25 allowed, 2026-10-27) though the
-// graphics memory holds flat, so its check waits for one that reads the
-// GPU's memory itself.
-final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] == '1';
+// Each round is drawn too (GT3), so what the GPU side keeps shows in the
+// rest of the process's memory. FYNKEL_SOAK_DRAW=0 leaves drawing out.
+final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] != '0';
 
 void main() {
   test(
@@ -44,6 +42,7 @@ void main() {
       addTearDown(service.dispose);
       final isolate = Service.getIsolateId(Isolate.current)!;
       final footprint = <int>[];
+      final rest = <int>[];
       final malloced = <int>[];
       final heap = <int>[];
       for (var round = 0; round < rounds; round++) {
@@ -88,11 +87,14 @@ void main() {
         // Drawn, what a round frees goes back over the next moments, not at
         // once: the lowest of a few readings, so each lands on what's kept.
         var low = _footprint();
+        var lowRest = _rest();
         for (var i = 0; i < 6; i++) {
           await Future<void>.delayed(const Duration(milliseconds: 150));
           low = math.min(low, _footprint());
+          lowRest = math.min(lowRest, _rest());
         }
         footprint.add(low);
+        rest.add(lowRest);
         malloced.add(_malloced());
         // A full collection, so what's left is what's kept: after the third
         // round and the last only, as asking for a profile of every class
@@ -103,7 +105,7 @@ void main() {
         }
         // ignore: avoid_print
         print(
-          'round ${round + 1}: process ${mb(footprint.last)} MB, malloc ${mb(malloced.last)} MB${heap.isEmpty ? '' : ', Dart heap ${mb(heap.last)} MB'}',
+          'round ${round + 1}: process ${mb(footprint.last)} MB, the rest ${mb(rest.last)} MB, malloc ${mb(malloced.last)} MB${heap.isEmpty ? '' : ', Dart heap ${mb(heap.last)} MB'}',
         );
       }
       // The first rounds fill caches. After them the JIT still compiles a
@@ -115,11 +117,21 @@ void main() {
       // Memory goes up for a long while before it levels off: caches fill
       // (one scene alone, the skinned one, takes some 180 rounds to fill
       // its 20 MB). So the first third of the rounds is warm-up, and only
-      // the rest is held to the limit. What the process holds is a saw: it
-      // climbs, then drops as freed pages go back. What's kept shows at
-      // the drops, so the lowest of the later rounds is held against the
-      // lowest of the earlier. Malloc's count is steady (half a MB either
-      // way), so it's held to far less: a leak in the engine shows there.
+      // the rest is held to the limit.
+      //
+      // What the process holds in all wanders by 30 MB or more over a run,
+      // and failed the check on main as often as anywhere (GT2): the Dart
+      // VM's pages and malloc's freed ones come and go with when each
+      // collects and gives back, though neither's count grows. Both are
+      // held to their own counts above and below, so the process is held
+      // only for what's left: the GPU's memory, stacks, the program's own
+      // data, mapped files. Undrawn that's 5.2 MB, the same each round;
+      // drawn, 21 MB that fills to 24 by the 80th round (17 KB a round
+      // between the halves), with rounds that read far more where the GPU
+      // hasn't given back yet (2026-10-27). So the lowest of the later
+      // rounds is held against the lowest of the earlier, to 100 KB a
+      // round: a mesh's buffers kept each round would be more. Malloc's count is steady (half a MB either way), so it's
+      // held to far less: a leak in the engine shows there.
       // It sits at one of two levels a MB apart, round by round (9.7 or
       // 10.8 MB), in a mix that shifts: the middle value jumps a whole MB
       // when a few more rounds land high, though nothing grew (2026-10-23:
@@ -133,7 +145,7 @@ void main() {
       int lowest(List<int> values) => values.reduce(math.min);
       int mean(List<int> values) => values.reduce((a, b) => a + b) ~/ values.length;
 
-      expect(growth(footprint, lowest), lessThan(250e3), reason: 'process: ${footprint.map(mb)}');
+      expect(growth(rest, lowest), lessThan(100e3), reason: 'the rest: ${rest.map(mb)}');
       expect(growth(malloced, mean), lessThan(20e3), reason: 'malloc: ${malloced.map(mb)}');
     },
     skip: rounds < 10 ? 'set FYNKEL_SOAK_ROUNDS (10 or more) to run it' : false,
@@ -157,6 +169,24 @@ int _footprint() {
   } finally {
     calloc.free(info);
   }
+}
+
+// What the process holds but the Dart VM's heap and malloc's zones, in
+// bytes, as the footprint tool counts it: dirty memory by category, less
+// the untagged pages (the Dart VM's) and malloc's. Zero elsewhere than
+// macOS.
+int _rest() {
+  if (!Platform.isMacOS) return 0;
+  final out = Process.runSync('footprint', ['-f', 'bytes', '$pid']).stdout as String;
+  var rest = 0;
+  for (final line in out.split('\n')) {
+    final m = RegExp(r'^\s*(\d+) B\s+\d+ B\s+\d+ B\s+\d+\s+(.+)$').firstMatch(line);
+    if (m == null) continue;
+    final category = m[2]!.trim();
+    if (category == 'TOTAL' || category.startsWith('MALLOC') || category == 'untagged (VM_ALLOCATE)') continue;
+    rest += int.parse(m[1]!);
+  }
+  return rest;
 }
 
 // What malloc has handed out and not had back, in bytes. Zero elsewhere
