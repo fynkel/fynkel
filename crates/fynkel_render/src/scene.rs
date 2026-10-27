@@ -731,6 +731,21 @@ impl PartialEq for SkyKind {
     }
 }
 
+impl SkyKind {
+    /// Whether the light worked out for one is the other's too: any two
+    /// gradients (theirs is worked out for unit colours, and coloured as
+    /// it's read), or the same image however turned or bright (its light
+    /// is worked out unturned at intensity 1, and turned and scaled as
+    /// it's read).
+    pub(crate) fn same_light(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Gradient { .. }, Self::Gradient { .. }) => true,
+            (Self::Image { image: a, .. }, Self::Image { image: b, .. }) => Arc::ptr_eq(a, b),
+            _ => false,
+        }
+    }
+}
+
 /// A picture of everything around, equirectangular: x the way round from
 /// behind (−Z is the middle, +X three quarters across), y from straight up
 /// to straight down. Linear RGB light values, as `.hdr` files hold.

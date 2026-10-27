@@ -90,13 +90,19 @@ struct Frame {
     // x: where it starts, metres from the camera. y: 1 / how far it takes
     // to be whole. z: 1 / the height it halves over, or 0.
     fog: vec4<f32>,
-    // The sky's light: x multiplies it, y is the specular cube's last mip.
+    // The sky's light: x multiplies it, y is the specular cube's last mip,
+    // z and w the cosine and sine of its turn (an image's cubes are made
+    // unturned).
     sky_light: vec4<f32>,
     // x, y: 1 / the view's width and height, in pixels.
     view_size: vec4<f32>,
     // x: the game's time, in seconds, as its shaders see it. y: this
     // frame's step of it. Both stop while the game is paused.
     time: vec4<f32>,
+    // What the sky's cubes' red, green and blue are worth (xyz): a
+    // gradient's zenith, horizon and ground colours, an image's intensity
+    // alone.
+    sky_colors: mat3x3<f32>,
 };
 
 @group(0) @binding(0) var<uniform> frame: Frame;
@@ -334,6 +340,14 @@ fn fresnel_schlick(f0: vec3<f32>, v_dot_h: f32) -> vec3<f32> {
     let x = 1.0 - v_dot_h;
     let x2 = x * x;
     return f0 + (vec3<f32>(1.0) - f0) * (x2 * x2 * x);
+}
+
+// Where `d` points in the sky's cubes, made unturned: turned back about
+// the vertical by the sky's turn (to the right seen from above).
+fn unturned(d: vec3<f32>) -> vec3<f32> {
+    let c = frame.sky_light.z;
+    let s = frame.sky_light.w;
+    return vec3<f32>(d.x * c + d.z * s, d.y, d.z * c - d.x * s);
 }
 
 // The split-sum environment BRDF, approximated analytically (Karis,
@@ -612,9 +626,9 @@ fn lit(in: VertexOut, front_facing: bool, s: Surface) -> vec4<f32> {
     if sky_lit {
         // What the surface mirrors, blurred by its roughness, and what
         // lights it from its side of the sky.
-        let r = reflect(-v, n);
-        let mirrored = textureSampleLevel(sky_specular, sky_sampler, r, roughness * frame.sky_light.y).rgb;
-        let irradiance = textureSampleLevel(sky_irradiance, sky_sampler, n, 0.0).rgb;
+        let r = unturned(reflect(-v, n));
+        let mirrored = frame.sky_colors * textureSampleLevel(sky_specular, sky_sampler, r, roughness * frame.sky_light.y).rgb;
+        let irradiance = frame.sky_colors * textureSampleLevel(sky_irradiance, sky_sampler, unturned(n), 0.0).rgb;
         color += frame.sky_light.x * (irradiance * diffuse_color + mirrored * ambient_specular) * occlusion;
     }
 
