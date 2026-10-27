@@ -167,6 +167,8 @@ extension _Loop on World {
     for (var i = 0; i < systems.length; i++) {
       final system = systems[i];
       if (system._off) continue;
+      // What a hook did may have asked for the world to go: none after it.
+      if (_disposeAsked) return;
       try {
         switch (hook) {
           case _SystemHook.beforeFrame:

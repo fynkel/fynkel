@@ -114,8 +114,8 @@ reading; ½ = partly true, as stated.
 | AU3 ✅ | Stolen-voice notices never reach Dart | after 32 one-shots, a source's volume stops reaching new ones; `music.onEnd` would fire for a stolen track | S |
 | AU-new 📖 | Music can be stolen | it plays at priority 0, though "never given up" | S |
 | AU5 ½ | An overflowing position turns sound off for good | NaN is refused when set; a world position of 6e38 gets through | S |
-| AU6 📖 | Android: voice chat counts as a phone call | a WebRTC library's `MODE_IN_COMMUNICATION` pauses the game's sound. **Note10+ check** | S |
-| AU8 📖 | iOS: Siri, an alarm or a call is treated as a lost device | drops cpal's resume, retries each second; it does recover. **iPhone check** | M |
+| AU6 📖 | Android: voice chat counts as a phone call | a WebRTC library's `MODE_IN_COMMUNICATION` pauses the game's sound. **Checked on the Note10+ 2026-10-27**: voice chat plays through the mode, `ambient` waits, both wait while ringing | S |
+| AU8 📖 | iOS: Siri, an alarm or a call is treated as a lost device | drops cpal's resume, retries each second; it does recover. **Checked on the iPhone 2026-10-27**: Siri, a timer and calls; the output never reopened | M |
 
 **The rest**
 

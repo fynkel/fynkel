@@ -39,8 +39,25 @@ sealed class Component {
 
   bool _enabledFlag = true;
 
-  /// Tells the engine or the world that [enabled] changed on live [object].
-  void _enabledChanged(GameObject object);
+  /// Tells the engine or the world that [enabled] changed on live [object]:
+  /// an engine component is put in the engine, or taken out.
+  void _enabledChanged(GameObject object) => _enabledFlag ? _put(object) : _takeOut(object);
+
+  // The one way an engine component comes into a world and goes (DC5):
+  // each writes itself, and keeps what its system holds of it, so neither
+  // the object nor the world names the kinds.
+
+  /// Puts it, on, in the engine on live [object] as it is now, or again: an
+  /// engine component writes itself. Throws what the engine refuses.
+  void _put(GameObject object) {}
+
+  /// Takes it, put and on, out of the engine on live [object], and out of
+  /// what its system holds.
+  void _takeOut(GameObject object) {}
+
+  /// Forgets what it told the world when the engine let go of it with its
+  /// object: destroyed, or its add refused.
+  void _forget(GameObject object) {}
 
   /// The object it's on. Throws a [StateError] before it's given to one.
   GameObject get gameObject => _owner ?? (throw StateError('$runtimeType is on no object yet'));
@@ -568,7 +585,21 @@ final class Camera extends Component {
   }
 
   @override
-  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+  void _put(GameObject object) => object._writeCamera(this);
+
+  @override
+  void _takeOut(GameObject object) {
+    final w = object.world.pointer;
+    // Its effects go with it, so their shaders can be let go.
+    if (_effectsSent) {
+      check(fy_camera_effects_set(w, object.id, nullptr, 0));
+      _effectsSent = false;
+    }
+    check(fy_camera_remove(w, object.id));
+  }
+
+  @override
+  void _forget(GameObject object) => _effectsSent = false;
 
   /// Writes it to the engine; what the engine refuses comes back, for the
   /// setter to undo its change and throw. Off, it's only kept here.
@@ -795,7 +826,16 @@ final class Light extends Component {
   }
 
   @override
-  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+  void _put(GameObject object) => object._writeLight(this);
+
+  @override
+  void _takeOut(GameObject object) {
+    check(fy_light_remove(object.world.pointer, object.id));
+    _forget(object);
+  }
+
+  @override
+  void _forget(GameObject object) => object.world._countLight(object, this, _LightCount.none);
 
   /// Writes it to the engine; what the engine refuses comes back, for the
   /// setter to undo its change and throw. Off, it's only kept here.
@@ -981,7 +1021,21 @@ final class MeshRenderer extends Component {
   }
 
   @override
-  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+  void _put(GameObject object) => object._writeMeshRenderer(this);
+
+  @override
+  void _takeOut(GameObject object) {
+    final w = object.world.pointer;
+    // Its parts' materials go with it, so they can be let go.
+    if (_moreSent) {
+      check(fy_submesh_materials_set(w, object.id, nullptr, 0));
+      _moreSent = false;
+    }
+    check(fy_mesh_renderer_remove(w, object.id));
+  }
+
+  @override
+  void _forget(GameObject object) => _moreSent = false;
 
   /// Writes it to the engine; what the engine refuses comes back, for the
   /// setter to undo its change and throw. Off, it's only kept here.

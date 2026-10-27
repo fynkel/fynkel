@@ -26,7 +26,9 @@ abstract class WorldSystem {
 
   /// Where its hooks run among the world's systems: a lower order first,
   /// and systems with the same order in the order they were made. Read
-  /// once, when it's made. 0 unless overridden.
+  /// once, when it's made. 0 unless overridden. The built-in animators,
+  /// then the particles, come first of all ([afterUpdate]), and the
+  /// cameras last ([afterLateUpdate]).
   int get order => 0;
 
   /// Whether its hooks threw in [turnOffAfter] frames in a row: none of
@@ -132,6 +134,12 @@ abstract class WorldSystem {
   @mustCallSuper
   void dispose() {}
 }
+
+// The built-in systems' [WorldSystem.order]s: first and last of any a
+// package's would sensibly have.
+const _animatorsOrder = -1 << 40;
+const _particlesOrder = _animatorsOrder + 1;
+const _camerasOrder = 1 << 40;
 
 /// What a system that follows objects reads of each.
 extension GameObjectSystems on GameObject {

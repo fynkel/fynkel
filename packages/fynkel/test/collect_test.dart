@@ -137,4 +137,72 @@ void main() {
     await collect();
     expect(drawn().$2, before);
   });
+
+  group('a world lets go of each built-in system\'s components (DC5)', () {
+    // What each built-in keeps of an object: a component, or the object's
+    // animator. Each made in a function of its own, so no local keeps it.
+    final kinds = <String, Object Function(GameObject object)>{
+      'particle system': (o) => o.addComponent(ParticleSystem()),
+      'particle system waiting for its plane': (o) =>
+          o.addComponent(ParticleSystem(collision: ParticleCollision(planes: [GameObject()]))),
+      'trail': (o) => o.addComponent(TrailRenderer(time: 1)),
+      'light': (o) => o.addComponent(Light.point()),
+      'camera': (o) => o.addComponent(Camera()),
+    };
+
+    for (final MapEntry(key: kind, value: put) in kinds.entries) {
+      test('a $kind, destroyed, removed, or with its world disposed', () async {
+        WeakReference<Object> destroyed() {
+          final object = world.add(GameObject());
+          final made = put(object);
+          object.destroy();
+          return WeakReference(made);
+        }
+
+        WeakReference<Object> removed() {
+          final object = world.add(GameObject());
+          final made = put(object) as Component;
+          object.removeComponent(made);
+          return WeakReference(made);
+        }
+
+        final other = World();
+        WeakReference<Object> disposed() {
+          final made = put(other.add(GameObject()));
+          other.update(1 / 60);
+          return WeakReference(made);
+        }
+
+        final gone = [destroyed(), removed(), disposed()];
+        world.update(1 / 60);
+        other.dispose();
+        await collect();
+        expect([for (final g in gone) g.target == null], [true, true, true], reason: 'destroyed, removed, disposed');
+      });
+    }
+
+    test("an animated model's animator, destroyed, or with its world disposed", () async {
+      final truck = await Model.load(glb('CesiumMilkTruck.glb'));
+      addTearDown(truck.dispose);
+      WeakReference<Object> destroyed() {
+        final copy = world.add(truck.instantiate());
+        final animator = copy.animator!..play('Wheels');
+        copy.destroy();
+        return WeakReference(animator);
+      }
+
+      final other = World();
+      WeakReference<Object> disposed() {
+        final animator = other.add(truck.instantiate()).animator!..play('Wheels');
+        other.update(1 / 60);
+        return WeakReference(animator);
+      }
+
+      final gone = [destroyed(), disposed()];
+      world.update(1 / 60);
+      other.dispose();
+      await collect();
+      expect([for (final g in gone) g.target == null], [true, true], reason: 'destroyed, disposed');
+    });
+  });
 }

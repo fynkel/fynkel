@@ -117,7 +117,16 @@ final class TrailRenderer extends Component {
   }
 
   @override
-  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+  void _put(GameObject object) => object._writeTrail(this);
+
+  @override
+  void _takeOut(GameObject object) {
+    check(fy_trail_remove(object.world.pointer, object.id));
+    _forget(object);
+  }
+
+  @override
+  void _forget(GameObject object) => object.world.maybeSystem<_ParticleWorld>()?._forgetTrail(object, this);
 
   _Failure? _write() {
     if (_refused() case final error?) return _Failure(error, StackTrace.current);

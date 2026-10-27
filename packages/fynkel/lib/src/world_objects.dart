@@ -213,7 +213,7 @@ extension _Objects on World {
     if (!described.active) check(fy_active_set(pointer, id, false));
     if (object._layer != 0) check(fy_layer_set(pointer, id, object._layer));
     for (final component in object._components ?? const <Component>[]) {
-      if (!component._removed) object._write(component);
+      if (!component._removed && component._enabledFlag) component._put(object);
     }
     for (final child in described.children) {
       _spawnTree(child, object, spawned);
@@ -225,20 +225,7 @@ extension _Objects on World {
   /// the world.
   void _unspawn(GameObject object) {
     for (final component in object._components ?? const <Component>[]) {
-      switch (component) {
-        case Light():
-          _countLight(object, component, _LightCount.none);
-        case ParticleSystem():
-          if (identical(_particleSystems[object._id], component)) _particleSystems.remove(object._id);
-          _waitingParticles.remove(component);
-        case TrailRenderer():
-          if (identical(_trails[object._id], component)) _trails.remove(object._id);
-        case Camera():
-          component._effectsSent = false;
-        case MeshRenderer():
-          component._moreSent = false;
-        case Behaviour():
-      }
+      component._forget(object);
     }
     for (final part in _subtree(object).skip(1)) {
       _objects.remove(part._id);
@@ -533,17 +520,11 @@ extension _Objects on World {
           .._transform = null
           .._unsent = false;
         _objects.remove(object._id);
-        if (object._animator case final animator?) {
-          _animators.remove(object._id);
-          _animatorList.remove(animator);
-        }
         _unregister(object);
         for (final c in object._components ?? const <Component>[]) {
           if (c._takenOff) continue;
           c._removed = true;
-          if (c is Light) _countLight(object, c, _LightCount.none);
-          if (c is ParticleSystem) _particleSystems.remove(object._id);
-          if (c is TrailRenderer) _trails.remove(object._id);
+          c._forget(object);
           _unregister(c);
         }
       }

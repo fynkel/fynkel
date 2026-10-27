@@ -1015,7 +1015,16 @@ final class ParticleSystem extends Component {
   }
 
   @override
-  void _enabledChanged(GameObject object) => object._enabledChanged(this);
+  void _put(GameObject object) => object._writeParticles(this);
+
+  @override
+  void _takeOut(GameObject object) {
+    check(fy_particles_remove(object.world.pointer, object.id));
+    _forget(object);
+  }
+
+  @override
+  void _forget(GameObject object) => object.world.maybeSystem<_ParticleWorld>()?._forget(object, this);
 
   _Failure? _write() {
     if (_refused() case final error?) return _Failure(error, StackTrace.current);
@@ -1116,37 +1125,87 @@ final class ParticleSystem extends Component {
       'ParticleSystem(startLifetime: $startLifetime, startSpeed: $startSpeed, emission: $emission, shape: $shape)';
 }
 
-extension _Particles on World {
-  /// Moves every particle system on, after the animators: the game's time
-  /// and the unscaled, through native memory, as [_animate]'s. Does the
-  /// stop actions of those that were done.
-  void _stepParticles() {
-    _particleWatch.reset();
-    if (_waitingParticles.isNotEmpty && _waitingShape != _shape) _linkWaitingParticles();
-    if (_particleSystems.isEmpty && _trails.isEmpty) return;
-    _sendTransforms();
-    scratch.numbers[0] = time._delta;
-    scratch.numbers[1] = time._unscaledDelta;
-    _particleWatch.start();
-    check(fy_world_particles_step(pointer, scratch.numbers, scratch.secondNumber, scratch.count));
-    _particleWatch.stop();
+/// The world's particle systems and trails, moved on in one native step
+/// after the animators, before every other system's [afterUpdate].
+final class _ParticleWorld extends WorldSystem {
+  _ParticleWorld(super.world);
+
+  @override
+  int get order => _particlesOrder;
+
+  // The particle systems in the engine, and the trails, by their objects'
+  // ids.
+  final _systems = <int, ParticleSystem>{};
+  final _trails = <int, TrailRenderer>{};
+  // Systems written before their sub emitters' or planes' objects were in
+  // the world: written again before the next step.
+  final _waiting = <ParticleSystem>{};
+  // [World.hierarchyVersion] when they last tried, so they try again only
+  // after a change.
+  var _waitingShape = 0;
+  final _watch = Stopwatch();
+
+  /// [system], on [object], is in the engine; [waiting] for an object of
+  /// its planes or sub emitters, which isn't in the world yet.
+  void _written(GameObject object, ParticleSystem system, {required bool waiting}) {
+    // Another's sub emitter may be this one, now here: they try again.
+    if (_waiting.isNotEmpty) _waitingShape = -1;
+    _systems[object._id] = system;
+    if (waiting) _waiting.add(system);
+  }
+
+  void _forget(GameObject object, ParticleSystem system) {
+    if (identical(_systems[object._id], system)) _systems.remove(object._id);
+    _waiting.remove(system);
+  }
+
+  void _forgetTrail(GameObject object, TrailRenderer trail) {
+    if (identical(_trails[object._id], trail)) _trails.remove(object._id);
+  }
+
+  /// Moves every particle system on: the game's time and the unscaled,
+  /// through native memory, as the animators'. Does the stop actions of
+  /// those that were done.
+  @override
+  void afterUpdate() {
+    super.afterUpdate();
+    _watch.reset();
+    final world = this.world;
+    if (_waiting.isNotEmpty && _waitingShape != world._shape) _linkWaiting();
+    if (_systems.isEmpty && _trails.isEmpty) return;
+    world._sendTransforms();
+    scratch.numbers[0] = world.time._delta;
+    scratch.numbers[1] = world.time._unscaledDelta;
+    _watch.start();
+    check(fy_world_particles_step(world.pointer, scratch.numbers, scratch.secondNumber, scratch.count));
+    _watch.stop();
     final count = scratch.count.value;
-    if (count > 0) _particleEvents(count);
+    if (count > 0) world._particleEvents(this, count);
   }
 
   /// Writes again the systems whose sub emitters or planes weren't in the
   /// world when they were written, now that they may be.
-  void _linkWaitingParticles() {
-    final waiting = _waitingParticles.toList();
-    _waitingParticles.clear();
+  void _linkWaiting() {
+    final waiting = _waiting.toList();
+    _waiting.clear();
     for (final system in waiting) {
       if (system.isRemoved || !system._enabledFlag) continue;
       system._live?._writeParticles(system);
     }
-    _waitingShape = _shape;
+    _waitingShape = world._shape;
   }
 
-  void _particleEvents(int count) {
+  @override
+  void dispose() {
+    super.dispose();
+    _systems.clear();
+    _trails.clear();
+    _waiting.clear();
+  }
+}
+
+extension _Particles on World {
+  void _particleEvents(_ParticleWorld particles, int count) {
     check(fy_particle_events_get(pointer, scratch.particleEvents(count), count, scratch.count));
     // Read one at a time, a word at a time, without a list or a closure,
     // as collisions come every frame: nothing a game does here writes to
@@ -1160,7 +1219,7 @@ extension _Particles on World {
       final action = halves[i * 8 + 3];
       final plane = words[i * 4 + 2];
       final hits = halves[i * 8 + 6];
-      final system = _particleSystems[id];
+      final system = particles._systems[id];
       if (system == null || system.isRemoved) continue;
       final object = system.gameObject;
       if (kind == FY_PARTICLE_EVENT_COLLISION) {

@@ -80,6 +80,39 @@ void main() {
     expect(hub.worldTransform.position, isNot(there));
   });
 
+  test("a package's system sees the pose in afterUpdate, and the cameras move after its afterLateUpdate (DC5)", () {
+    final copy = world.add(truck.instantiate());
+    final wheels = copy.find('Wheels')!;
+    final rest = wheels.transform.rotation;
+    copy.animator!.play('Wheels');
+    final view = world.add(GameObject(components: [Camera()]));
+    world.cameras.defaultBlend = Blend.cut;
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 9)),
+        components: [VirtualCamera()],
+      ),
+    );
+    // The first a package would sensibly put itself, and the last.
+    final seen = <String>[];
+    void posed(int order) => seen.add('$order ${sameTurn(wheels.localRotation, rest) ? 'rest' : 'posed'}');
+    void late(int order) => seen.add('$order late ${view.position.z}');
+    world
+      ..system((w) => _Watcher<int>(w, -1 << 30, posed, late))
+      ..system((w) => _Watcher<bool>(w, 0, posed, late))
+      ..system((w) => _Watcher<String>(w, 1 << 30, posed, late));
+    world.update(second);
+    expect(seen, [
+      '${-1 << 30} posed',
+      '0 posed',
+      '${1 << 30} posed',
+      '${-1 << 30} late 0.0',
+      '0 late 0.0',
+      '${1 << 30} late 0.0',
+    ]);
+    expect(view.position.z, 9, reason: 'moved after them');
+  });
+
   test('the game turns a part after the clip, in onLateUpdate', () {
     final copy = world.add(truck.instantiate());
     final wheels = copy.find('Wheels')!;
@@ -246,5 +279,30 @@ class _Call extends Behaviour {
   void onLateUpdate() {
     super.onLateUpdate();
     lateUpdate?.call();
+  }
+}
+
+// A package's system at [order], calling [after] in its afterUpdate and
+// [late] in its afterLateUpdate. A world has one of each type: [T] only
+// makes another.
+final class _Watcher<T> extends WorldSystem {
+  _Watcher(super.world, this._order, this._after, this._late);
+
+  final int _order;
+  final void Function(int order) _after, _late;
+
+  @override
+  int get order => _order;
+
+  @override
+  void afterUpdate() {
+    super.afterUpdate();
+    _after(_order);
+  }
+
+  @override
+  void afterLateUpdate() {
+    super.afterLateUpdate();
+    _late(_order);
   }
 }

@@ -438,28 +438,51 @@ final class Animator with AnimatorPlays {
   String toString() => 'Animator(${gameObject.name ?? gameObject.id}, ${clips.length} clips)';
 }
 
-extension _Animate on World {
-  Animator _addAnimator(GameObject object, Model model) {
+/// The world's animators ([GameObject.animator]): each frame they pose
+/// their models' parts first of every system's [afterUpdate], after the
+/// updates moved the objects, as Unity's do.
+final class _AnimatorWorld extends WorldSystem {
+  _AnimatorWorld(super.world);
+
+  @override
+  int get order => _animatorsOrder;
+
+  // The animators the game has asked for, by their model copies' ids, and
+  // in a list, which a frame goes through without making an iterator. A
+  // destroyed one's is let go in the next frame.
+  final _byRoot = <int, Animator>{};
+  final _list = <Animator>[];
+
+  Animator _add(GameObject object, Model model) {
     final animator = Animator._(object, model);
-    _animators[object.id] = animator;
-    _animatorList.add(animator);
+    _byRoot[object.id] = animator;
+    _list.add(animator);
     return animator;
   }
 
   /// Plays the clips: the engine poses every animator's parts, then the
   /// parts' kept transforms are forgotten, so reading one reads the pose,
   /// and the clips' events go to the game.
-  void _animate() {
-    if (_animators.isEmpty) return;
-    _sendTransforms();
+  @override
+  void afterUpdate() {
+    super.afterUpdate();
+    if (_list.isEmpty) return;
+    final world = this.world;
+    world._sendTransforms();
     // The field, through native memory: the getter's double and one passed
     // to a call are each boxed, every frame, in the JIT.
-    scratch.number.value = time._delta;
-    check(fy_world_animate(pointer, scratch.number, scratch.count));
+    scratch.number.value = world.time._delta;
+    check(fy_world_animate(world.pointer, scratch.number, scratch.count));
     final events = scratch.count.value;
-    final version = ++_transformVersion;
-    for (var i = 0; i < _animatorList.length; i++) {
-      final animator = _animatorList[i];
+    final version = ++world._transformVersion;
+    var kept = 0;
+    for (var i = 0; i < _list.length; i++) {
+      final animator = _list[i];
+      if (animator.gameObject._gone) {
+        _byRoot.remove(animator.gameObject._id);
+        continue;
+      }
+      _list[kept++] = animator;
       if (animator._moving == 0) continue;
       final parts = animator._parts;
       for (var j = 0; j < parts.length; j++) {
@@ -468,25 +491,34 @@ extension _Animate on World {
         part
           .._transform = null
           .._transformStamp = version;
-        _logMoved(part);
+        world._logMoved(part);
       }
     }
-    if (events > 0) _animationEvents(events);
+    _list.length = kept;
+    if (events > 0) _events(events);
   }
 
-  void _animationEvents(int count) {
+  void _events(int count) {
+    final world = this.world;
     final buf = scratch.animationEvents(count);
-    check(fy_animation_events_get(pointer, buf, count, scratch.count));
+    check(fy_animation_events_get(world.pointer, buf, count, scratch.count));
     // Copied first: a callback may play, stop or destroy.
     final events = [
       for (var i = 0; i < count; i++) (buf[i].root, buf[i].clip, buf[i].from, buf[i].to, buf[i].loops, buf[i].ended),
     ];
     for (final (root, clip, from, to, loops, ended) in events) {
-      final animator = _animators[root];
+      final animator = _byRoot[root];
       if (animator == null || animator.gameObject._destroyed) continue;
       animator._event(clip, from, to, loops, ended);
-      if (_disposeAsked) return;
+      if (world._disposeAsked) return;
     }
+  }
+
+  @override
+  void dispose() {
+    super.dispose();
+    _byRoot.clear();
+    _list.clear();
   }
 }
 
