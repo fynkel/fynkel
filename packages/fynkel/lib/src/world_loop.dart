@@ -337,27 +337,27 @@ extension _Loop on World {
   void _reorderMoved() {
     // Each moved object and what's below it go last, in the order they
     // moved (one moved later, inside another's subtree, goes after it),
-    // keeping their order among themselves: one pass over the live list.
-    final last = <GameObject, int>{};
+    // parents before children: new orders for all of them, those in the
+    // loop or not, and one pass over the live list.
+    final moved = <GameObject>{};
     for (var i = 0; i < _reparented.length; i++) {
-      final moved = _reparented[i];
-      if (moved._destroyed) continue;
-      for (final o in _subtree(moved)) {
-        last[o] = i;
+      final root = _reparented[i];
+      if (root._destroyed) continue;
+      for (final o in _subtree(root)) {
+        o._order = _nextOrder++;
+        if (o._inLoop) moved.add(o);
       }
     }
     _reparented.clear();
-    if (last.isEmpty) return;
-    final tails = <int, List<GameObject>>{};
+    if (moved.isEmpty) return;
+    final tail = <GameObject>[];
     _live.removeWhere((o) {
-      final i = last[o];
-      if (i == null) return false;
-      (tails[i] ??= []).add(o);
+      if (!moved.contains(o)) return false;
+      tail.add(o);
       return true;
     });
-    for (final i in tails.keys.toList()..sort()) {
-      _live.addAll(tails[i]!);
-    }
+    tail.sort((a, b) => a._order.compareTo(b._order));
+    _live.addAll(tail);
   }
 
   /// Whether [object] is hidden, or hasn't appeared: as of the last

@@ -127,6 +127,22 @@ void main() {
     expect(root.find('Wheels.001')!.get<MeshRenderer>()!.mesh, same(wheel.mesh));
   });
 
+  test('a model\'s parts given behaviours update in their places, children last whatever the order put on', () async {
+    final world = World();
+    addTearDown(world.dispose);
+    final truck = await Model.load(glb('CesiumMilkTruck.glb'));
+    final root = world.add(truck.instantiate());
+    final body = root.find('Cesium_Milk_Truck')!;
+    final part = body.children.first;
+    world.update(0.1);
+    final updates = <String>[];
+    part.addComponent(_Updates('part', updates));
+    body.addComponent(_Updates('body', updates));
+    root.addComponent(_Updates('root', updates));
+    world.update(0.1);
+    expect(updates, ['root', 'body', 'part']);
+  });
+
   test('copies of a model share its GPU data and its materials', () async {
     final world = World();
     addTearDown(world.dispose);
@@ -172,4 +188,18 @@ void main() {
     final box = glb('Box.glb');
     await expectLater(Model.load(Uint8List.sublistView(box, 0, box.length ~/ 2)), throwsFormat('the .glb is broken'));
   });
+}
+
+/// Logs [name] in [into] each update.
+class _Updates extends Behaviour {
+  _Updates(this.name, this.into);
+
+  final String name;
+  final List<String> into;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    into.add(name);
+  }
 }

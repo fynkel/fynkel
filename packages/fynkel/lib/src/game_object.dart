@@ -95,10 +95,13 @@ class GameObject with _Moving {
   // Its components, in the order they were put on; removed ones stay until
   // the world's next update takes them out. For an object the engine made
   // (a model's part), its engine components are read the first time
-  // they're asked for ([_probed]). [_inLoop]: in the world's update order.
+  // they're asked for ([_probed]). [_inLoop]: in the world's update order,
+  // or waiting to join it ([World._joining]); [_order]: its place there,
+  // given when it's added or moved, whether in it or not.
   List<Component>? _components;
   bool _probed = true;
   bool _inLoop = false;
+  int _order = 0;
 
   // The transform as the game last set or read it, so reading it makes no
   // call, and whether it waits in [World._unsent]. Null until first read
