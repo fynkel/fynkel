@@ -418,6 +418,81 @@ fn a_mesh_changed_every_frame_allocates_nothing_on_the_calling_thread() {
     assert_eq!(allocations, 0, "allocations in 100 frames changing a 4,225-vertex mesh");
 }
 
+/// A capped pipe 100 points long, swept again along a moving path, the
+/// world given it and drawn every frame (stage 14's WO8): nothing is
+/// allocated once warm.
+#[test]
+fn a_mesh_swept_every_frame_allocates_nothing_on_the_calling_thread() {
+    let world = World::new();
+    let cube = stage1(&world);
+    let ring = |n: usize, r: f32| -> Vec<f32> {
+        (0..n)
+            .flat_map(|i| {
+                let a = i as f32 / n as f32 * std::f32::consts::TAU;
+                [a.cos() * r, a.sin() * r]
+            })
+            .collect()
+    };
+    let mut points = ring(8, 0.1);
+    points.extend(ring(5, 0.05));
+    let sizes = [8_u32, 5];
+    let mut path = vec![0.0_f32; 100 * 10];
+    let bend = |path: &mut [f32], t: f32| {
+        for (i, p) in path.chunks_exact_mut(10).enumerate() {
+            let d = i as f32 * 0.03;
+            p.copy_from_slice(&[
+                d - 1.5,
+                (d * 4.0 + t).sin() * 0.2,
+                0.0,
+                1.0,
+                0.8 * (d * 4.0 + t).cos(),
+                0.0,
+                0.0,
+                1.0,
+                0.0,
+                d,
+            ]);
+        }
+    };
+    bend(&mut path, 0.0);
+    let (mut mesh, mut id) = (std::ptr::null_mut(), 0);
+    let mut renderer = FyMeshRenderer::default();
+    // SAFETY: a live world, slices, and pointers to locals.
+    unsafe {
+        ok(fy_mesh_sweep(path.as_ptr(), 100, points.as_ptr(), 13, sizes.as_ptr(), 2, true, 1.0, &mut mesh));
+        ok(fy_mesh_mark_dynamic(mesh));
+        ok(fy_mesh_add(world.0, mesh, &mut id));
+        ok(fy_mesh_renderer_get(world.0, cube, &mut renderer));
+        renderer.mesh = id;
+        ok(fy_mesh_renderer_set(world.0, cube, &renderer));
+    }
+    let view = View::headless(&world, 64, 64);
+    let mut frame = |t: f32| {
+        bend(&mut path, t);
+        // SAFETY: a live mesh and world, and slices.
+        unsafe {
+            ok(fy_mesh_set_sweep(mesh, path.as_ptr(), 100, points.as_ptr(), 13, sizes.as_ptr(), 2, true, 1.0));
+            ok(fy_mesh_update(world.0, id, mesh));
+        }
+        view.frame()
+    };
+    let mut warmed = 0;
+    for i in 0..240 {
+        warmed = frame(i as f32 / 60.0);
+    }
+    view.read(warmed, 64, 64);
+    let mut numbers = Vec::with_capacity(100);
+    let allocations = count(|| {
+        for i in 0..100 {
+            numbers.push(frame(i as f32 / 60.0));
+        }
+    });
+    view.read(*numbers.last().unwrap(), 64, 64);
+    // SAFETY: made above, freed once.
+    unsafe { fy_mesh_free(mesh) };
+    assert_eq!(allocations, 0, "allocations in 100 frames sweeping a pipe again");
+}
+
 /// Flutter's raster thread calls `fy_apple_acquire` once per frame.
 #[cfg(target_vendor = "apple")]
 #[test]

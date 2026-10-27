@@ -233,7 +233,7 @@ fn bench_sweeping_a_road_again() {
         .collect();
     let profile = circle(3.0, 12);
     let mut mesh = MeshData::sweep(&sweep(&path, &profile, &[], true)).unwrap();
-    fynkel_bench::bench("a 100 m road of 201 points, a 12-point outline, swept again", 200, 0.2, || {
+    fynkel_bench::bench("a 100 m road of 201 points, a 12-point outline, swept again", 200, 0.12, || {
         mesh.sweep_into(&sweep(&path, &profile, &[], true)).unwrap();
     });
 }

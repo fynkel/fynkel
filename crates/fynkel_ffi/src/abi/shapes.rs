@@ -1,6 +1,7 @@
 //! Shapes with settings, outlines, combining and sweeping; changing and reading
 //! meshes; meshes and materials in a world.
 
+use std::cell::RefCell;
 use std::sync::Arc;
 
 use fynkel_world::{MeshData, Vec2, Vec3};
@@ -259,6 +260,24 @@ unsafe fn loops<'a>(
     loop_sizes: *const u32,
     loop_count: usize,
 ) -> Result<Vec<&'a [Vec2]>, Error> {
+    let mut rings = Vec::with_capacity(loop_count);
+    // SAFETY: per this function's contract.
+    unsafe { each_loop(points, point_count, loop_sizes, loop_count, |ring| rings.push(ring)) }?;
+    Ok(rings)
+}
+
+/// [`loops`] handed to `each` one at a time, allocating nothing.
+///
+/// # Safety
+///
+/// As [`loops`].
+unsafe fn each_loop<'a>(
+    points: *const FyVec2,
+    point_count: usize,
+    loop_sizes: *const u32,
+    loop_count: usize,
+    mut each: impl FnMut(&'a [Vec2]),
+) -> Result<(), Error> {
     if points.is_null() {
         return Err(Error::null("points"));
     }
@@ -281,14 +300,11 @@ unsafe fn loops<'a>(
         ));
     }
     let mut from = 0;
-    Ok(sizes
-        .iter()
-        .map(|&n| {
-            let ring = &points[from..from + n as usize];
-            from += n as usize;
-            ring
-        })
-        .collect())
+    for &n in sizes {
+        each(&points[from..from + n as usize]);
+        from += n as usize;
+    }
+    Ok(())
 }
 
 const _: () = assert!(std::mem::size_of::<FyVec2>() == std::mem::size_of::<Vec2>());
@@ -400,34 +416,64 @@ pub unsafe extern "C" fn fy_mesh_combine(
     })
 }
 
-/// A path of `path_count` points, ten floats each, and an outline's
-/// loops, as `fy_mesh_sweep` takes them.
+/// Loops an outline and its holes have up to which [`with_sweep`] lists
+/// them on the stack.
+const FEW_LOOPS: usize = 16;
+
+/// The sweep of a path of `path_count` points, ten floats each, and an
+/// outline's loops, as `fy_mesh_sweep` takes them, handed to `f`. The path
+/// is read into room kept on the thread, so a rope swept each frame
+/// allocates nothing (stage 14's WO8).
 ///
 /// # Safety
 ///
 /// As `fy_mesh_sweep`.
-unsafe fn sweep_parts<'a>(
+#[allow(clippy::too_many_arguments)]
+unsafe fn with_sweep<T>(
     path: *const f32,
     path_count: usize,
     points: *const f32,
     point_count: usize,
     loop_sizes: *const u32,
     loop_count: usize,
-) -> Result<(Vec<fynkel_world::PathPoint>, Vec<&'a [Vec2]>), Error> {
+    caps: bool,
+    uv_per_metre: f32,
+    f: impl FnOnce(&fynkel_world::Sweep<'_>) -> Result<T, Error>,
+) -> Result<T, Error> {
+    thread_local! {
+        static PATH: RefCell<Vec<fynkel_world::PathPoint>> = RefCell::default();
+    }
     // SAFETY: per this function's contract.
-    let path = unsafe { items::<f32, 10>(path, path_count, "path") }?.ok_or_else(|| Error::null("path"))?;
-    let path = path
-        .iter()
-        .map(|p| fynkel_world::PathPoint {
+    let floats = unsafe { items::<f32, 10>(path, path_count, "path") }?.ok_or_else(|| Error::null("path"))?;
+    let uv_per_metre = at_least_0(uv_per_metre, "uv_per_metre")?;
+    let points = points.cast::<FyVec2>();
+    let (mut few, many): ([&[Vec2]; FEW_LOOPS], Vec<&[Vec2]>);
+    let rings: &[&[Vec2]] = if loop_count <= FEW_LOOPS {
+        few = [&[]; FEW_LOOPS];
+        let mut k = 0;
+        // SAFETY: per this function's contract; two floats are a FyVec2.
+        unsafe {
+            each_loop(points, point_count, loop_sizes, loop_count, |ring| {
+                few[k] = ring;
+                k += 1;
+            })
+        }?;
+        &few[..loop_count]
+    } else {
+        // SAFETY: as above.
+        many = unsafe { loops(points, point_count, loop_sizes, loop_count) }?;
+        &many
+    };
+    PATH.with_borrow_mut(|path| {
+        path.clear();
+        path.extend(floats.iter().map(|p| fynkel_world::PathPoint {
             position: Vec3::from_slice(&p[0..3]),
             forward: Vec3::from_slice(&p[3..6]),
             up: Vec3::from_slice(&p[6..9]),
             distance: p[9],
-        })
-        .collect();
-    // SAFETY: per this function's contract; two floats are a FyVec2.
-    let rings = unsafe { loops(points.cast::<FyVec2>(), point_count, loop_sizes, loop_count) }?;
-    Ok((path, rings))
+        }));
+        f(&fynkel_world::Sweep { path, outline: rings[0], holes: &rings[1..], caps, uv_per_metre })
+    })
 }
 
 /// Makes a mesh of an outline swept along a path (a road, a rope, a pipe)
@@ -462,15 +508,11 @@ pub unsafe extern "C" fn fy_mesh_sweep(
 ) -> FyStatus {
     guard(|| {
         // SAFETY: per this function's contract.
-        let (path, rings) = unsafe { sweep_parts(path, path_count, points, point_count, loop_sizes, loop_count) }?;
-        let sweep = fynkel_world::Sweep {
-            path: &path,
-            outline: rings[0],
-            holes: &rings[1..],
-            caps,
-            uv_per_metre: at_least_0(uv_per_metre, "uv_per_metre")?,
-        };
-        let data = MeshData::sweep(&sweep).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        let data = unsafe {
+            with_sweep(path, path_count, points, point_count, loop_sizes, loop_count, caps, uv_per_metre, |sweep| {
+                MeshData::sweep(sweep).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+            })
+        }?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -499,18 +541,14 @@ pub unsafe extern "C" fn fy_mesh_set_sweep(
     uv_per_metre: f32,
 ) -> FyStatus {
     guard(|| {
-        // SAFETY: per this function's contract.
-        let (path, rings) = unsafe { sweep_parts(path, path_count, points, point_count, loop_sizes, loop_count) }?;
-        let sweep = fynkel_world::Sweep {
-            path: &path,
-            outline: rings[0],
-            holes: &rings[1..],
-            caps,
-            uv_per_metre: at_least_0(uv_per_metre, "uv_per_metre")?,
-        };
         // SAFETY: the caller promises it's null or live, and only theirs.
         let mesh = unsafe { mesh.as_mut() }.ok_or_else(|| Error::null("mesh"))?;
-        mesh.own().sweep_into(&sweep).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+        // SAFETY: per this function's contract.
+        unsafe {
+            with_sweep(path, path_count, points, point_count, loop_sizes, loop_count, caps, uv_per_metre, |sweep| {
+                mesh.own().sweep_into(sweep).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+            })
+        }
     })
 }
 

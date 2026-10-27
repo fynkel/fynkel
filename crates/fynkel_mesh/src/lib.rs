@@ -590,37 +590,44 @@ impl MeshData {
     /// No vertex is split, so a mirrored seam averages; MikkTSpace
     /// ([`MeshData::new`]) splits it.
     pub fn recalculate_tangents(&mut self) {
-        let mut along_u = vec![Vec3::ZERO; self.vertices.len()];
-        let mut along_v = vec![Vec3::ZERO; self.vertices.len()];
-        for tri in self.indices.chunks_exact(3) {
-            let v = [0, 1, 2].map(|k| self.vertices[tri[k] as usize]);
-            let (e1, e2) = (
-                Vec3::from(v[1].position) - Vec3::from(v[0].position),
-                Vec3::from(v[2].position) - Vec3::from(v[0].position),
-            );
-            let (du1, dv1) = (v[1].uv[0] - v[0].uv[0], v[1].uv[1] - v[0].uv[1]);
-            let (du2, dv2) = (v[2].uv[0] - v[0].uv[0], v[2].uv[1] - v[0].uv[1]);
-            let det = du1 * dv2 - du2 * dv1;
-            if det.abs() < 1e-12 {
-                continue;
-            }
-            let u = (e1 * dv2 - e2 * dv1) / det;
-            let w = (e2 * du1 - e1 * du2) / det;
-            for &i in tri {
-                along_u[i as usize] += u;
-                along_v[i as usize] += w;
-            }
+        // Each vertex's sums along u and along v, kept on the thread so a
+        // mesh changed each frame allocates nothing.
+        thread_local! {
+            static SUMS: std::cell::RefCell<Vec<(Vec3, Vec3)>> = std::cell::RefCell::default();
         }
-        for ((vertex, u), v) in self.vertices.iter_mut().zip(along_u).zip(along_v) {
-            let n = Vec3::from(vertex.normal);
-            let Some(t) = (u - n * n.dot(u)).try_normalize() else {
-                vertex.tangent = any_tangent(n).into();
-                continue;
-            };
-            // v grows down the image; the bitangent points up it.
-            let w = if n.cross(t).dot(v) > 0.0 { -1.0 } else { 1.0 };
-            vertex.tangent = t.extend(w).into();
-        }
+        SUMS.with_borrow_mut(|sums| {
+            sums.clear();
+            sums.resize(self.vertices.len(), (Vec3::ZERO, Vec3::ZERO));
+            for tri in self.indices.chunks_exact(3) {
+                let v = [0, 1, 2].map(|k| self.vertices[tri[k] as usize]);
+                let (e1, e2) = (
+                    Vec3::from(v[1].position) - Vec3::from(v[0].position),
+                    Vec3::from(v[2].position) - Vec3::from(v[0].position),
+                );
+                let (du1, dv1) = (v[1].uv[0] - v[0].uv[0], v[1].uv[1] - v[0].uv[1]);
+                let (du2, dv2) = (v[2].uv[0] - v[0].uv[0], v[2].uv[1] - v[0].uv[1]);
+                let det = du1 * dv2 - du2 * dv1;
+                if det.abs() < 1e-12 {
+                    continue;
+                }
+                let u = (e1 * dv2 - e2 * dv1) / det;
+                let w = (e2 * du1 - e1 * du2) / det;
+                for &i in tri {
+                    sums[i as usize].0 += u;
+                    sums[i as usize].1 += w;
+                }
+            }
+            for (vertex, &(u, v)) in self.vertices.iter_mut().zip(sums.iter()) {
+                let n = Vec3::from(vertex.normal);
+                let Some(t) = (u - n * n.dot(u)).try_normalize() else {
+                    vertex.tangent = any_tangent(n).into();
+                    continue;
+                };
+                // v grows down the image; the bitangent points up it.
+                let w = if n.cross(t).dot(v) > 0.0 { -1.0 } else { 1.0 };
+                vertex.tangent = t.extend(w).into();
+            }
+        });
     }
 }
 
