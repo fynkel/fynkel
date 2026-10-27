@@ -1,10 +1,11 @@
 //! The world: objects, their components, and the meshes, materials and
 //! textures they use.
 
-use crate::components::{Component, MeshRenderer};
+use crate::components::{Component, MeshRenderer, Transform};
 use crate::describe::{Describe, FieldError, Value};
 use crate::hierarchy::Hierarchy;
 use crate::id::{IdCounter, IdMap};
+use std::any::TypeId;
 use std::sync::Arc;
 
 use fynkel_load::ImageData;
@@ -194,6 +195,8 @@ pub struct World {
     pub(crate) debug_lines: Vec<crate::DebugLine>,
     /// Each model copy's animator, by its root.
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
+    /// See [`World::transforms_version`].
+    pub(crate) transforms_version: u64,
     /// The roots of the animators the last [`World::animate`] posed.
     pub(crate) posed: Vec<ObjectId>,
     /// The skin of each model copy's skinned part, by the part.
@@ -251,6 +254,7 @@ impl World {
             batch: Vec::new(),
             debug_lines: Vec::new(),
             animators: IdMap::default(),
+            transforms_version: 0,
             posed: Vec::new(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
@@ -269,7 +273,18 @@ impl World {
         // The id is also stored on the entity, so queries can report it.
         let entity = self.ecs.spawn((id,));
         self.entities.insert(id, entity);
+        self.transforms_version += 1;
         id
+    }
+
+    /// A number that goes up whenever an object's world matrix, or whether
+    /// it's shown, may have changed: a `Transform` set or removed, an
+    /// object spawned or despawned, turned on or off, given a new parent,
+    /// or posed by its animator. While it and the hierarchy stay the same,
+    /// [`WorldMatrices`](crate::hierarchy::WorldMatrices) has nothing to
+    /// work out again.
+    pub fn transforms_version(&self) -> u64 {
+        self.transforms_version
     }
 
     /// Removes an object, its components and its children, theirs too.
@@ -303,6 +318,7 @@ impl World {
         if unlinked {
             self.relink_particles();
         }
+        self.transforms_version += 1;
         Ok(())
     }
 
@@ -357,6 +373,9 @@ impl World {
 
     /// Writes a checked component.
     fn write<C: Component>(&mut self, entity: hecs::Entity, component: C) {
+        if TypeId::of::<C>() == TypeId::of::<Transform>() {
+            self.transforms_version += 1;
+        }
         // Replacing is the common case (a transform set every frame), and
         // writing in place skips hecs's archetype lookup; `query_one_mut`
         // also skips its run-time borrow.
@@ -380,6 +399,9 @@ impl World {
     /// Removes the object's `C` and returns it.
     pub fn remove<C: Component>(&mut self, id: ObjectId) -> Result<C> {
         let entity = self.entity(id)?;
+        if TypeId::of::<C>() == TypeId::of::<Transform>() {
+            self.transforms_version += 1;
+        }
         self.ecs.remove_one::<C>(entity).map_err(|_| WorldError::NoComponent { object: id, component: C::NAME })
     }
 
@@ -456,6 +478,21 @@ impl World {
         *data = mesh.into();
         *version += 1;
         Ok(())
+    }
+
+    /// The version of mesh `id`: a new one each time it's set.
+    pub(crate) fn mesh_version(&self, id: MeshId) -> u64 {
+        self.meshes.get(&id).map_or(0, |(_, version)| *version)
+    }
+
+    /// Whether mesh `id` is in the world.
+    pub(crate) fn has_mesh(&self, id: MeshId) -> bool {
+        self.meshes.contains_key(&id)
+    }
+
+    /// The number of meshes.
+    pub(crate) fn mesh_count(&self) -> usize {
+        self.meshes.len()
     }
 
     /// Every mesh, and its version, in no particular order.

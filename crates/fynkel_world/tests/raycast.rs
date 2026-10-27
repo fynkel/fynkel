@@ -246,6 +246,10 @@ fn a_raycaster_sees_changes_made_since_its_last_cast() {
 
     s.world.insert(parent, Transform::from_position(Vec3::new(0.0, 0.0, -2.0))).unwrap();
     assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 5.5, "the parent moved");
+    s.world.set_active(parent, false).unwrap();
+    assert!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).is_none(), "its parent hidden");
+    s.world.set_active(parent, true).unwrap();
+    assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 5.5, "shown again");
     s.world.set_parent(cube, None).unwrap();
     assert_eq!(caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance, 3.5, "unparented");
     s.world.despawn(cube).unwrap();
@@ -390,4 +394,141 @@ fn only_the_submeshes_drawn_are_hit_each_from_its_own_sides() {
     let object = two(&mut s, first);
     s.world.set_submesh_materials(object, &[s.two_sided]).unwrap();
     assert_eq!(from_behind(&s), Some(-2.0));
+}
+
+/// The closest hit along `ray` on `mesh` placed by `model`, triangle by
+/// triangle in the world: what a cast through the mesh's tree must find.
+/// `sides` is each submesh's: not drawn, or drawn and whether double-sided.
+fn one_by_one(mesh: &MeshData, model: Mat4, sides: &[Option<bool>], ray: Ray) -> Option<f32> {
+    let (positions, indices) = (mesh.vertices(), mesh.indices());
+    let mut best: Option<f32> = None;
+    for (range, side) in mesh.submeshes().iter().zip(sides) {
+        let Some(double_sided) = *side else { continue };
+        for t in indices[range.start as usize..range.end as usize].chunks_exact(3) {
+            let [a, b, c] = [0, 1, 2].map(|i| model.transform_point3(Vec3::from(positions[t[i] as usize].position)));
+            let (ab, ac) = (b - a, c - a);
+            let p = ray.direction().cross(ac);
+            let det = ab.dot(p);
+            if det.abs() < 1e-12 || (det < 0.0 && !double_sided) {
+                continue;
+            }
+            let s = ray.origin() - a;
+            let u = s.dot(p) / det;
+            let q = s.cross(ab);
+            let v = ray.direction().dot(q) / det;
+            let d = ac.dot(q) / det;
+            if (0.0..=1.0).contains(&u) && v >= 0.0 && u + v <= 1.0 && d >= 0.0 && best.is_none_or(|b| d < b) {
+                best = Some(d);
+            }
+        }
+    }
+    best
+}
+
+/// Rays from all round at the middle of things, spread by a fixed rule.
+fn rays(count: u32) -> impl Iterator<Item = Ray> {
+    let mut seed = 0x2545_f491_u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32 * 2.0 - 1.0
+    };
+    (0..count).map(move |_| {
+        let from = Vec3::new(next(), next(), next()).normalize_or(Vec3::Y) * 6.0;
+        let to = Vec3::new(next(), next(), next()) * 1.5;
+        Ray::new(from, to - from).unwrap()
+    })
+}
+
+#[track_caller]
+fn same_as_one_by_one(s: &Scene, mesh: MeshId, model: Mat4, sides: &[Option<bool>]) {
+    let data = s.world.mesh(mesh).unwrap();
+    assert!(data.indices().len() / 3 >= 64, "big enough to have a tree");
+    let mut caster = Raycaster::default();
+    let (mut hits, mut wrong) = (0, Vec::new());
+    for ray in rays(2000) {
+        let cast = caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).map(|h| h.distance);
+        let want = one_by_one(data, model, sides, ray);
+        hits += usize::from(want.is_some());
+        let same = match (cast, want) {
+            (Some(a), Some(b)) => (a - b).abs() < 1e-3 * b.max(1.0),
+            (a, b) => a.is_none() && b.is_none(),
+        };
+        if !same {
+            wrong.push((ray, cast, want));
+        }
+    }
+    // A ray through an edge may be a hit one way and a miss the other.
+    assert!(wrong.len() <= 2, "{} of 2000 differ: {:?}", wrong.len(), &wrong[..wrong.len().min(5)]);
+    assert!(hits > 200, "{hits} hits");
+}
+
+#[test]
+fn a_big_mesh_is_hit_through_its_tree_where_each_triangle_would_be() {
+    // A sphere turned and stretched: one submesh, one-sided.
+    let mut s = scene();
+    let t = Transform {
+        position: Vec3::new(0.2, -0.1, 0.3),
+        rotation: Quat::from_euler(glam::EulerRot::XYZ, 0.4, 1.1, -0.3),
+        scale: Vec3::new(2.0, 1.0, 1.5),
+    };
+    let (sphere, material) = (s.sphere, s.one_sided);
+    s.spawn(sphere, material, t);
+    same_as_one_by_one(&s, sphere, t.matrix(), &[Some(false)]);
+
+    // A wavy sheet of 1800 triangles in two submeshes, the halves.
+    let n = 30;
+    let positions: Vec<[f32; 3]> = (0..=n)
+        .flat_map(|z| {
+            (0..=n).map(move |x| {
+                let (x, z) = (x as f32 / n as f32 * 3.0 - 1.5, z as f32 / n as f32 * 3.0 - 1.5);
+                [x, (x * 2.0).sin() * 0.4 + (z * 3.0).cos() * 0.3, z]
+            })
+        })
+        .collect();
+    let row = n + 1;
+    let indices: Vec<u32> = (0..n)
+        .flat_map(|z| {
+            (0..n).flat_map(move |x| {
+                let a = z * row + x;
+                [a, a + row, a + 1, a + 1, a + row, a + row + 1]
+            })
+        })
+        .collect();
+    let half = [n * n * 3];
+    let sheet = || {
+        MeshData::new(MeshParts { positions: &positions, indices: &indices, submeshes: &half, ..MeshParts::default() })
+            .unwrap()
+    };
+    let t = Transform::from_position(Vec3::new(0.0, 0.1, 0.0));
+    // The second half not drawn; then drawn double-sided.
+    let mut s = scene();
+    let mesh = s.world.add_mesh(sheet());
+    let one_sided = s.one_sided;
+    let object = s.spawn(mesh, one_sided, t);
+    same_as_one_by_one(&s, mesh, t.matrix(), &[Some(false), None]);
+    let two_sided = s.two_sided;
+    s.world.set_submesh_materials(object, &[two_sided]).unwrap();
+    same_as_one_by_one(&s, mesh, t.matrix(), &[Some(false), Some(true)]);
+}
+
+#[test]
+fn a_changed_mesh_is_hit_where_it_is_now() {
+    // The tree made for the first sphere isn't used for the second.
+    let mut s = scene();
+    let mesh = s.world.add_mesh(MeshData::sphere_sized(1.0, 32, 16));
+    let material = s.one_sided;
+    s.spawn(mesh, material, Transform::default());
+    let mut caster = Raycaster::default();
+    let ray = Ray::new(Vec3::new(0.0, 0.0, 5.0), Vec3::NEG_Z).unwrap();
+    let at = |caster: &mut Raycaster, s: &Scene| caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap().distance;
+    // Enough casts at each that each gets its tree.
+    for _ in 0..20 {
+        assert!((at(&mut caster, &s) - 4.0).abs() < 1e-3);
+    }
+    s.world.set_mesh(mesh, MeshData::sphere_sized(2.0, 32, 16)).unwrap();
+    for _ in 0..20 {
+        assert!((at(&mut caster, &s) - 3.0).abs() < 1e-3);
+    }
 }

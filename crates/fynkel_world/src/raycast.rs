@@ -18,7 +18,10 @@
 //! - Cut-outs (`alpha_cutoff`) are hit as if solid: the texture isn't read.
 //!
 //! The test runs in each object's own space, so its matrix is inverted once
-//! and no triangle is moved. A ray's distance is the same number in both
+//! and no triangle is moved. A still mesh of many triangles has a box tree
+//! over them ([`crate::bvh`]), made the first time a ray reaches it and
+//! again when the mesh changes, and the world matrices are worked out
+//! again only when something moved (WO4). A ray's distance is the same number in both
 //! spaces when its direction is carried over unnormalised. A skinned mesh
 //! is bent into the world first, as the renderer bends it, and tested
 //! there.
@@ -28,9 +31,11 @@ use std::ops::Range;
 use glam::{Mat3, Mat4, Vec3};
 
 use crate::MeshData;
+use crate::bvh::{Bvh, WORTH_A_TREE};
 use crate::components::{MeshRenderer, Transform};
 use crate::hierarchy::WorldMatrices;
-use crate::{ObjectId, World};
+use crate::id::IdMap;
+use crate::{MeshId, ObjectId, World};
 
 /// A half-line: from `origin`, along `direction` (unit length).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -74,52 +79,99 @@ pub struct RayHit {
     pub distance: f32,
 }
 
-/// Casts rays at a world. It keeps the world matrices between casts, so a
-/// steady world is cast at without allocating. One of these belongs to one
-/// world.
+/// Rays that reach one version of a mesh before its tree is made.
+const CASTS_BEFORE_A_TREE: u32 = 16;
+
+/// Casts rays at a world. It keeps the world matrices between casts, and
+/// the trees over its meshes' triangles, so a steady world is cast at
+/// without allocating. One of these belongs to one world.
 #[derive(Debug, Default)]
 pub struct Raycaster {
     matrices: WorldMatrices,
     /// A skin's joints as they bend its mesh, and its vertices bent.
     joints: Vec<Mat4>,
     bent: Vec<Vec3>,
+    /// Each mesh's tree, with the version it was made for and the rays
+    /// that reached that version: none until [`CASTS_BEFORE_A_TREE`] have,
+    /// as making it costs as much as that many casts without (a mesh
+    /// changed every frame and cast at a few times never gets one).
+    trees: IdMap<MeshId, (u64, u32, Option<Bvh>)>,
+    /// For each submesh of the mesh being tested: drawn, and if so
+    /// whether double-sided.
+    sides: Vec<Option<bool>>,
 }
 
 impl Raycaster {
     /// The closest hit along `ray` no further than `max_distance`, on the
     /// layers in `mask` (bit `n` for layer `n`), in the world as it is now.
     pub fn cast(&mut self, world: &World, ray: Ray, max_distance: f32, mask: u32) -> Option<RayHit> {
-        let Self { matrices, joints, bent } = self;
+        let Self { matrices, joints, bent, trees, sides } = self;
         matrices.update(world);
+        // Trees of meshes no longer in the world go, now and then.
+        if trees.len() > 16 && trees.len() > 2 * world.mesh_count() {
+            trees.retain(|&id, _| world.has_mesh(id));
+        }
         let (has_skins, has_extra) = (world.has_skins(), world.has_submesh_materials());
         let mut best: Option<RayHit> = None;
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
-            let (Some(mesh), Some(material)) = (r.mesh, r.material) else { return };
+            let (Some(mesh_id), Some(material)) = (r.mesh, r.material) else { return };
             if !world.in_mask(id, mask) {
                 return;
             }
-            let Ok(mesh) = world.mesh(mesh) else { return };
+            let Ok(mesh) = world.mesh(mesh_id) else { return };
             let reach = best.map_or(max_distance, |b| b.distance);
             let Some(model) = matrices.world(world, id, t) else { return };
-            // Each submesh drawn, and whether it's seen from behind.
-            let extra = if has_extra { world.submesh_materials(id) } else { &[] };
-            let parts = mesh.submeshes().iter().enumerate().filter_map(|(k, range)| {
-                let material = if k == 0 { material } else { *extra.get(k - 1)? };
-                Some((range.clone(), world.material(material).ok()?.double_sided))
-            });
             // A skinned mesh, all its joints there: bent as it's drawn.
             joints.clear();
-            let skin = if has_skins { world.skin(id) } else { None };
-            let skinned = mesh.skin().is_some()
-                && skin.is_some_and(|skin| {
-                    skin.joints().iter().zip(skin.inverse_binds()).all(|(&joint, &inverse_bind)| {
-                        matrices.matrix(world, joint).map(|m| joints.push(m * inverse_bind)).is_some()
-                    })
-                });
-            let hit = if skinned {
-                hit_skinned(mesh, joints, bent, parts, ray, reach)
-            } else {
-                hit_still(mesh, model, parts, ray, reach)
+            let skin = if has_skins && mesh.skin().is_some() { world.skin(id) } else { None };
+            let skinned = skin.is_some_and(|skin| {
+                skin.joints().iter().zip(skin.inverse_binds()).all(|(&joint, &inverse_bind)| {
+                    matrices.matrix(world, joint).map(|m| joints.push(m * inverse_bind)).is_some()
+                })
+            });
+            // A still mesh's box first: most are missed there.
+            let into = if skinned { None } else { into_object(mesh, model, ray, reach) };
+            if !skinned && into.is_none() {
+                return;
+            }
+            // Each submesh drawn, and whether it's seen from behind.
+            let extra = if has_extra { world.submesh_materials(id) } else { &[] };
+            sides.clear();
+            sides.extend((0..mesh.submeshes().len()).map(|k| {
+                let material = if k == 0 { Some(material) } else { extra.get(k - 1).copied() };
+                material.and_then(|m| world.material(m).ok()).map(|m| m.double_sided)
+            }));
+            let parts =
+                mesh.submeshes().iter().zip(sides.iter()).filter_map(|(range, side)| Some((range.clone(), (*side)?)));
+            let hit = match into {
+                None => hit_skinned(mesh, joints, bent, parts, ray, reach),
+                Some((inverse, origin, direction)) => {
+                    let positions = mesh.vertices();
+                    let at = |i: u32| Vec3::from(positions[i as usize].position);
+                    let tree = if mesh.indices().len() / 3 < WORTH_A_TREE {
+                        None
+                    } else {
+                        let version = world.mesh_version(mesh_id);
+                        match trees.get_mut(&mesh_id) {
+                            Some((seen, casts, tree)) if *seen == version => {
+                                *casts += 1;
+                                if tree.is_none() && *casts >= CASTS_BEFORE_A_TREE {
+                                    *tree = Some(Bvh::new(mesh));
+                                }
+                                tree.as_ref()
+                            }
+                            _ => {
+                                trees.insert(mesh_id, (version, 1, None));
+                                None
+                            }
+                        }
+                    };
+                    let hit = match tree {
+                        Some(tree) => tree.closest(mesh, at, sides, origin, direction, reach),
+                        None => closest(mesh, parts, at, origin, direction, reach),
+                    };
+                    hit.map(|(distance, face)| (distance, world_normal(inverse, face, ray.direction)))
+                }
             };
             if let Some((distance, normal)) = hit {
                 best = Some(RayHit { object: id, point: ray.at(distance), normal, distance });
@@ -129,15 +181,10 @@ impl Raycaster {
     }
 }
 
-/// The closest hit on `mesh` placed by `model`, no further than `reach`:
-/// the distance and the normal in the world.
-fn hit_still(
-    mesh: &MeshData,
-    model: Mat4,
-    parts: impl Iterator<Item = (Range<u32>, bool)>,
-    ray: Ray,
-    reach: f32,
-) -> Option<(f32, Vec3)> {
+/// The ray in the space of `mesh` placed by `model`, when it reaches the
+/// mesh's box no further than `reach`: the model's inverse, and the ray's
+/// origin and unnormalised direction there.
+fn into_object(mesh: &MeshData, model: Mat4, ray: Ray, reach: f32) -> Option<(Mat4, Vec3, Vec3)> {
     // The box around the object's box, in the world: far cheaper than the
     // inverse, which only objects the ray may hit need.
     let (lo, hi) = mesh.bounds();
@@ -151,12 +198,7 @@ fn hit_still(
     if model.determinant() == 0.0 || !inverse.is_finite() {
         return None;
     }
-    let origin = inverse.transform_point3(ray.origin);
-    let direction = inverse.transform_vector3(ray.direction);
-    let positions = mesh.vertices();
-    let at = |i: u32| Vec3::from(positions[i as usize].position);
-    let (distance, face) = closest(mesh, parts, at, origin, direction, reach)?;
-    Some((distance, world_normal(inverse, face, ray.direction)))
+    Some((inverse, inverse.transform_point3(ray.origin), inverse.transform_vector3(ray.direction)))
 }
 
 /// As [`hit_still`] for a skinned mesh, its vertices bent by `joints`
@@ -246,7 +288,7 @@ fn hits_box(origin: Vec3, direction: Vec3, lo: Vec3, hi: Vec3, reach: f32) -> bo
 /// Möller–Trumbore. The distance along the ray and the triangle's
 /// unnormalised face normal (front side, counter-clockwise), when the ray
 /// meets it from a side it can be hit from, closer than `limit`.
-fn hit_triangle(
+pub(crate) fn hit_triangle(
     origin: Vec3,
     direction: Vec3,
     a: Vec3,

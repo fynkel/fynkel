@@ -472,6 +472,8 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
 /// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture bench_extract`.
 /// Prints the median and the slowest of 500 steady frames for each shape,
 /// and holds the median to the Mac's bar (stage 14's GT1).
+/// Each frame one object is moved, so every world matrix is worked out
+/// again, as in a game: a frame where nothing moved skips that (WO4).
 /// The fourth shape hides one tree in ten (stage 3 plan §3.3), so the flags
 /// are looked up for every object. The last draws nothing (a culling mask
 /// of 0): the gap to the first is all culling in the extract could save,
@@ -519,6 +521,7 @@ fn bench_extract() {
 
         let mut extract = Extract::default();
         let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+        let moved = world.get::<Transform>(ids[1]).unwrap();
         let first = std::time::Instant::now();
         extract.run(&world, &mut scene, &mut ops);
         let first = first.elapsed();
@@ -526,6 +529,7 @@ fn bench_extract() {
         let mut times: Vec<std::time::Duration> = (0..500)
             .map(|_| {
                 ops.clear();
+                world.insert(ids[1], moved).unwrap();
                 let t = std::time::Instant::now();
                 extract.run(&world, &mut scene, &mut ops);
                 t.elapsed()
@@ -541,6 +545,7 @@ fn bench_extract() {
         );
         fynkel_bench::bench(&format!("extracting 10,000 objects, {name}"), 500, bar_ms, || {
             ops.clear();
+            world.insert(ids[1], moved).unwrap();
             extract.run(&world, &mut scene, &mut ops);
         });
     }
