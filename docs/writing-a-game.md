@@ -708,6 +708,9 @@ Future<void> photographedSky(World world) async {
   scene too: it adds to the ambient light.
 - **It lights the scene.** A gradient or an image is blurred once, on the
   GPU, when it's set (a few milliseconds), into the light each way gets.
+  Only a new image is blurred again: an image turned or made brighter,
+  and a gradient of other colours (a day passing), cost nothing more
+  each frame than a still sky.
   What faces up is lit by the zenith and what faces down by the ground; a
   shiny surface mirrors the sky, a rough one shows only its colour, and
   metal in between shows it blurred. `lighting` scales that light (0 for
