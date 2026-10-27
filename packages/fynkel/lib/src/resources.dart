@@ -1042,6 +1042,9 @@ final class Material {
   /// [_values] laid out as [_shader]'s `Values`, and the layout they were
   /// laid out for: a shader's new code lays them out again.
   Uint8List? _bytes;
+
+  /// [_bytes], to write one value into.
+  ByteData? _data;
   _ShaderLayout? _packedFor;
 
   final _release = _Release(_Resource.material);
@@ -1134,7 +1137,19 @@ final class Material {
   /// shader. To tween one:
   /// `tween(0.0, 1.0, seconds: 1, onUpdate: (v) => material.set('dissolve', v))`.
   void set(String name, Object value) {
-    if (_shader == null) throw StateError('$this has no shader to set $name for');
+    final shader = _shader;
+    if (shader == null) throw StateError('$this has no shader to set $name for');
+    // One value of the shader as it is now: written in place, and only its
+    // bytes sent on (stage 14's DF7a).
+    final data = _data;
+    if (value is! Texture2D && data != null && identical(_packedFor, shader._layout)) {
+      final v = shader._layout.value(name);
+      if (v != null && v.write(data, value, shader)) {
+        _values[name] = value;
+        _release.updateValues(this, v.offset, v.parts * 4);
+        return;
+      }
+    }
     _setValue(name, value);
     _pack();
     _changed();
@@ -1163,7 +1178,8 @@ final class Material {
   /// code doesn't have, or has as another kind, is left out.
   void _pack() {
     final shader = _shader;
-    _bytes = shader?._layout.pack(_values, shader);
+    final bytes = _bytes = shader?._layout.pack(_values, shader);
+    _data = bytes == null ? null : ByteData.sublistView(bytes);
     _packedFor = shader?._layout;
   }
 
@@ -1438,6 +1454,21 @@ final class _Release {
       final entry = entries[i];
       final world = entry.$1.target;
       if (world != null && world._updateMaterial(material)) entries[kept++] = entry;
+    }
+    if (kept == entries.length) return;
+    entries.length = kept;
+    if (kept == 0) _finalizer.detach(this);
+  }
+
+  /// Writes [length] bytes of [material]'s values, this one's, from
+  /// [offset] to each world that has it, as [updateMaterial] does.
+  void updateValues(Material material, int offset, int length) {
+    final entries = _in;
+    var kept = 0;
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      final world = entry.$1.target;
+      if (world != null && world._updateValues(material, offset, length)) entries[kept++] = entry;
     }
     if (kept == entries.length) return;
     entries.length = kept;

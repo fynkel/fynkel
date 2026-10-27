@@ -471,5 +471,65 @@ final class _ShaderValue {
     return parts_;
   }
 
+  /// Lays [value], one [parse] takes, out at [offset] in [data] without
+  /// making anything (stage 14's DF7a: a tween sets one every frame), and
+  /// checked as [parse] checks it before writing. False for an array,
+  /// which [parseAll] lays out.
+  bool write(ByteData data, Object value, Shader shader) {
+    if (isArray) return false;
+    num x = 0, y = 0, z = 0, w = 0;
+    final int given;
+    switch (value) {
+      case num n:
+        (x, given) = (n, 1);
+      case Vec2 v:
+        (x, y, given) = (v.x, v.y, 2);
+      case Vec3 v:
+        (x, y, z, given) = (v.x, v.y, v.z, 3);
+      case Color c:
+        // A colour for a vec3 drops its alpha.
+        (x, y, z, w) = (_toLinear(c.r), _toLinear(c.g), _toLinear(c.b), c.a);
+        given = parts == 3 ? 3 : 4;
+      case List<num> l when l.length == parts:
+        x = l[0];
+        if (parts > 1) y = l[1];
+        if (parts > 2) z = l[2];
+        if (parts > 3) w = l[3];
+        given = parts;
+      default:
+        _wrong(value, shader);
+    }
+    if (given != parts) _wrong(value, shader);
+    _check(x, value, shader);
+    if (parts > 1) _check(y, value, shader);
+    if (parts > 2) _check(z, value, shader);
+    if (parts > 3) _check(w, value, shader);
+    _put(data, offset, x);
+    if (parts > 1) _put(data, offset + 4, y);
+    if (parts > 2) _put(data, offset + 8, z);
+    if (parts > 3) _put(data, offset + 12, w);
+    return true;
+  }
+
+  Never _wrong(Object value, Shader shader) =>
+      throw ArgumentError.value(value, name, "is no value for $shader's $name, which is $_type");
+
+  void _check(num n, Object value, Shader shader) {
+    if (kind == 'f32' && !n.isFinite) throw ArgumentError.value(value, name, 'must be finite');
+    if (kind != 'f32' && n is! int) _wrong(value, shader);
+    if (kind == 'u32' && n < 0) throw ArgumentError.value(value, name, 'must be 0 or more');
+  }
+
+  void _put(ByteData data, int at, num n) {
+    switch (kind) {
+      case 'f32':
+        data.setFloat32(at, n.toDouble(), Endian.little);
+      case 'i32':
+        data.setInt32(at, n.toInt(), Endian.little);
+      default:
+        data.setUint32(at, n.toInt(), Endian.little);
+    }
+  }
+
   static double _toLinear(double s) => s <= 0.04045 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
 }
