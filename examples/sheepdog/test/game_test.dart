@@ -88,6 +88,33 @@ void main() {
       expect(walk(Vec3(11, 0, 0), Vec3(14, 0, 1)), Vec3(size - 0.5, 0, 1));
     });
 
+    test('the fences go along splines, posts 2 m apart and two rails; the worn path to the gate has no grass', () {
+      world.run(0.1);
+      for (final (i, line) in fenceLines.indexed) {
+        final fence = round().find('fence $i')!;
+        final posts = fence.get<SplineInstantiate>()!.copies;
+        expect(posts.length, closeTo(line.length / 2, 1.5), reason: 'fence $i: a post every 2 m');
+        expect(
+          posts.every((p) => (line.nearest(p.position).position - p.position).length < 0.01),
+          isTrue,
+          reason: 'on its line',
+        );
+        final rails = fence.children.where((c) => c.get<MeshRenderer>()?.mesh == game.rails[i]);
+        expect(rails, hasLength(2));
+      }
+      expect(round().find('path')!.get<MeshRenderer>()!.mesh, game.path);
+      const gate = Vec3(0, 0, penFront);
+      expect((wornPath.nearest(gate).position - gate).flat.length, lessThan(1.6), reason: 'it ends at the gate');
+      for (final (middle, mesh) in game.patches) {
+        final p = mesh.positions;
+        for (var v = 0; v < p.length; v += 3) {
+          final at = middle + Vec3(p[v], 0, p[v + 2]);
+          expect((wornPath.nearest(at).position - at).flat.length, greaterThan(pathWidth / 2 - 0.2));
+        }
+      }
+      shot('path', width: 960, height: 640);
+    });
+
     test('a round starts with the flock together mid-field, the dog behind it, the clock full', () {
       world.run(0.1);
       expect(round().flock, hasLength(names.length));

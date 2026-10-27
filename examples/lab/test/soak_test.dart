@@ -27,6 +27,13 @@ Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytes
 
 final rounds = int.tryParse(Platform.environment['FYNKEL_SOAK_ROUNDS'] ?? '') ?? 0;
 
+// FYNKEL_SOAK_DRAW=1 draws each round too (GT3). Not in CI yet: drawn,
+// the process's lowest readings wander by 30 MB or more over a run on the
+// runner (0.85 MB a round, against 0.25 allowed, 2026-10-27) though the
+// graphics memory holds flat, so its check waits for one that reads the
+// GPU's memory itself.
+final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] == '1';
+
 void main() {
   test(
     'every scene, again and again, in one world each round: memory stays flat',
@@ -41,12 +48,16 @@ void main() {
       final heap = <int>[];
       for (var round = 0; round < rounds; round++) {
         final world = World(source: files);
+        // Drawn too, small, so what the GPU side keeps shows (GT3): every
+        // 30th frame, read back, so none is replaced before it's drawn.
+        final view = drawing ? HeadlessView(world, width: 64, height: 64) : null;
         for (final make in scenes) {
           final scene = world.add(make());
           await scene.loaded;
           void frames(int n) {
             for (var i = 0; i < n; i++) {
               world.update(1 / 60);
+              if (view != null && i % 30 == 0) view.read(view.frame());
             }
           }
 
@@ -71,9 +82,17 @@ void main() {
           scene.destroy();
           world.update(1 / 60);
         }
+        view?.dispose();
         world.dispose();
         await pumpEventQueue();
-        footprint.add(_footprint());
+        // Drawn, what a round frees goes back over the next moments, not at
+        // once: the lowest of a few readings, so each lands on what's kept.
+        var low = _footprint();
+        for (var i = 0; i < 6; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+          low = math.min(low, _footprint());
+        }
+        footprint.add(low);
         malloced.add(_malloced());
         // A full collection, so what's left is what's kept: after the third
         // round and the last only, as asking for a profile of every class

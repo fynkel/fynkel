@@ -1,5 +1,5 @@
 // Every scene of the lab, in the order of docs/stage-4.md's and
-// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's, 10's, 11's, 12's and 13's. Each step adds its own.
+// docs/stage-5.md's steps, then stage 6's, 7's, 8's, 9's, 10's, 11's, 12's, 13's and 14's. Each step adds its own.
 
 import 'lab.dart';
 import 'scenes/addons_basics.dart';
@@ -58,6 +58,7 @@ import 'scenes/rigidbody_walls.dart';
 import 'scenes/routines.dart';
 import 'scenes/shapes_basics.dart';
 import 'scenes/splines.dart';
+import 'scenes/all_together.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
 import 'scenes/skinned.dart';
@@ -132,4 +133,5 @@ final List<LabScene Function()> scenes = [
   MeshesChangeScene.new,
   MeshesBuildScene.new,
   SplinesScene.new,
+  AllTogetherScene.new,
 ];

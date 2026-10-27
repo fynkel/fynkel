@@ -223,6 +223,24 @@ void main() {
     expect(world.audio.stats.voices, 0);
   });
 
+  test("stopOneShots stops the world's one-shots, not a source's sounds or the music (AU9½)", () {
+    final world = newWorld();
+    final source = AudioSource(clip: tone(1));
+    world.add(GameObject(components: [source]));
+    source.playOneShot(tone(1));
+    world.audio.music.play(tone(1));
+    world.audio
+      ..playOneShot(tone(1))
+      ..playOneShot(tone(1), ignorePause: true)
+      ..playAt(tone(1), Vec3(3, 0, 0));
+    run(world);
+    expect(world.audio.stats.voices, 6);
+    world.audio.stopOneShots();
+    run(world, frames: 2);
+    expect(world.audio.stats.voices, 3, reason: "the source's clip and one-shot, and the music");
+    expect((source.isPlaying, world.audio.music.isPlaying), (true, true));
+  });
+
   test('one-shots play over the clip at their own volume and pitch, and stop with it', () {
     final world = newWorld();
     final source = AudioSource(clip: tone(1), volume: 0.5);
