@@ -464,7 +464,8 @@ final class Physics extends WorldSystem implements Finalizable {
   void _addNative(Collider collider, int key, Rigidbody? body) {
     final object = collider.gameObject;
     collider._writeSpec(_spec.ref, _listensFor(collider, body));
-    final Transform(:position, :rotation, :scale) = object.worldTransform;
+    var Transform(:position, :rotation, :scale) = object.worldTransform;
+    if (body != null && body._interpolatedAt >= 0) (position, rotation) = body._againstStep(position, rotation);
     final t = _transform.ref;
     t.position.set(position);
     t.rotation.set(rotation);
@@ -719,6 +720,10 @@ final class Physics extends WorldSystem implements Finalizable {
     final batch = _batch;
     try {
       world.readWorldTransforms(_objectIds, count, _transforms);
+      for (var i = 0; i < count; i++) {
+        final body = batch[i]._body;
+        if (body != null && body._interpolatedAt >= 0) body._againstStepAt(_transforms + i * 10);
+      }
       checkPhysics(fp_colliders_follow(_world, _colliderIds, _transformsAsStructs, count));
       // Seen only once taken: a refused batch is tried again next time.
       for (var i = 0; i < batch.length; i++) {
@@ -954,9 +959,12 @@ final class Physics extends WorldSystem implements Finalizable {
     final keys = _contactKeys;
     final byKey = _byKey;
     for (var i = 0; i < count; i++) {
-      final a = byKey[keys[i * 7 + 1]];
-      final b = byKey[keys[i * 7 + 2]];
-      if (a == null || b == null) continue;
+      final keyA = keys[i * 7 + 1], keyB = keys[i * 7 + 2];
+      final a = byKey[keyA];
+      final b = byKey[keyB];
+      // A collider turned off and on again since has a new key: what the
+      // old one did ended with it, untold, as when it's off.
+      if (a == null || b == null || a._key != keyA || b._key != keyB) continue;
       final kind = uints[i * _contactWords];
       final trigger = uints[i * _contactWords + 1] != 0;
       _tell(kind, trigger, i, a, b, false);
@@ -1100,7 +1108,13 @@ final class Physics extends WorldSystem implements Finalizable {
       final body = joint.gameObject.get<Rigidbody>();
       if (body == null || body._id == 0) continue;
       final connected = joint._connectedBody;
-      if (connected != null && connected._id == 0) continue;
+      // One gone for good leaves it joined to the world, as in Unity;
+      // one away for now, it waits for.
+      if (connected != null && (connected.isRemoved || connected.gameObject.isDestroyed)) {
+        joint._connectedBody = null;
+      } else if (connected != null && connected._id == 0) {
+        continue;
+      }
       waiting.removeAt(i);
       joint._writeSpec(_jointSpec.ref, body);
       checkPhysics(fp_joint_add(_world, joint._key, _jointSpec, _id));

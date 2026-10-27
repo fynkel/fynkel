@@ -321,7 +321,7 @@ final class Rigidbody extends Behaviour {
   /// it isn't in the world.
   void movePosition(Vec3 position) {
     final physics = _inWorld('movePosition');
-    final rotation = _movedAt == physics._steps ? _moveRotation : this.rotation;
+    final rotation = _moveAskedAt == physics._steps ? _moveRotation : this.rotation;
     _move(physics, position, rotation);
   }
 
@@ -329,7 +329,7 @@ final class Rigidbody extends Behaviour {
   /// [movePosition] moves it.
   void moveRotation(Quat rotation) {
     final physics = _inWorld('moveRotation');
-    final position = _movedAt == physics._steps ? _movePosition : this.position;
+    final position = _moveAskedAt == physics._steps ? _movePosition : this.position;
     _move(physics, position, rotation);
   }
 
@@ -361,9 +361,11 @@ final class Rigidbody extends Behaviour {
   var _toRotation = Quat.identity;
   var _clean = false;
 
-  // Where movePosition and moveRotation send it, and the step count then.
+  // Where movePosition and moveRotation send it, and the step count then:
+  // what the other keeps, if both are asked before the next step.
   var _movePosition = Vec3.zero;
   var _moveRotation = Quat.identity;
+  var _moveAskedAt = -1;
 
   @override
   void onEnable() {
@@ -439,7 +441,7 @@ final class Rigidbody extends Behaviour {
     checkPhysics(fp_rigidbody_move(physics._world, _id, physics._pose));
     _movePosition = position;
     _moveRotation = rotation;
-    _movedAt = physics._steps;
+    _moveAskedAt = physics._steps;
   }
 
   void _teleport(Vec3 position, Quat rotation) {
@@ -449,6 +451,28 @@ final class Rigidbody extends Behaviour {
     _reset(position, rotation);
     _place.stamp = _place.chain();
     _put(position, rotation);
+  }
+
+  /// [position] and [rotation] in the world, moved from where its object
+  /// is drawn to where the last step left it, as the native world has it:
+  /// the same against both. They differ only while it's interpolated.
+  (Vec3, Quat) _againstStep(Vec3 position, Quat rotation) {
+    final drawn = gameObject.worldTransform;
+    final turn = _r1 * drawn.rotation.inverse;
+    return (_p1 + turn.rotate(position - drawn.position), (turn * rotation).normalized);
+  }
+
+  /// [_againstStep] on the position and rotation at [at], as
+  /// [World.readWorldTransforms] writes them.
+  void _againstStepAt(Pointer<Float> at) {
+    final (position, rotation) = _againstStep(Vec3(at[0], at[1], at[2]), Quat(at[3], at[4], at[5], at[6]));
+    at[0] = position.x;
+    at[1] = position.y;
+    at[2] = position.z;
+    at[3] = rotation.x;
+    at[4] = rotation.y;
+    at[5] = rotation.z;
+    at[6] = rotation.w;
   }
 
   /// It's at [position] and [rotation] now, not moving between steps.

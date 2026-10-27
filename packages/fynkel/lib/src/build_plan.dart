@@ -131,6 +131,28 @@ Future<({int exitCode, String stderr})> runStreaming(
   return (exitCode: exitCode, stderr: s.length > keep ? s.substring(s.length - keep) : s);
 }
 
+/// Copies [built], the library cargo made, to [dest]. Another cargo build
+/// of the same crate and target (a second app on this checkout, or tests
+/// beside a build) links it again even when nothing changed, taking it
+/// away for an instant: so a missing file is waited for, up to [patience].
+Future<void> copyBuilt(File built, String dest, {Duration patience = const Duration(seconds: 30)}) async {
+  final until = DateTime.now().add(patience);
+  while (true) {
+    try {
+      await built.copy(dest);
+      return;
+    } on FileSystemException {
+      if (DateTime.now().isAfter(until)) {
+        throw HookException(
+          '${built.path} is missing after cargo built it, and stayed so for ${patience.inSeconds} s: '
+          'is something deleting the target directory?',
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+    }
+  }
+}
+
 /// What a build hook throws when it can't build.
 class HookException implements Exception {
   /// The build failed for the reason in [message].

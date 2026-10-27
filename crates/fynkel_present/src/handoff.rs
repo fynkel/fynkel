@@ -27,7 +27,9 @@ struct State<T> {
 /// [`Handoff::take`] wait.
 pub(crate) struct Lease<T> {
     handoff: Arc<Handoff<T>>,
-    value: Arc<T>,
+    /// Always there until it drops, which lets go of it before it says
+    /// it's done: the taker then holds the only reference.
+    value: Option<Arc<T>>,
 }
 
 impl<T> Handoff<T> {
@@ -72,7 +74,7 @@ impl<T> Handoff<T> {
         }
         let value = state.current.clone()?;
         state.leases += 1;
-        Some(Lease { handoff: self.clone(), value })
+        Some(Lease { handoff: self.clone(), value: Some(value) })
     }
 }
 
@@ -90,12 +92,13 @@ impl<T> std::ops::Deref for Lease<T> {
     type Target = T;
 
     fn deref(&self) -> &T {
-        &self.value
+        self.value.as_deref().expect("a lease has its value until it drops")
     }
 }
 
 impl<T> Drop for Lease<T> {
     fn drop(&mut self) {
+        self.value = None;
         self.handoff.state().leases -= 1;
         self.handoff.idle.notify_all();
     }
@@ -108,6 +111,32 @@ mod tests {
     use std::time::Duration;
 
     use super::*;
+
+    /// Stage 14's BR4: once `take` returns, a lease that just ended holds
+    /// no reference, so the taker's is the only one (the iOS layer is
+    /// unwrapped with `Arc::into_inner`).
+    #[test]
+    fn the_taker_holds_the_only_reference() {
+        let rounds = 20_000;
+        let mut shared = 0;
+        for _ in 0..rounds {
+            let handoff = Arc::new(Handoff::new());
+            handoff.put(0u64);
+            let lease = handoff.lease().unwrap();
+            let barrier = Arc::new(std::sync::Barrier::new(2));
+            let other = barrier.clone();
+            let ending = thread::spawn(move || {
+                other.wait();
+                drop(lease);
+            });
+            barrier.wait();
+            if Arc::into_inner(handoff.take().unwrap()).is_none() {
+                shared += 1;
+            }
+            ending.join().unwrap();
+        }
+        assert_eq!(shared, 0, "{shared} of {rounds} takes still shared the value with a lease");
+    }
 
     #[test]
     fn nothing_to_lease_until_a_value_is_put() {
