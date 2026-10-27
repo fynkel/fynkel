@@ -179,3 +179,39 @@ fn ogg_and_mp3_start_far_in_where_theyre_asked_to() {
         same(&heard(&whole, from, 30_000), &heard(&streamed, from, 30_000), name);
     }
 }
+
+#[test]
+fn a_streamed_sample_that_isnt_a_number_silences_only_its_own_voice() {
+    // Stage 14's AU5: a float WAV holds what it likes, and a streamed one
+    // isn't checked as it's decoded; one sample that isn't a number went
+    // into the mix and silenced every sound.
+    let mut samples = vec![0.25f32; 8_000];
+    samples[100] = f32::NAN;
+    samples[200] = f32::INFINITY;
+    let data = samples.len() * 4;
+    let mut bytes = Vec::new();
+    bytes.extend_from_slice(b"RIFF");
+    bytes.extend_from_slice(&((36 + data) as u32).to_le_bytes());
+    bytes.extend_from_slice(b"WAVEfmt ");
+    bytes.extend_from_slice(&16u32.to_le_bytes());
+    // IEEE floats, mono, 8 kHz, 32 bits.
+    for (value, size) in [(3u32, 2), (1, 2), (8_000, 4), (32_000, 4), (4, 2), (32, 2)] {
+        bytes.extend_from_slice(&value.to_le_bytes()[..size]);
+    }
+    bytes.extend_from_slice(b"data");
+    bytes.extend_from_slice(&(data as u32).to_le_bytes());
+    for s in &samples {
+        bytes.extend_from_slice(&s.to_le_bytes());
+    }
+    let clip = Arc::new(Clip::load(&bytes, "bad.wav", Streaming::Always).unwrap());
+    let mut audio = Audio::new();
+    audio.play(&clip, Play::default()).unwrap().unwrap();
+    let other = Arc::new(Clip::new(QUIET_RATE, 1, vec![0.5; QUIET_RATE as usize]).unwrap());
+    audio.play(&other, Play::default()).unwrap().unwrap();
+    let mut out = vec![0.0; 4_800 * 2];
+    audio.render(&mut out).unwrap();
+    assert!(out.iter().all(|s| s.is_finite()), "the mix isn't a number");
+    // The other plays on, and so does the bad one, after its bad samples.
+    let last = out[out.len() - 2];
+    assert!((last - 0.75).abs() < 0.01, "{last}");
+}

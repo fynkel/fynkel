@@ -16,7 +16,9 @@ rtrb.workspace = true
 symphonia.workspace = true
 
 [target.'cfg(target_os = "ios")'.dependencies]
+block2.workspace = true
 objc2-avf-audio.workspace = true
+objc2-foundation.workspace = true
 
 [target.'cfg(target_os = "android")'.dependencies]
 jni-sys.workspace = true

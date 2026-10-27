@@ -1910,7 +1910,11 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   game, and holds when the game's time stands still.
 - **32 voices.** As many sounds as that play at once. Past it the least
   important gives way: `priority` 0 is the most important, 256 the
-  least, 128 unless set; of equals, the oldest goes.
+  least, 128 unless set; of equals, one fading out goes first, then the
+  oldest. A sound of priority 0 never gives way, as music doesn't, so
+  keep 0 for music. A sound fading out (`music.crossFade`, `stop(fadeOut:)`) keeps
+  its importance until it's done. The one that gives way fades out over
+  a few milliseconds, so it doesn't click.
 - **The iPhone's silent switch** mutes the game and the player's own
   music plays on under it, as most games do. `audio.session =
   AudioSession.playback` plays through the switch and stops their music,
@@ -1921,7 +1925,11 @@ for a sound that belongs to no object (a button's click), `audio.stats`
   which plays from the loudspeaker through the switch, and the mic's
   plugin is told to leave the session alone (`record`'s
   `IosRecordConfig(manageAudioSession: false)`). On both, the game's
-  sound waits while a call rings or is on.
+  sound waits while a call rings or is on; on Android, with `voiceChat`,
+  a call over the internet doesn't count (the game's own voice chat puts
+  the phone in that call's mode), only a phone call. On the iPhone it
+  waits the same way while Siri, an alarm or a call shown over the game
+  holds the sound, and goes on where it was when that's over.
 - **The sound starts** when the world is first shown on screen. In a
   test, which shows nothing, the sound is made and timed the same way
   with no device: `world.update` steps it, a clip ends after its length,
@@ -4148,6 +4156,18 @@ For code written before: each change that breaks it, newest first.
   - `Animator.removeMark(clip, time, callback)` and `removeMarks([clip])`
     take away what `at` added; before, a pooled object that called `at`
     each time it came back was called once more each time.
+  - A sound fading out keeps its `priority` until it's done: a less
+    important one no longer takes its voice and cuts it off, and a
+    sound that takes a voice fades the old one out over a few
+    milliseconds instead of cutting it.
+  - A sound of `priority` 0 is never given up, as music isn't (it plays
+    at 0): with every voice busy at 0, a new one isn't played, where the
+    oldest gave way before.
+  - On Android, `AudioSession.voiceChat` no longer pauses the game's
+    sound while the phone is in a call's mode for talking over the
+    internet (`MODE_IN_COMMUNICATION`, which WebRTC's libraries set for
+    the game's own voice chat). A phone call, ringing or on, still
+    pauses it.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

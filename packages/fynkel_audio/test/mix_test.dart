@@ -146,6 +146,33 @@ void main() {
     expect(() => music.stop(fadeOut: -1), throwsArgumentError);
   });
 
+  test('music plays on, crossfading too, when every voice is busy with as important sounds (stage 14, AU-new)', () {
+    final world = newWorld();
+    final music = world.audio.music;
+    final (calm, chase) = (level(0.4, seconds: 4, name: 'calm'), level(0.2, seconds: 4, name: 'chase'));
+    music.play(calm);
+    world.update(0.1);
+    final (blip, quiet) = (level(0, seconds: 0.2, name: 'blip'), level(0, seconds: 4, name: 'quiet'));
+    for (var i = 0; i < Audio.maxVoices; i++) {
+      world.audio.playOneShot(blip, priority: 0);
+    }
+    world.update(0.1);
+    expect(music.isPlaying, isTrue);
+    expect(heard(world), closeTo(0.4, 0.005));
+    expect(world.audio.stats.stolen, 0);
+    world.update(0.2);
+    // The next track takes a less important voice, and the last fades
+    // out under sounds that would take any other.
+    for (var i = 0; i < Audio.maxVoices; i++) {
+      world.audio.playOneShot(quiet, priority: 1);
+    }
+    music.crossFade(chase, 1);
+    for (var i = 0; i < Audio.maxVoices; i++) {
+      world.audio.playOneShot(quiet, priority: 1);
+    }
+    expect(heard(world, frames: 24000), closeTo(0.3, 0.005), reason: 'both tracks heard half way');
+  });
+
   test("music that doesn't loop ends and says so", () {
     final world = newWorld();
     final music = world.audio.music..loop = false;

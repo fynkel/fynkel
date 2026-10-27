@@ -46,9 +46,6 @@ struct Manager {
 /// `AudioManager`'s constants.
 const STREAM_MUSIC: jint = 3;
 const AUDIOFOCUS_GAIN: jint = 1;
-const MODE_RINGTONE: jint = 1;
-const MODE_IN_CALL: jint = 2;
-const MODE_IN_COMMUNICATION: jint = 3;
 
 /// Gives `ndk-context` the VM and the app, the first time; then says how
 /// that went.
@@ -79,17 +76,18 @@ pub(crate) fn focus(wanted: bool) -> Result<(), String> {
     })
 }
 
-/// Whether a call is on, or ringing: the game's sound waits for it.
-pub(crate) fn in_call() -> bool {
-    let Ok(manager) = manager() else { return false };
+/// The phone's mode (`AudioManager.getMode`): a call ringing, on, and so
+/// on; `None` when it can't be asked.
+pub(crate) fn mode() -> Option<i32> {
+    let manager = manager().ok()?;
     // SAFETY: a live env, and the manager's getMode on it.
     with_env(|env| unsafe {
         let call = (**env).CallIntMethodA.ok_or("no CallIntMethodA")?;
         let mode = call(env, manager.object as jobject, manager.get_mode as jmethodID, ptr::null());
         thrown(env, "the phone's mode")?;
-        Ok(matches!(mode, MODE_RINGTONE | MODE_IN_CALL | MODE_IN_COMMUNICATION))
+        Ok(mode)
     })
-    .unwrap_or(false)
+    .ok()
 }
 
 fn manager() -> Result<&'static Manager, String> {

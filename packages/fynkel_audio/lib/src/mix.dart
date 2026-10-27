@@ -71,7 +71,8 @@ final class AudioGroup {
 ///
 /// It plays on while the game is [World.paused] (a pause menu's music)
 /// unless it doesn't [ignorePause], and is never given up for other
-/// sounds.
+/// sounds: it plays at priority 0 ([AudioSource.priority]), even while it
+/// fades out.
 final class AudioMusic {
   AudioMusic._(this._audio) : _owner = _audio._nextOwner++;
 
@@ -180,12 +181,14 @@ final class AudioMusic {
     _clip = _voice == 0 ? null : clip;
   }
 
-  void _ended(int handle) {
+  /// [handle] stopped on its own: at its end, or [stolen], which music
+  /// never is (it plays at priority 0), and which isn't an end.
+  void _ended(int handle, {required bool stolen}) {
     if (handle != _voice) return;
     final clip = _clip;
     _voice = 0;
     _clip = null;
-    if (clip == null) return;
+    if (clip == null || stolen) return;
     try {
       onEnd?.call(clip);
     } catch (error, stack) {

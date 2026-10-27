@@ -34,7 +34,9 @@ enum AudioSession {
   /// The game talks and listens at once, like a call: the mic works
   /// alongside the game's sound (iOS's `playAndRecord`), which plays from
   /// the loudspeaker (not the earpiece) and ignores the silent switch. On
-  /// Android, as [playback]. Set it before the first sound, and let the
+  /// Android, as [playback], but the game's own voice chat (which puts the
+  /// phone in a call's mode, `MODE_IN_COMMUNICATION`) doesn't pause it; a
+  /// phone call still does. Set it before the first sound, and let the
   /// mic's plugin leave the session alone, so the two don't fight.
   voiceChat,
 }
@@ -320,7 +322,7 @@ final class Audio extends WorldSystem implements Finalizable {
   /// given) are its own; it holds while the game is paused unless
   /// [ignorePause], and is under [group]'s volume, if given. Nothing plays
   /// it if every voice is busy with something more important than
-  /// [priority].
+  /// [priority], or of priority 0, which never gives way.
   void playOneShot(
     AudioClip clip, {
     double? volume,
@@ -721,7 +723,9 @@ final class Audio extends WorldSystem implements Finalizable {
       final stopped = _stopped[i];
       final source = _sources[stopped.owner];
       if (source != null) source._ended(stopped.handle, stolen: stopped.stolen == 1);
-      if (music != null && stopped.owner == music._owner) music._ended(stopped.handle);
+      if (music != null && stopped.owner == music._owner) {
+        music._ended(stopped.handle, stolen: stopped.stolen == 1);
+      }
     }
   }
 

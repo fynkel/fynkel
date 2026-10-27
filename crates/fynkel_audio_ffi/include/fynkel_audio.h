@@ -162,7 +162,7 @@ typedef struct FaSpatial {
   uint32_t rolloff;
 } FaSpatial;
 
-// How to play a clip: its settings; `priority` 0 (kept longest) to 256
+// How to play a clip: its settings; `priority` 0 (never given up) to 256
 // (given up first); `pausable` 1 to hold while the game is paused; whose
 // it is (`owner`, 0 for no one's); where to start, in seconds; whether
 // it's 3D, and where it is; and the seconds it fades in over, from
@@ -407,7 +407,10 @@ FaStatus fa_voice_spatial_set(struct FaAudio *audio,
 
 // The frame's moves, in one call: the listener, at `listener`, and
 // `count` voices at `places`, each where it is now. Heard from the next
-// `fa_audio_update`. A voice that ended is skipped.
+// `fa_audio_update`. A voice that ended is skipped, and so is a place
+// that isn't finite (an object past what a float holds) or a listener
+// that faces nowhere: heard from where it was last, so one bad object
+// doesn't fail the frame's sound.
 //
 // # Safety
 //

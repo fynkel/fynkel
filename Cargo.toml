@@ -46,6 +46,9 @@ cpal = "0.18.2"
 rtrb = "0.4.0"
 symphonia = { version = "0.6.1", default-features = false, features = ["wav", "pcm", "ogg", "vorbis", "mp3"] }
 objc2-avf-audio = { version = "0.3.2", default-features = false, features = ["std", "AVAudioSession", "AVAudioSessionRoute", "AVAudioSessionTypes"] }
+# iOS's interruption notices, as cpal listens for them.
+block2 = "0.6.2"
+objc2-foundation = { version = "0.3.2", default-features = false, features = ["std", "block2", "NSDictionary", "NSNotification", "NSOperation", "NSString", "NSValue"] }
 
 # The build hook (package:fynkel/hooks.dart) always builds in release, so
 # this is what every app ships. Measured on the Mac (stage 6, PR 12b):

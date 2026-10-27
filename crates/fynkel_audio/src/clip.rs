@@ -22,6 +22,11 @@ pub const MAX_CHANNELS: u16 = 2;
 /// stereo is about 21 MB.
 pub const STREAM_SECONDS: f64 = 10.0;
 
+/// The loudest a sample is taken as, either way: 8 times full scale. A
+/// float WAV's can be anything, and one near what a float holds would
+/// overflow as the mixer adds them up, silencing every sound.
+pub const LOUDEST: f32 = 8.0;
+
 /// Whether a clip is decoded whole as it loads, or as it plays.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Streaming {
@@ -148,14 +153,18 @@ impl Opened {
 impl Clip {
     /// A clip from samples already decoded. Fails for a rate of 0, a
     /// channel count other than 1 or 2, samples that aren't whole frames,
-    /// or a sample that isn't finite.
-    pub fn new(rate: u32, channels: u16, samples: Vec<f32>) -> Result<Self, String> {
+    /// or a sample that isn't finite. A sample past 8 times full scale
+    /// ([`LOUDEST`]) is taken as that, so adding samples up can't overflow.
+    pub fn new(rate: u32, channels: u16, mut samples: Vec<f32>) -> Result<Self, String> {
         check_format(rate, channels)?;
         if !samples.len().is_multiple_of(usize::from(channels)) {
             return Err(format!("{} samples aren't whole frames of {channels} channels", samples.len()));
         }
         if let Some(at) = samples.iter().position(|s| !s.is_finite()) {
             return Err(format!("sample {at} isn't a number"));
+        }
+        for s in &mut samples {
+            *s = s.clamp(-LOUDEST, LOUDEST);
         }
         let frames = samples.len() / usize::from(channels);
         Ok(Self { rate, channels, frames, data: Data::Decoded(samples.into_boxed_slice()) })
@@ -347,7 +356,13 @@ impl Reader {
                 }
                 let n = room.min(self.pending.len() - self.pending_at);
                 if let Ok(chunk) = out.write_chunk_uninit(n) {
-                    chunk.fill_from_iter(self.pending[self.pending_at..self.pending_at + n].iter().copied());
+                    // A float WAV's samples can be anything: one that isn't
+                    // a number is silence, and none is past LOUDEST, so
+                    // adding them up can't overflow (stage 14, AU5). Here,
+                    // not on the audio thread.
+                    let samples = self.pending[self.pending_at..self.pending_at + n].iter();
+                    chunk
+                        .fill_from_iter(samples.map(|&s| if s.is_finite() { s.clamp(-LOUDEST, LOUDEST) } else { 0.0 }));
                 }
                 self.pending_at += n;
                 continue;
