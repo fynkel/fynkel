@@ -1133,6 +1133,9 @@ final class _ParticleWorld extends WorldSystem {
   @override
   int get order => _particlesOrder;
 
+  @override
+  String get name => 'Particles';
+
   // The particle systems in the engine, and the trails, by their objects'
   // ids.
   final _systems = <int, ParticleSystem>{};

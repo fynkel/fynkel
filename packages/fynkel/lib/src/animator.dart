@@ -447,6 +447,9 @@ final class _AnimatorWorld extends WorldSystem {
   @override
   int get order => _animatorsOrder;
 
+  @override
+  String get name => 'Animators';
+
   // The animators the game has asked for, by their model copies' ids, and
   // in a list, which a frame goes through without making an iterator. A
   // destroyed one's is let go in the next frame.

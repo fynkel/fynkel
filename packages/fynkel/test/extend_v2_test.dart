@@ -64,6 +64,7 @@ final class NoteKind extends AssetKind<Note> {
 class Logs extends WorldSystem {
   Logs(super.world, [this.name = 'logs']);
 
+  @override
   final String name;
 
   @override

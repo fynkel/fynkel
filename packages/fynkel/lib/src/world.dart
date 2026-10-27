@@ -30,6 +30,7 @@ part 'motion_kinds.dart';
 part 'particles.dart';
 part 'pointing.dart';
 part 'pool.dart';
+part 'profile.dart';
 part 'resources.dart';
 part 'routines.dart';
 part 'shader.dart';
@@ -348,14 +349,19 @@ final class World implements Finalizable {
   /// Zero in a world without particle systems.
   Duration get particleStepTime =>
       Duration(microseconds: maybeSystem<_ParticleWorld>()?._watch.elapsedMicroseconds ?? 0);
-  final _meshWatch = Stopwatch();
+
+  /// How long the last frame took, part by part, and each system's part:
+  /// the game's updates, physics, the animators, the particles and the
+  /// rest, as Unity's Profiler shows them. `print(world.profile)` lists
+  /// them.
+  late final FrameProfile profile = FrameProfile._(this);
 
   /// How long the last frame took to send the meshes the game changed to
   /// the worlds that have them: their normals and tangents worked out, and
   /// each handed to the engine (the GPU's copy is written as it draws).
   /// With several worlds, the first to update sends them all. Zero when no
   /// mesh changed.
-  Duration get meshChangeTime => Duration(microseconds: _meshWatch.elapsedMicroseconds);
+  Duration get meshChangeTime => profile.meshes;
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
   // given a new parent (systems.dart).
@@ -667,7 +673,11 @@ final class World implements Finalizable {
       _update(dt);
     } finally {
       _updating = false;
-      if (_disposeAsked) dispose();
+      if (_disposeAsked) {
+        dispose();
+      } else {
+        profile._end();
+      }
     }
   }
 
@@ -681,13 +691,16 @@ final class World implements Finalizable {
 
   void _update(double dt) {
     time._advance(dt);
+    final profile = this.profile.._begin();
     _tidy();
     _runSystems(_SystemHook.beforeFrame);
     if (_disposeAsked) return;
+    profile._lap(_Part.other);
 
     input
       .._now += dt
       .._step();
+    profile._lap(_Part.input);
 
     var kept = 0;
     for (var i = 0; i < _starting.length; i++) {
@@ -713,18 +726,22 @@ final class World implements Finalizable {
     }
     // Shorter unless an onStart disposed the world, which empties it.
     if (kept < _starting.length) _starting.length = kept;
+    profile._lap(_Part.starts);
 
     if (_disposeAsked) return;
     _runFixedSteps();
     if (_disposeAsked) return;
+    profile._lap(_Part.fixedUpdates);
     _runSystems(_SystemHook.beforeUpdate);
     if (_disposeAsked) return;
+    profile._lap(_Part.other);
 
     // Objects added from here on are past the end when they come, or not
     // started: they wait for the next frame. The calls are guarded inline,
     // not through [_safely], so a frame makes no closures.
     final updated = _live.length;
     _callEach(_Call.update, updated);
+    profile._lap(_Part.updates);
 
     if (_disposeAsked) return;
     _runMotions();
@@ -733,23 +750,25 @@ final class World implements Finalizable {
     if (_dueObjects.isNotEmpty) _runDue();
     if (_disposeAsked) return;
     if (_shaders.isNotEmpty) check(fy_world_time_set(pointer, time._sinceStart, time._delta));
+    profile._lap(_Part.motions);
     // The animators pose, then the particles move, then the packages'.
     _runSystems(_SystemHook.afterUpdate);
     if (_disposeAsked) return;
+    profile._lap(_Part.other);
 
     _callEach(_Call.lateUpdate, updated);
+    profile._lap(_Part.lateUpdates);
 
     if (_disposeAsked) return;
     // The packages', then the cameras move.
     _runSystems(_SystemHook.afterLateUpdate);
     if (_disposeAsked) return;
+    profile._lap(_Part.other);
 
-    _meshWatch
-      ..reset()
-      ..start();
     Mesh._publishChanges();
-    _meshWatch.stop();
+    profile._lap(_Part.meshes);
     _debug?._flush();
+    profile._lap(_Part.debug);
     _runSystems(_SystemHook.afterFrame);
   }
 
