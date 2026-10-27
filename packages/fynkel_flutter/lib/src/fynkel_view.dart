@@ -382,33 +382,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   int _steadyFrames = 0;
   static const _settleFrames = 3;
 
-  WorldView? _view;
-  Future<int?>? _registration;
-  int? _texture;
-
-  /// Whether the plugin gives the view where it draws, and with it the
-  /// size (Android's surface, iOS's layer), rather than the engine making
-  /// it: set as the view is made.
-  bool _surfaced = false;
+  /// How the engine view reaches the screen, with what that alone
+  /// needs: made on the first frame with a size, null once let go of.
+  _Host? _host;
 
   /// iOS: the plugin couldn't give the view a layer (no Flutter view of its
   /// own on screen: an app that adds Flutter to its own view controllers),
-  /// so the view is a texture from then on.
+  /// so the view is a texture from then on, whatever host comes next.
   bool _noLayer = false;
-
-  /// Android and iOS's layer: the size the plugin was last given.
-  int _sentWidth = 0, _sentHeight = 0;
-
-  /// The view draws straight to the screen, to a surface or layer behind
-  /// Flutter's view ([FynkelView.onScreen]), not to a texture. The plugin
-  /// says so when the view registers.
-  bool _onScreen = false;
-
-  /// On screen: where the surface was last put, in physical
-  /// pixels from the top left of Flutter's view, and whether it was put
-  /// over the other views.
-  Rect? _sentPlace;
-  bool _sentOver = false;
   Object? _error;
 
   /// Whether the frames go on without a picture: there is no plugin (a
@@ -694,15 +675,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     // window has one): no view yet, and no surface.
     if (_noPicture || _width == 0 || _height == 0) return;
 
-    final view = _view ?? _open();
-    if (view == null) return;
+    final host = _host ?? _open();
+    if (host == null) return;
+    final view = host.view;
     try {
       view.camera = widget.camera;
-      if (!_surfaced) view.resize(_width, _height);
-      final texture = _texture;
+      if (host is! _Surfaced) view.resize(_width, _height);
+      final texture = host.texture;
       if (texture == null) return;
-      if (_surfaced) _sendSize(view, texture);
-      if (_onScreen) _sendPlace(texture);
+      if (host is _Surfaced) _sendSize(host, texture);
+      if (host.onScreen) _sendPlace(host, texture);
       view.frame();
     } on FynkelException catch (error, stack) {
       if (error.status != FynkelStatus.deviceLost && error.status != FynkelStatus.workerFailed) rethrow;
@@ -757,21 +739,24 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
-  /// Makes the engine view and starts registering its texture.
-  WorldView? _open() {
-    final WorldView view;
-    final layer = _ios && widget.onScreen && !_noLayer;
+  /// Makes the engine view, in the host this platform shows it with, and
+  /// starts registering it.
+  _Host? _open() {
+    final _Host host;
     try {
       if (_android) {
-        view = Platform.isAndroid
+        final view = Platform.isAndroid
             ? AndroidSurfaceView(world, width: _width, height: _height)
             : HeadlessView(world, width: _width, height: _height);
-      } else if (layer) {
-        view = Platform.isIOS
-            ? AppleLayerView(world, width: _width, height: _height)
-            : HeadlessView(world, width: _width, height: _height);
+        host = _AndroidSurface(view, asksOnScreen: widget.onScreen);
+      } else if (_ios && widget.onScreen && !_noLayer) {
+        host = _AppleLayer(
+          Platform.isIOS
+              ? AppleLayerView(world, width: _width, height: _height)
+              : HeadlessView(world, width: _width, height: _height),
+        );
       } else if (Platform.isMacOS || Platform.isIOS) {
-        view = AppleView(world, width: _width, height: _height);
+        host = _AppleTexture(AppleView(world, width: _width, height: _height));
       } else {
         throw UnsupportedError('FynkelView runs on macOS, iOS and Android.');
       }
@@ -780,99 +765,52 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       return null;
     }
     _viewsOpen++;
-    _view = view;
-    _surfaced = _android || layer;
-    _registration = _register(view, layer: layer);
-    return view;
+    _host = host;
+    host.registration = _register(host);
+    return host;
   }
 
-  Future<int?> _register(WorldView view, {required bool layer}) async {
+  Future<int?> _register(_Host host) async {
     try {
       if (!_resetSent) {
         _resetSent = true;
         await channel.invokeMethod<void>('reset');
       }
-      final Map<String, Object> arguments;
-      if (layer) {
-        _sentWidth = view.width;
-        _sentHeight = view.height;
-        final place = _place();
-        arguments = {
-          'view': view.address,
-          'width': view.width,
-          'height': view.height,
-          'layer': true,
-          'attach': AppleLayerView.attachAddress,
-          'detach': AppleLayerView.detachAddress,
-          'free': AppleView.freeAddress,
-          'onScreen': true,
-          'left': place.left.round(),
-          'top': place.top.round(),
-          'frameWidth': place.width.round(),
-          'frameHeight': place.height.round(),
-        };
-      } else if (_android) {
-        _sentWidth = view.width;
-        _sentHeight = view.height;
-        final place = widget.onScreen ? _place() : null;
-        arguments = {
-          'view': view.address,
-          'width': view.width,
-          'height': view.height,
-          if (place != null) ...{
-            'onScreen': true,
-            'left': place.left.round(),
-            'top': place.top.round(),
-            'frameWidth': place.width.round(),
-            'frameHeight': place.height.round(),
-          },
-        };
-      } else {
-        arguments = {
-          'view': view.address,
-          'acquire': AppleView.acquireAddress,
-          'setFrameReady': AppleView.setFrameReadyAddress,
-          'free': AppleView.freeAddress,
-        };
-      }
-      if (_surfaced) _listenToPlugin();
+      final place = host.asksOnScreen ? _place() : null;
+      final arguments = host.arguments(place);
+      if (host is _Surfaced) _listenToPlugin();
       // A texture's id, or for a surface on screen {id, onScreen}.
       final answer = await channel.invokeMethod<Object>('register', arguments);
       final onScreen = answer is Map && answer['onScreen'] == true;
       final texture = answer is Map ? answer['id'] as int? : answer as int?;
-      if (mounted && _view == view) {
+      if (mounted && _host == host) {
         if (texture != null) _byTexture[texture] = this;
         if (onScreen) {
-          _sentPlace = arguments.containsKey('left')
-              ? Rect.fromLTWH(
-                  (arguments['left']! as int).toDouble(),
-                  (arguments['top']! as int).toDouble(),
-                  (arguments['frameWidth']! as int).toDouble(),
-                  (arguments['frameHeight']! as int).toDouble(),
-                )
-              : null;
-          _sentOver = false;
+          host
+            ..sentPlace = place
+            ..sentOver = false;
         }
         setState(() {
-          _texture = texture;
-          _onScreen = onScreen;
+          host
+            ..texture = texture
+            ..onScreen = onScreen;
         });
       }
       return texture;
     } on MissingPluginException {
       // No plugin: a widget test, most likely. The game runs on unseen.
-      if (mounted && _view == view) _withoutPicture();
+      if (mounted && _host == host) _withoutPicture();
       return null;
     } catch (error, stack) {
-      if (layer && error is PlatformException && error.code == 'nolayer') {
+      if (host is _AppleLayer && error is PlatformException && error.code == 'nolayer') {
         // No layer here: a texture from the next frame.
-        if (mounted && _view == view) {
+        if (mounted && _host == host) {
           _noLayer = true;
           setState(_release);
         }
         return null;
       }
-      if (mounted && _view == view) _fail(error, stack);
+      if (mounted && _host == host) _fail(error, stack);
       return null;
     }
   }
@@ -880,16 +818,17 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// Android and iOS's layer: gives the plugin the new size (a new surface
   /// on Android, the layer set up again on iOS).
   /// The plugin handles the calls in order, so the last size sent wins.
-  void _sendSize(WorldView view, int texture) {
-    if (_width == _sentWidth && _height == _sentHeight) return;
-    _sentWidth = _width;
-    _sentHeight = _height;
+  void _sendSize(_Surfaced host, int texture) {
+    if (_width == host.sentWidth && _height == host.sentHeight) return;
+    host
+      ..sentWidth = _width
+      ..sentHeight = _height;
     unawaited(
       channel.invokeMethod<void>('resize', {'texture': texture, 'width': _width, 'height': _height}).catchError((
         Object error,
         StackTrace stack,
       ) {
-        if (mounted && _view == view) _replace(error, stack);
+        if (mounted && _host == host) _replace(error, stack);
       }),
     );
   }
@@ -913,10 +852,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// On screen: moves the surface or layer to where the view now is (a
   /// page sliding in, a resize), and over the other views when it lies
   /// within one of them (a minimap over the game).
-  void _sendPlace(int texture) {
+  void _sendPlace(_Host host, int texture) {
     final place = _place();
-    if (place != _sentPlace) {
-      _sentPlace = place;
+    if (place != host.sentPlace) {
+      host.sentPlace = place;
       unawaited(
         channel.invokeMethod<void>('place', {
           'texture': texture,
@@ -927,16 +866,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         }),
       );
     }
-    final over = _byTexture.values.any(
-      (other) =>
-          other != this &&
-          other._onScreen &&
-          other._sentPlace != null &&
-          other._sentPlace != place &&
-          other._sentPlace!.expandToInclude(place) == other._sentPlace,
-    );
-    if (over != _sentOver) {
-      _sentOver = over;
+    final over = _byTexture.values.any((other) {
+      final at = other._host?.sentPlace;
+      return other != this && other._host!.onScreen && at != null && at != place && at.expandToInclude(place) == at;
+    });
+    if (over != host.sentOver) {
+      host.sentOver = over;
       unawaited(channel.invokeMethod<void>('over', {'texture': texture, 'over': over}));
     }
   }
@@ -944,7 +879,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// The view can't go on (the plugin couldn't give it a new surface): a
   /// new one takes its place, as for a lost device.
   void _replace(Object error, StackTrace stack) {
-    if (!mounted || _view == null) return;
+    if (!mounted || _host == null) return;
     _lost(error, stack, _lastMicros ?? 0);
   }
 
@@ -998,15 +933,13 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// Lets go of the engine view: the plugin stops using it first, then it
   /// is freed. Safe while the registration is still on its way.
   void _release() {
-    final view = _view, registration = _registration;
-    _byTexture.remove(_texture);
-    _view = null;
-    _registration = null;
-    _texture = null;
-    _onScreen = false;
-    _sentPlace = null;
+    final host = _host;
+    _host = null;
     _windowStartMicros = 0;
-    if (view == null || registration == null) return;
+    if (host == null) return;
+    _byTexture.remove(host.texture);
+    final (view, registration) = (host.view, host.registration);
+    if (registration == null) return;
     unawaited(() async {
       try {
         final texture = await registration;
@@ -1051,11 +984,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         _logical = size;
         _ratio = ratio;
         _sizeFromLayout();
-        final texture = _texture;
+        final host = _host, texture = host?.texture;
         if (texture == null) return const SizedBox.expand();
         // On screen: the surface is behind Flutter's view, so the view
         // clears whatever was painted under it, and the game shows through.
-        if (_onScreen) return const SizedBox.expand(child: CustomPaint(painter: _Window()));
+        if (host!.onScreen) return const SizedBox.expand(child: CustomPaint(painter: _Window()));
         return Texture(textureId: texture);
       },
     );
@@ -1120,6 +1053,110 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       ],
     );
   }
+}
+
+/// How a [FynkelView]'s engine [view] reaches the screen, one kind for
+/// each platform's way, each keeping what it alone needs.
+sealed class _Host {
+  _Host(this.view);
+
+  final WorldView view;
+
+  /// Its registration with the plugin, on its way or done.
+  Future<int?>? registration;
+
+  /// The id the plugin gave it, once registered.
+  int? texture;
+
+  /// Whether it asks to be drawn straight to the screen, behind Flutter's
+  /// view ([FynkelView.onScreen]), and so is registered with its place.
+  bool get asksOnScreen;
+
+  /// It draws straight to the screen, not to a texture: the plugin says so
+  /// as it registers.
+  bool onScreen = false;
+
+  /// On screen: where it was last put, in physical pixels from the top
+  /// left of Flutter's view, and whether over the other views.
+  Rect? sentPlace;
+  bool sentOver = false;
+
+  /// What the plugin is sent to register it, at [place] when on screen.
+  Map<String, Object> arguments(Rect? place);
+}
+
+/// macOS, and iOS when not on screen or with no layer to have: a texture
+/// the engine makes at the size the view asks for, which Flutter shows.
+final class _AppleTexture extends _Host {
+  _AppleTexture(super.view);
+
+  @override
+  bool get asksOnScreen => false;
+
+  @override
+  Map<String, Object> arguments(Rect? place) => {
+    'view': view.address,
+    'acquire': AppleView.acquireAddress,
+    'setFrameReady': AppleView.setFrameReadyAddress,
+    'free': AppleView.freeAddress,
+  };
+}
+
+/// The plugin gives the view where it draws, and with it the size, which
+/// is sent it as it changes.
+sealed class _Surfaced extends _Host {
+  _Surfaced(super.view) : sentWidth = view.width, sentHeight = view.height;
+
+  /// The size the plugin was last given.
+  int sentWidth, sentHeight;
+}
+
+/// iOS on screen: a layer of its own under Flutter's view, which the
+/// plugin makes.
+final class _AppleLayer extends _Surfaced {
+  _AppleLayer(super.view);
+
+  @override
+  bool get asksOnScreen => true;
+
+  @override
+  Map<String, Object> arguments(Rect? place) => {
+    'view': view.address,
+    'width': view.width,
+    'height': view.height,
+    'layer': true,
+    'attach': AppleLayerView.attachAddress,
+    'detach': AppleLayerView.detachAddress,
+    'free': AppleView.freeAddress,
+    'onScreen': true,
+    'left': place!.left.round(),
+    'top': place.top.round(),
+    'frameWidth': place.width.round(),
+    'frameHeight': place.height.round(),
+  };
+}
+
+/// Android: a surface the plugin makes, shown as a texture, or on screen
+/// behind Flutter's view when [asksOnScreen].
+final class _AndroidSurface extends _Surfaced {
+  _AndroidSurface(super.view, {required this.asksOnScreen});
+
+  @override
+  final bool asksOnScreen;
+
+  @override
+  Map<String, Object> arguments(Rect? place) => {
+    'view': view.address,
+    'width': view.width,
+    'height': view.height,
+    if (place != null) ...{
+      'onScreen': true,
+      'left': place.left.round(),
+      'top': place.top.round(),
+      'frameWidth': place.width.round(),
+      'frameHeight': place.height.round(),
+    },
+  };
 }
 
 /// Clears its rectangle, whatever was painted under it, so the surface
