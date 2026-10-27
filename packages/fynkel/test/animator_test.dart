@@ -87,7 +87,12 @@ void main() {
     copy.animator!.play('Wheels');
     final view = world.add(GameObject(components: [Camera()]));
     world.cameras.defaultBlend = Blend.cut;
-    world.add(GameObject(transform: Transform(position: Vec3(0, 0, 9)), components: [VirtualCamera()]));
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 9)),
+        components: [VirtualCamera()],
+      ),
+    );
     // The first a package would sensibly put itself, and the last.
     final seen = <String>[];
     void posed(int order) => seen.add('$order ${sameTurn(wheels.localRotation, rest) ? 'rest' : 'posed'}');
