@@ -2436,7 +2436,9 @@ class LavaPool extends GameObject {
   list of numbers. An array, `colors: array<vec4<f32>, 8>`, takes a list
   of those (`material.set('colors', [red, green])`), up to its length;
   the rest are 0. A name the shader doesn't have, or a value of the wrong
-  kind, is an `ArgumentError` that lists what it has. Tween one as above.
+  kind, is an `ArgumentError` that lists what it has. Tween one as above:
+  setting one value writes just its bytes and makes nothing, so every
+  frame is fine; an array or a texture sends the whole material again.
 - Textures: `var rock: color_texture;` (colours) or
   `var heights: texture_2d<f32>;` (data), read with `sample(rock, in.uv)`,
   set like values: `material.set('rock', await assets.texture('rock.png'))`.
