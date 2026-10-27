@@ -3,7 +3,7 @@ import 'package:fynkel/fynkel.dart';
 import 'package:scale/main.dart';
 
 void main() {
-  test('10,000 objects of 50 kinds run, and their frames are timed', () {
+  test('10,000 objects of 50 kinds run, and their frames are timed and held to a bar', () {
     final world = World();
     addTearDown(world.dispose);
     final scale = world.add(Scale(objects: 10000));
@@ -28,6 +28,9 @@ void main() {
     times.sort();
     // ignore: avoid_print
     print('world.update, 10,000 objects: median ${times[300]} µs, 95th ${times[570]} µs, max ${times.last} µs');
+    // Held to a bar (stage 14's GT1): the Mac's median when it was set,
+    // 0.5 ms, doubled, as the crates' benchmarks are (fynkel_bench).
+    expect(times[300], lessThan(1000), reason: 'world.update for 10,000 objects, median µs');
   });
 
   test('churn destroys and makes groups, and the count holds', () {
