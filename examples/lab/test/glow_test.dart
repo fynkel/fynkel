@@ -30,6 +30,7 @@ void main() {
     final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as GlowScene;
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
+      await tester.pump();
       await tester.tap(find.text(label));
       await wait(tester, 2);
     }

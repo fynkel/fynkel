@@ -39,6 +39,10 @@ abstract class LabScene extends GameObject {
   /// A few lines the scene keeps up to date, such as the clock's values.
   final readout = ValueNotifier('');
 
+  /// The frame's parts and systems ([World.profile]), each the median of
+  /// the last second's frames, for the page's profiler.
+  final profile = ValueNotifier('');
+
   /// Where the camera stands and looks.
   Vec3 get eye => Vec3(0, 4, 9);
   Vec3 get target => Vec3(0, 0.5, 0);
@@ -70,6 +74,7 @@ abstract class LabScene extends GameObject {
       ),
     );
     add(GameObject(name: 'ambient', components: [Light.ambient(intensity: 0.5)]));
+    add(_Profiler(profile));
     add(
       GameObject(
         name: 'floor',
@@ -105,6 +110,44 @@ abstract class LabScene extends GameObject {
     ],
     children: children,
   );
+}
+
+/// Reads [World.profile] each frame and, once a second, puts the medians
+/// of each part and system into [out]: one frame's are too uneven to read.
+class _Profiler extends GameObject {
+  _Profiler(this.out) : super(name: 'profiler');
+
+  final ValueNotifier<String> out;
+  final _times = <String, List<int>>{};
+  var _frames = 0;
+
+  @override
+  void onLateUpdate() {
+    super.onLateUpdate();
+    final p = world.profile;
+    void add(String name, Duration time) => (_times[name] ??= []).add(time.inMicroseconds);
+    add('the whole update', p.total);
+    add('updates', p.updates);
+    add('late updates', p.lateUpdates);
+    add('fixed updates', p.fixedUpdates);
+    add('starts', p.starts);
+    add('input', p.input);
+    add('motions', p.motions);
+    add('meshes', p.meshes);
+    add('debug', p.debug);
+    add('the world\'s own', p.other);
+    for (final s in p.systems) {
+      add(s.name, s.time);
+    }
+    if (++_frames < 60) return;
+    String ms(int micros) => (micros / 1000).toStringAsFixed(2).padLeft(6);
+    out.value = [
+      for (final MapEntry(:key, :value) in _times.entries)
+        if (value.isNotEmpty) '${ms((value..sort())[value.length ~/ 2])} ms  $key',
+    ].join('\n');
+    _times.clear();
+    _frames = 0;
+  }
 }
 
 /// One line of a scene's [LabScene.log].

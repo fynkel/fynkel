@@ -49,6 +49,8 @@ void main() {
     expect(scene.readout.value, contains('foam 20 cm'));
 
     await tester.ensureVisible(find.text('glass ball and force field'));
+
+    await tester.pump();
     await tester.tap(find.text('glass ball and force field'));
     await wait(tester, 2);
     expect(scene.find('glass ball')!.active, isFalse);

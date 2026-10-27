@@ -144,6 +144,22 @@ class _Panel extends StatelessWidget {
                   expandedAlignment: Alignment.topLeft,
                   children: [Text(scene.about, style: text.bodySmall)],
                 ),
+                // Unity's Profiler, for the Dart side of the frame.
+                ExpansionTile(
+                  title: Text('The frame, part by part (world.profile)', style: text.labelLarge),
+                  dense: true,
+                  tilePadding: EdgeInsets.zero,
+                  expandedAlignment: Alignment.topLeft,
+                  children: [
+                    ValueListenableBuilder(
+                      valueListenable: scene.profile,
+                      builder: (context, profile, _) => Text(
+                        profile.isEmpty ? 'after the first second' : profile,
+                        style: text.bodySmall?.copyWith(fontFamily: 'Menlo', color: Colors.lightBlue[100]),
+                      ),
+                    ),
+                  ],
+                ),
                 // The controls show the game's state, which changes each
                 // frame: rebuild with the readout, and after each control,
                 // as the readout may not change.
