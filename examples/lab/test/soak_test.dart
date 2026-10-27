@@ -81,7 +81,14 @@ void main() {
         view?.dispose();
         world.dispose();
         await pumpEventQueue();
-        footprint.add(_footprint());
+        // Drawn, what a round frees goes back over the next moments, not at
+        // once: the lowest of a few readings, so each lands on what's kept.
+        var low = _footprint();
+        for (var i = 0; i < 6; i++) {
+          await Future<void>.delayed(const Duration(milliseconds: 150));
+          low = math.min(low, _footprint());
+        }
+        footprint.add(low);
         malloced.add(_malloced());
         // A full collection, so what's left is what's kept: after the third
         // round and the last only, as asking for a profile of every class
