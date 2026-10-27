@@ -539,7 +539,10 @@ fn bench_extract() {
             ms(times[times.len() / 2]),
             ms(times[times.len() - 1])
         );
-        fynkel_bench::hold(&format!("extracting 10,000 objects, {name}"), ms(times[times.len() / 2]), bar_ms);
+        fynkel_bench::bench(&format!("extracting 10,000 objects, {name}"), 500, bar_ms, || {
+            ops.clear();
+            extract.run(&world, &mut scene, &mut ops);
+        });
     }
 }
 
