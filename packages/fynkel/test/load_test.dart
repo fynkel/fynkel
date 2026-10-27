@@ -231,6 +231,68 @@ void main() {
     await root.loaded;
   });
 
+  // Stage 14's DC1: a behaviour put on a child whose load hasn't run yet.
+  test("a behaviour put on a child during its parent's load loads once, after the child's own", () async {
+    final root = _PutsOnChild();
+    world.add(root);
+    await root.loaded;
+    world.update(0.1);
+    expect(log, ['load b', 'load counted', 'start counted']);
+  });
+
+  // Stage 14's DC2: an object moved while it loads.
+  test('an object moved while it loads makes its new parent wait instead of its old one, and starts', () async {
+    final parentGate = Completer<void>(), childGate = Completer<void>(), otherGate = Completer<void>();
+    late GameObject child;
+    final parent = world.add(
+      Loads(
+        'parent',
+        gate: parentGate.future,
+        during: [() => child = Loads('child', gate: childGate.future)],
+      ),
+    );
+    final other = world.add(Loads('other', gate: otherGate.future));
+    await pumpEventQueue();
+    child.parent = null;
+    parentGate.complete();
+    await pumpEventQueue();
+    expect(parent.activeInHierarchy, isTrue, reason: 'it no longer waits for what was moved out');
+    expect(child.activeInHierarchy, isFalse);
+    world.update(0.1);
+
+    child.parent = other;
+    childGate.complete();
+    await pumpEventQueue();
+    expect([child.active, child.activeInHierarchy], [true, false], reason: 'it waits under other');
+    otherGate.complete();
+    await pumpEventQueue();
+    expect([other.activeInHierarchy, child.activeInHierarchy], [true, true]);
+    log.clear();
+    world.update(0.1);
+    expect(log, ['start other', 'start child']);
+
+    // Moved out from under a loading parent to the top, it appears and
+    // starts by itself.
+    final gate = Completer<void>(), movedGate = Completer<void>();
+    late GameObject moved;
+    final holder = world.add(
+      Loads(
+        'holder',
+        gate: gate.future,
+        during: [() => moved = Loads('moved', gate: movedGate.future)],
+      ),
+    );
+    await pumpEventQueue();
+    moved.parent = null;
+    movedGate.complete();
+    await pumpEventQueue();
+    expect([moved.activeInHierarchy, holder.activeInHierarchy], [true, false]);
+    log.clear();
+    world.update(0.1);
+    expect(log, ['start moved']);
+    gate.complete();
+  });
+
   test('a child added after its parent appeared loads by itself, and the parent stays', () async {
     final parent = world.add(GameObject());
     final gate = Completer<void>();
@@ -528,6 +590,41 @@ class _AddsAfter extends GameObject {
 }
 
 /// Destroys another object in its load, before that one's load runs.
+/// Puts a [_Counted] on its child b during its load.
+class _PutsOnChild extends GameObject {
+  _PutsOnChild() : super(children: [_LogsLoad('b')]);
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    find('b')!.addComponent(_Counted());
+  }
+}
+
+class _LogsLoad extends GameObject {
+  _LogsLoad(String name) : super(name: name);
+
+  @override
+  void onLoad() {
+    super.onLoad();
+    log.add('load $name');
+  }
+}
+
+class _Counted extends Behaviour {
+  @override
+  void onLoad() {
+    super.onLoad();
+    log.add('load counted');
+  }
+
+  @override
+  void onStart() {
+    super.onStart();
+    log.add('start counted');
+  }
+}
+
 class _Destroys extends GameObject {
   _Destroys(this.other);
 

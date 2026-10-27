@@ -371,6 +371,27 @@ void main() {
       frames(2);
       expectVec(view.position, const Vec3(2, 0, 0));
     });
+
+    // Stage 14's DF1: the live one's object destroyed.
+    test('the live one destroyed blends from where the view is to the next, and says so', () {
+      final view = camera();
+      world.cameras.defaultBlend = const Blend(1, ease: Ease.linear);
+      final a = at(Vec3.zero, priority: 1);
+      final b = at(const Vec3(4, 0, 0)).get<VirtualCamera>()!;
+      final seen = <VirtualCamera?>[];
+      world.cameras.onLiveChanged.listen(seen.add);
+      frames(1);
+      expect(seen, [a.get<VirtualCamera>()]);
+      a.destroy();
+      frames(1);
+      expect(world.cameras.live, b);
+      expect(seen, [a.get<VirtualCamera>(), b]);
+      expect(world.cameras.isBlending, isTrue);
+      expectVec(view.position, const Vec3(1, 0, 0));
+      frames(3);
+      expect(world.cameras.isBlending, isFalse);
+      expectVec(view.position, const Vec3(4, 0, 0));
+    });
   });
 
   group('rigs', () {
@@ -453,6 +474,24 @@ void main() {
       frames(1);
       // 1 m in a quarter of a second: 4 m/s, so 2 m ahead of (2, 0, 0).
       expect(rig.position, const Vec3(4, 0, 0));
+    });
+
+    // Stage 14's DF8: look-ahead over a pause.
+    test('Follow keeps its look-ahead while the game is paused, and after', () {
+      final rig = world.add(GameObject(components: [Follow(target, offset: Vec3.zero, lookAhead: 0.5)]));
+      frames(1);
+      target.position += const Vec3(1, 0, 0);
+      frames(1);
+      expect(rig.position, const Vec3(4, 0, 0));
+      world.paused = true;
+      frames(2);
+      expect(rig.position, const Vec3(4, 0, 0), reason: 'held where it was');
+      world.paused = false;
+      frames(1);
+      expect(rig.position, const Vec3(4, 0, 0), reason: 'the first frame back moves on nothing');
+      target.position += const Vec3(1, 0, 0);
+      frames(1);
+      expect(rig.position, const Vec3(5, 0, 0));
     });
 
     test('LookAt turns to the target, from where a Follow on the same object put it this frame', () {

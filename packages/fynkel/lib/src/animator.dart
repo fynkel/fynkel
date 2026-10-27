@@ -369,13 +369,41 @@ final class Animator with AnimatorPlays {
   /// Calls [callback] each time clip [name] passes [time] seconds while
   /// it plays forwards, on any layer or in a blend's mix: a footstep, the
   /// moment a sword hits. A time of 0 comes each time a looping clip comes
-  /// round, not as it starts.
+  /// round, not as it starts. Each call adds a mark, the same one again
+  /// too: take it away with [removeMark] (a pooled object adding it in its
+  /// `onSpawn` takes it away in its `onRelease`), or all with
+  /// [removeMarks].
   void at(String name, double time, void Function() callback) {
     final clip = _clip(name);
     if (!time.isFinite || time < 0 || time > clips[clip].length) {
       throw ArgumentError.value(time, 'time', 'must be within the clip, 0 to ${clips[clip].length}');
     }
     ((_marks ??= {})[clip] ??= []).add((time, callback));
+    _report();
+  }
+
+  /// Takes away what [at] added with the same clip [name], [time] and
+  /// [callback] (a method torn off again is the same callback; a closure
+  /// made again isn't), as Unity's `RemoveListener`. Nothing there, it
+  /// does nothing.
+  void removeMark(String name, double time, void Function() callback) {
+    final clip = _clip(name);
+    final marks = _marks?[clip];
+    if (marks == null) return;
+    marks.removeWhere((m) => m.$1 == time && m.$2 == callback);
+    if (marks.isEmpty) _marks!.remove(clip);
+    _report();
+  }
+
+  /// Takes away every mark [at] added to clip [name], or to every clip
+  /// when null, as Unity's `RemoveAllListeners`.
+  void removeMarks([String? name]) {
+    if (name == null) {
+      _marks?.clear();
+    } else {
+      final clip = _clip(name);
+      _marks?.remove(clip);
+    }
     _report();
   }
 

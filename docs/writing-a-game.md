@@ -1011,8 +1011,9 @@ class Door extends GameObject {
   `onComplete:`.
 - **`sequence([...])`** plays one after another, **`together([...])`** all
   at once.
-- Each returns a **`Motion`**: `stop()`, `complete()`, and it's a future,
-  so `await open();` waits for it to end.
+- Each returns a **`Motion`**: `stop()`, `complete()` (to where its last
+  loop ends; one that loops for ever ends the loop it's in), and it's a
+  future, so `await open();` waits for it to end.
 
 ## 9. Routines
 
@@ -1593,10 +1594,12 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
 
 - **`SplineContainer`** holds splines in its object's space: move the
   object and they move with it. Its `positionAt` and the rest answer in
-  the world.
+  the world, distances included: on an object scaled 2, `length()` is
+  twice the spline's, and `positionAt(5)` is 5 m along in the world.
 - **`SplineInstantiate`** makes copies with its function, hung from its
-  object, `spacing` metres apart or `count` of them, turned along the
-  spline unless `align` is false, `offset` from it.
+  object, `spacing` metres apart (along the spline in its own space, so
+  scaling the object spaces them out with it) or `count` of them, turned
+  along the spline unless `align` is false, `offset` from it.
 - **`SplineAnimate`** moves its object along at a `speed` or over
   `seconds`, `once`, `loop` or `pingPong`, turned to face the way it goes;
   `play`, `pause`, `restart`, `distance` and `normalizedTime`.
@@ -1656,7 +1659,10 @@ class Hero extends GameObject {
   `stop()` keeps the pose it's in. Game time scales it: a paused world
   pauses its clips.
 - `at(clip, seconds, callback)` calls back each time a clip passes that
-  time: footsteps, the moment a sword hits.
+  time: footsteps, the moment a sword hits. Each call adds one more:
+  `removeMark(clip, seconds, callback)` takes one away (a pooled object
+  that adds it in `onSpawn` takes it away in `onRelease`), and
+  `removeMarks(clip)` all of a clip's, or `removeMarks()` all.
 - The clips play in the engine, once a frame after `onUpdate` and the
   tweens and before `onLateUpdate`. Each moves only the parts it moves.
   To turn a part a clip moves (a head that looks at you), set it in
@@ -2609,7 +2615,8 @@ A shader can't use another's code.
 
 **Cameras** work as Cinemachine's. Put a `VirtualCamera` on objects; the
 enabled one with the highest `priority` drives the view's camera, and a
-change of priority blends to it:
+change of priority blends to it (as does destroying the live one's
+object: from where the view is to the next):
 
 ```dart
 class CameraRig extends GameObject {
@@ -4064,7 +4071,7 @@ What keeps a game fast:
 | `TrailRenderer`: Time, Min Vertex Distance, Width, Color, Emitting, `Clear()` | `TrailRenderer(time:, minVertexDistance:, widthMultiplier:, widthCurve:, colorGradient:, emitting:)`, `clear()` |
 | Quality's Soft Particles | `Quality.softParticles` |
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
-| Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `animator.onEnd` |
+| Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `removeMark`, `removeMarks`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
 | `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
@@ -4119,6 +4126,28 @@ For code written before: each change that breaks it, newest first.
     wait for that body for good.
   - A collider turned off and on again before a step gets no exit from
     the trigger it's in (it used to get enter, then exit).
+  - Destroying the live virtual camera's object blends from where the
+    view is to the next one, with `onLiveChanged`; it used to make the
+    next `update` throw, then cut.
+  - An add the engine refuses (a camera's `fovY` of 500°, say) adds
+    nothing, wherever below the root the refused component is: the world
+    is as it was and the objects can be added once mended. A root used
+    to stay in the world half built, its later children could never be
+    added, and its lights stayed counted.
+  - `Motion.complete()` on one that loops a number of times ends where
+    its last loop would: a yoyo of 2 back at the start, a `moveBy`
+    sequence of 3 loops three times as far. It used to stop at the end
+    of the loop it was in.
+  - A `SplineContainer`'s distances are metres in the world, as its
+    points are: on an object scaled 2, `positionAt(5)` is 5 m along, not
+    10, and a `SplineAnimate` at `speed: 1` goes 1 m a second, not 2.
+    `length()` is new, the length in the world. On one scaled unevenly,
+    `rotationAt` faces along `directionAt`.
+  - `Follow` with `lookAhead` stays as far ahead as it was while the
+    game is paused; it used to jump back to the target and out again.
+  - `Animator.removeMark(clip, time, callback)` and `removeMarks([clip])`
+    take away what `at` added; before, a pooled object that called `at`
+    each time it came back was called once more each time.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

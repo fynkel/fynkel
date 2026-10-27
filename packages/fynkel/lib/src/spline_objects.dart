@@ -7,7 +7,9 @@ part of 'world.dart';
 
 /// Splines in its object's space, as Unity's SplineContainer: a road's,
 /// a track's, where a fence goes. Move the object and its splines move
-/// with it; [positionAt] and the rest give points in the world.
+/// with it; [positionAt] and the rest give points in the world, and take
+/// and give distances in metres in the world too: on an object scaled 2,
+/// a spline's 10 m are 20 ([length]).
 ///
 /// ```dart
 /// final track = GameObject(components: [SplineContainer([Spline.smooth(points, closed: true)])]);
@@ -33,26 +35,70 @@ final class SplineContainer extends Behaviour {
     return splines[index];
   }
 
+  /// How long spline [index] is in the world, in metres: its own length
+  /// times the object's scale.
+  double length({int index = 0}) {
+    final spline = _at(index);
+    final s = gameObject.worldTransform.scale;
+    final x = s.x.abs(), y = s.y.abs(), z = s.z.abs();
+    if (x == y && y == z) return spline.length * x;
+    spline._scaleTo(x, y, z);
+    return spline._scaledLength;
+  }
+
   /// The point [distance] metres along spline [index], in the world.
-  Vec3 positionAt(double distance, {int index = 0}) => transformPoint(_at(index).positionAt(distance));
+  Vec3 positionAt(double distance, {int index = 0}) {
+    final spline = _at(index);
+    return transformPoint(spline.positionAt(_alongOwn(spline, distance)));
+  }
 
   /// The way spline [index] goes [distance] metres along, in the world,
   /// unit length.
-  Vec3 directionAt(double distance, {int index = 0}) => _turned(_at(index).directionAt(distance));
+  Vec3 directionAt(double distance, {int index = 0}) {
+    final spline = _at(index);
+    return _turned(spline.directionAt(_alongOwn(spline, distance)));
+  }
 
   /// Which way is up [distance] metres along spline [index], in the world.
-  Vec3 upAt(double distance, {int index = 0}) => _turned(_at(index).upAt(distance));
+  Vec3 upAt(double distance, {int index = 0}) {
+    final spline = _at(index);
+    return _turned(spline.upAt(_alongOwn(spline, distance)));
+  }
 
   /// The rotation that faces along spline [index] [distance] metres
-  /// along, in the world: an object turned so has its -Z along it.
-  Quat rotationAt(double distance, {int index = 0}) =>
-      (gameObject.worldTransform.rotation * _at(index).rotationAt(distance)).normalized;
+  /// along, in the world: an object turned so has its -Z along it
+  /// ([directionAt]) and its up as near [upAt] as it can be.
+  Quat rotationAt(double distance, {int index = 0}) {
+    final spline = _at(index);
+    final own = _alongOwn(spline, distance);
+    return Quat.lookRotation(_turned(spline.directionAt(own)), up: _turned(spline.upAt(own)));
+  }
 
   /// The point of spline [index] nearest [point], given in the world: how
-  /// far along it is, and where in the world.
+  /// far along it is, in metres in the world, and where in the world.
   ({double distance, Vec3 position}) nearest(Vec3 point, {int index = 0}) {
-    final found = _at(index).nearest(inverseTransformPoint(point));
-    return (distance: found.distance, position: transformPoint(found.position));
+    final spline = _at(index);
+    final found = spline.nearest(inverseTransformPoint(point));
+    final s = gameObject.worldTransform.scale;
+    final x = s.x.abs(), y = s.y.abs(), z = s.z.abs();
+    final double distance;
+    if (x == y && y == z) {
+      distance = found.distance * x;
+    } else {
+      spline._scaleTo(x, y, z);
+      distance = spline._toScaled(found.distance);
+    }
+    return (distance: distance, position: transformPoint(found.position));
+  }
+
+  // [distance] metres along [spline] in the world, as a distance in its
+  // own space: the object's scale undone.
+  double _alongOwn(Spline spline, double distance) {
+    final s = gameObject.worldTransform.scale;
+    final x = s.x.abs(), y = s.y.abs(), z = s.z.abs();
+    if (x == y && y == z) return x == 0 ? 0 : distance / x;
+    spline._scaleTo(x, y, z);
+    return spline._unscaled(distance);
   }
 
   // A direction in the object's space, in the world's, unit length.
@@ -119,8 +165,10 @@ final class SplineInstantiate extends Behaviour {
   Vec3 _offset;
   int _index;
 
-  /// How far apart the copies are along it, in metres, when [count] is
-  /// null: as many as fit, the first at its start. More than 0.
+  /// How far apart the copies are along it, in metres in the spline's
+  /// own space (scaling the container's object spaces them out with it),
+  /// when [count] is null: as many as fit, the first at its start. More
+  /// than 0.
   double get spacing => _spacing;
   set spacing(double value) => _set(() => _spacing = value);
 
@@ -313,7 +361,7 @@ final class SplineAnimate extends Behaviour {
   /// spline's length over them.
   double get speed {
     final seconds = _seconds;
-    return seconds == null ? _speed : _spline.length / seconds;
+    return seconds == null ? _speed : container.length(index: index) / seconds;
   }
 
   set speed(double value) {
@@ -344,11 +392,11 @@ final class SplineAnimate extends Behaviour {
   /// How far along it is, 0 at the start and 1 at the end (Unity's
   /// `NormalizedTime`, within one go).
   double get normalizedTime {
-    final length = _spline.length;
+    final length = container.length(index: index);
     return length == 0 ? 0 : _distance / length;
   }
 
-  set normalizedTime(double value) => distance = value * _spline.length;
+  set normalizedTime(double value) => distance = value * container.length(index: index);
 
   /// Whether it's moving.
   bool get isPlaying => _playing;
@@ -366,10 +414,7 @@ final class SplineAnimate extends Behaviour {
     distance = 0;
   }
 
-  Spline get _spline => container._at(index);
-
   void _place() {
-    final spline = _spline;
     final c = container;
     final at = c.positionAt(_distance, index: index);
     if (align) {
@@ -381,7 +426,7 @@ final class SplineAnimate extends Behaviour {
     } else {
       position = at;
     }
-    if (spline.length == 0) _playing = false;
+    if (c.length(index: index) == 0) _playing = false;
   }
 
   @override
@@ -395,7 +440,7 @@ final class SplineAnimate extends Behaviour {
   void onUpdate() {
     super.onUpdate();
     if (!_playing) return;
-    final length = _spline.length;
+    final length = container.length(index: index);
     final step = speed * world.time.delta;
     var d = _distance + (_back ? -step : step);
     var ended = false;

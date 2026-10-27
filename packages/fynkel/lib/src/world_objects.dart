@@ -47,7 +47,23 @@ extension _Objects on World {
     _logMoved(child);
     _reparented.add(child);
     _shape++;
+    if (!child._appeared) _moveWait(child, parent);
     _refresh(child);
+  }
+
+  /// [child], still loading, now under [parent]: the object above it that
+  /// waits for it is [parent] if that's loading too, else none, and the
+  /// one that waited before goes on without it.
+  void _moveWait(GameObject child, GameObject? parent) {
+    final before = child._waiter;
+    final waiter = parent != null && !parent._appeared ? parent : null;
+    if (identical(before, waiter)) return;
+    child._waiter = waiter;
+    if (waiter != null) waiter._pending++;
+    if (before != null) {
+      before._pending--;
+      _appearIfDone(before);
+    }
   }
 
   void _link(GameObject child, GameObject? parent) {
@@ -160,8 +176,29 @@ extension _Objects on World {
   }
 
   /// Spawns [object] in the engine under [parent], then what was added to
-  /// it before it was live, and lists each in [fresh].
+  /// it before it was live, and lists each in [fresh]. All or nothing:
+  /// the whole tree goes into the engine first, and if the engine refuses
+  /// any of it, everything spawned is taken out again and the objects are
+  /// as they were, still addable.
   void _attach(GameObject object, GameObject? parent, List<GameObject> fresh) {
+    final spawned = <(GameObject, GameObject?)>[];
+    try {
+      _spawnTree(object, parent, spawned);
+    } catch (_) {
+      for (final (node, _) in spawned.reversed) {
+        _unspawn(node);
+      }
+      rethrow;
+    }
+    for (final (node, above) in spawned) {
+      _enter(node, above, fresh);
+    }
+  }
+
+  /// Spawns [object] and what was added to it before it was live, parents
+  /// first, in the engine with their components, and lists each with its
+  /// parent in [spawned] as it's spawned.
+  void _spawnTree(GameObject object, GameObject? parent, List<(GameObject, GameObject?)> spawned) {
     final described = object._described!;
     final transform = described.transform;
     GameObject._check(transform);
@@ -169,28 +206,57 @@ extension _Objects on World {
     object
       .._world = this
       .._id = id;
-    try {
-      if (parent != null) check(fy_parent_set(pointer, id, parent.id));
-      if (described.model != null) _readParts(object);
-      if (described.name != null) object._writeName(described.name!);
-      if (!described.active) check(fy_active_set(pointer, id, false));
-      if (object._layer != 0) check(fy_layer_set(pointer, id, object._layer));
-      for (final component in object._components ?? const <Component>[]) {
-        if (!component._removed) object._write(component);
-      }
-    } catch (_) {
-      for (final part in _subtree(object).skip(1)) {
-        _objects.remove(part._id);
-      }
-      object._children = null;
-      fy_despawn(_pointer, id);
-      object
-        .._world = null
-        .._id = 0;
-      rethrow;
+    spawned.add((object, parent));
+    if (parent != null) check(fy_parent_set(pointer, id, parent.id));
+    if (described.model != null) _readParts(object);
+    if (described.name != null) object._writeName(described.name!);
+    if (!described.active) check(fy_active_set(pointer, id, false));
+    if (object._layer != 0) check(fy_layer_set(pointer, id, object._layer));
+    for (final component in object._components ?? const <Component>[]) {
+      if (!component._removed) object._write(component);
     }
+    for (final child in described.children) {
+      _spawnTree(child, object, spawned);
+    }
+  }
+
+  /// Takes [object], spawned by an add the engine refused, out of the
+  /// engine with its model's parts, and forgets what its components told
+  /// the world.
+  void _unspawn(GameObject object) {
+    for (final component in object._components ?? const <Component>[]) {
+      switch (component) {
+        case Light():
+          _countLight(object, component, _LightCount.none);
+        case ParticleSystem():
+          if (identical(_particleSystems[object._id], component)) _particleSystems.remove(object._id);
+          _waitingParticles.remove(component);
+        case TrailRenderer():
+          if (identical(_trails[object._id], component)) _trails.remove(object._id);
+        case Camera():
+          component._effectsSent = false;
+        case MeshRenderer():
+          component._moreSent = false;
+        case Behaviour():
+      }
+    }
+    for (final part in _subtree(object).skip(1)) {
+      _objects.remove(part._id);
+    }
+    object._children = null;
+    fy_despawn(_pointer, object._id);
+    object
+      .._world = null
+      .._id = 0;
+  }
+
+  /// Makes [object], just spawned under [parent], live in Dart: in the
+  /// update order, known by id and class, and its components announced.
+  void _enter(GameObject object, GameObject? parent, List<GameObject> fresh) {
+    final described = object._described!;
     object
       .._described = null
+      .._queuedIn = null
       .._activeSelf = described.active
       .._probed = described.model == null
       .._model = described.model
@@ -203,8 +269,8 @@ extension _Objects on World {
     }
     _link(object, parent);
     fresh.add(object);
-    if (described.model == null) object._setTransform(transform);
-    _objects[id] = object;
+    if (described.model == null) object._setTransform(described.transform);
+    _objects[object._id] = object;
     _register(object);
     _live.add(object);
     _starting.add(object);
@@ -215,10 +281,6 @@ extension _Objects on World {
       _announce(object, component);
     }
     _shape++;
-    for (final child in described.children) {
-      child._queuedIn = null;
-      _attach(child, object, fresh);
-    }
   }
 
   /// Runs [object]'s [GameObject.onLoad], then its behaviours'
@@ -226,6 +288,7 @@ extension _Objects on World {
   /// else when its future completes. The object waits for all of them.
   void _runLoad(GameObject object) {
     if (object._destroyed) return;
+    object._loadsRun = true;
     final behaviours = [
       for (final c in object._components ?? const <Component>[])
         if (c is Behaviour && !c._removed) c,
@@ -295,7 +358,8 @@ extension _Objects on World {
 
   /// Puts [component] on [object], which is live: the engine's are written
   /// by the caller; a behaviour loads, with the object if it's still
-  /// loading, else by itself (a failed load removes only the behaviour).
+  /// loading (with its own loads, if those haven't run yet), else by
+  /// itself (a failed load removes only the behaviour).
   void _componentAdded(GameObject object, Component component) {
     _register(component);
     _announce(object, component);
@@ -303,6 +367,7 @@ extension _Objects on World {
     _enterLoop(object);
     _starting.add(component);
     if (!object._appeared) {
+      if (!object._loadsRun) return;
       object._pending++;
       _load(object, component, component.onLoad);
       return;

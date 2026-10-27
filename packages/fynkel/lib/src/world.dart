@@ -805,8 +805,9 @@ final class World implements Finalizable {
   ///
   /// Throws a [StateError] if [root] was already added (to move a live
   /// object, set its [GameObject.parent]) or destroyed. If the engine
-  /// refuses one of its components, the object isn't added and the error
-  /// is thrown; objects below it that were already live stay so.
+  /// refuses a component on it or on anything below it, nothing is added
+  /// and the error is thrown: the world is as it was, and the objects can
+  /// be added once mended.
   T add<T extends GameObject>(T root) {
     root._checkAddable();
     _add(root, null);

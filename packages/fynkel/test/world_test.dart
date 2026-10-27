@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:math' as math;
@@ -141,6 +142,42 @@ void main() {
     for (var id = before.id + 1; id < after.id; id++) {
       expect(fy_exists(world.pointer, id), isFalse, reason: 'object#$id was despawned again');
     }
+  });
+
+  // Stage 14's DC6: one object below refused.
+  test('an add refused anywhere in the tree leaves the world as it was, and the objects addable', () {
+    final said = <String>[];
+    runZoned(() {
+      final before = world.add(GameObject());
+      final bad = Camera(fovY: 500.deg);
+      final good = GameObject(name: 'good', components: [Light.sun()]);
+      final under = GameObject(name: 'under');
+      final root = GameObject(
+        name: 'root',
+        components: [Light.sun()],
+        children: [
+          GameObject(components: [Light.sun()], children: [under]),
+          GameObject(components: [Light.sun(), bad]),
+          good,
+        ],
+      );
+      for (var i = 0; i < 3; i++) {
+        expect(() => world.add(root), throwsRefusal(FynkelStatus.invalidValue, 'fov_y'));
+      }
+      expect([root.isAlive, good.isAlive, under.isAlive], [false, false, false]);
+      expect(world.all<GameObject>(), [before]);
+      final after = world.add(GameObject());
+      for (var id = before.id + 1; id < after.id; id++) {
+        expect(fy_exists(world.pointer, id), isFalse, reason: 'object#$id was despawned again');
+      }
+      // Each part can still be added, and its lights are counted once.
+      bad.fovY = 60.deg;
+      world.add(root);
+      expect([root.isAlive, good.isAlive, under.isAlive], [true, true, true]);
+      expect(good.parent, root);
+      expect(world.all<GameObject>(), hasLength(7));
+    }, zoneSpecification: ZoneSpecification(print: (_, _, _, line) => said.add(line)));
+    expect(said, isEmpty, reason: 'four suns, after nine refused');
   });
 
   test('the engine refuses values that are not finite or not unit rotations', () {
