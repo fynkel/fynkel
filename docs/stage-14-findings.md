@@ -153,7 +153,7 @@ spline fences and path), plus what the audit found at the seams:
 
 | Row | What | Size |
 |---|---|---|
-| GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median, held to a bar of the Mac's time doubled); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
+| GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median over 200 ms at least, held to a bar of the Mac's time doubled; over it, tried again up to three times, the best held, as other work on the runner once slowed one 2.4×); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
 | GT7 | Per-system frame timing (only particles and meshes have one; the lab rebuilds a median timer in six scenes; the guide points at a Profiler that doesn't exist) | M |
 | — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts | M |
 
