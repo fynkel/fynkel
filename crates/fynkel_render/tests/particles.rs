@@ -507,3 +507,28 @@ fn the_look_of_particles_matches_its_golden() {
     assert_eq!(stats.particles, 16 + 6 + 1 + 1 + 5);
     assert_golden("particles_look", &image);
 }
+
+/// What preparing a frame of 10,000 see-through particles takes on the
+/// CPU, their sort included (stage 14's RN4), held to a bar:
+/// `cargo test --release -p fynkel_render -- --ignored bench_`.
+#[test]
+#[ignore = "a benchmark: run in release"]
+fn bench_preparing_ten_thousand_see_through_particles() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let mut s = scene(vec![], QualityLevel::High);
+    // A cloud in front of the camera, in no order.
+    let mut seed = 0x2545_f491_u32;
+    let mut next = move || {
+        seed ^= seed << 13;
+        seed ^= seed >> 17;
+        seed ^= seed << 5;
+        seed as f32 / u32::MAX as f32 - 0.5
+    };
+    let cloud: Vec<Particle> =
+        (0..10_000).map(|_| particle(Vec3::new(next() * 4.0, next() * 4.0, next() * 4.0), 0.1, GREEN, 0.5)).collect();
+    add(&mut s, &cloud, plain(Blend::Transparent));
+    fynkel_bench::bench("preparing 10,000 see-through particles", 100, 0.2, || {
+        std::hint::black_box(r.prepare(&s, 256, 256));
+    });
+}

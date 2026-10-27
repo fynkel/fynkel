@@ -696,6 +696,9 @@ pub struct Renderer {
     line_vertices: Vec<LineVertex>,
     /// The particle systems' particles, as their batches draw them.
     particle_instances: Vec<ParticleInstance>,
+    /// A transparent system's particles in the order they're drawn: each
+    /// one's depth and index packed to sort as one number.
+    particle_order: Vec<u64>,
     /// The scene's solid draws that are seen, each with its sort key,
     /// sorted.
     order: Vec<(SortKey, u32)>,
@@ -843,6 +846,7 @@ impl Renderer {
             blended_from: 0,
             line_vertices: Vec::new(),
             particle_instances: Vec::new(),
+            particle_order: Vec::new(),
             order: Vec::new(),
             blended: Vec::new(),
             in_view_lights: Vec::new(),
@@ -1349,7 +1353,7 @@ impl Renderer {
                 0 => batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values),
                 _ => particle_batch(
                     &mut self.batches,
-                    &mut self.particle_instances,
+                    (&mut self.particle_instances, &mut self.particle_order),
                     key,
                     scene,
                     &scene.particle_draws[(i & !PARTICLES) as usize],
@@ -3389,7 +3393,7 @@ fn batch(batches: &mut Vec<Batch>, instances: &mut Vec<Instance>, key: SortKey, 
 /// none are soft.
 fn particle_batch(
     batches: &mut Vec<Batch>,
-    instances: &mut Vec<ParticleInstance>,
+    (instances, order): (&mut Vec<ParticleInstance>, &mut Vec<u64>),
     key: SortKey,
     scene: &RenderScene,
     draw: &crate::ParticleDraw,
@@ -3419,7 +3423,20 @@ fn particle_batch(
     let ([su, sv], [ou, ov]) = (m.uv_scale, m.uv_offset);
     let (fu, fv) = (su / columns as f32, sv / rows as f32);
     let values = m.shader.map_or(0, |used| values + used.values);
-    instances.extend(particles.iter().map(|p| {
+    // A transparent system's furthest first: sorted by depth (then index,
+    // so equal depths keep their order) as one number each, not as whole
+    // instances with their depths worked out in every comparison.
+    order.clear();
+    if cover == Cover::Transparent && !trail {
+        order.extend(
+            particles.iter().enumerate().map(|(i, p)| (u64::from(!ordered(p.position.dot(forward))) << 32) | i as u64),
+        );
+        order.sort_unstable();
+    } else {
+        order.extend(0..particles.len() as u64);
+    }
+    instances.extend(order.iter().map(|&i| {
+        let p = &particles[(i & 0xFFFF_FFFF) as usize];
         let [r, g, b, a] = p.color;
         let (column, row) = (p.frame % columns, (p.frame / columns) % rows);
         // A trail's point: half its width across the way it goes, as seen
@@ -3439,10 +3456,6 @@ fn particle_batch(
             values: [values, 0, 0, 0],
         }
     }));
-    if cover == Cover::Transparent && !trail {
-        let depth = |p: &ParticleInstance| Vec3::new(p.center_size[0], p.center_size[1], p.center_size[2]).dot(forward);
-        instances[first as usize..].sort_unstable_by(|a, b| depth(b).total_cmp(&depth(a)));
-    }
     let count = instances.len() as u32 - first;
     batches.push(Batch {
         cover,
@@ -3457,6 +3470,12 @@ fn particle_batch(
         first,
         count,
     });
+}
+
+/// `depth`'s bits made to sort as it does: larger, larger.
+fn ordered(depth: f32) -> u32 {
+    let bits = depth.to_bits();
+    if bits >> 31 == 1 { !bits } else { bits | 1 << 31 }
 }
 
 /// `draw`'s instance, as forward.wgsl reads it.

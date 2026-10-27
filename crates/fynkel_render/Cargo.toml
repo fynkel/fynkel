@@ -20,3 +20,4 @@ pollster.workspace = true
 
 [dev-dependencies]
 fynkel_golden.workspace = true
+fynkel_bench.workspace = true

@@ -42,7 +42,7 @@ jobs:
       # median is over its bar (the Mac's time when it was set, doubled),
       # so a slowdown fails the PR that makes it.
       - name: benchmarks
-        run: cargo test --release -p fynkel_mesh -p fynkel_world -p fynkel_physics -p fynkel_ffi -- --ignored bench_
+        run: cargo test --release -p fynkel_mesh -p fynkel_world -p fynkel_physics -p fynkel_render -p fynkel_ffi -- --ignored bench_
       # package:fynkel. Its build hook compiles fynkel_ffi; its tests draw
       # the stage 1 scene from Dart to the same golden image. The bindings
       # are generated again from the header and must match the committed
