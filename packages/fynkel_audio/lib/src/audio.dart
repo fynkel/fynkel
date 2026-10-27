@@ -393,6 +393,16 @@ final class Audio extends WorldSystem implements Finalizable {
     _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: _indexOf(group));
   }
 
+  /// Stops every sound [playOneShot] and [playAt] started, with a short
+  /// fade: on leaving a level, say, its explosions still ringing. An
+  /// [AudioSource]'s sounds and the [music] play on; stop a source with
+  /// [AudioSource.stop], or destroy its object.
+  void stopOneShots() {
+    if (_disposed) return;
+    // A world-level one-shot belongs to no owner: 0.
+    _check(fa_owner_stop(_native, 0));
+  }
+
   /// Makes [frames] frames of the sound (48,000 a second, interleaved
   /// left and right) as a speaker would have played them: for a test to
   /// listen to what plays, and compare it with what it should be. The

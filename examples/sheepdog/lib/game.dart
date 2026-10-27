@@ -24,6 +24,25 @@ const size = 12.0;
 /// z behind penFront, with its gate the whole front.
 const penHalf = 4.5, penFront = -5.0;
 
+/// The fences, each along a spline: the field's four sides, and the
+/// pen's two (its back is the field's).
+final fenceLines = [
+  Spline.linear([Vec3(-size, 0, -size), Vec3(size, 0, -size), Vec3(size, 0, size), Vec3(-size, 0, size)], closed: true),
+  Spline.linear([Vec3(-penHalf, 0, penFront), Vec3(-penHalf, 0, -size)]),
+  Spline.linear([Vec3(penHalf, 0, penFront), Vec3(penHalf, 0, -size)]),
+];
+
+/// The path the flock has worn from the field's front to the pen's gate,
+/// round the middle, and [pathWidth] across: no grass grows on it.
+final wornPath = Spline.smooth([
+  Vec3(3, 0, size),
+  Vec3(1.5, 0, 7),
+  Vec3(-1.5, 0, 2),
+  Vec3(0.5, 0, -2),
+  Vec3(0, 0, penFront - 1.5),
+]);
+const pathWidth = 1.6;
+
 /// The layer of what's only for show, the bark's ring and the grass: the
 /// minimap leaves it out.
 const effects = 1;
@@ -122,6 +141,16 @@ class SheepdogGame extends GameObject {
   /// The floor and the fences, coloured by [wear]. The floor turns to
   /// sand where it dips under the pond (assets/shaders/ground.wgsl).
   final grass = Material(name: 'grass', roughness: 1), fence = Material(name: 'fence', roughness: 0.8);
+
+  /// The worn path, bare earth.
+  final earth = Material(name: 'earth', roughness: 1);
+
+  /// The fences' rails, swept along [fenceLines], and the path, along
+  /// [wornPath]: made once, for every round.
+  late final List<Mesh> rails = [
+    for (final line in fenceLines) Mesh.sweep(line, Shape2D.rect(0.08, 0.12), segmentsPerMetre: 1),
+  ];
+  late final Mesh path = Mesh.sweep(wornPath, Shape2D.rect(pathWidth, 0.02), segmentsPerMetre: 2, uvPerMetre: 0.5);
 
   /// How far the grass's tips bend in the wind, in metres.
   static const wind = 0.12;
@@ -321,6 +350,7 @@ class SheepdogGame extends GameObject {
     grass.color = (dark ? scheme.onPrimaryFixedVariant : scheme.primary).toFynkel();
     blades.color = grass.color;
     fence.color = (dark ? scheme.outline : scheme.secondaryContainer).toFynkel();
+    earth.color = Color.lerp(grass.color, const Color(0xFF9A7650), 0.65);
     // The moon is pale blue.
     final light = dark ? Color.rgb(0.65, 0.75, 1) : Color.white;
     _sun
@@ -397,6 +427,7 @@ class SheepdogGame extends GameObject {
           final world = middle + at;
           final angle = random.nextDouble() * math.pi, tall = 0.25 + random.nextDouble() * 0.25;
           if ((world - pond).flat.length < pondRadius + 0.15 ||
+              (wornPath.nearest(world).position - world).flat.length < pathWidth / 2 + 0.1 ||
               world.x.abs() > size - 0.2 ||
               world.z.abs() > size - 0.2) {
             continue;
@@ -515,19 +546,41 @@ class Round extends GameObject {
         components: [MeshRenderer(game.pondMesh, game.pondWater)..castShadows = false],
       ),
     );
-    // A low fence around the field, and the pen's three sides.
-    for (final (at, across) in [
-      (Vec3(0, 0, -size), Vec3(2 * size, 0, 0)),
-      (Vec3(0, 0, size), Vec3(2 * size, 0, 0)),
-      (Vec3(-size, 0, 0), Vec3(0, 0, 2 * size)),
-      (Vec3(size, 0, 0), Vec3(0, 0, 2 * size)),
-      (Vec3(-penHalf, 0, (penFront - size) / 2), Vec3(0, 0, size + penFront)),
-      (Vec3(penHalf, 0, (penFront - size) / 2), Vec3(0, 0, size + penFront)),
-    ]) {
+    // The path the flock wore, just above the grass.
+    add(
+      GameObject(
+        name: 'path',
+        transform: Transform(position: Vec3(0, 0.012, 0)),
+        components: [MeshRenderer(game.path, game.earth)..castShadows = false],
+      ),
+    );
+    // A low fence around the field, and the pen's sides: posts 2 m apart
+    // along each line, and two rails swept along it.
+    for (final (i, line) in fenceLines.indexed) {
       add(
         GameObject(
-          transform: Transform(position: at + Vec3(0, 0.3, 0), scale: across + Vec3(0.2, 0.6, 0.2)),
-          components: [MeshRenderer(Mesh.cube(), game.fence)],
+          name: 'fence $i',
+          components: [
+            SplineContainer([line]),
+            SplineInstantiate(
+              (_) => GameObject(
+                children: [
+                  GameObject(
+                    transform: Transform(position: Vec3(0, 0.35, 0), scale: Vec3(0.18, 0.7, 0.18)),
+                    components: [MeshRenderer(Mesh.cube(), game.fence)],
+                  ),
+                ],
+              ),
+              spacing: 2,
+            ),
+          ],
+          children: [
+            for (final y in [0.3, 0.58])
+              GameObject(
+                transform: Transform(position: Vec3(0, y, 0)),
+                components: [MeshRenderer(game.rails[i], game.fence)],
+              ),
+          ],
         ),
       );
     }

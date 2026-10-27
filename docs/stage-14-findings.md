@@ -138,9 +138,14 @@ spline fences and path), plus what the audit found at the seams:
   cheap to add. (L)
 - **GT9**: no test runs three systems at once outside the lab; sound is
   in no game. The everything-on scene and its tests close this.
+  **Done**: the lab's 'All of it together', tested at each level.
 - **GT3**: the soak never draws, so GPU-side leaks can't show.
+  **Half done**: with `FYNKEL_SOAK_DRAW=1` it draws every 30th frame,
+  64×64. Not in CI: drawn, the process's footprint wanders on the runner
+  while the graphics memory holds flat; a check of the GPU's own memory
+  is phase 4's.
 - **AU9 ½**: a way to stop all world-level one-shots (no scene loads in
-  Fynkel, so it's narrower than raised).
+  Fynkel, so it's narrower than raised). **Done**: `audio.stopOneShots()`.
 
 ## 4. Phase 4: fast, and staying fast
 
