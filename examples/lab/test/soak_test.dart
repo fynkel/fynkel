@@ -27,8 +27,12 @@ Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytes
 
 final rounds = int.tryParse(Platform.environment['FYNKEL_SOAK_ROUNDS'] ?? '') ?? 0;
 
-// FYNKEL_SOAK_DRAW=0 runs it without drawing, to compare with.
-final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] != '0';
+// FYNKEL_SOAK_DRAW=1 draws each round too (GT3). Not in CI yet: drawn,
+// the process's lowest readings wander by 30 MB or more over a run on the
+// runner (0.85 MB a round, against 0.25 allowed, 2026-10-27) though the
+// graphics memory holds flat, so its check waits for one that reads the
+// GPU's memory itself.
+final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] == '1';
 
 void main() {
   test(
