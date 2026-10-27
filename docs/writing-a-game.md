@@ -1959,6 +1959,8 @@ of 1 and it's heard from where its object is, as Unity's:
 - `audio.playAt(clip, position)` plays a one-shot at a place that belongs
   to no object (Unity's `PlayClipAtPoint`): an explosion, a coin picked
   up. It stays where it was played.
+- `audio.stopOneShots()` stops every sound `playOneShot` and `playAt`
+  started, on leaving a level, say; sources and the music play on.
 - `audio.drawSources = true` draws each 3D source's `minDistance` and
   `maxDistance` as spheres with the debug lines (§13), to see where
   each can be heard.

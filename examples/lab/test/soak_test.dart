@@ -27,6 +27,9 @@ Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytes
 
 final rounds = int.tryParse(Platform.environment['FYNKEL_SOAK_ROUNDS'] ?? '') ?? 0;
 
+// FYNKEL_SOAK_DRAW=0 runs it without drawing, to compare with.
+final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] != '0';
+
 void main() {
   test(
     'every scene, again and again, in one world each round: memory stays flat',
@@ -41,12 +44,16 @@ void main() {
       final heap = <int>[];
       for (var round = 0; round < rounds; round++) {
         final world = World(source: files);
+        // Drawn too, small, so what the GPU side keeps shows (GT3): every
+        // 30th frame, read back, so none is replaced before it's drawn.
+        final view = drawing ? HeadlessView(world, width: 64, height: 64) : null;
         for (final make in scenes) {
           final scene = world.add(make());
           await scene.loaded;
           void frames(int n) {
             for (var i = 0; i < n; i++) {
               world.update(1 / 60);
+              if (view != null && i % 30 == 0) view.read(view.frame());
             }
           }
 
@@ -71,6 +78,7 @@ void main() {
           scene.destroy();
           world.update(1 / 60);
         }
+        view?.dispose();
         world.dispose();
         await pumpEventQueue();
         footprint.add(_footprint());
