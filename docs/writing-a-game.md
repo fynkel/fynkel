@@ -933,6 +933,16 @@ numbers are uneven, so take the median of a second's worth: the lab's
 to draw the frame runs on the view's own thread: `ViewStats.busy`, from
 a `FynkelView`'s `onStats` (`stats.view.busy`, for about a second).
 
+**What objects cost each frame**: only those with something of yours to
+call. A plain `GameObject`, with only the engine's components (a
+renderer, a light, a collider, a particle system), costs the frame
+nothing on the game's thread however many there are: 32,000 still cubes
+add 0.002 ms on a Mac. A subclass, or one with a behaviour, has its
+updates called whether it overrides them or not: tens of nanoseconds
+each on a Mac before your code, which adds up in the tens of thousands.
+So make scenery plain objects, and give the class of your own to what
+thinks.
+
 ## 7. Moving things
 
 On objects and behaviours alike:
@@ -4239,6 +4249,9 @@ For code written before: each change that breaks it, newest first.
     system's hook after it in that step runs. A particle system waiting
     for its collision plane or sub emitter to be added no longer stays
     held after its world is disposed.
+  - A model's parts given behaviours update after their parents, as
+    other objects do, whatever order the behaviours were put on in: they
+    updated in that order, a child before its parent if it came first.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

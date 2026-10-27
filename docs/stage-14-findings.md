@@ -155,7 +155,7 @@ spline fences and path), plus what the audit found at the seams:
 |---|---|---|
 | GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median over 200 ms at least, held to a bar of the Mac's time doubled; over it, tried again up to three times, the best held, as other work on the runner once slowed one 2.4×); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
 | GT7 | Per-system frame timing (only particles and meshes have one; the lab rebuilds a median timer in six scenes; the guide points at a Profiler that doesn't exist). **Done**: `world.profile`, the frame's parts and each system's own time (`WorldSystem.name`, `frameTime`), always on (scale's frame 0.49 → 0.51 ms, within its noise), no garbage; the lab shows its medians for every scene, and the guide (§6) points there. The six scenes' own timers stay: they time one thing each (a sweep, a step) for their readouts | M |
-| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts. **Curves done on the Mac** (`examples/lab/test/curves_test.dart`, `FYNKEL_CURVES=1`): each count a fresh lab scene, the median of 120 frames, the best of three tries, on the game's thread (`world.profile.total`) and drawn (a 256×256 headless view, so CPU, not fill). Every curve grows in step with its count or slower, except still objects on the game's thread: DC4, below. The budgets need the phones | M |
+| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts. **Curves done on the Mac** (`examples/lab/test/curves_test.dart`, `FYNKEL_CURVES=1`): each count a fresh lab scene, the median of 120 frames, the best of three tries, on the game's thread (`world.profile.total`) and drawn (a 256×256 headless view, so CPU, not fill). Every curve grows in step with its count or slower; still objects on the game's thread didn't until DC4, below, was fixed. The budgets need the phones | M |
 
 **The curves** (Mac, 2026-10-27; ms over an empty world's, at the
 second count and the last; growth 1 = in step):
@@ -172,9 +172,10 @@ second count and the last; growth 1 = in step):
 Moving objects cost more each past 4,000 or so (0.12 µs → 0.15), their
 data no longer in the cache; above that they're in step. Still objects
 should cost close to nothing, but the updates, late updates and fixed
-updates each visit every one (DC4): 0.1 ms at 4,000, 1.1–1.4 at 32,000,
-three times as much for each doubling at the top, as the walks fall
-out of the cache. The curve test marks it known until DC4 is fixed.
+updates each visited every one (DC4): 0.1 ms at 4,000, 1.1–1.4 at
+32,000, three times as much for each doubling at the top, as the walks
+fell out of the cache. With DC4 done they cost 0.002 ms at 32,000, and
+the moving objects (moved by the scene, plain themselves) 3.1 ms.
 
 **The costs found** (Mac numbers; a phone is slower):
 
@@ -184,7 +185,7 @@ out of the cache. The curve test marks it known until DC4 is fixed.
 | WO8 | Sweeping and changing meshes allocate each frame | 87 allocations, 800 KB per road sweep | M |
 | WO4 | Raycasts recompute every matrix and test every triangle | 50 casts into 3000 objects: 14.2 ms | M |
 | DC3 + DF3 | Animators mark every part moved every frame, hidden or paused too | 50 hidden knights ~42 µs; physics then rescans | S |
-| DC4 | Plain objects visited every update; one destroy or reparent is a pass over all | 0.1 ms at 5000, 0.5 ms at 20000; the curves: 1.3 ms at 32,000, growing faster than the count | S/M |
+| DC4 | Plain objects visited every update; one destroy or reparent is a pass over all | 0.1 ms at 5000, 0.5 ms at 20000; the curves: 1.3 ms at 32,000, growing faster than the count. **Done**: only objects with something to call (a subclass, a behaviour) are in the update order; a plain one joins in its place when given a behaviour. 32,000 still objects 1.3 → 0.002 ms, 32,000 moved by one object 4.8 → 3.1; destroying or moving plain ones is no pass at all, and others' a pass over those in the order only. A model's parts given behaviours now update after their parents (they went in the order the behaviours were put on) | S/M |
 | DF2 | A particle or trail setter resends everything and relinks every system | 9 objects a set; 4.3 µs with 1000 systems | M |
 | DF7a | `material.set` packs every value again | ~70 objects a set (the guide's way to tween) | S |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects | M |
