@@ -706,7 +706,7 @@ class GameObject with _Moving {
     _engine('its animator can\'t be used');
     final model = _model;
     if (model == null || model.clips.isEmpty) return null;
-    return _animator = world._addAnimator(this, model);
+    return _animator = world.system(_AnimatorWorld.new)._add(this, model);
   }
 
   // --- Components ---
@@ -742,7 +742,7 @@ class GameObject with _Moving {
     }
     if (_world case final world?) {
       try {
-        _write(component);
+        if (component._enabledFlag) component._put(this);
       } catch (_) {
         _components!.removeLast();
         component._owner = null;
@@ -782,8 +782,8 @@ class GameObject with _Moving {
         b._listening?.cancelAll();
         b._ending = true;
         world._safely(this, b.onDestroy);
-      case Camera() || Light() || MeshRenderer() || ParticleSystem() || TrailRenderer():
-        if (component._enabledFlag) _unwrite(component);
+      case _:
+        if (component._enabledFlag) component._takeOut(this);
     }
     component
       .._removed = true
@@ -907,49 +907,6 @@ class GameObject with _Moving {
     };
     return Light._(kind, l.color.read(), l.intensity, l.range, l.spot_angle.deg, l.softness, l.shadows);
   }
-
-  /// Puts an engine component that was turned on or off into the engine,
-  /// or takes it out.
-  void _enabledChanged(Component component) => component._enabledFlag ? _write(component) : _unwrite(component);
-
-  void _unwrite(Component component) {
-    switch (component) {
-      case Camera c:
-        // Its effects go with it, so their shaders can be let go.
-        if (c._effectsSent) {
-          check(fy_camera_effects_set(world.pointer, id, nullptr, 0));
-          c._effectsSent = false;
-        }
-        check(fy_camera_remove(world.pointer, id));
-      case Light l:
-        check(fy_light_remove(world.pointer, id));
-        world._countLight(this, l, _LightCount.none);
-      case MeshRenderer r:
-        // Its parts' materials go with it, so they can be let go.
-        if (r._moreSent) {
-          check(fy_submesh_materials_set(world.pointer, id, nullptr, 0));
-          r._moreSent = false;
-        }
-        check(fy_mesh_renderer_remove(world.pointer, id));
-      case ParticleSystem():
-        check(fy_particles_remove(world.pointer, id));
-        world._particleSystems.remove(id);
-      case TrailRenderer():
-        check(fy_trail_remove(world.pointer, id));
-        world._trails.remove(id);
-      case Behaviour():
-    }
-  }
-
-  void _write(Component component) => switch (component) {
-    _ when !component._enabledFlag => null,
-    Camera c => _writeCamera(c),
-    Light c => _writeLight(c),
-    MeshRenderer c => _writeMeshRenderer(c),
-    ParticleSystem c => _writeParticles(c),
-    TrailRenderer c => _writeTrail(c),
-    Behaviour() => null,
-  };
 
   /// Where the object is, how it's turned and how big it is, relative to
   /// its [parent]: [localPosition], [localRotation] and [localScale] in
@@ -1164,7 +1121,7 @@ class GameObject with _Moving {
       }
     }
     check(fy_trail_set(w, id, scratch.trailSettings));
-    world._trails[id] = value;
+    world.system(_ParticleWorld.new)._trails[id] = value;
   }
 
   void _writeParticles(ParticleSystem value) {
@@ -1366,10 +1323,7 @@ class GameObject with _Moving {
     }
     s.sub_emitter_count = subs;
     check(fy_particles_set(w, id, scratch.particleSettings));
-    // Another's sub emitter may be this one, now here: they try again.
-    if (world._waitingParticles.isNotEmpty) world._waitingShape = -1;
-    world._particleSystems[id] = value;
-    if (waiting) world._waitingParticles.add(value);
+    world.system(_ParticleWorld.new)._written(this, value, waiting: waiting);
   }
 
   @override

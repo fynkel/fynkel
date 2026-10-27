@@ -401,7 +401,10 @@ final class Orbit extends _Rig {
 /// camera where it is (still shaking it). When the live one's object is
 /// destroyed, the view blends from where it is to the next one.
 final class Cameras {
-  Cameras._(this._world);
+  Cameras._(this._world) {
+    // Its frame is a system's, from the first time it's asked for.
+    if (!_world.isDisposed) _world.system(_CameraWorld.new);
+  }
 
   final World _world;
   final _virtual = <VirtualCamera>[];
@@ -659,4 +662,20 @@ final class _Shake {
   final double strength, seconds, frequency, phaseX, phaseY;
   final bool unscaled;
   double time = 0;
+}
+
+/// Runs the world's [Cameras] last of every system's [afterLateUpdate],
+/// before the frame's meshes are sent: the rigs, then the live virtual
+/// camera, its blend and the shake.
+final class _CameraWorld extends WorldSystem {
+  _CameraWorld(super.world);
+
+  @override
+  int get order => _camerasOrder;
+
+  @override
+  void afterLateUpdate() {
+    super.afterLateUpdate();
+    world.cameras._run();
+  }
 }

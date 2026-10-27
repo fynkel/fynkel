@@ -4206,6 +4206,15 @@ For code written before: each change that breaks it, newest first.
     refused (an `ArgumentError`), and `Quat.normalized` throws for a
     quaternion of length 0 or one that isn't finite, as `Vec3.normalized`
     does: both gave NaNs.
+  - The animators, the particles with their trails, and the cameras run
+    as built-in `WorldSystem`s (`package:fynkel/extend.dart`), in the
+    same places in the frame: the animators and then the particles first
+    in `afterUpdate`, the cameras last in `afterLateUpdate`. What their
+    step throws goes to `world.errors`, as a package's does, instead of
+    out of `update`. Once a hook asks for the world to be disposed, no
+    system's hook after it in that step runs. A particle system waiting
+    for its collision plane or sub emitter to be added no longer stays
+    held after its world is disposed.
 
 - **Limits instead of crashes** (2026-10-26, stage 14):
   - A particle system's `duration` is from 0.05 to 100,000 s: more

@@ -174,8 +174,6 @@ final class World implements Finalizable {
     _motions.clear();
     _reparented.clear();
     _unsent.clear();
-    _animators.clear();
-    _animatorList.clear();
     _assets.clear();
     _free(owned, null);
     // What a disposed world reports from here goes to the zone.
@@ -342,26 +340,14 @@ final class World implements Finalizable {
   // start of the next update, so a removal never shifts a list being run.
   final _compact = <GameObject>[];
 
-  // The animators the game has asked for ([GameObject.animator]), by
-  // their model copies' ids, and in a list, which a frame goes through
-  // without making an iterator.
-  final _animators = <int, Animator>{};
-  // The particle systems in the engine, by their objects' ids.
-  final _particleSystems = <int, ParticleSystem>{};
   // The enabled spline containers, for [Debug.drawSplines].
   final _splineContainers = <SplineContainer>[];
-  // Systems written before their sub emitters' or planes' objects were in
-  // the world: written again before the next step.
-  final _waitingParticles = <ParticleSystem>{};
-  // [_shape] when they last tried, so they try again only after a change.
-  var _waitingShape = 0;
-  final _trails = <int, TrailRenderer>{};
-  final _particleWatch = Stopwatch();
 
   /// How long the engine took to move every particle system on, in the
   /// last frame: what Unity's Profiler shows as ParticleSystem.Update.
   /// Zero in a world without particle systems.
-  Duration get particleStepTime => Duration(microseconds: _particleWatch.elapsedMicroseconds);
+  Duration get particleStepTime =>
+      Duration(microseconds: maybeSystem<_ParticleWorld>()?._watch.elapsedMicroseconds ?? 0);
   final _meshWatch = Stopwatch();
 
   /// How long the last frame took to send the meshes the game changed to
@@ -370,7 +356,6 @@ final class World implements Finalizable {
   /// With several worlds, the first to update sends them all. Zero when no
   /// mesh changed.
   Duration get meshChangeTime => Duration(microseconds: _meshWatch.elapsedMicroseconds);
-  final _animatorList = <Animator>[];
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
   // given a new parent (systems.dart).
@@ -747,21 +732,18 @@ final class World implements Finalizable {
     if (_disposeAsked) return;
     if (_dueObjects.isNotEmpty) _runDue();
     if (_disposeAsked) return;
-    _animate();
-    if (_disposeAsked) return;
-    _stepParticles();
-    if (_disposeAsked) return;
     if (_shaders.isNotEmpty) check(fy_world_time_set(pointer, time._sinceStart, time._delta));
+    // The animators pose, then the particles move, then the packages'.
     _runSystems(_SystemHook.afterUpdate);
     if (_disposeAsked) return;
 
     _callEach(_Call.lateUpdate, updated);
 
     if (_disposeAsked) return;
+    // The packages', then the cameras move.
     _runSystems(_SystemHook.afterLateUpdate);
     if (_disposeAsked) return;
 
-    cameras._run();
     _meshWatch
       ..reset()
       ..start();

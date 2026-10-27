@@ -123,7 +123,7 @@ final class Debug implements Finalizable {
   /// The frame's shapes, with [drawShapes].
   void _drawShapes() {
     _addSeconds = null;
-    for (final system in _world._particleSystems.values) {
+    for (final system in _world.maybeSystem<_ParticleWorld>()?._systems.values ?? const <ParticleSystem>[]) {
       if (system.isRemoved || !system.enabled) continue;
       final object = system.gameObject;
       if (!object.activeInHierarchy) continue;
