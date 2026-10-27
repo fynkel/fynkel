@@ -528,25 +528,21 @@ fn a_skinned_mesh_cant_be_combined() {
     assert_eq!(MeshData::combine(&[(&skinned, Mat4::IDENTITY)]), Err(MeshError::Skinned));
 }
 
-/// What making each kind of mesh takes, in release:
-/// `cargo test --release -p fynkel_mesh --test made -- --ignored --nocapture`.
+/// What making each kind of mesh takes, each held to a bar (stage 14's
+/// GT1): `cargo test --release -p fynkel_mesh -- --ignored bench_`.
 #[test]
-#[ignore]
-fn what_making_meshes_costs() {
-    fn time(name: &str, make: impl Fn() -> MeshData) {
-        let mesh = make();
-        let runs = 50;
-        let start = std::time::Instant::now();
-        for _ in 0..runs {
-            std::hint::black_box(make());
-        }
-        let ms = start.elapsed().as_secs_f64() * 1000.0 / runs as f64;
-        println!("{name}: {} triangles, {ms:.3} ms", mesh.indices().len() / 3);
+#[ignore = "a benchmark: run in release"]
+fn bench_making_meshes() {
+    fn time(name: &str, bar_ms: f64, make: impl Fn() -> MeshData) {
+        let triangles = make().indices().len() / 3;
+        fynkel_bench::bench(&format!("{name}, {triangles} triangles"), 50, bar_ms, || {
+            drop(std::hint::black_box(make()))
+        });
     }
-    time("box 8 a side", || MeshData::box_shape(Vec3::ONE, [8; 3], 1.0));
-    time("grid 100 × 100", || MeshData::grid(Vec2::splat(10.0), [100, 100], 1.0));
-    time("sphere 48 × 24", || MeshData::sphere_sized(1.0, 48, 24));
-    time("torus 64 × 32", || MeshData::torus(1.0, 0.25, 64, 32));
+    time("box 8 a side", 0.03, || MeshData::box_shape(Vec3::ONE, [8; 3], 1.0));
+    time("grid 100 × 100", 0.35, || MeshData::grid(Vec2::splat(10.0), [100, 100], 1.0));
+    time("sphere 48 × 24", 0.06, || MeshData::sphere_sized(1.0, 48, 24));
+    time("torus 64 × 32", 0.1, || MeshData::torus(1.0, 0.25, 64, 32));
     let gear: Vec<Vec2> = (0..96)
         .map(|i| Vec2::from_angle(std::f32::consts::TAU * i as f32 / 96.0) * if (i / 4) % 2 == 0 { 1.0 } else { 0.85 })
         .collect();
@@ -557,11 +553,13 @@ fn what_making_meshes_costs() {
         })
         .collect();
     let hole_refs: Vec<&[Vec2]> = holes.iter().map(Vec::as_slice).collect();
-    time("a gear of 96 points with 6 holes, extruded", || MeshData::extrude(&gear, &hole_refs, 0.2, 1.0).unwrap());
+    time("a gear of 96 points with 6 holes, extruded", 0.08, || {
+        MeshData::extrude(&gear, &hole_refs, 0.2, 1.0).unwrap()
+    });
     let profile: Vec<Vec2> = (0..=40).map(|i| Vec2::new(0.3 + 0.1 * (i as f32 * 0.3).sin(), i as f32 * 0.05)).collect();
-    time("a profile of 41 points, lathed 48 times round", || MeshData::lathe(&profile, 48).unwrap());
+    time("a profile of 41 points, lathed 48 times round", 0.15, || MeshData::lathe(&profile, 48).unwrap());
     let house = MeshData::box_shape(Vec3::ONE, [1; 3], 1.0);
     let at: Vec<(&MeshData, glam::Mat4)> =
         (0..100).map(|i| (&house, Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0)))).collect();
-    time("100 boxes combined", || MeshData::combine(&at).unwrap());
+    time("100 boxes combined", 0.17, || MeshData::combine(&at).unwrap());
 }

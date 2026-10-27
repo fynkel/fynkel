@@ -213,11 +213,11 @@ fn a_broken_sweep_is_refused() {
     );
 }
 
-/// What sweeping takes, in release:
-/// `cargo test --release -p fynkel_mesh --test sweep -- --ignored --nocapture`.
+/// What sweeping a road again takes, held to a bar (stage 14's GT1):
+/// `cargo test --release -p fynkel_mesh -- --ignored bench_`.
 #[test]
-#[ignore]
-fn what_sweeping_costs() {
+#[ignore = "a benchmark: run in release"]
+fn bench_sweeping_a_road_again() {
     // A 100 m road, a point every 0.5 m, its outline 12 points.
     let path: Vec<PathPoint> = (0..=200)
         .map(|i| {
@@ -232,14 +232,10 @@ fn what_sweeping_costs() {
         })
         .collect();
     let profile = circle(3.0, 12);
-    let rounds = 200;
     let mut mesh = MeshData::sweep(&sweep(&path, &profile, &[], true)).unwrap();
-    let start = std::time::Instant::now();
-    for _ in 0..rounds {
+    fynkel_bench::bench("a 100 m road of 201 points, a 12-point outline, swept again", 200, 0.2, || {
         mesh.sweep_into(&sweep(&path, &profile, &[], true)).unwrap();
-    }
-    let each = start.elapsed().as_secs_f64() * 1e3 / rounds as f64;
-    println!("a 100 m road of 201 points, a 12-point outline: {each:.3} ms, {} triangles", mesh.indices().len() / 3);
+    });
 }
 
 // Stage 14's WO14: where the path went straight up its up, the right was
