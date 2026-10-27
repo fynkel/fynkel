@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 44
+#define FY_ABI_VERSION 45
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -2199,6 +2199,19 @@ FyStatus fy_animator_parts(const struct FyWorld *world,
 // `world` is null or live; `dt` is null or readable; `out_count` is null
 // or writable.
 FyStatus fy_world_animate(const struct FyWorld *world, const float *dt, size_t *out_count);
+
+// The roots of the animators the last `fy_world_animate` posed (those
+// playing and shown), as `fy_children_get` writes ids: only their parts
+// may have moved.
+//
+// # Safety
+//
+// `world` is null or live; `buf` is null or valid for `cap` writes;
+// `out_count` is null or writable.
+FyStatus fy_world_posed_get(const struct FyWorld *world,
+                            uint64_t *buf,
+                            size_t cap,
+                            size_t *out_count);
 
 // The last `fy_world_animate`'s events, as `fy_children_get` writes ids:
 // all of them when they fit in `cap`, and their number to `out_count`.

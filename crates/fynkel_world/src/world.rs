@@ -194,6 +194,8 @@ pub struct World {
     pub(crate) debug_lines: Vec<crate::DebugLine>,
     /// Each model copy's animator, by its root.
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
+    /// The roots of the animators the last [`World::animate`] posed.
+    pub(crate) posed: Vec<ObjectId>,
     /// The skin of each model copy's skinned part, by the part.
     pub(crate) skins: IdMap<ObjectId, crate::skin::Skin>,
     /// Each camera's screen effects, in order, by its object.
@@ -249,6 +251,7 @@ impl World {
             batch: Vec::new(),
             debug_lines: Vec::new(),
             animators: IdMap::default(),
+            posed: Vec::new(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
             particles: IdMap::default(),

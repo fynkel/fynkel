@@ -811,6 +811,12 @@ impl World {
             .collect())
     }
 
+    /// The roots of the animators the last [`animate`](Self::animate)
+    /// posed: those playing and shown. Only their parts may have moved.
+    pub fn posed(&self) -> &[ObjectId] {
+        &self.posed
+    }
+
     /// The number of animators: models spawned with clips, still here.
     pub fn animator_count(&self) -> usize {
         self.animators.len()
@@ -819,10 +825,11 @@ impl World {
     /// Advances every animator by `dt` seconds and poses its model: once a
     /// frame, before the frame is drawn. Animators of models that aren't
     /// shown keep time but don't pose. What the reporting ones did is
-    /// added to `events`.
+    /// added to `events`; those that posed are [`posed`](Self::posed).
     pub fn animate(&mut self, dt: f32, events: &mut Vec<AnimationEvent>) {
         let dt = if dt.is_finite() { dt.max(0.0) } else { 0.0 };
         let mut animators = std::mem::take(&mut self.animators);
+        self.posed.clear();
         for (&root, animator) in &mut animators {
             if !animator.playing() {
                 continue;
@@ -830,6 +837,7 @@ impl World {
             animator.advance(root, dt, events);
             if self.active_in_hierarchy(root).unwrap_or(false) {
                 animator.pose(&mut self.ecs);
+                self.posed.push(root);
             }
             animator.tidy();
         }
