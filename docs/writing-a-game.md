@@ -1459,8 +1459,11 @@ class Waves extends GameObject {
   the second starting at index `n`; `MeshRenderer.materials` gives each
   its material, the first part the first (Unity's submeshes and
   `Renderer.sharedMaterials`). `submeshCount` and `submesh(i)` read them.
-- **A `MeshCollider` follows its mesh** (§16): after a change it's made
-  again on the next physics step, and what lies on it wakes. Making it
+- **A `MeshCollider` follows its mesh** (§16): after a change to its
+  positions or triangles it's made again on the next physics step, and
+  what lies on it wakes. Colours, UVs, normals and tangents leave it as
+  it is (`mesh.shapeVersion`, from `package:fynkel/extend.dart`, counts
+  the changes it follows). Making it
   again takes time (about 0.2 ms for 1,000 triangles and 3 ms for 10,000
   on a Mac), so it suits ground dug where it's tapped, not water that
   moves every frame: that shouldn't have one.
