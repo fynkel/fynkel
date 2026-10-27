@@ -308,7 +308,7 @@ final class MeshBuilder {
   /// change: the worlds that have it draw it from the next frame, and a
   /// `MeshCollider` of it follows. An empty builder empties it.
   void applyTo(Mesh mesh) {
-    mesh._changeable();
+    mesh._reshape();
     final live = mesh._live;
     // The parts one after another, and where each after the first starts.
     var total = 0;
