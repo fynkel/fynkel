@@ -223,6 +223,7 @@ class Field extends GameObject {
   Future<void> _run() async {
     await loaded;
     WorldView.timeGpu = _timeGpu;
+    Measurement.report('FIELD gpu: ${SystemInfo.graphicsDeviceName} (${SystemInfo.graphicsApi})');
     final levels = _content
         ? contentLevels
         : [for (final level in _parts ? partLevels : fieldLevels) (level, 'nothing')];
