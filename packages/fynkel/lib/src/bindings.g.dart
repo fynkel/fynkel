@@ -2084,6 +2084,9 @@ final class FyViewStats extends ffi.Struct {
   @ffi.Uint64()
   external int gpu_effects_micros;
 
+  @ffi.Uint64()
+  external int gpu_untimed_passes;
+
   static ffi.Pointer<FyViewStats> $allocate(
     ffi.Allocator $allocator, {
     required int posted,
@@ -2104,6 +2107,7 @@ final class FyViewStats extends ffi.Struct {
     required int gpu_bloom_micros,
     required int gpu_finish_micros,
     required int gpu_effects_micros,
+    required int gpu_untimed_passes,
   }) => $allocator<FyViewStats>()
     ..ref.posted = posted
     ..ref.rendered = rendered
@@ -2122,7 +2126,8 @@ final class FyViewStats extends ffi.Struct {
     ..ref.gpu_scene_micros = gpu_scene_micros
     ..ref.gpu_bloom_micros = gpu_bloom_micros
     ..ref.gpu_finish_micros = gpu_finish_micros
-    ..ref.gpu_effects_micros = gpu_effects_micros;
+    ..ref.gpu_effects_micros = gpu_effects_micros
+    ..ref.gpu_untimed_passes = gpu_untimed_passes;
 }
 
 final class FyWorld extends ffi.Opaque {}

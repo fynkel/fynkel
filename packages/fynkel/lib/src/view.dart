@@ -88,7 +88,7 @@ final class ViewStats {
       'gpuFrames=${gpu.frames} gpuShadowsMicros=${gpu.shadows.inMicroseconds} '
       'gpuSkyLightMicros=${gpu.skyLight.inMicroseconds} gpuAmbientOcclusionMicros=${gpu.ambientOcclusion.inMicroseconds} '
       'gpuSceneMicros=${gpu.scene.inMicroseconds} gpuBloomMicros=${gpu.bloom.inMicroseconds} '
-      'gpuFinishMicros=${gpu.finish.inMicroseconds} gpuEffectsMicros=${gpu.effects.inMicroseconds}';
+      'gpuFinishMicros=${gpu.finish.inMicroseconds} gpuEffectsMicros=${gpu.effects.inMicroseconds} gpuUntimed=${gpu.untimed}';
 }
 
 /// The GPU's time for each part of a view's frames, added up over
@@ -96,8 +96,10 @@ final class ViewStats {
 /// what a frame's GPU time goes on. Part of [ViewStats]; subtract an
 /// earlier one for a stretch, and divide by [frames] for a frame's.
 ///
-/// On a phone's GPU each part's work may start before the one before it
-/// ends, so the parts can add up to a little more than the frame took.
+/// A tiled GPU's (Apple's, every phone's) clocks round a part are rough, so
+/// each part counts only the time it adds past the parts before it: they
+/// never overlap, and say where the time goes, not to the tenth of a
+/// millisecond.
 final class GpuTimes {
   /// None unless given: a start to subtract from, and for tests.
   const GpuTimes({
@@ -109,6 +111,7 @@ final class GpuTimes {
     this.bloom = Duration.zero,
     this.finish = Duration.zero,
     this.effects = Duration.zero,
+    this.untimed = 0,
   });
 
   /// The frames timed.
@@ -137,6 +140,10 @@ final class GpuTimes {
   /// The screen effects.
   final Duration effects;
 
+  /// Passes in the frames timed whose clocks the GPU didn't give, left out
+  /// of the times: many of them say the times fall short.
+  final int untimed;
+
   /// Every part's time added up.
   Duration get total => shadows + skyLight + ambientOcclusion + scene + bloom + finish + effects;
 
@@ -150,6 +157,7 @@ final class GpuTimes {
     bloom: bloom + more.bloom,
     finish: finish + more.finish,
     effects: effects + more.effects,
+    untimed: untimed + more.untimed,
   );
 
   /// The frames and times since [earlier].
@@ -162,6 +170,7 @@ final class GpuTimes {
     bloom: bloom - earlier.bloom,
     finish: finish - earlier.finish,
     effects: effects - earlier.effects,
+    untimed: untimed - earlier.untimed,
   );
 
   @override
@@ -174,16 +183,17 @@ final class GpuTimes {
       other.scene == scene &&
       other.bloom == bloom &&
       other.finish == finish &&
-      other.effects == effects;
+      other.effects == effects &&
+      other.untimed == untimed;
 
   @override
-  int get hashCode => Object.hash(frames, shadows, skyLight, ambientOcclusion, scene, bloom, finish, effects);
+  int get hashCode => Object.hash(frames, shadows, skyLight, ambientOcclusion, scene, bloom, finish, effects, untimed);
 
   @override
   String toString() =>
       'frames=$frames shadows=${shadows.inMicroseconds} skyLight=${skyLight.inMicroseconds} '
       'ambientOcclusion=${ambientOcclusion.inMicroseconds} scene=${scene.inMicroseconds} '
-      'bloom=${bloom.inMicroseconds} finish=${finish.inMicroseconds} effects=${effects.inMicroseconds}';
+      'bloom=${bloom.inMicroseconds} finish=${finish.inMicroseconds} effects=${effects.inMicroseconds} untimed=$untimed';
 }
 
 /// A view of a [World]: a render worker on its own thread that draws the
@@ -309,6 +319,7 @@ abstract base class WorldView implements Finalizable {
               bloom: Duration(microseconds: r.gpu_bloom_micros),
               finish: Duration(microseconds: r.gpu_finish_micros),
               effects: Duration(microseconds: r.gpu_effects_micros),
+              untimed: r.gpu_untimed_passes,
             ),
     );
   }

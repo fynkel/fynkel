@@ -110,6 +110,7 @@ void main() {
     if (gpu.frames > 0) {
       expect(gpu.scene + gpu.finish, greaterThan(Duration.zero), reason: '$gpu');
       expect(gpu + gpu - gpu, gpu);
+      if (Platform.isMacOS) expect(gpu.untimed, lessThan(gpu.frames), reason: "the passes' clocks are read");
       // As the measure tool reads it: key=value pairs, split on spaces.
       for (final pair in (view.stats - before).toString().split(' ')) {
         expect(pair.split('='), hasLength(2), reason: pair);
