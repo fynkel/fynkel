@@ -1141,9 +1141,11 @@ final class ParticleSystem extends Component {
     }
   }
 
-  /// Lit by the scene's lights as a surface facing the camera, with the
-  /// material's metal and roughness, rather than shown as it is: smoke and
-  /// dust in the sun.
+  /// Lit by the scene's lights as a surface facing the camera, rather
+  /// than shown as it is: smoke and dust in the sun. Each particle (or a
+  /// trail's point) is lit once, at its middle, as a matte surface, so a
+  /// cloud of them costs little more than unlit; [ParticleRenderMode.mesh]
+  /// ones are lit pixel by pixel, with the material's metal and roughness.
   bool get lit => _lit;
   set lit(bool value) {
     _checkChangeable();

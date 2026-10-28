@@ -328,9 +328,11 @@ impl ShadowKit {
                 count: None,
             }],
         });
+        // The maps are read in vertices too: particles lit once each
+        // (particles.wgsl).
         let map_entry = |binding| wgpu::BindGroupLayoutEntry {
             binding,
-            visibility: wgpu::ShaderStages::FRAGMENT,
+            visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
             ty: wgpu::BindingType::Texture {
                 sample_type: wgpu::TextureSampleType::Depth,
                 view_dimension: wgpu::TextureViewDimension::D2Array,
@@ -343,7 +345,7 @@ impl ShadowKit {
             map_entry(1),
             wgpu::BindGroupLayoutEntry {
                 binding: 2,
-                visibility: wgpu::ShaderStages::FRAGMENT,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Comparison),
                 count: None,
             },

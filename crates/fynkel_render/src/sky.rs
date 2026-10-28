@@ -120,12 +120,17 @@ impl SkyKit {
                 sampler(3),
             ],
         });
+        // Read in vertices too: particles lit once each (particles.wgsl).
+        let both = |mut entry: wgpu::BindGroupLayoutEntry| {
+            entry.visibility = wgpu::ShaderStages::VERTEX_FRAGMENT;
+            entry
+        };
         let light_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("sky light"),
             entries: &[
                 texture(0, wgpu::TextureViewDimension::Cube),
-                texture(1, wgpu::TextureViewDimension::Cube),
-                sampler(2),
+                both(texture(1, wgpu::TextureViewDimension::Cube)),
+                both(sampler(2)),
             ],
         });
         let image_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {

@@ -2258,8 +2258,12 @@ ParticleSystem fire(Texture2D flames) => ParticleSystem(
   meets the floor. At `Quality.low`, which has no depth to read, they're
   hard.
 - **Lit particles.** `lit: true` lights them as a surface facing the
-  camera, with the material's `metallic` and `roughness`, as Unity's
-  Particles/Lit is: smoke the sun falls on.
+  camera: smoke the sun falls on. Each square (or a trail's point) is
+  lit once, at its middle, by the ambient light, the sky, the suns with
+  their shadows and the lamps in reach, as a matte surface, so it's the
+  same colour across and has no highlights; a cloud of overlapping
+  ones costs little more than unlit ones. Mesh particles are lit pixel
+  by pixel, with the material's `metallic` and `roughness`.
 - **A material's own shader** (§14) shades them, its `unlit` or `surface`
   function, with `particle_age()` (0 to 1 through its life) and
   `particle_random()` (its own number) to tell them apart.

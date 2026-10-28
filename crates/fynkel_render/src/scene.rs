@@ -665,8 +665,9 @@ pub struct ParticleDraw {
     /// The material's texture as a grid of so many columns and rows, each
     /// particle showing its [`Particle::frame`]; `[1, 1]` for the whole.
     pub sheet: [u32; 2],
-    /// Lit, with the built-in material; a material's own shader is
-    /// always used as it says.
+    /// Lit, with the built-in material: once a particle, at its middle
+    /// (a trail's, at each point), as a matte surface; a mesh's pixel by
+    /// pixel. A material's own shader is always used as it says.
     pub lit: bool,
     /// How far, in metres, a particle fades out in front of the solid
     /// scene behind it; 0 for not at all.

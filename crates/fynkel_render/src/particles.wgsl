@@ -2,8 +2,9 @@
 // billboards are, or stretched the way it moves, lying flat, standing up,
 // or a mesh; and trails, a strip through their points. Unlit, as Unity's default particle material is, its colour
 // the particle's times the material's, times the base colour texture,
-// plus the material's emission; or lit as a surface facing the camera; or
-// shaded by the material's own shader. Appended to forward.wgsl and
+// plus the material's emission; or lit as a surface facing the camera,
+// once at each particle's middle (or trail's point), not pixel by pixel;
+// or shaded by the material's own shader. Appended to forward.wgsl and
 // library.wgsl (and a material's shader), for its frame, its textures,
 // its lighting, its fog and its tone mapping.
 
@@ -65,11 +66,69 @@ struct FyParticleOut {
     @location(7) @interpolate(flat) own: vec4<f32>,
     @location(8) @interpolate(flat) values: u32,
     @location(9) @interpolate(flat) softness: f32,
+    // The light that reaches it, with `particle_lit_once`: what its
+    // colour is times.
+    @location(10) light: vec3<f32>,
 };
 
 // Lit as a surface (the built-in material's, or a material's own shader),
 // rather than shown as it is.
 override particle_lit: bool = false;
+
+// Lit (the built-in material) once at each particle's middle, or each
+// trail's point, rather than pixel by pixel (stage 14's RN11): a pixel
+// under many overlapping particles is lit once for each, which was most of
+// a field of dust's time on an old iPad. As a matte surface: no
+// highlights, no ambient occlusion.
+override particle_lit_once: bool = false;
+
+// The light reaching a matte surface at `p` facing `n`, which its colour
+// is times: as `lit` gives a rough, not metallic one, from the ambient
+// light, the sky, the suns and every lamp in reach (the frame's, not its
+// cell's: there's no pixel yet), shadows falling on it if `receives`.
+fn fy_particle_light(p: vec3<f32>, n: vec3<f32>, receives: bool) -> vec3<f32> {
+    var light = frame.ambient.rgb;
+    if sky_lit {
+        light += frame.sky_light.x * frame.sky_colors
+            * textureSampleLevel(sky_irradiance, sky_sampler, unturned(n), 0.0).rgb;
+    }
+    for (var i = 0u; i < frame.counts.x; i++) {
+        let sun = frame.suns[i];
+        let l = sun.to_sun.xyz;
+        let facing = max(dot(n, l), 0.0);
+        if facing <= 0.0 {
+            continue;
+        }
+        var shadow = 1.0;
+        if shadowed && i == frame.counts.y && receives {
+            shadow = sun_shadow(p, n, l);
+        }
+        light += sun.color.rgb * shadow * facing;
+    }
+    for (var i = 0u; i < frame.counts.w; i++) {
+        let position = frame.lamps[i].position;
+        let to_lamp = position.xyz - p;
+        let distance2 = dot(to_lamp, to_lamp);
+        let near = distance2 * position.w;
+        if near >= 1.0 {
+            continue;
+        }
+        let lamp = frame.lamps[i];
+        let l = to_lamp * inverseSqrt(max(distance2, 1e-8));
+        let reach = 1.0 - near * near;
+        let cone = saturate(dot(-l, lamp.direction.xyz) * lamp.cone.x + lamp.cone.y);
+        let falloff = reach * reach * cone * cone / max(distance2, 0.01) * max(dot(n, l), 0.0);
+        if falloff <= 0.0 {
+            continue;
+        }
+        var shadow = 1.0;
+        if shadowed && lamp.cone.z >= 0.0 && receives {
+            shadow = spot_shadow(lamp, p, n, l, sqrt(distance2));
+        }
+        light += lamp.color.rgb * falloff * shadow;
+    }
+    return light;
+}
 
 // The camera's right and up in the world: two points across the middle of
 // the view, back from clip space.
@@ -94,6 +153,7 @@ fn fy_particle_out(in: FyParticleIn, p: vec3<f32>, normal: vec3<f32>, tangent: v
     out.own = vec4<f32>(in.particle.x, in.particle.y, 0.0, 0.0);
     out.values = in.values;
     out.softness = in.params.z;
+    out.light = vec3<f32>(0.0);
     return out;
 }
 
@@ -141,7 +201,12 @@ fn vs_fy_particle(@builtin(vertex_index) corner: u32, in: FyParticleIn) -> FyPar
     }
     let p = center + right * at.x * half.x + up * at.y * half.y;
     let uv = vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
-    return fy_particle_out(in, p, cross(right, up), vec4<f32>(right, 1.0), uv);
+    let normal = cross(right, up);
+    var out = fy_particle_out(in, p, normal, vec4<f32>(right, 1.0), uv);
+    if particle_lit_once {
+        out.light = fy_particle_light(center, normal, in.emissive.w > 0.5);
+    }
+    return out;
 }
 
 // A trail's strip from its point `in` to the next, `end`: its texture's u
@@ -160,6 +225,9 @@ fn vs_fy_trail(@builtin(vertex_index) corner: u32, in: FyParticleIn, end: FyTrai
     var out = fy_particle_out(in, p, to_camera, vec4<f32>(right, 1.0), vec2<f32>(u, 0.5 - across * 0.5));
     out.base_color = select(in.color, end.color, next);
     out.own = vec4<f32>(u, in.particle.y, 0.0, 0.0);
+    if particle_lit_once {
+        out.light = fy_particle_light(p - side * across, to_camera, in.emissive.w > 0.5);
+    }
     return out;
 }
 
@@ -188,12 +256,16 @@ fn fy_particle_vertex(in: FyParticleOut) -> VertexOut {
 
 // Linear radiance and alpha, not premultiplied.
 fn fy_particle_shaded(in: FyParticleOut, front_facing: bool) -> vec4<f32> {
-    if particle_lit {
+    if particle_lit && !particle_lit_once {
         return shade(fy_particle_vertex(in), front_facing);
     }
     var color = in.base_color;
     if textured {
         color *= textureSample(base_color_texture, material_sampler, in.uv);
+    }
+    if particle_lit_once {
+        // Its metal is lit as its matte part is.
+        return vec4<f32>(color.rgb * in.light + in.emissive.rgb, color.a);
     }
     return vec4<f32>(color.rgb + in.emissive.rgb, color.a);
 }

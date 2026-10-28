@@ -1209,6 +1209,8 @@ impl Renderer {
             self.frame_lights.push(Reach::of(light));
         }
         stats.lights = self.frame_lights.len() as u32;
+        // Particles lit once each go through every lamp (particles.wgsl).
+        u.counts[3] = stats.lights;
         // The cells: their slices end where the furthest lamp's reach does,
         // rounded up a quarter octave at a time so a moving camera seldom
         // changes the grid's shape (`Clusters` keeps it while it holds).
@@ -3097,10 +3099,15 @@ impl Pipelines {
             immediate_size: 0,
         });
         let on = |yes: bool| if yes { 1.0 } else { 0.0 };
+        // The built-in material's squares and trails are lit once a
+        // particle, in their vertices; meshes, and a material's own
+        // shader, pixel by pixel.
+        let once = key.look.lit && shader.is_none() && !key.look.mesh;
         // Blended, so not in ambient occlusion's depth.
         let constants = [
             ("textured", on(key.textured)),
             ("particle_lit", on(key.look.lit || shader.is_some())),
+            ("particle_lit_once", on(once)),
             ("shadowed", on(key.shadowed)),
             ("sky_lit", on(key.sky_lit)),
             ("ao", 0.0),
@@ -3150,7 +3157,7 @@ impl Pipelines {
             vertex: wgpu::VertexState {
                 module: &module,
                 entry_point: Some(entry),
-                compilation_options: Default::default(),
+                compilation_options: wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() },
                 buffers,
             },
             // Squares face the camera; a mesh's backs are hidden by its

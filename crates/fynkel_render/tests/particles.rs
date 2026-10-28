@@ -400,6 +400,38 @@ fn a_lit_particle_takes_the_light_and_an_unlit_one_does_not() {
     assert!(lit_up[0] > 100 && lit_up[0] == lit_up[1], "lit by the ambient light: {lit_up:?}");
 }
 
+/// Lit once a particle, at its middle (stage 14's RN11): a square lit
+/// pixel by pixel costs its light again under every one it overlaps, the
+/// most of a field of dust's time on an old iPad. So a lamp by one edge
+/// lights it evenly, as much as its middle is, from the sun, the lamps and
+/// the ambient light alike; and a lamp it's out of reach of lights none
+/// of it.
+#[test]
+fn a_lit_particle_is_lit_once_at_its_middle() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let one = [particle(Vec3::ZERO, 3.0, Vec3::ONE, 1.0)];
+    let material = PbrMaterial { base_color: [0.6, 0.6, 0.6, 1.0], roughness: 1.0, ..plain(Blend::Transparent) };
+    let shown = |r: &mut Renderer, lights: Vec<Light>| {
+        let mut s = scene(vec![], QualityLevel::High);
+        s.lights = lights;
+        add_as(&mut s, &one, material, |d| ParticleDraw { lit: true, ..d });
+        render(&gpu, r, &s, 33, 33).0
+    };
+    // 1 m in front of its left edge, reaching 2.5 m: past its middle.
+    let image = shown(&mut r, vec![Light::point(Vec3::new(-1.5, 0.0, 1.0), 2.5, Vec3::splat(4.0))]);
+    let (left, middle, right) = (image.pixel(10, 16), image.pixel(16, 16), image.pixel(22, 16));
+    assert!(middle[0] > 20, "the lamp reaches its middle: {middle:?}");
+    for (side, what) in [(left, "left"), (right, "right")] {
+        assert!(side[0].abs_diff(middle[0]) <= 2, "its {what} as lit as its middle: {side:?} against {middle:?}");
+    }
+    // Out of reach of its middle, though in reach of its edge.
+    let image = shown(&mut r, vec![Light::point(Vec3::new(-1.5, 0.0, 0.3), 1.2, Vec3::splat(2.0))]);
+    assert_eq!(image.pixel(10, 16)[0], 0, "a lamp out of reach of its middle lights none of it");
+    let sun = shown(&mut r, vec![Light::sun(Vec3::new(0.0, 0.0, -1.0), Vec3::splat(1.0))]);
+    assert_near(sun.pixel(10, 16), tonemap(Vec3::splat(0.6)), "facing the sun");
+}
+
 #[test]
 fn a_mesh_particle_is_its_mesh_turned_round_up() {
     let gpu = gpu();
