@@ -10,12 +10,30 @@
 // bulbs, a sun with shadows, 500 lit dust particles, linear fog, from a
 // camera 14 m up. Each quality in [fieldLevels] is shown for 20 s, the
 // first 5 to settle, and the frames counted over the rest.
+//
+// With `--define FIELD_GPU=true` each part of a frame is also timed on the
+// GPU (WorldView.timeGpu), and reported a frame's worth a level. Off by
+// default: timing costs the GPU a little, so the frame rates are read
+// without it. `--define FIELD_PARTS=true` shows [partLevels] instead:
+// medium with one thing at a time taken away, to find what its GPU time
+// goes on.
 
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelViewStats;
+
+/// Medium, and medium with one thing at a time taken away.
+final partLevels = [
+  Quality.medium,
+  Quality.medium.copyWith(name: 'medium, scale 0.75', renderScale: 0.75),
+  Quality.medium.copyWith(name: 'medium, no AA', antiAliasing: 0),
+  Quality.medium.copyWith(name: 'medium, no HDR', hdr: false, bloom: false),
+  Quality.medium.copyWith(name: 'medium, no lamp highlights', lampHighlights: false),
+  Quality.medium.copyWith(name: 'medium, hard shadows', shadowSoftness: ShadowSoftness.hard),
+  Quality.medium.copyWith(name: 'medium, no soft particles', softParticles: false),
+];
 
 /// The levels compared: ours, and low with less anti-aliasing.
 final fieldLevels = [
@@ -26,6 +44,8 @@ final fieldLevels = [
   Quality.high,
 ];
 
+const _timeGpu = bool.fromEnvironment('FIELD_GPU');
+const _parts = bool.fromEnvironment('FIELD_PARTS');
 const _sky = Color(0xFF9DB8CF);
 const _sheep = 60;
 const _posts = 120;
@@ -40,6 +60,7 @@ class Field extends GameObject {
 
   var _counting = false, _shown = 0, _window = 0.0, _drawn = 0;
   var _busy = Duration.zero;
+  var _gpu = const GpuTimes();
   final _update = <int>[];
 
   @override
@@ -163,6 +184,7 @@ class Field extends GameObject {
     _window += stats.window.inMicroseconds / 1e6;
     _drawn += stats.view.rendered;
     _busy += stats.view.busy;
+    _gpu += stats.view.gpu;
   }
 
   @override
@@ -173,7 +195,8 @@ class Field extends GameObject {
 
   Future<void> _run() async {
     await loaded;
-    for (final level in fieldLevels) {
+    WorldView.timeGpu = _timeGpu;
+    for (final level in _parts ? partLevels : fieldLevels) {
       if (isDestroyed) return;
       world.quality = level;
       await world.shadersReady();
@@ -181,6 +204,7 @@ class Field extends GameObject {
       _shown = _drawn = 0;
       _window = 0;
       _busy = Duration.zero;
+      _gpu = const GpuTimes();
       _update.clear();
       _counting = true;
       await Future<void>.delayed(Duration(seconds: seconds - 5));
@@ -193,6 +217,15 @@ class Field extends GameObject {
         'FIELD fynkel ${level.name}: ${fps.toStringAsFixed(1)} fps, world.update ${update.toStringAsFixed(2)} ms, '
         'render thread ${render.toStringAsFixed(2)} ms a frame',
       );
+      if (_gpu.frames > 0) {
+        String ms(Duration d) => (d.inMicroseconds / _gpu.frames / 1000).toStringAsFixed(2);
+        Measurement.report(
+          'FIELD fynkel ${level.name} gpu over ${_gpu.frames} frames: total ${ms(_gpu.total)}, '
+          'shadows ${ms(_gpu.shadows)}, ambient occlusion ${ms(_gpu.ambientOcclusion)}, scene ${ms(_gpu.scene)}, '
+          'bloom ${ms(_gpu.bloom)}, finish ${ms(_gpu.finish)}, effects ${ms(_gpu.effects)}, '
+          'sky light ${ms(_gpu.skyLight)} ms a frame; ${_gpu.untimed} passes untimed',
+        );
+      }
     }
     Measurement.report('FIELD done');
   }

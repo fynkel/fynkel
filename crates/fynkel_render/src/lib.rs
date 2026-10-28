@@ -10,6 +10,7 @@ mod clusters;
 mod effects;
 mod frame_ring;
 mod gpu;
+mod gpu_time;
 mod renderer;
 mod scene;
 mod shader;
@@ -21,6 +22,7 @@ pub use assets::{Assets, Kit, MadeMesh, MadeTexture, SharedAssets, lock as lock_
 pub use fynkel_mesh::{MeshData, MeshParts, SkinVertex, Vertex};
 pub use glam;
 pub use gpu::{Gpu, GpuError, instance_flags};
+pub use gpu_time::GpuTimes;
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
     AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures,

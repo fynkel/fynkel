@@ -4013,6 +4013,13 @@ What keeps a game fast:
   of the budgets on a Mac (docs/stage-14-findings.md has each part).
   The lab's `tool/measured.dart` breaks a scene's frame down so on a
   device: `--define 'TOUR=<title>'`.
+- **Where the GPU's time goes**: `WorldView.timeGpu = true` times each
+  part of every view's frames on the GPU (shadows, ambient occlusion, the
+  scene, bloom, the last pass, screen effects), and `view.stats.gpu`
+  adds them up; subtract an earlier one and divide by its `frames` for a
+  frame's. It's for measuring: off, it costs nothing; on, a little GPU
+  time. The parts never overlap, and say where the time goes rather than
+  to the tenth of a millisecond.
 
 ## 21. What isn't there yet
 

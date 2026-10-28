@@ -50,6 +50,7 @@ use crate::clusters::{Clusters, Grid, Reach, TILES_X, TILES_Y};
 use crate::effects::EffectImages;
 use crate::frame_ring::{FrameRing, Parts};
 use crate::gpu::Gpu;
+use crate::gpu_time::{GpuTimer, GpuTimes, Part};
 use crate::scene::{
     AmbientOcclusion, Blend, Bloom, ColorSpace, LightKind, MaterialTextures, MeshKey, Quality, RenderScene, ShaderKey,
     ShadowFilter, SkyKind, TextureKey,
@@ -662,6 +663,8 @@ pub struct Renderer {
     /// The samples the scene is drawn with this frame: its quality's, as
     /// far as the device draws them.
     samples: u32,
+    /// Each pass's time on the GPU, when asked for.
+    timer: GpuTimer,
     /// Whether a frame waits for its own shaders' pipelines to be made,
     /// or goes without their draws till they are.
     wait_for_shaders: bool,
@@ -878,6 +881,7 @@ impl Renderer {
             effects_idle: 0,
             effect_textures: Vec::new(),
             effect_depth: false,
+            timer: GpuTimer::new(&kit.gpu.device, &kit.gpu.queue),
             kit,
         }
     }
@@ -889,6 +893,22 @@ impl Renderer {
     /// [`FrameStats::shaders_waiting`] says how many are being made.
     pub fn set_wait_for_shaders(&mut self, wait: bool) {
         self.wait_for_shaders = wait;
+    }
+
+    /// Whether each pass's time on the GPU is measured ([`Renderer::gpu_times`]),
+    /// for finding what a frame's GPU time goes on. Off by default: the
+    /// times are copied back every frame, which costs a little and, on
+    /// Apple GPUs, keeps some driver memory in use. Stays off where the
+    /// device can't time passes.
+    pub fn set_gpu_timing(&mut self, on: bool) {
+        self.timer.set(on);
+    }
+
+    /// The GPU's time for each part of the frames timed so far, added up
+    /// ([`Renderer::set_gpu_timing`]). A frame's times come back a frame or
+    /// two after it's sent, once the GPU is done with it.
+    pub fn gpu_times(&mut self) -> GpuTimes {
+        self.timer.times()
     }
 
     /// The meshes and textures it draws, to share with another renderer
@@ -1559,6 +1579,7 @@ impl Renderer {
     /// given to `prepare`. `encoder` must be submitted before the next
     /// `encode`.
     pub fn encode(&mut self, encoder: &mut wgpu::CommandEncoder, target: &wgpu::TextureView) {
+        self.timer.begin();
         let (width, height) = self.size;
         let image = self.image_format;
         self.samples = self.kit.samples(self.quality.samples, &[image.unwrap_or(self.format)]);
@@ -1626,7 +1647,7 @@ impl Renderer {
         if let Some(kind) = &self.sky_next
             && self.environment.as_ref().is_none_or(|e| !e.kind.same_light(kind))
         {
-            self.environment = Some(Environment::new(&self.kit.sky, encoder, kind));
+            self.environment = Some(Environment::new(&self.kit.sky, encoder, kind, &self.timer));
         }
         if let (Some(_), Some(image)) = (self.bloom, self.targets.as_mut().and_then(|t| t.image.as_mut()))
             && image.bloom.is_none()
@@ -1685,7 +1706,7 @@ impl Renderer {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(1.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.timer.pass(Part::Shadows),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -1762,7 +1783,7 @@ impl Renderer {
         // whose shaders move their vertices are drawn with them.
         if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
             {
-                let mut pass = images.depth_pass(&kit.ao, encoder);
+                let mut pass = images.depth_pass(&kit.ao, encoder, &self.timer);
                 let mut solid =
                     self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque).peekable();
                 if solid.peek().is_some() {
@@ -1799,7 +1820,7 @@ impl Renderer {
                     pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
                 }
             }
-            images.encode(&kit.ao, encoder);
+            images.encode(&kit.ao, encoder, &self.timer);
         }
 
         // 1. The scene, into the scene image or straight into the view.
@@ -2029,7 +2050,7 @@ impl Renderer {
                     }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.timer.pass(Part::Scene),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2064,7 +2085,7 @@ impl Renderer {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.timer.pass(Part::Scene),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2090,7 +2111,7 @@ impl Renderer {
                     depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Load, store: wgpu::StoreOp::Discard }),
                     stencil_ops: None,
                 }),
-                timestamp_writes: None,
+                timestamp_writes: self.timer.pass(Part::Scene),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2104,7 +2125,7 @@ impl Renderer {
 
         // 2. Bloom's glow, from the scene image.
         if let (Some(bloom), Some(SceneImage { bloom: Some(chain), .. })) = (self.bloom, &mut targets.image) {
-            chain.encode(&kit.bloom, &kit.gpu.queue, encoder, bloom);
+            chain.encode(&kit.bloom, &kit.gpu.queue, encoder, bloom, &self.timer);
         }
 
         // 3. The last pass: the scene image onto the view, or with screen
@@ -2124,7 +2145,7 @@ impl Renderer {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: self.timer.pass(Part::Finish),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
@@ -2157,7 +2178,7 @@ impl Renderer {
                         },
                     })],
                     depth_stencil_attachment: None,
-                    timestamp_writes: None,
+                    timestamp_writes: self.timer.pass(Part::Effects),
                     occlusion_query_set: None,
                     multiview_mask: None,
                 });
@@ -2188,6 +2209,7 @@ impl Renderer {
                 pass.draw(0..3, 0..1);
             }
         }
+        self.timer.end(encoder);
     }
 
     fn create_targets(&self, width: u32, height: u32, image: Option<wgpu::TextureFormat>) -> Targets {

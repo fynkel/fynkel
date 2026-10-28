@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 45
+#define FY_ABI_VERSION 46
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -894,6 +894,29 @@ typedef struct FyViewStats {
   // one to being done with it: busy, against waiting for the next. On
   // Android it includes waiting for the GPU to finish each frame.
   uint64_t busy_micros;
+  // Frames timed on the GPU while `fy_gpu_timing_set` had timing on,
+  // and the GPU's time over them for each part of a frame, in
+  // microseconds. Each frame's come back a frame or two after it's
+  // drawn. Each part counts only the time it adds past the parts
+  // before it, so they never overlap.
+  uint64_t gpu_frames;
+  // The shadow maps.
+  uint64_t gpu_shadows_micros;
+  // A new sky's light, worked out when the sky changes.
+  uint64_t gpu_sky_light_micros;
+  // Ambient occlusion.
+  uint64_t gpu_ambient_occlusion_micros;
+  // The scene itself.
+  uint64_t gpu_scene_micros;
+  // Bloom.
+  uint64_t gpu_bloom_micros;
+  // The scene image onto the view.
+  uint64_t gpu_finish_micros;
+  // The screen effects.
+  uint64_t gpu_effects_micros;
+  // Passes in the frames timed whose clocks the GPU didn't give, left
+  // out of the times: many of them say the times fall short.
+  uint64_t gpu_untimed_passes;
 } FyViewStats;
 
 // Called on a GPU thread each time an Apple view finishes a frame.
@@ -2458,6 +2481,13 @@ FyStatus fy_view_lose_device(const struct FyView *view);
 //
 // `view` is null or live.
 FyStatus fy_view_fail_worker(const struct FyView *view);
+
+// Times every view's frames on the GPU, each part of a frame on its own,
+// or stops (the default): for finding what a frame's GPU time goes on.
+// The times are in [`FyViewStats`]. Timing costs a little GPU time, and
+// on Apple GPUs keeps some driver memory in use; where the GPU can't time
+// its work, nothing is timed.
+void fy_gpu_timing_set(bool on);
 
 // # Safety
 //

@@ -446,6 +446,39 @@ pub struct FyViewStats {
     /// one to being done with it: busy, against waiting for the next. On
     /// Android it includes waiting for the GPU to finish each frame.
     pub busy_micros: u64,
+    /// Frames timed on the GPU while `fy_gpu_timing_set` had timing on,
+    /// and the GPU's time over them for each part of a frame, in
+    /// microseconds. Each frame's come back a frame or two after it's
+    /// drawn. Each part counts only the time it adds past the parts
+    /// before it, so they never overlap.
+    pub gpu_frames: u64,
+    /// The shadow maps.
+    pub gpu_shadows_micros: u64,
+    /// A new sky's light, worked out when the sky changes.
+    pub gpu_sky_light_micros: u64,
+    /// Ambient occlusion.
+    pub gpu_ambient_occlusion_micros: u64,
+    /// The scene itself.
+    pub gpu_scene_micros: u64,
+    /// Bloom.
+    pub gpu_bloom_micros: u64,
+    /// The scene image onto the view.
+    pub gpu_finish_micros: u64,
+    /// The screen effects.
+    pub gpu_effects_micros: u64,
+    /// Passes in the frames timed whose clocks the GPU didn't give, left
+    /// out of the times: many of them say the times fall short.
+    pub gpu_untimed_passes: u64,
+}
+
+/// Times every view's frames on the GPU, each part of a frame on its own,
+/// or stops (the default): for finding what a frame's GPU time goes on.
+/// The times are in [`FyViewStats`]. Timing costs a little GPU time, and
+/// on Apple GPUs keeps some driver memory in use; where the GPU can't time
+/// its work, nothing is timed.
+#[unsafe(no_mangle)]
+pub extern "C" fn fy_gpu_timing_set(on: bool) {
+    crate::worker::GPU_TIMING.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
 /// # Safety
@@ -466,6 +499,15 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             mesh_bytes: w.mesh_bytes,
             sky_bytes: w.sky_bytes,
             busy_micros: w.busy_micros,
+            gpu_frames: w.gpu.frames,
+            gpu_shadows_micros: w.gpu.shadows / 1000,
+            gpu_sky_light_micros: w.gpu.sky_light / 1000,
+            gpu_ambient_occlusion_micros: w.gpu.ambient_occlusion / 1000,
+            gpu_scene_micros: w.gpu.scene / 1000,
+            gpu_bloom_micros: w.gpu.bloom / 1000,
+            gpu_finish_micros: w.gpu.finish / 1000,
+            gpu_effects_micros: w.gpu.effects / 1000,
+            gpu_untimed_passes: w.gpu.untimed,
             ..Default::default()
         };
         #[cfg(target_vendor = "apple")]

@@ -91,6 +91,37 @@ void main() {
     expect(() => view.stats, throwsStateError);
   });
 
+  test("a view's frames are timed on the GPU, each part on its own, only when asked", () {
+    final scene = stage1();
+    final view = HeadlessView(scene.world, width: 8, height: 8);
+    addTearDown(view.dispose);
+    addTearDown(scene.world.dispose);
+    addTearDown(() => WorldView.timeGpu = false);
+
+    view.read(view.frame());
+    expect(view.stats.gpu, const GpuTimes(), reason: 'nothing timed unless asked');
+    WorldView.timeGpu = true;
+    final before = view.stats;
+    for (var i = 0; i < 30 && (view.stats - before).gpu.frames < 3; i++) {
+      view.read(view.frame());
+    }
+    final gpu = (view.stats - before).gpu;
+    if (Platform.isMacOS) expect(gpu.frames, greaterThanOrEqualTo(3), reason: "a Mac's GPU times its frames");
+    if (gpu.frames > 0) {
+      expect(gpu.scene + gpu.finish, greaterThan(Duration.zero), reason: '$gpu');
+      expect(gpu + gpu - gpu, gpu);
+      if (Platform.isMacOS) expect(gpu.untimed, lessThan(gpu.frames), reason: "the passes' clocks are read");
+      // As the measure tool reads it: key=value pairs, split on spaces.
+      for (final pair in (view.stats - before).toString().split(' ')) {
+        expect(pair.split('='), hasLength(2), reason: pair);
+      }
+      expect(
+        gpu.total,
+        gpu.shadows + gpu.skyLight + gpu.ambientOcclusion + gpu.scene + gpu.bloom + gpu.finish + gpu.effects,
+      );
+    }
+  });
+
   test('an Apple view draws frames that Flutter could show', () {
     final scene = stage1();
     final view = AppleView(scene.world, width: 64, height: 32);

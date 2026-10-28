@@ -16,6 +16,7 @@
 use std::sync::OnceLock;
 
 use crate::assets::PipelineMaker;
+use crate::gpu_time::{GpuTimer, Part};
 use crate::scene::Bloom;
 
 /// The most images in a chain: the smallest, of a 1080-pixel view, is 17
@@ -235,6 +236,7 @@ impl BloomChain {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         bloom: Bloom,
+        timer: &GpuTimer,
     ) {
         let params = Params {
             strength: bloom.strength,
@@ -257,7 +259,7 @@ impl BloomChain {
                     ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: timer.pass(Part::Bloom),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

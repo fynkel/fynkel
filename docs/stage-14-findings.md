@@ -246,6 +246,33 @@ RN12). The game's thread isn't where it's lost: `world.update` takes
 the Note10+ read 16.6 ms at every level, the frame's length, not the
 GPU's work, and are left out.)
 
+**Each part's GPU time** (2026-10-28): the engine now times every pass on
+the GPU when asked (`WorldView.timeGpu`, `ViewStats.gpu`; the field's
+`--define FIELD_GPU=true`). A tiled GPU's clocks round a pass are rough
+(a small pass's start can be read after its end), so each pass counts
+only the time it adds past the latest end, its frame's or the frame
+before's: the parts never overlap, and on the iPad they add up to the
+frame (medium 64.25 ms of GPU against 64.27 a frame, high 89.90 against
+89.92). Medium, then medium with one thing taken away
+(`--define FIELD_PARTS=true`), ms a frame:
+
+| Medium, with… | iPad: scene | iPad: all | Note10+: scene | Note10+: all |
+|---|---|---|---|---|
+| everything | 51.2 | 64.7 | 21.0 | 29.4 |
+| render scale 0.75 | 29.7 | 39.1 | 12.7 | 19.7 |
+| no anti-aliasing | 25.3 | 38.8 | 22.1 | 33.5 |
+| no HDR (so no bloom) | 48.8 | 52.9 | 18.7 | 21.0 |
+| no lamp highlights | 48.6 | 62.1 | 20.5 | 29.7 |
+| hard shadows | 49.3 | 62.8 | 20.2 | 29.4 |
+| no soft particles | 36.9 | 50.4 | 17.0 | 26.2 |
+
+The rest of the iPad's medium frame: shadows 4.8, bloom 2.9, finish 5.8;
+at high ambient occlusion adds 11.2 and the scene 64.5. The scene pass
+is most of the frame on both. Shadows, lamp highlights and soft shadows
+are 2–3 ms each. What isn't small: anti-aliasing on the A10 (26 ms),
+soft particles (14 on the iPad, 4 on the Note10+), and HDR on the Mali
+(8.4: bloom 4, finish 2.2, the scene 2.3). Those are RN11 and RN12.
+
 **The costs found** (Mac numbers; a phone is slower):
 
 | Row | What | Measured | Size |
@@ -258,8 +285,8 @@ GPU's work, and are left out.)
 | DF2 ✅ | A particle or trail setter resends everything and relinks every system | 9 objects a set; 4.3 µs with 1000 systems. **Done**: the engine relinks sub emitters only for a new system or other sub emitters; the setters keep no closures, the checks make no lists, and the settings are written through views into the native settings made once, not a view for each field (hundreds for a system with its modules). Still written as each is set, not once at the frame's end: the engine checks the numbers, and a wrong one throws where it was set. A frame setting five of a system's settings and three of a trail's makes nothing but boxed numbers (`particles_set_alloc_test.dart`). A set with 1000 systems: 3.9 → 0.9 µs (Mac, JIT); the engine's part 3 → 0.06 µs, a CI benchmark (`bench_setting_one_of_a_thousand_particle_systems`, 1000 sets, bar 0.12 ms) | M |
 | DF7a ✅ | `material.set` packs every value again | ~70 objects a set (the guide's way to tween). **Done**: a number, vector, colour or list for a value of the shader as it is now is checked and written in place, and only its bytes go to each world (`fy_material_values_set` with its offset), not the whole material; an array, a texture or a reloaded shader still packs them all. A frame setting four values, in two worlds, makes nothing but boxed numbers (`material_alloc_test.dart`); a set 0.62 → 0.12 µs (Mac, JIT) | S |
 | RN10 | An older Apple GPU is given high | Every Apple GPU gets high (`QualityLevel::for_adapter`), as every one known when it was written was fast. An iPad (6th generation, A10, 1536×2048) draws Sheepdog at 13 fps at high and 17 at medium. At low it's 45, held back by 4× anti-aliasing: 59 without it, 58 with 2×, and 59 at half the pixels with it. The passes already discard the multisampled images and keep them on the chip, so it's the anti-aliasing's own cost. Proposed: Apple's A-series GPUs before the A12 pick low with 2× anti-aliasing, read from the adapter's name; the iPhones and Macs in use keep high. Where to cut is a guess: only an A10 and an A18 have been measured Not yet done: the user's decision (a device's pick changes for players) | S |
-| RN11 | Anti-aliasing costs an Apple GPU ten times what it costs Unity | The field at low on the iPad (A10): 4x anti-aliasing adds 11 ms a frame for Fynkel (17.9 → 29.0), 1.4 for Unity (13.2 → 14.6). The scene pass already resolves its samples on the chip and never stores them; wgpu makes the multisampled images memoryless only on Metal 4's GPUs (A14 and later), not on this one. Not yet found where it goes: needs the GPU's time pass by pass (Instruments can't reach the iPad from here) | M |
-| RN12 | HDR, bloom and ambient occlusion cost twice Unity's | The field at medium and high: on the Note10+ Unity holds 52–53 fps, Fynkel 32 and 24 (render thread 29 and 38 ms); on the iPad 37 and 58 ms of GPU against 65 and 91. Candidates: the scene image is half floats (8 bytes a pixel) where URP's mobile HDR uses 4 (R11G11B10); bloom's chain and passes; the passes after the scene each read and write the whole image. To be measured pass by pass first | M |
+| RN11 | Anti-aliasing costs an Apple GPU ten times what it costs Unity | The field at low on the iPad (A10): 4x anti-aliasing adds 11 ms a frame for Fynkel (17.9 → 29.0), 1.4 for Unity (13.2 → 14.6). Pass by pass (above): at medium it's 26 of the scene pass's 51 ms, and soft particles 14 of them. Soft particles read the solid scene's depth, and get it the way a see-through surface gets what's behind it: the scene in two passes, the multisampled depth stored and copied to one sample, the colour resolved and drawn back into every sample for the second, the depth loaded again. Each of those moves the whole image through memory, which a tiled GPU otherwise never does; the A10 has least to spare. Proposed: soft particles (and effects reading depth) get it from a pass of their own drawing the solid scene's depth at one sample, as ambient occlusion's does, so the scene stays one pass whose samples never leave the chip. Then anti-aliasing measured again on its own | M |
+| RN12 | HDR, bloom and ambient occlusion cost twice Unity's | The field at medium and high: on the Note10+ Unity holds 52–53 fps, Fynkel 32 and 24 (render thread 29 and 38 ms); on the iPad 37 and 58 ms of GPU against 65 and 91. Pass by pass (above): on the iPad HDR is small (the scene 2.4 ms, bloom 2.9, finish 5.8) and the cost is RN11's; on the Note10+ HDR is 8.4 ms (bloom 4, finish 2.2, the scene 2.3). Candidates there: the scene image is half floats (8 bytes a pixel) where URP's mobile HDR uses 4 (R11G11B10); bloom's chain; the finish pass reading the whole image again. Ambient occlusion at high: 11.2 ms on the iPad | M |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects. **Half done with WO4**: a frame where nothing moved skips them; one moved object still recomputes them all | M |
 | RN4 | Transparent particles re-sorted with depth recomputed per compare | 0.73 ms for 10k, 0.13 keyed. **Done**: each particle's depth and index packed into one number, those sorted, and the instances made in that order; equal depths keep the system's order. Preparing a frame of 10,000 see-through particles: 0.600 → 0.101 ms (Mac), a CI benchmark (`bench_preparing_ten_thousand_see_through_particles`, bar 0.2 ms); fynkel_render joins the benchmarks step | S |
 | PH5 | Any mesh change, colours too, rebuilds its collider; each rebuild scans all colliders | 10 colour sets = 10 rebuilds. **Done**: a mesh counts the changes to its positions or triangles apart (`shapeVersion`, in `extend.dart`), and physics follows only those; colours, UVs, normals and tangents changed every frame leave its colliders, and what sleeps on them, alone. The scan over all colliders stays: it runs only when the shape changes, and making the shape again costs far more (3 ms for 10,000 triangles against microseconds for the scan) | S |
