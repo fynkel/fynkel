@@ -1099,7 +1099,8 @@ class GameObject with _Moving {
 
   void _writeTrail(TrailRenderer value) {
     final w = _engine('its TrailRenderer can\'t be changed');
-    final s = scratch.trailSettings.ref
+    final views = _trailViews;
+    final s = views.settings
       ..time = value.time
       ..min_vertex_distance = value.minVertexDistance
       ..width = value.widthMultiplier
@@ -1108,28 +1109,39 @@ class GameObject with _Moving {
     final widths = value._widthTable;
     s.has_width_table = widths != null;
     if (widths != null) {
+      final to = views.widthTable;
       for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.width_table[i] = widths[i];
+        to[i] = widths[i];
       }
     }
     final colors = value._colorTable;
     s.has_color_table = colors != null;
-    if (colors != null) {
-      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.color_table[i]
-          ..r = colors[i * 4]
-          ..g = colors[i * 4 + 1]
-          ..b = colors[i * 4 + 2]
-          ..a = colors[i * 4 + 3];
-      }
-    }
+    if (colors != null) _writeColors(views.colorTable, colors);
     check(fy_trail_set(w, id, scratch.trailSettings));
     world.system(_ParticleWorld.new)._trails[id] = value;
   }
 
+  /// [table]'s colours, four numbers each, into [to].
+  static void _writeColors(List<FyColor> to, Float32List table) {
+    for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
+      to[i]
+        ..r = table[i * 4]
+        ..g = table[i * 4 + 1]
+        ..b = table[i * 4 + 2]
+        ..a = table[i * 4 + 3];
+    }
+  }
+
+  static void _writeRange(FyRange to, double min, double max) => to
+    ..min = min
+    ..max = max;
+
+  /// Writes [value] through views made once ([_ParticleViews]): a system
+  /// changed every frame makes nothing here.
   void _writeParticles(ParticleSystem value) {
     final w = _engine('its ParticleSystem can\'t be changed');
-    final s = scratch.particleSettings.ref
+    final views = _particleViews;
+    final s = views.settings
       ..duration = value.duration
       ..looping = value.looping
       ..prewarm = value.prewarm
@@ -1152,31 +1164,30 @@ class GameObject with _Moving {
       ..rate_over_distance = value.emission.rateOverDistance
       ..burst_count = value.emission.bursts.length
       ..material = value.material == null ? 0 : world._materialId(value.material!);
-    void range(FyRange to, Range r) => to
-      ..min = r.min
-      ..max = r.max;
-    range(s.start_lifetime, value.startLifetime);
-    range(s.start_speed, value.startSpeed);
-    range(s.start_size, value.startSize);
-    range(s.start_rotation, value.startRotation);
-    final (a, b) = switch (value.startColor) {
-      final Color c => (c, c),
-      ColorRange(:final a, :final b) => (a, b),
-    };
-    s.start_color[0].write(a);
-    s.start_color[1].write(b);
+    _writeRange(views.startLifetime, value.startLifetime.min, value.startLifetime.max);
+    _writeRange(views.startSpeed, value.startSpeed.min, value.startSpeed.max);
+    _writeRange(views.startSize, value.startSize.min, value.startSize.max);
+    _writeRange(views.startRotation, value.startRotation.min, value.startRotation.max);
+    switch (value.startColor) {
+      case final Color c:
+        views.startColor[0].write(c);
+        views.startColor[1].write(c);
+      case ColorRange(:final a, :final b):
+        views.startColor[0].write(a);
+        views.startColor[1].write(b);
+    }
     final bursts = value.emission.bursts;
     for (var i = 0; i < bursts.length; i++) {
       final burst = bursts[i];
-      final to = s.bursts[i]
+      views.bursts[i]
         ..time = burst.time
         ..cycles = burst.cycles
         ..interval = burst.interval
         ..probability = burst.probability;
-      range(to.count, burst.count);
+      _writeRange(views.burstCounts[i], burst.count.min, burst.count.max);
     }
     final shape = value.shape;
-    s.shape
+    views.shape
       ..kind = switch (shape._kind) {
         _ShapeKind.point => FY_PARTICLE_SHAPE_POINT,
         _ShapeKind.sphere => FY_PARTICLE_SHAPE_SPHERE,
@@ -1190,69 +1201,57 @@ class GameObject with _Moving {
       ..radius_thickness = shape.radiusThickness
       ..angle = shape.angle
       ..arc = shape.arc
-      ..random_direction = shape.randomDirection
-      ..size.write(shape.size);
+      ..random_direction = shape.randomDirection;
+    views.shapeSize.write(shape.size);
     final sizes = value._sizeTable;
     s.has_size_table = sizes != null;
     if (sizes != null) {
+      final to = views.sizeTable;
       for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.size_table[i] = sizes[i];
+        to[i] = sizes[i];
       }
     }
     final colors = value._colorTable;
     s.has_color_table = colors != null;
-    if (colors != null) {
-      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.color_table[i]
-          ..r = colors[i * 4]
-          ..g = colors[i * 4 + 1]
-          ..b = colors[i * 4 + 2]
-          ..a = colors[i * 4 + 3];
-      }
-    }
+    if (colors != null) _writeColors(views.colorTable, colors);
     s.has_velocity_over_lifetime = value.velocityOverLifetime != null;
-    value.velocityOverLifetime?._write(s.velocity_over_lifetime);
+    value.velocityOverLifetime?._write(views.velocity);
     s.has_force_over_lifetime = value.forceOverLifetime != null;
-    value.forceOverLifetime?._write(s.force_over_lifetime);
+    value.forceOverLifetime?._write(views.force);
     s.has_limit_velocity = value.limitVelocity != null;
     if (value.limitVelocity case final l?) {
-      l.limit._write(s.limit_velocity.limit);
-      l.drag._write(s.limit_velocity.drag);
-      s.limit_velocity.dampen = l.dampen;
+      l.limit._write(views.limitCurve);
+      l.drag._write(views.drag);
+      views.limit.dampen = l.dampen;
     }
     s.has_rotation_over_lifetime = value.rotationOverLifetime != null;
-    value.rotationOverLifetime?._write(s.rotation_over_lifetime);
+    value.rotationOverLifetime?._write(views.rotation);
     s.has_size_by_speed = value.sizeBySpeed != null;
     if (value.sizeBySpeed case final b?) {
+      final to = views.sizeBySpeed;
       for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.size_by_speed[i] = b._table[i];
+        to[i] = b._table[i];
       }
-      range(s.size_speeds, Range(b.minSpeed, b.maxSpeed));
+      _writeRange(views.sizeSpeeds, b.minSpeed, b.maxSpeed);
     }
     s.has_color_by_speed = value.colorBySpeed != null;
     if (value.colorBySpeed case final b?) {
-      for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-        s.color_by_speed[i]
-          ..r = b._table[i * 4]
-          ..g = b._table[i * 4 + 1]
-          ..b = b._table[i * 4 + 2]
-          ..a = b._table[i * 4 + 3];
-      }
-      range(s.color_speeds, Range(b.minSpeed, b.maxSpeed));
+      _writeColors(views.colorBySpeed, b._table);
+      _writeRange(views.colorSpeeds, b.minSpeed, b.maxSpeed);
     }
     s.has_noise = value.noise != null;
     if (value.noise case final n?) {
-      n.strength._write(s.noise.strength);
-      s.noise
+      n.strength._write(views.noiseStrength);
+      views.noise
         ..frequency = n.frequency
         ..scroll_speed = n.scrollSpeed
         ..octaves = n.octaves;
     }
     s.has_texture_sheet = value.textureSheet != null;
     if (value.textureSheet case final t?) {
-      t.frameOverTime._write(s.texture_sheet.frame_over_time);
-      range(s.texture_sheet.start_frame, t.startFrame);
-      s.texture_sheet
+      t.frameOverTime._write(views.sheetFrames);
+      _writeRange(views.sheetStart, t.startFrame.min, t.startFrame.max);
+      views.sheet
         ..columns = t.columns
         ..rows = t.rows
         ..cycles = t.cycles
@@ -1274,11 +1273,11 @@ class GameObject with _Moving {
       ..softness = value.softness;
     s.has_inherit_velocity = value.inheritVelocity != null;
     if (value.inheritVelocity case final i?) {
-      s.inherit_velocity.mode = switch (i.mode) {
+      views.inherit.mode = switch (i.mode) {
         InheritVelocityMode.initial => FY_PARTICLE_INHERIT_INITIAL,
         InheritVelocityMode.current => FY_PARTICLE_INHERIT_CURRENT,
       };
-      i.curve._write(s.inherit_velocity.curve);
+      i.curve._write(views.inheritCurve);
     }
     // Planes and sub emitters not in this world yet are left out, and the
     // system written again once they may be. A destroyed plane is left
@@ -1287,31 +1286,35 @@ class GameObject with _Moving {
     s.has_collision = value.collision != null;
     if (value.collision case final c?) {
       var n = 0;
-      for (final plane in c.planes) {
+      final planes = c.planes;
+      for (var i = 0; i < planes.length; i++) {
+        final plane = planes[i];
         if (plane.isDestroyed) continue;
         if (!identical(plane._world, world)) {
           waiting = true;
           continue;
         }
-        s.collision.planes[n++] = plane._id;
+        views.planes[n++] = plane._id;
       }
-      s.collision
+      views.collision
         ..plane_count = n
         ..min_kill_speed = c.minKillSpeed
         ..radius_scale = c.radiusScale
         ..send_messages = c.sendCollisionMessages;
-      c.dampen._write(s.collision.dampen);
-      c.bounce._write(s.collision.bounce);
-      c.lifetimeLoss._write(s.collision.lifetime_loss);
+      c.dampen._write(views.dampen);
+      c.bounce._write(views.bounce);
+      c.lifetimeLoss._write(views.lifetimeLoss);
     }
     var subs = 0;
-    for (final sub in value.subEmitters) {
+    final subEmitters = value.subEmitters;
+    for (var i = 0; i < subEmitters.length; i++) {
+      final sub = subEmitters[i];
       final object = sub.system._live;
       if (object == null || !identical(object._world, world) || !sub.system._enabledFlag) {
         waiting = true;
         continue;
       }
-      s.sub_emitters[subs++]
+      views.subEmitters[subs++]
         ..system = object._id
         ..kind = switch (sub.type) {
           SubEmitterType.birth => FY_PARTICLE_SUB_BIRTH,
