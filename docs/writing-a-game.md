@@ -558,6 +558,28 @@ Quality chooseQuality(World world, Quality? chosen) {
 }
 ```
 
+**Choosing by device.** As in Unity, the engine picks one level per
+kind of device and the game decides the rest: Unity has a default
+quality per platform, and games that want more check the device and
+call `QualitySettings.SetQualityLevel`. `SystemInfo` says what the GPU
+is, as Unity's does, for a game that keeps its own list of slow ones:
+
+```dart
+/// An older iPad's GPU draws high at 19 fps and low at 53 (Sheepdog's
+/// field, an A10): low, with fewer samples.
+Quality? qualityFor(String gpu) => switch (gpu) {
+  'Apple A9 GPU' || 'Apple A10 GPU' => Quality.low.copyWith(antiAliasing: 2),
+  _ => null, // the device's own pick
+};
+
+void pickQuality(World world) => world.quality = qualityFor(SystemInfo.graphicsDeviceName);
+```
+
+`SystemInfo.graphicsDeviceVendorId` (Apple's 0x106B, Arm's 0x13B5,
+Qualcomm's 0x5143) and `SystemInfo.graphicsApi` (`metal`, `vulkan`) say
+the rest. Other games time a few seconds of play on the first launch,
+or leave it to the player's settings page.
+
 - **Fewer pixels: `renderScale`**, as Unity's render scale. At 0.75 the
   views draw about half the pixels and stretch the picture to fit: a
   little softer, and much cheaper on a big screen (an iPhone 16 Pro Max is
