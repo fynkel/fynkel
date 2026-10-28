@@ -216,6 +216,36 @@ them about 0.45, against 1 ms together (the lab's 'Meshes that change',
 59.9 fps). Sheepdog on the iPhone at 120 and high, and the iPhone runs
 owed by stages 12 and 13, are still owed.
 
+**Unity and Fynkel** (2026-10-28): is the engine slow, or the scene?
+Sheepdog's field, built from the same numbers in both
+(`examples/sheepdog/tool/field.dart`, `--define FIELD=true`, and
+`tools/unity_field`, Unity 6.3 with URP): 60 skinned sheep and the dog,
+120 posts, 8 lamps, a sun with shadows, 500 lit dust particles, fog.
+Sheepdog's own shaders are left out, so each engine draws with its
+standard surface. URP's levels are made to match Fynkel's: HDR, render
+scale, anti-aliasing, shadow map, cascades, softness and distance,
+ambient occlusion only at high, bloom and tone mapping from medium, soft
+particles where Fynkel has them, Forward+ for Fynkel's clustered lamps.
+Screenshots from both match. Frames a second over 15 s, profile and
+release builds, 60 asked for; Unity's GPU time a frame, Fynkel's render
+thread's (which waits for the GPU):
+
+| Level | iPad, Unity | iPad, Fynkel | Note10+, Unity | Note10+, Fynkel |
+|---|---|---|---|---|
+| low | 59.7 (GPU 14.6 ms) | 39.0 (29.0 ms) | 59.5 | 59.6 (2.1 ms) |
+| low, 2x AA | 59.5 (13.9) | 39.9 (25.0) | 59.7 | 59.7 (2.1) |
+| low, no AA | 59.2 (13.3) | 55.9 (17.9) | 59.8 | 59.7 (2.2) |
+| medium | 39.6 (37.0) | 15.3 (65.1) | 52.1 | 32.2 (28.8) |
+| high | 28.3 (58.4) | 10.9 (91.4) | 53.3 | 23.9 (38.4) |
+
+Unity draws the same scene faster on both. At low on the Note10+ the two
+are even (Fynkel has room to spare there); everywhere else Unity's GPU
+does the frame in about half Fynkel's time. Two things stand out (RN11,
+RN12). The game's thread isn't where it's lost: `world.update` takes
+1.5–4 ms on the iPad and 2.4–2.8 on the Note10+. (Unity's GPU times on
+the Note10+ read 16.6 ms at every level, the frame's length, not the
+GPU's work, and are left out.)
+
 **The costs found** (Mac numbers; a phone is slower):
 
 | Row | What | Measured | Size |
@@ -228,6 +258,8 @@ owed by stages 12 and 13, are still owed.
 | DF2 ✅ | A particle or trail setter resends everything and relinks every system | 9 objects a set; 4.3 µs with 1000 systems. **Done**: the engine relinks sub emitters only for a new system or other sub emitters; the setters keep no closures, the checks make no lists, and the settings are written through views into the native settings made once, not a view for each field (hundreds for a system with its modules). Still written as each is set, not once at the frame's end: the engine checks the numbers, and a wrong one throws where it was set. A frame setting five of a system's settings and three of a trail's makes nothing but boxed numbers (`particles_set_alloc_test.dart`). A set with 1000 systems: 3.9 → 0.9 µs (Mac, JIT); the engine's part 3 → 0.06 µs, a CI benchmark (`bench_setting_one_of_a_thousand_particle_systems`, 1000 sets, bar 0.12 ms) | M |
 | DF7a ✅ | `material.set` packs every value again | ~70 objects a set (the guide's way to tween). **Done**: a number, vector, colour or list for a value of the shader as it is now is checked and written in place, and only its bytes go to each world (`fy_material_values_set` with its offset), not the whole material; an array, a texture or a reloaded shader still packs them all. A frame setting four values, in two worlds, makes nothing but boxed numbers (`material_alloc_test.dart`); a set 0.62 → 0.12 µs (Mac, JIT) | S |
 | RN10 | An older Apple GPU is given high | Every Apple GPU gets high (`QualityLevel::for_adapter`), as every one known when it was written was fast. An iPad (6th generation, A10, 1536×2048) draws Sheepdog at 13 fps at high and 17 at medium. At low it's 45, held back by 4× anti-aliasing: 59 without it, 58 with 2×, and 59 at half the pixels with it. The passes already discard the multisampled images and keep them on the chip, so it's the anti-aliasing's own cost. Proposed: Apple's A-series GPUs before the A12 pick low with 2× anti-aliasing, read from the adapter's name; the iPhones and Macs in use keep high. Where to cut is a guess: only an A10 and an A18 have been measured Not yet done: the user's decision (a device's pick changes for players) | S |
+| RN11 | Anti-aliasing costs an Apple GPU ten times what it costs Unity | The field at low on the iPad (A10): 4x anti-aliasing adds 11 ms a frame for Fynkel (17.9 → 29.0), 1.4 for Unity (13.2 → 14.6). The scene pass already resolves its samples on the chip and never stores them; wgpu makes the multisampled images memoryless only on Metal 4's GPUs (A14 and later), not on this one. Not yet found where it goes: needs the GPU's time pass by pass (Instruments can't reach the iPad from here) | M |
+| RN12 | HDR, bloom and ambient occlusion cost twice Unity's | The field at medium and high: on the Note10+ Unity holds 52–53 fps, Fynkel 32 and 24 (render thread 29 and 38 ms); on the iPad 37 and 58 ms of GPU against 65 and 91. Candidates: the scene image is half floats (8 bytes a pixel) where URP's mobile HDR uses 4 (R11G11B10); bloom's chain and passes; the passes after the scene each read and write the whole image. To be measured pass by pass first | M |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects. **Half done with WO4**: a frame where nothing moved skips them; one moved object still recomputes them all | M |
 | RN4 | Transparent particles re-sorted with depth recomputed per compare | 0.73 ms for 10k, 0.13 keyed. **Done**: each particle's depth and index packed into one number, those sorted, and the instances made in that order; equal depths keep the system's order. Preparing a frame of 10,000 see-through particles: 0.600 → 0.101 ms (Mac), a CI benchmark (`bench_preparing_ten_thousand_see_through_particles`, bar 0.2 ms); fynkel_render joins the benchmarks step | S |
 | PH5 | Any mesh change, colours too, rebuilds its collider; each rebuild scans all colliders | 10 colour sets = 10 rebuilds. **Done**: a mesh counts the changes to its positions or triangles apart (`shapeVersion`, in `extend.dart`), and physics follows only those; colours, UVs, normals and tangents changed every frame leave its colliders, and what sleeps on them, alone. The scan over all colliders stays: it runs only when the shape changes, and making the shape again costs far more (3 ms for 10,000 triangles against microseconds for the scan) | S |
