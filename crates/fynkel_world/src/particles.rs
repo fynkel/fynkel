@@ -1732,15 +1732,26 @@ impl World {
                 return Err(WorldError::Particles("a particle system can't be its own sub emitter"));
             }
         }
-        match self.particles.get_mut(&object) {
-            Some(system) => system.set(settings),
+        // Who's whose sub emitter changes only with a new system or other
+        // sub emitters: a game setting a rate every frame relinks nothing
+        // (stage 14's DF2: with 1000 systems, 3 µs a set).
+        let relink = match self.particles.get_mut(&object) {
+            Some(system) => {
+                let same = |e: &SubEmitter| e.system;
+                let changed = !system.settings.sub_emitters.iter().map(same).eq(settings.sub_emitters.iter().map(same));
+                system.set(settings);
+                changed
+            }
             None => {
                 let seed = self.particle_seeds;
                 self.particle_seeds = self.particle_seeds.wrapping_add(0x5851_F42D);
                 self.particles.insert(object, ParticleSystem::new(settings, seed));
+                true
             }
+        };
+        if relink {
+            self.relink_particles();
         }
-        self.relink_particles();
         Ok(())
     }
 
