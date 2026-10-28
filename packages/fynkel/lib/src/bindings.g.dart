@@ -197,6 +197,9 @@ external int fy_find(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)>(isLeaf: true)
+external int fy_gpu_describe(ffi.Pointer<ffi.Uint8> buf, int cap, ffi.Pointer<ffi.Size> out_len);
+
 @ffi.Native<ffi.Void Function(ffi.Bool)>(isLeaf: true)
 external void fy_gpu_timing_set(bool on);
 
@@ -903,7 +906,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 46;
+const int FY_ABI_VERSION = 47;
 
 const int FY_APPLE_MORE = 2;
 

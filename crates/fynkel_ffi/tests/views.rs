@@ -248,6 +248,29 @@ fn a_world_draws_the_same_at_every_quality_level_and_refuses_others() {
     assert_eq!(auto, FY_QUALITY_HIGH, "an Apple GPU");
 }
 
+/// What GPU this is, for a game choosing its quality by device (Unity's
+/// `SystemInfo.graphicsDeviceName` and the rest): its name, its maker's
+/// PCI id and the API drawing with it, a line each; its length told first.
+#[test]
+fn the_gpu_says_what_it_is() {
+    let mut len = 0;
+    // SAFETY: no buffer, a local out-value.
+    ok(unsafe { fy_gpu_describe(std::ptr::null_mut(), 0, &mut len) });
+    let mut buf = vec![0u8; len];
+    // SAFETY: a buffer of `len` bytes.
+    ok(unsafe { fy_gpu_describe(buf.as_mut_ptr(), len, &mut len) });
+    let text = String::from_utf8(buf).unwrap();
+    let lines: Vec<&str> = text.lines().collect();
+    assert_eq!(lines.len(), 3, "{text:?}");
+    assert!(!lines[0].is_empty(), "a name: {text:?}");
+    lines[1].parse::<u32>().unwrap_or_else(|_| panic!("a maker's id: {text:?}"));
+    #[cfg(target_os = "macos")]
+    {
+        assert!(lines[0].starts_with("Apple"), "{text:?}");
+        assert_eq!(lines[2], "metal", "{text:?}");
+    }
+}
+
 /// A game's own quality: a level's, changed, and what's out of range
 /// refused, the world keeping the one it had.
 #[test]

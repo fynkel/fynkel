@@ -44,6 +44,15 @@ void main() {
     expectGolden('cube', frame.rgba, 256, 256);
   });
 
+  test('the GPU says what it is, for a game choosing its quality by device', () {
+    expect(SystemInfo.graphicsDeviceName, isNotEmpty);
+    expect(SystemInfo.graphicsDeviceVendorId, greaterThanOrEqualTo(0));
+    if (Platform.isMacOS) {
+      expect(SystemInfo.graphicsDeviceName, startsWith('Apple'));
+      expect(SystemInfo.graphicsApi, 'metal');
+    }
+  });
+
   test('every quality level draws the same picture, and a world can change level between frames', () {
     final scene = stage1();
     final world = scene.world;

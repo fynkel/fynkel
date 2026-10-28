@@ -391,3 +391,33 @@ pub unsafe extern "C" fn fy_quality_auto(out: *mut u32) -> FyStatus {
         unsafe { write(out, level_of(device.kit.device_quality()), "out") }
     })
 }
+
+/// Writes what GPU this is, for a game choosing its quality by device
+/// (Unity's `SystemInfo.graphicsDeviceName`): its name as its driver gives
+/// it, its maker's PCI id (0 if not known) and the API drawing with it
+/// (`metal`, `vulkan`, `gl`, `dx12`), a line each, as UTF-8. Its length goes
+/// to `out_len`; it's copied into `buf` only when it fits in `cap`. Makes
+/// the device if there's none yet.
+///
+/// # Safety
+///
+/// `buf` is null or valid for `cap` writes; `out_len` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_gpu_describe(buf: *mut u8, cap: usize, out_len: *mut usize) -> FyStatus {
+    guard(|| {
+        let device = Device::current().map_err(|e| Error::new(FyStatus::NoGpu, e.to_string()))?;
+        let info = device.kit.gpu().adapter.get_info();
+        let api = match info.backend {
+            fynkel_render::wgpu::Backend::Metal => "metal",
+            fynkel_render::wgpu::Backend::Vulkan => "vulkan",
+            fynkel_render::wgpu::Backend::Gl => "gl",
+            fynkel_render::wgpu::Backend::Dx12 => "dx12",
+            _ => "other",
+        };
+        // One line each: a name with a line break in it loses the rest.
+        let name = info.name.lines().next().unwrap_or_default();
+        let text = format!("{name}\n{}\n{api}", info.vendor);
+        // SAFETY: per this function's contract.
+        unsafe { write_all(text.bytes(), buf, cap, out_len) }
+    })
+}
