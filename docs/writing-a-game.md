@@ -2193,6 +2193,14 @@ class Fountain extends GameObject {
 - **Time.** It goes with the game's time: it holds while the game is
   paused and follows `time.scale`; one with `useUnscaledTime` goes on,
   for a pause menu's.
+- **Changing it as it plays.** Every setting can change at any time,
+  and the particles it has keep going: `smoke.emission =
+  Emission(rateOverTime: speed * 4)` each frame, as an exhaust follows
+  its speed. A setting is checked as it's set, so a wrong one throws
+  there and changes nothing. Setting one makes nothing, so every frame
+  is fine, even among a thousand systems; a new function or gradient is
+  read 64 times when it's set, so give those once. A `TrailRenderer`'s
+  are the same.
 - **The material.** Particles are unlit and fogged, as Unity's default
   particle material is: each one's colour times the material's `color`
   and its `baseColorTexture` (a soft dot, a puff of smoke), plus its
