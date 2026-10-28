@@ -868,6 +868,16 @@ external int fy_world_particles_step(
   ffi.Pointer<ffi.Size> out_count,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>, ffi.Size, ffi.Pointer<ffi.Size>)>(
+  isLeaf: true,
+)
+external int fy_world_posed_get(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<ffi.Uint64> buf,
+  int cap,
+  ffi.Pointer<ffi.Size> out_count,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyQuality>)>(isLeaf: true)
 external int fy_world_quality_set(ffi.Pointer<FyWorld> world, ffi.Pointer<FyQuality> quality);
 
@@ -890,7 +900,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 44;
+const int FY_ABI_VERSION = 45;
 
 const int FY_APPLE_MORE = 2;
 

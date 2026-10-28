@@ -32,7 +32,6 @@ mixin AnimatorPlays {
   void play(String name, {bool loop = true}) {
     scratch.number.value = 0;
     check(fy_animator_play(_world, _root, _layer, _animator._clip(name), scratch.number, loop));
-    _animator._moves(_layer);
   }
 
   /// Fades from what plays here to clip [name] over [duration] seconds,
@@ -47,7 +46,6 @@ mixin AnimatorPlays {
     // each frame, in the JIT.
     scratch.number.value = duration;
     check(fy_animator_play(_world, _root, _layer, _animator._clip(name), scratch.number, loop));
-    _animator._moves(_layer);
   }
 
   /// Plays the blend [name]: [clips] mixed by one number, [at], so a walk
@@ -74,7 +72,6 @@ mixin AnimatorPlays {
     scratch.numbers[0] = at;
     scratch.numbers[1] = duration;
     check(fy_animator_blend(_world, _root, _layer, blend, scratch.numbers));
-    _animator._moves(_layer);
   }
 
   /// Stops what plays here: at once, the parts keeping the pose they're
@@ -84,7 +81,6 @@ mixin AnimatorPlays {
     _duration(duration);
     scratch.number.value = duration;
     check(fy_animator_stop(_world, _root, _layer, scratch.number));
-    if (duration == 0) _animator._stops(_layer);
   }
 
   FyAnimatorState _state() {
@@ -248,9 +244,6 @@ final class Animator with AnimatorPlays {
 
   final _index = <String, int>{};
   late final List<GameObject> _parts;
-  // The layers that may be moving the parts, a bit each: from a play
-  // until a stop at once.
-  var _moving = 0;
   final _layers = List<AnimatorLayer?>.filled(maxLayers, null);
   // The blends made, by name, with their clips and thresholds, and their
   // names by number.
@@ -274,9 +267,6 @@ final class Animator with AnimatorPlays {
       clips.isEmpty ? 'the model has no clips' : 'not one of the model\'s clips (${clipNames.join(', ')})',
     );
   }
-
-  void _moves(int layer) => _moving |= 1 << layer;
-  void _stops(int layer) => _moving &= ~(1 << layer);
 
   int _blend(String name, List<String> clips, List<double>? thresholds) {
     if (_blends[name] case (final number, final made, final at)) {
@@ -463,9 +453,10 @@ final class _AnimatorWorld extends WorldSystem {
     return animator;
   }
 
-  /// Plays the clips: the engine poses every animator's parts, then the
-  /// parts' kept transforms are forgotten, so reading one reads the pose,
-  /// and the clips' events go to the game.
+  /// Plays the clips: the engine poses the parts of every animator playing
+  /// and shown, then those parts' kept transforms are forgotten, so
+  /// reading one reads the pose, and the clips' events go to the game.
+  /// Hidden and stopped ones move nothing (DC3, DF3).
   @override
   void afterUpdate() {
     super.afterUpdate();
@@ -477,7 +468,6 @@ final class _AnimatorWorld extends WorldSystem {
     scratch.number.value = world.time._delta;
     check(fy_world_animate(world.pointer, scratch.number, scratch.count));
     final events = scratch.count.value;
-    final version = ++world._transformVersion;
     var kept = 0;
     for (var i = 0; i < _list.length; i++) {
       final animator = _list[i];
@@ -486,18 +476,31 @@ final class _AnimatorWorld extends WorldSystem {
         continue;
       }
       _list[kept++] = animator;
-      if (animator._moving == 0) continue;
-      final parts = animator._parts;
-      for (var j = 0; j < parts.length; j++) {
-        final part = parts[j];
-        if (part._gone) continue;
-        part
-          .._transform = null
-          .._transformStamp = version;
-        world._logMoved(part);
-      }
     }
     _list.length = kept;
+    // The ones the engine posed, by their roots.
+    final pointer = world.pointer;
+    final capacity = scratch.idCapacity;
+    check(fy_world_posed_get(pointer, scratch.ids(), capacity, scratch.count));
+    final posed = scratch.count.value;
+    if (posed > capacity) check(fy_world_posed_get(pointer, scratch.ids(posed), posed, scratch.count));
+    if (posed > 0) {
+      final version = ++world._transformVersion;
+      final ids = scratch.ids();
+      for (var i = 0; i < posed; i++) {
+        final animator = _byRoot[ids[i]];
+        if (animator == null || animator.gameObject._gone) continue;
+        final parts = animator._parts;
+        for (var j = 0; j < parts.length; j++) {
+          final part = parts[j];
+          if (part._gone) continue;
+          part
+            .._transform = null
+            .._transformStamp = version;
+          world._logMoved(part);
+        }
+      }
+    }
     if (events > 0) _events(events);
   }
 

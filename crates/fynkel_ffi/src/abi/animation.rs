@@ -320,6 +320,31 @@ pub unsafe extern "C" fn fy_world_animate(world: *const FyWorld, dt: *const f32,
     })
 }
 
+/// The roots of the animators the last `fy_world_animate` posed (those
+/// playing and shown), as `fy_children_get` writes ids: only their parts
+/// may have moved.
+///
+/// # Safety
+///
+/// `world` is null or live; `buf` is null or valid for `cap` writes;
+/// `out_count` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_world_posed_get(
+    world: *const FyWorld,
+    buf: *mut u64,
+    cap: usize,
+    out_count: *mut usize,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let world = unsafe { handle(world, "world") }?;
+        let world = world.lock()?;
+        let posed = world.posed().iter().map(|r| r.raw());
+        // SAFETY: per this function's contract.
+        unsafe { write_all(posed, buf, cap, out_count) }
+    })
+}
+
 /// The last `fy_world_animate`'s events, as `fy_children_get` writes ids:
 /// all of them when they fit in `cap`, and their number to `out_count`.
 ///

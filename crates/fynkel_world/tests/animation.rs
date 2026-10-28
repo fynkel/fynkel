@@ -150,6 +150,27 @@ fn speed_time_and_stop() {
 }
 
 #[test]
+fn posed_lists_the_animators_the_last_animate_posed() {
+    let mut toy = Toy::new();
+    toy.step(0.1);
+    assert!(toy.world.posed().is_empty(), "nothing plays");
+    toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();
+    toy.step(0.1);
+    assert_eq!(toy.world.posed(), [toy.root]);
+    // Hidden, it keeps time but isn't posed.
+    toy.world.set_active(toy.root, false).unwrap();
+    toy.step(0.1);
+    assert!(toy.world.posed().is_empty(), "hidden");
+    toy.world.set_active(toy.root, true).unwrap();
+    toy.step(0.1);
+    assert_eq!(toy.world.posed(), [toy.root]);
+    // Stopped, nothing plays.
+    toy.world.stop(toy.root).unwrap();
+    toy.step(0.1);
+    assert!(toy.world.posed().is_empty(), "stopped");
+}
+
+#[test]
 fn an_animator_lives_and_goes_with_its_model() {
     let mut toy = Toy::new();
     toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();

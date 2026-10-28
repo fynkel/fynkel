@@ -503,6 +503,11 @@ fn a_model_copys_clips_play_through_the_c_interface() {
         ok(fy_animator_play(w, root, 0, 0, &0.0, true));
         ok(fy_world_animate(w, &0.5, &mut count));
         assert_eq!(count, 1);
+        // It posed the truck.
+        let mut posed = [0u64; 2];
+        let mut posed_count = 0;
+        ok(fy_world_posed_get(w, posed.as_mut_ptr(), posed.len(), &mut posed_count));
+        assert_eq!((posed_count, posed[0]), (1, root));
         // Too small a buffer: just the count.
         let mut seen = 0;
         ok(fy_animation_events_get(w, ptr::null_mut(), 0, &mut seen));
