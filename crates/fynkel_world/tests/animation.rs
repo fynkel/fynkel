@@ -155,12 +155,16 @@ fn posed_lists_the_animators_the_last_animate_posed() {
     toy.step(0.1);
     assert!(toy.world.posed().is_empty(), "nothing plays");
     toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();
+    let version = toy.world.transforms_version();
     toy.step(0.1);
     assert_eq!(toy.world.posed(), [toy.root]);
+    assert!(toy.world.transforms_version() > version, "posing moves things");
     // Hidden, it keeps time but isn't posed.
     toy.world.set_active(toy.root, false).unwrap();
+    let version = toy.world.transforms_version();
     toy.step(0.1);
     assert!(toy.world.posed().is_empty(), "hidden");
+    assert_eq!(toy.world.transforms_version(), version, "nothing posed, nothing moved");
     toy.world.set_active(toy.root, true).unwrap();
     toy.step(0.1);
     assert_eq!(toy.world.posed(), [toy.root]);

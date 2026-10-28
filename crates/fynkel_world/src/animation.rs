@@ -842,5 +842,8 @@ impl World {
             animator.tidy();
         }
         self.animators = animators;
+        if !self.posed.is_empty() {
+            self.transforms_version += 1;
+        }
     }
 }

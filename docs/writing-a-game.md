@@ -2701,7 +2701,11 @@ class CameraRig extends GameObject {
   `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
   Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)`
   gives what a ray hits first (a `RayHit`: `gameObject`, `point`,
-  `normal`, `distance`).
+  `normal`, `distance`). It tests the meshes as drawn: a big mesh cast
+  at many times between changes gets a tree over its triangles, so 50
+  rays into 3,000 objects and a 50,000-triangle ground take 1.5 ms on a
+  Mac; a mesh changed every frame and cast at often is cheaper with a
+  collider and `physics.raycast`.
 - **A camera that follows a physics body** sees each fixed step's jump:
   a body steps 50 or 100 times a second, the screen draws at 60 or 120,
   and the camera moves smoothly, so the body seems to jitter. Give the

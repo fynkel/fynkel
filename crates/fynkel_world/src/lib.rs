@@ -5,6 +5,7 @@
 //! Dart.
 
 mod animation;
+mod bvh;
 mod color;
 mod components;
 mod debug;

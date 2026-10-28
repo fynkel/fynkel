@@ -114,6 +114,7 @@ impl World {
             tree.nodes.entry(child).or_default().parent = Some(parent);
         }
         tree.version += 1;
+        self.transforms_version += 1;
         Ok(())
     }
 
@@ -164,6 +165,7 @@ impl World {
         } else {
             self.hierarchy.inactive.insert(id, ());
         }
+        self.transforms_version += 1;
         Ok(())
     }
 
@@ -322,8 +324,10 @@ impl World {
 /// belongs to one world.
 #[derive(Debug, Default)]
 pub struct WorldMatrices {
-    /// The hierarchy version the order was built for.
+    /// The hierarchy version the order was built for, and the world's
+    /// transforms version the matrices were worked out for.
     version: Option<u64>,
+    transforms: Option<u64>,
     /// Every object in a tree, parents first, with its parent's index.
     order: Vec<(ObjectId, hecs::Entity, Option<u32>)>,
     matrices: Vec<Mat4>,
@@ -336,9 +340,13 @@ impl WorldMatrices {
     /// Brings every matrix up to date with `world`.
     pub fn update(&mut self, world: &World) {
         let tree = &world.hierarchy;
+        if self.version == Some(tree.version) && self.transforms == Some(world.transforms_version) {
+            return;
+        }
         if self.version != Some(tree.version) {
             self.rebuild(world);
         }
+        self.transforms = Some(world.transforms_version);
         for i in 0..self.order.len() {
             let (id, entity, parent) = self.order[i];
             let local = world.local_matrix(entity);

@@ -521,6 +521,7 @@ dependencies = [
 name = "fynkel_world"
 version = "0.1.0"
 dependencies = [
+ "fynkel_bench",
  "fynkel_load",
  "fynkel_mesh",
  "glam 0.34.1",
