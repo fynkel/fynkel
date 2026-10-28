@@ -14,13 +14,26 @@
 // With `--define FIELD_GPU=true` each part of a frame is also timed on the
 // GPU (WorldView.timeGpu), and reported a frame's worth a level. Off by
 // default: timing costs the GPU a little, so the frame rates are read
-// without it.
+// without it. `--define FIELD_PARTS=true` shows [partLevels] instead:
+// medium with one thing at a time taken away, to find what its GPU time
+// goes on.
 
 import 'dart:math' as math;
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart' show FynkelViewStats;
+
+/// Medium, and medium with one thing at a time taken away.
+final partLevels = [
+  Quality.medium,
+  Quality.medium.copyWith(name: 'medium, scale 0.75', renderScale: 0.75),
+  Quality.medium.copyWith(name: 'medium, no AA', antiAliasing: 0),
+  Quality.medium.copyWith(name: 'medium, no HDR', hdr: false, bloom: false),
+  Quality.medium.copyWith(name: 'medium, no lamp highlights', lampHighlights: false),
+  Quality.medium.copyWith(name: 'medium, hard shadows', shadowSoftness: ShadowSoftness.hard),
+  Quality.medium.copyWith(name: 'medium, no soft particles', softParticles: false),
+];
 
 /// The levels compared: ours, and low with less anti-aliasing.
 final fieldLevels = [
@@ -32,6 +45,7 @@ final fieldLevels = [
 ];
 
 const _timeGpu = bool.fromEnvironment('FIELD_GPU');
+const _parts = bool.fromEnvironment('FIELD_PARTS');
 const _sky = Color(0xFF9DB8CF);
 const _sheep = 60;
 const _posts = 120;
@@ -182,7 +196,7 @@ class Field extends GameObject {
   Future<void> _run() async {
     await loaded;
     WorldView.timeGpu = _timeGpu;
-    for (final level in fieldLevels) {
+    for (final level in _parts ? partLevels : fieldLevels) {
       if (isDestroyed) return;
       world.quality = level;
       await world.shadersReady();
