@@ -918,6 +918,21 @@ time or on something gone (a destroyed object, a mesh still in use). A
 file that can't be read throws a `FormatException`. `FynkelException` is
 only for the engine's own failures: no GPU, a lost device, a panic.
 
+**How long the frame took**, part by part, is `world.profile`: what
+Unity's Profiler shows in its CPU view, for the frame on the game's
+thread. `profile.updates`, `lateUpdates`, `fixedUpdates`, `starts` and
+`input` are your code in each call; `motions` the tweens and routines;
+`meshes` sending the meshes you changed; and `profile.systems` each
+system's own time, by name: `Animators`, `Particles`, `Cameras`, and
+`Physics` and `Audio` from their packages. Each part is its own (a
+system's work isn't counted in the part it runs in), and they add up to
+`profile.total`. It's the last finished frame's, always on, and costs
+nothing you'd see; `print(world.profile)` lists it all. One frame's
+numbers are uneven, so take the median of a second's worth: the lab's
+"The frame, part by part" does, for every scene. What the engine does
+to draw the frame runs on the view's own thread: `ViewStats.busy`, from
+a `FynkelView`'s `onStats` (`stats.view.busy`, for about a second).
+
 ## 7. Moving things
 
 On objects and behaviours alike:
@@ -1440,8 +1455,8 @@ class Waves extends GameObject {
   changed every frame with their normals worked out, take the engine
   about 1.3 ms a frame on a Note10+ and 0.2 ms on a Mac, on top of the
   game's own work out of the new shape. A few thousand vertices a frame
-  is nothing; tens of thousands want a look at the Profiler
-  (`world.meshChangeTime` says what sending them took).
+  is nothing; tens of thousands want a look at `world.profile` (§6):
+  its `meshes` is what sending them took, as `world.meshChangeTime` is.
   Built-in shapes and models' meshes can't be changed: copy what you
   need into a `Mesh()`.
 
@@ -2307,7 +2322,8 @@ throws an `ArgumentError` and the old one stays.
 has. The engine moves 10,000 particles in about 0.03 ms a frame on a
 Mac, 0.1 ms on an iPhone 16 Pro Max and 0.3 ms on a Galaxy Note10+;
 `world.particleStepTime` says how long the last frame's took (Unity's
-Profiler's ParticleSystem.Update). A frame with systems playing and bursting makes
+Profiler's ParticleSystem.Update), and the `Particles` system in
+`world.profile` (§6) the whole of their frame. A frame with systems playing and bursting makes
 no garbage. The modules cost more:
 on a Mac, 10,000 particles take about 0.08 ms more for each of velocity
 over lifetime, force and limit velocity, 0.04 ms for rotation, and 0.15
@@ -4129,6 +4145,12 @@ What keeps a game fast:
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 14's frame timing** (2026-10-27): `WorldSystem` has a `name`
+  (its type's, unless overridden) and a `frameTime`, for
+  `world.profile`. A package's system with a `name` of its own now
+  overrides it: a `String` one only needs `@override`; one of another
+  type must be renamed.
 
 - **Stage 14's fixes** (2026-10-27): behaviour that was wrong, put
   right; code that relied on it changes.

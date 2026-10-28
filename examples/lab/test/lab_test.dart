@@ -349,6 +349,11 @@ void main() {
     final ten = int.parse(RegExp(r'the ten: (\d+)').firstMatch(scene.readout.value)!.group(1)!);
     expect(ten, inInclusiveRange(9500, 10000));
     expect(world.particleStepTime, greaterThan(Duration.zero));
+    // The page's profiler: the medians of the last second, the particles'
+    // system among them.
+    expect(scene.profile.value, contains('the whole update'));
+    expect(scene.profile.value, contains('Particles'));
+    expect(world.profile.systems.firstWhere((s) => s.name == 'Particles').time, greaterThan(Duration.zero));
     control<Toggle>('ten thousand').onChanged(false);
     world.update(1 / 60);
     expect(scene.readout.value, isNot(contains('the ten')));

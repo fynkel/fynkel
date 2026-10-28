@@ -44,6 +44,8 @@ void main() {
     expect(scene.readout.value, contains('4 bands'));
 
     await tester.ensureVisible(find.text('outlines'));
+
+    await tester.pump();
     await tester.tap(find.text('outlines'));
     await wait(tester, 2);
     expect(ball.material!.outline, isNull);

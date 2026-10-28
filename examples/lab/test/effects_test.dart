@@ -36,16 +36,21 @@ void main() {
     expect(scene.camera.effects, [scene.tv]);
 
     await tester.ensureVisible(find.text('four colours'));
+
+    await tester.pump();
     await tester.tap(find.text('four colours'));
     await wait(tester, 2);
     expect(scene.camera.effects, [scene.palette, scene.tv]);
     expect(scene.readout.value, contains('palette.wgsl → old_tv.wgsl'));
     await tester.ensureVisible(find.text('TV before the palette'));
+    await tester.pump();
     await tester.tap(find.text('TV before the palette'));
     await wait(tester, 2);
     expect(scene.camera.effects, [scene.tv, scene.palette]);
 
     await tester.ensureVisible(find.text('hit'));
+
+    await tester.pump();
     await tester.tap(find.text('hit'));
     await wait(tester, 2);
     expect(scene.camera.effects.last, scene.hit);
@@ -54,14 +59,18 @@ void main() {
     expect(scene.readout.value, contains('hits 1'));
 
     await tester.ensureVisible(find.text('pixel look'));
+
+    await tester.pump();
     await tester.tap(find.text('pixel look'));
     await wait(tester, 2);
     expect(scene.camera.pixels, 160);
 
     // The colour grade and the scanner go first, over the picture as drawn.
     await tester.ensureVisible(find.text('colour grade'));
+    await tester.pump();
     await tester.tap(find.text('colour grade'));
     await tester.ensureVisible(find.text('scanner'));
+    await tester.pump();
     await tester.tap(find.text('scanner'));
     await wait(tester, 2);
     expect(scene.camera.effects.take(2), [scene.scanner, scene.grade]);

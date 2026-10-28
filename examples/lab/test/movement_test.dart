@@ -47,6 +47,7 @@ void main() {
 
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
+      await tester.pump();
       await tester.tap(find.text(label));
       await wait(tester, 2);
     }
@@ -68,6 +69,7 @@ void main() {
 
     // The pixel look, while the camera drifts.
     await tester.ensureVisible(find.text('pixel look'));
+    await tester.pump();
     await tester.tap(find.text('pixel look'));
     await wait(tester, 2);
     expect(scene.find('camera')!.get<Camera>()!.pixels, 180);

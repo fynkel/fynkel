@@ -674,6 +674,9 @@ final class _CameraWorld extends WorldSystem {
   int get order => _camerasOrder;
 
   @override
+  String get name => 'Cameras';
+
+  @override
   void afterLateUpdate() {
     super.afterLateUpdate();
     world.cameras._run();

@@ -169,6 +169,7 @@ extension _Loop on World {
       if (system._off) continue;
       // What a hook did may have asked for the world to go: none after it.
       if (_disposeAsked) return;
+      final from = profile._ticks;
       try {
         switch (hook) {
           case _SystemHook.beforeFrame:
@@ -185,6 +186,7 @@ extension _Loop on World {
       } catch (error, stack) {
         _systemThrew(system, error, stack);
       }
+      profile._system(system, from);
     }
   }
 
@@ -275,21 +277,25 @@ extension _Loop on World {
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
           if (system._off) continue;
+          final from = profile._ticks;
           try {
             system.beforeFixedUpdate();
           } catch (error, stack) {
             _systemThrew(system, error, stack);
           }
+          profile._system(system, from);
         }
         _callEach(_Call.fixedUpdate, _live.length);
         for (var i = 0; i < systems.length; i++) {
           final system = systems[i];
           if (system._off) continue;
+          final from = profile._ticks;
           try {
             system.afterFixedUpdate();
           } catch (error, stack) {
             _systemThrew(system, error, stack);
           }
+          profile._system(system, from);
         }
         _runRoutines(fixed: true);
         input._fixedStepDone();

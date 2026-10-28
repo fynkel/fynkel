@@ -31,6 +31,17 @@ abstract class WorldSystem {
   /// cameras last ([afterLateUpdate]).
   int get order => 0;
 
+  /// What [World.profile] calls it: its type's name unless overridden.
+  String get name => '$runtimeType';
+
+  /// How long its hooks took in the last frame, all of them together
+  /// ([World.profile]).
+  Duration get frameTime => world.profile._duration(_lastTicks);
+
+  // The ticks its hooks took this frame, and in the last finished one.
+  var _ticks = 0;
+  var _lastTicks = 0;
+
   /// Whether its hooks threw in [turnOffAfter] frames in a row: none of
   /// them runs again, but for [dispose].
   bool get isTurnedOff => _off;
