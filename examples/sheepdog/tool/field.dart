@@ -209,7 +209,7 @@ class Field extends GameObject {
           'FIELD fynkel ${level.name} gpu over ${_gpu.frames} frames: total ${ms(_gpu.total)}, '
           'shadows ${ms(_gpu.shadows)}, ambient occlusion ${ms(_gpu.ambientOcclusion)}, scene ${ms(_gpu.scene)}, '
           'bloom ${ms(_gpu.bloom)}, finish ${ms(_gpu.finish)}, effects ${ms(_gpu.effects)}, '
-          'sky light ${ms(_gpu.skyLight)} ms a frame',
+          'sky light ${ms(_gpu.skyLight)} ms a frame; ${_gpu.untimed} passes untimed',
         );
       }
     }
