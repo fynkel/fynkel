@@ -4004,6 +4004,15 @@ What keeps a game fast:
   game's own frame rate (`--define FYNKEL_FRAME_RATE=0` for as fast as it
   goes). On an iPhone or a Mac it gives the thermal state too, and each
   minute's frame rate with `--seconds 600`.
+- **A frame's budget** at 60 fps is 16.7 ms. The engine's own are, on
+  the level a device draws at: your code 3 ms, the animators 1.5,
+  meshes you change 1, physics 1, particles 0.5, sound 0.25, so
+  `world.update` 7 in all; the render thread 14 a frame. The lab's 'All
+  of it together', everything at once, takes 4.2 ms of `world.update`
+  and 4.7 of the render thread on a Galaxy Note10+ at low, and a tenth
+  of the budgets on a Mac (docs/stage-14-findings.md has each part).
+  The lab's `tool/measured.dart` breaks a scene's frame down so on a
+  device: `--define 'TOUR=<title>'`.
 
 ## 21. What isn't there yet
 

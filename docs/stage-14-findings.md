@@ -155,7 +155,7 @@ spline fences and path), plus what the audit found at the seams:
 |---|---|---|
 | GT1 | No number is checked in CI: Rust benches are `#[ignore]`, scale's test only prints, `fynkel_measure` never runs. Bench gates with a margin, on the runner. **Done** for the crates and scale: `crates/fynkel_bench` (a median over 200 ms at least, held to a bar of the Mac's time doubled; over it, tried again up to three times, the best held, as other work on the runner once slowed one 2.4×); extracting 10,000 objects, making, changing and sweeping meshes, and setting a ground's collider again run in release in CI, and scale's `world.update` for 10,000 objects is held to 1 ms. `fynkel_measure` runs on devices; its tests are GT10 | M |
 | GT7 | Per-system frame timing (only particles and meshes have one; the lab rebuilds a median timer in six scenes; the guide points at a Profiler that doesn't exist). **Done**: `world.profile`, the frame's parts and each system's own time (`WorldSystem.name`, `frameTime`), always on (scale's frame 0.49 → 0.51 ms, within its noise), no garbage; the lab shows its medians for every scene, and the guide (§6) points there. The six scenes' own timers stay: they time one thing each (a sweep, a step) for their readouts | M |
-| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts. **Curves done on the Mac** (`examples/lab/test/curves_test.dart`, `FYNKEL_CURVES=1`): each count a fresh lab scene, the median of 120 frames, the best of three tries, on the game's thread (`world.profile.total`) and drawn (a 256×256 headless view, so CPU, not fill). Every curve grows in step with its count or slower; still objects on the game's thread didn't until DC4, below, was fixed. The budgets need the phones | M |
+| — | A budget per device and level, written down; curves against object, lamp, particle, source and body counts. **Curves done on the Mac** (`examples/lab/test/curves_test.dart`, `FYNKEL_CURVES=1`): each count a fresh lab scene, the median of 120 frames, the best of three tries, on the game's thread (`world.profile.total`) and drawn (a 256×256 headless view, so CPU, not fill). Every curve grows in step with its count or slower; still objects on the game's thread didn't until DC4, below, was fixed. **Budgets written** (below) for the Mac, the Note10+ and an iPad (6th generation, 2018), from the lab's tour on the device (`examples/lab/tool/measured.dart`, which now breaks each level's frame down); the iPhone's are owed, as it was only reachable wirelessly | M |
 
 **The curves** (Mac, 2026-10-27; ms over an empty world's, at the
 second count and the last; growth 1 = in step):
@@ -177,6 +177,45 @@ updates each visited every one (DC4): 0.1 ms at 4,000, 1.1–1.4 at
 fell out of the cache. With DC4 done they cost 0.002 ms at 32,000, and
 the moving objects (moved by the scene, plain themselves) 3.1 ms.
 
+**The budgets** (2026-10-28): what each part of a frame may take at 60
+fps, 16.7 ms, on the level the device draws at, held against the lab's
+'All of it together' (a skinned crowd, colliding particles, sounds in
+3D, custom shaders, lamps and shadows, physics, meshes changed every
+frame and swept), the busiest scene there is. Medians, in ms, over 15 s
+of profile builds. The game's thread is `world.profile`; Flutter's UI
+thread holds it, sending the frame on and Flutter's build; the render
+thread's is its time a drawn frame, waiting for the GPU included, so a
+device whose GPU can't keep up shows it there.
+
+| Part | Budget | Note10+ (low) | iPad (high, its pick) | iPad (low) | Mac (high) |
+|---|---|---|---|---|---|
+| The game's code | 3 | 1.58 | 2.11 | 0.64 | 0.51 |
+| Animators | 1.5 | 1.21 | 1.32 | 0.38 | 0.32 |
+| Meshes sent | 1 | 0.85 | 1.81 ✗ | 0.58 | 0.28 |
+| Physics | 1 | 0.14 | 0.12 | 0.06 | 0.06 |
+| Particles | 0.5 | 0.06 | 0.07 | 0.02 | 0.03 |
+| Sound | 0.25 | 0.05 | 0.03 | 0.02 | 0.02 |
+| The world's own | 0.25 | 0.02 | 0.01 | 0.01 | 0.00 |
+| `world.update` | 7 | 4.17 | 5.52 | 1.79 | 1.25 |
+| Flutter's UI thread | 10 | 5.20 | 6.56 | 2.46 | 1.64 |
+| The render thread | 14 | 4.67 | 37.27 ✗ | 35.75 ✗ | 1.74 |
+| Frames a second | 60 | 59.7 | 26.8 ✗ | 35.1 ✗ | 60.0 |
+
+The budgets leave the rest of the frame to what a game adds and to the
+device's own slowdowns. The Note10+ is within all of them at low; at
+medium and high its render thread takes 19–20 ms (50.7 and 48.1 fps),
+which is why it draws at low. The Mac takes a tenth of its budgets at
+every level. The iPad's GPU (an A10) can't draw this scene at 60 at any
+level, and Sheepdog, a real game, shows it isn't only this scene (RN10).
+Its game's thread at low is a third of what it is at medium and high,
+with the same work: when its GPU is the limit, the CPU runs slower.
+
+The bars owed from before: stage 13's mesh change on the Note10+ is
+where it was, sending the flag and the water 0.82 ms a frame and setting
+them about 0.45, against 1 ms together (the lab's 'Meshes that change',
+59.9 fps). Sheepdog on the iPhone at 120 and high, and the iPhone runs
+owed by stages 12 and 13, are still owed.
+
 **The costs found** (Mac numbers; a phone is slower):
 
 | Row | What | Measured | Size |
@@ -188,6 +227,7 @@ the moving objects (moved by the scene, plain themselves) 3.1 ms.
 | DC4 | Plain objects visited every update; one destroy or reparent is a pass over all | 0.1 ms at 5000, 0.5 ms at 20000; the curves: 1.3 ms at 32,000, growing faster than the count. **Done**: only objects with something to call (a subclass, a behaviour) are in the update order; a plain one joins in its place when given a behaviour. 32,000 still objects 1.3 → 0.002 ms, 32,000 moved by one object 4.8 → 3.1; destroying or moving plain ones is no pass at all, and others' a pass over those in the order only. A model's parts given behaviours now update after their parents (they went in the order the behaviours were put on) | S/M |
 | DF2 ✅ | A particle or trail setter resends everything and relinks every system | 9 objects a set; 4.3 µs with 1000 systems. **Done**: the engine relinks sub emitters only for a new system or other sub emitters; the setters keep no closures, the checks make no lists, and the settings are written through views into the native settings made once, not a view for each field (hundreds for a system with its modules). Still written as each is set, not once at the frame's end: the engine checks the numbers, and a wrong one throws where it was set. A frame setting five of a system's settings and three of a trail's makes nothing but boxed numbers (`particles_set_alloc_test.dart`). A set with 1000 systems: 3.9 → 0.9 µs (Mac, JIT); the engine's part 3 → 0.06 µs, a CI benchmark (`bench_setting_one_of_a_thousand_particle_systems`, 1000 sets, bar 0.12 ms) | M |
 | DF7a ✅ | `material.set` packs every value again | ~70 objects a set (the guide's way to tween). **Done**: a number, vector, colour or list for a value of the shader as it is now is checked and written in place, and only its bytes go to each world (`fy_material_values_set` with its offset), not the whole material; an array, a texture or a reloaded shader still packs them all. A frame setting four values, in two worlds, makes nothing but boxed numbers (`material_alloc_test.dart`); a set 0.62 → 0.12 µs (Mac, JIT) | S |
+| RN10 | An older Apple GPU is given high | Every Apple GPU gets high (`QualityLevel::for_adapter`), as every one known when it was written was fast. An iPad (6th generation, A10, 1536×2048) draws Sheepdog at 13 fps at high and 17 at medium. At low it's 45, held back by 4× anti-aliasing: 59 without it, 58 with 2×, and 59 at half the pixels with it. The passes already discard the multisampled images and keep them on the chip, so it's the anti-aliasing's own cost. Proposed: Apple's A-series GPUs before the A12 pick low with 2× anti-aliasing, read from the adapter's name; the iPhones and Macs in use keep high. Where to cut is a guess: only an A10 and an A18 have been measured Not yet done: the user's decision (a device's pick changes for players) | S |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects. **Half done with WO4**: a frame where nothing moved skips them; one moved object still recomputes them all | M |
 | RN4 | Transparent particles re-sorted with depth recomputed per compare | 0.73 ms for 10k, 0.13 keyed. **Done**: each particle's depth and index packed into one number, those sorted, and the instances made in that order; equal depths keep the system's order. Preparing a frame of 10,000 see-through particles: 0.600 → 0.101 ms (Mac), a CI benchmark (`bench_preparing_ten_thousand_see_through_particles`, bar 0.2 ms); fynkel_render joins the benchmarks step | S |
 | PH5 | Any mesh change, colours too, rebuilds its collider; each rebuild scans all colliders | 10 colour sets = 10 rebuilds. **Done**: a mesh counts the changes to its positions or triangles apart (`shapeVersion`, in `extend.dart`), and physics follows only those; colours, UVs, normals and tangents changed every frame leave its colliders, and what sleeps on them, alone. The scan over all colliders stays: it runs only when the shape changes, and making the shape again costs far more (3 ms for 10,000 triangles against microseconds for the scan) | S |
