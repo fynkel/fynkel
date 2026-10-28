@@ -509,6 +509,7 @@ name = "fynkel_render"
 version = "0.1.0"
 dependencies = [
  "bytemuck",
+ "fynkel_bench",
  "fynkel_golden",
  "fynkel_mesh",
  "glam 0.34.1",
