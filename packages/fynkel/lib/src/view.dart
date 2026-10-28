@@ -84,7 +84,11 @@ final class ViewStats {
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds} gpu=($gpu)';
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds} '
+      'gpuFrames=${gpu.frames} gpuShadowsMicros=${gpu.shadows.inMicroseconds} '
+      'gpuSkyLightMicros=${gpu.skyLight.inMicroseconds} gpuAmbientOcclusionMicros=${gpu.ambientOcclusion.inMicroseconds} '
+      'gpuSceneMicros=${gpu.scene.inMicroseconds} gpuBloomMicros=${gpu.bloom.inMicroseconds} '
+      'gpuFinishMicros=${gpu.finish.inMicroseconds} gpuEffectsMicros=${gpu.effects.inMicroseconds}';
 }
 
 /// The GPU's time for each part of a view's frames, added up over

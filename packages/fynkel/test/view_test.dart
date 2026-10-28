@@ -110,6 +110,10 @@ void main() {
     if (gpu.frames > 0) {
       expect(gpu.scene + gpu.finish, greaterThan(Duration.zero), reason: '$gpu');
       expect(gpu + gpu - gpu, gpu);
+      // As the measure tool reads it: key=value pairs, split on spaces.
+      for (final pair in (view.stats - before).toString().split(' ')) {
+        expect(pair.split('='), hasLength(2), reason: pair);
+      }
       expect(
         gpu.total,
         gpu.shadows + gpu.skyLight + gpu.ambientOcclusion + gpu.scene + gpu.bloom + gpu.finish + gpu.effects,
