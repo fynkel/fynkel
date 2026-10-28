@@ -21,13 +21,14 @@
 //! thread and leaves nothing behind.
 
 use std::panic::{self, AssertUnwindSafe};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, PoisonError, TryLockError, Weak, mpsc};
 use std::thread;
 
 use fynkel_present::Target;
 #[cfg(test)]
 use fynkel_render::Gpu;
-use fynkel_render::{MadeMesh, MadeTexture, MeshKey, RenderScene, Renderer, TextureKey, wgpu};
+use fynkel_render::{GpuTimes, MadeMesh, MadeTexture, MeshKey, RenderScene, Renderer, TextureKey, wgpu};
 
 #[cfg(test)]
 use crate::device::Device;
@@ -56,7 +57,14 @@ pub(crate) struct WorkerStats {
     /// done with it, in microseconds. On Android that includes waiting for
     /// the GPU to finish the frame.
     pub(crate) busy_micros: u64,
+    /// The GPU's time for each part of the frames timed, while
+    /// [`GPU_TIMING`] is on.
+    pub(crate) gpu: GpuTimes,
 }
+
+/// Whether every view's frames are timed on the GPU, for measuring
+/// (`fy_gpu_timing_set`). Each worker reads it as it draws.
+pub(crate) static GPU_TIMING: AtomicBool = AtomicBool::new(false);
 
 #[derive(Debug)]
 pub(crate) struct Worker {
@@ -416,6 +424,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
     let gpu = &world.device.gpu;
     let (mut ops, mut made) = (Vec::new(), Vec::new());
     let mut first = true;
+    let mut timing = false;
     // A scene the target has no room for waits for a frame to free some.
     let waits = target.on_free(Arc::new({
         let shared = Arc::downgrade(shared);
@@ -529,6 +538,10 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                 let drawn = match target.begin() {
                     Some(frame) => {
                         let (width, height) = target.size();
+                        if timing != GPU_TIMING.load(Ordering::Relaxed) {
+                            timing = !timing;
+                            renderer.set_gpu_timing(timing);
+                        }
                         let stats = renderer.prepare(&scene, width, height);
                         shared.lock().stats.sky_bytes = stats.sky_bytes;
                         let mut encoder =
@@ -537,6 +550,9 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                             });
                         renderer.encode(&mut encoder, target.view(&frame));
                         target.finish(frame, encoder, number);
+                        if timing {
+                            shared.lock().stats.gpu = renderer.gpu_times();
+                        }
                         true
                     }
                     None => false,

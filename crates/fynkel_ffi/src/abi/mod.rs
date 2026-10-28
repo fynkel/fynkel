@@ -72,7 +72,7 @@ mod views;
 pub use views::*;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 45;
+pub const FY_ABI_VERSION: u32 = 46;
 
 // --- Library -----------------------------------------------------------------
 
