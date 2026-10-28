@@ -335,6 +335,46 @@ struct Targets {
     ao: Option<AoImages>,
     /// What's behind, made the first frame a shader reads it.
     behind: Option<BehindImages>,
+    /// The solid scene's depth for soft particles, when nothing reads
+    /// what's behind.
+    soft: Option<SoftDepth>,
+}
+
+/// Which images a bind group reads, for knowing when it must be made again.
+static NEXT_IMAGES: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+
+/// The solid scene's depth at one sample, drawn in a pass of its own before
+/// the scene, for soft particles to read. Getting it as what's behind does
+/// (the scene in two passes, its samples kept and put back) moves whole
+/// images through memory, which costs a tiled GPU most: 14 ms a frame on an
+/// A10 at medium (docs/stage-14-findings.md, RN11). Cut-outs aren't in it,
+/// as in ambient occlusion's.
+struct SoftDepth {
+    id: u64,
+    depth: wgpu::TextureView,
+}
+
+impl SoftDepth {
+    fn new(device: &wgpu::Device, width: u32, height: u32) -> Self {
+        let depth = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("soft particles' depth"),
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DEPTH_FORMAT,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
+        Self { id: NEXT_IMAGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed), depth }
+    }
+
+    /// Its GPU memory, `width` × `height`.
+    fn bytes(width: u32, height: u32) -> u64 {
+        u64::from(width) * u64::from(height) * 4
+    }
 }
 
 /// What's behind see-through surfaces, for shaders that read it: the solid
@@ -356,7 +396,6 @@ struct BehindImages {
 
 impl BehindImages {
     fn new(kit: &Kit, width: u32, height: u32, color_format: wgpu::TextureFormat, samples: u32) -> Self {
-        static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let device = &kit.gpu.device;
         let make = |label, format, sample_count| {
             device
@@ -383,7 +422,7 @@ impl BehindImages {
             })
         };
         Self {
-            id: NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
+            id: NEXT_IMAGES.fetch_add(1, std::sync::atomic::Ordering::Relaxed),
             copy: one("scene depth", if samples > 1 { &kit.msaa_depth_layout } else { &kit.image_layout }, &msaa_depth),
             restore: one("what's behind", &kit.image_layout, &color),
             effect_depth: one("scene depth, for effects", &kit.effects.depth_layout, &depth),
@@ -690,6 +729,11 @@ pub struct Renderer {
     behind: bool,
     behind_kept: bool,
     behind_idle: u32,
+    /// Whether a soft particle in view reads the solid scene's depth;
+    /// whether its image is kept, and for how many frames none has.
+    soft: bool,
+    soft_kept: bool,
+    soft_idle: u32,
     /// Where the materials' values start among the joints.
     values_at: u32,
     instances: Vec<Instance>,
@@ -843,6 +887,9 @@ impl Renderer {
             behind: false,
             behind_kept: false,
             behind_idle: 0,
+            soft: false,
+            soft_kept: false,
+            soft_idle: 0,
             values_at: 0,
             instances: Vec::new(),
             batches: Vec::new(),
@@ -1003,6 +1050,7 @@ impl Renderer {
         self.bloom = None;
         self.ao = None;
         self.behind = false;
+        self.soft = false;
         let mut stats = FrameStats {
             shaders_waiting: (self.pipelines.waiting() + self.image_pipelines.as_ref().map_or(0, |p| p.waiting()))
                 as u32,
@@ -1316,7 +1364,8 @@ impl Renderer {
                 stats.culled += 1;
                 continue;
             }
-            self.behind |= reads_behind || (particles.softness > 0.0 && self.quality.soft_particles);
+            self.behind |= reads_behind;
+            self.soft |= particles.softness > 0.0 && self.quality.soft_particles;
             let cover = match Cover::of(m) {
                 Cover::Additive => Cover::Additive,
                 _ => Cover::Transparent,
@@ -1414,6 +1463,15 @@ impl Renderer {
         if self.behind_kept {
             let format = self.image_format.unwrap_or(self.format);
             stats.behind_bytes = BehindImages::bytes(self.size.0, self.size.1, format, self.samples);
+        }
+        // Soft particles' depth, when what's behind doesn't give it: kept a
+        // while too.
+        let soft = self.soft && !self.behind;
+        self.soft_idle = if soft { 0 } else { self.soft_idle.saturating_add(1) };
+        let held = self.targets.as_ref().is_some_and(|t| t.soft.is_some() && (t.width, t.height) == self.size);
+        self.soft_kept = soft || held && self.soft_idle <= KEEP_UNUSED_MAPS;
+        if self.soft_kept {
+            stats.behind_bytes += SoftDepth::bytes(self.size.0, self.size.1);
         }
         // The effects' pictures: kept a while too.
         let count = self.effect_chain.len();
@@ -1631,6 +1689,11 @@ impl Renderer {
                 let format = targets.image.as_ref().map_or(self.format, |i| i.format);
                 targets.behind = Some(BehindImages::new(&self.kit, width, height, format, targets.samples));
             }
+            if !self.soft_kept {
+                targets.soft = None;
+            } else if targets.soft.is_none() {
+                targets.soft = Some(SoftDepth::new(&self.kit.gpu.device, width, height));
+            }
             if let Some(maps) = &mut self.shadow_maps {
                 maps.read_ao(&self.kit.gpu.device, &self.kit.shadows, ao);
                 if let (true, Some(behind)) = (self.behind, &targets.behind) {
@@ -1639,6 +1702,14 @@ impl Renderer {
                         &self.kit.shadows,
                         ao,
                         (behind.id, &behind.depth, &behind.color),
+                    );
+                } else if let (true, Some(soft)) = (self.soft, &targets.soft) {
+                    // No colour is read: a stand-in.
+                    maps.read_behind(
+                        &self.kit.gpu.device,
+                        &self.kit.shadows,
+                        ao,
+                        (soft.id, &soft.depth, &self.kit.ao.none),
                     );
                 }
             }
@@ -1778,49 +1849,71 @@ impl Renderer {
             }
         }
 
-        // Ambient occlusion: the solid scene's depth, then how hidden each
-        // pixel is, blurred. Cut-outs and blended draws aren't in it. Those
-        // whose shaders move their vertices are drawn with them.
-        if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
-            {
-                let mut pass = images.depth_pass(&kit.ao, encoder, &self.timer);
-                let mut solid =
-                    self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque).peekable();
-                if solid.peek().is_some() {
-                    pass.set_bind_group(0, frame.bind_group, &[]);
-                    pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
-                }
-                let mut last = None;
-                for batch in solid {
-                    let Some(mesh) = meshes.get(&batch.mesh) else { continue };
-                    let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
-                    if batch.skinned && skin.is_none() {
-                        continue;
-                    }
-                    let moving = batch.shader.and_then(|key| shaders.get(&key)).filter(|s| s.moves);
-                    let pipeline = (batch.skinned, moving.map(|s| s.hash));
-                    if last != Some(pipeline) {
-                        last = Some(pipeline);
-                        match moving {
-                            None => pass.set_pipeline(kit.ao.depth_pipeline(batch.skinned)),
-                            Some(shader) => match pipelines.own_depth_ready(shader, batch.skinned, wait) {
-                                Some(made) => pass.set_pipeline(&made),
-                                None => {
-                                    last = None;
-                                    continue;
-                                }
-                            },
-                        }
-                    }
-                    if let Some(skin) = skin {
-                        pass.set_vertex_buffer(2, skin.buffer.slice(..));
-                    }
-                    pass.set_vertex_buffer(0, mesh.vertices.slice(..));
-                    pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
-                }
+        // The solid scene's depth at one sample, into `pass`: for ambient
+        // occlusion, and soft particles. Cut-outs and blended draws aren't
+        // in it. Those whose shaders move their vertices are drawn with
+        // them.
+        let solid_depth = |pass: &mut wgpu::RenderPass<'_>| {
+            let mut solid = self.batches[..self.blended_from].iter().filter(|b| b.cover == Cover::Opaque).peekable();
+            if solid.peek().is_none() {
+                return;
             }
+            pass.set_bind_group(0, frame.bind_group, &[]);
+            pass.set_vertex_buffer(1, frame.buffer.slice(frame.instances..frame.lines));
+            let mut last = None;
+            for batch in solid {
+                let Some(mesh) = meshes.get(&batch.mesh) else { continue };
+                let skin = mesh.skin.as_ref().filter(|_| batch.skinned);
+                if batch.skinned && skin.is_none() {
+                    continue;
+                }
+                let moving = batch.shader.and_then(|key| shaders.get(&key)).filter(|s| s.moves);
+                let pipeline = (batch.skinned, moving.map(|s| s.hash));
+                if last != Some(pipeline) {
+                    last = Some(pipeline);
+                    match moving {
+                        None => pass.set_pipeline(kit.ao.depth_pipeline(batch.skinned)),
+                        Some(shader) => match pipelines.own_depth_ready(shader, batch.skinned, wait) {
+                            Some(made) => pass.set_pipeline(&made),
+                            None => {
+                                last = None;
+                                continue;
+                            }
+                        },
+                    }
+                }
+                if let Some(skin) = skin {
+                    pass.set_vertex_buffer(2, skin.buffer.slice(..));
+                }
+                pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
+                pass.draw_indexed(mesh.submesh(batch.submesh), 0, batch.first..batch.first + batch.count);
+            }
+        };
+
+        // Ambient occlusion: the solid scene's depth, then how hidden each
+        // pixel is, blurred.
+        if let (Some(_), Some(images)) = (self.ao, &targets.ao) {
+            solid_depth(&mut images.depth_pass(&kit.ao, encoder, &self.timer));
             images.encode(&kit.ao, encoder, &self.timer);
+        }
+
+        // Soft particles' depth, when what's behind doesn't give it.
+        let soft_depth = targets.soft.as_ref().filter(|_| self.soft && !self.behind);
+        if let Some(soft) = soft_depth {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("soft particles' depth"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &soft.depth,
+                    depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: self.timer.pass(Part::Scene),
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            solid_depth(&mut pass);
         }
 
         // 1. The scene, into the scene image or straight into the view.
@@ -1834,6 +1927,9 @@ impl Renderer {
         };
         let behind = targets.behind.as_ref().filter(|_| self.behind);
         let behind_group = behind.and(shadow_maps.behind_bind_group());
+        // What soft particles read their depth through: what's behind, or
+        // their own depth.
+        let soft_group = behind_group.or(soft_depth.and(shadow_maps.behind_bind_group()));
         // The solid scene's depth, for what's behind or a screen effect.
         let kept_depth = targets.behind.as_ref().filter(|_| self.behind || self.effect_depth);
         // Where the solid scene ends up: what's behind's colour, when a
@@ -1868,16 +1964,22 @@ impl Renderer {
                             None => continue,
                         },
                     };
-                    // Soft only where what's behind was kept; a shader
-                    // that reads it isn't drawn without it.
+                    // Soft only where the depth was kept; a shader that
+                    // reads what's behind isn't drawn without it. Where
+                    // one does, soft particles read its depth too, so one
+                    // group serves both.
                     let reads = shader.is_some_and(|s| s.reads_behind);
                     if reads && behind_group.is_none() {
                         continue;
                     }
-                    let look = ParticleLook { soft: look.soft && behind_group.is_some(), ..look };
+                    let look = ParticleLook { soft: look.soft && soft_group.is_some(), ..look };
                     let wants = reads || look.soft;
                     if wants != reading {
-                        let group = if wants { behind_group } else { Some(&shadow_maps.bind_group) };
+                        let group = match (wants, reads) {
+                            (true, true) => behind_group,
+                            (true, false) => soft_group,
+                            (false, _) => Some(&shadow_maps.bind_group),
+                        };
                         let Some(group) = group else { continue };
                         pass.set_bind_group(2, group, &[]);
                         reading = wants;
@@ -1943,8 +2045,12 @@ impl Renderer {
                     },
                 };
                 let reads = shader.is_some_and(|s| s.reads_behind);
+                // Changed since prepare: what it reads isn't there (soft
+                // particles' own depth may be bound, with no colour).
+                if reads && behind_group.is_none() {
+                    continue;
+                }
                 if reads != reading {
-                    // Changed since prepare: what it reads isn't there.
                     let group = if reads { behind_group } else { Some(&shadow_maps.bind_group) };
                     let Some(group) = group else {
                         continue;
@@ -2264,6 +2370,7 @@ impl Renderer {
             image,
             ao: None,
             behind: None,
+            soft: None,
         }
     }
 
