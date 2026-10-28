@@ -142,4 +142,7 @@ fn frames_sent_one_after_another_keep_their_own_times() {
         let (each, frame) = (nanos / frames, took / 120);
         assert!(each > 0 && each < frame, "{part}: {each} ns a frame, of {frame} ns a frame in all");
     }
+    // Nor does a frame count the time it waited for the one before.
+    let (all, frame) = ((times.total() - before.total()) / frames, took / 120);
+    assert!(all <= frame * 11 / 10, "{all} ns a frame on the GPU, of {frame} ns a frame in all");
 }

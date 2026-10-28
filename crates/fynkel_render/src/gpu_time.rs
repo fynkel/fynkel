@@ -10,8 +10,8 @@
 //! the next pass's vertices may start before that, a small pass's start
 //! may be read after its end, and even its end before the end of the pass
 //! it reads from. So each pass counts only the time it adds past the
-//! latest end so far, from its start if that's later: the parts never
-//! overlap, add up to the frame's time on the GPU less any waits between
+//! latest end so far (this frame's or, for its first, the frame before's),
+//! from its start if that's later: the parts never overlap, add up to the frame's time on the GPU less any waits between
 //! passes, and a pass done within another's time counts nothing. They
 //! say where the time goes, not to the tenth of a millisecond.
 //!
@@ -48,6 +48,13 @@ pub struct GpuTimes {
     /// in a frame, whose start): left out of the times above. Many of them say the times are short
     /// of the frames'.
     pub untimed: u64,
+}
+
+impl GpuTimes {
+    /// Every part's time added up.
+    pub fn total(&self) -> u64 {
+        self.shadows + self.sky_light + self.ambient_occlusion + self.scene + self.bloom + self.finish + self.effects
+    }
 }
 
 /// The part of a frame a pass belongs to.
@@ -94,6 +101,8 @@ struct Slot {
     state: State,
     mapped: Arc<AtomicU8>,
     parts: Vec<Part>,
+    /// Which frame timed it was, counting from 1: they're read in order.
+    sent: u64,
 }
 
 struct Queries {
@@ -114,6 +123,12 @@ pub(crate) struct GpuTimer {
     passes: RefCell<Vec<Part>>,
     used: Cell<u32>,
     totals: GpuTimes,
+    /// The frames given a slot so far.
+    sent: u64,
+    /// Where the GPU had got to, as of the last frame read: its last
+    /// pass's end. The next frame's first pass counts from there, not
+    /// from when its vertices started while that frame was still drawing.
+    done: Option<u64>,
 }
 
 impl GpuTimer {
@@ -127,6 +142,8 @@ impl GpuTimer {
             passes: RefCell::new(Vec::with_capacity(PASSES as usize)),
             used: Cell::new(0),
             totals: GpuTimes::default(),
+            sent: 0,
+            done: None,
         }
     }
 
@@ -157,6 +174,7 @@ impl GpuTimer {
                         state: State::Free,
                         mapped: Arc::new(AtomicU8::new(PENDING)),
                         parts: Vec::with_capacity(PASSES as usize),
+                        sent: 0,
                     })
                     .collect(),
             });
@@ -210,6 +228,8 @@ impl GpuTimer {
         let bytes = u64::from(used * 2) * u64::from(wgpu::QUERY_SIZE);
         encoder.copy_buffer_to_buffer(&queries.resolve, 0, &slot.buffer, 0, bytes);
         slot.state = State::Written;
+        self.sent += 1;
+        slot.sent = self.sent;
         slot.parts.clear();
         slot.parts.extend_from_slice(self.passes.get_mut());
     }
@@ -237,9 +257,10 @@ impl GpuTimer {
             return;
         }
         let _ = self.device.poll(wgpu::PollType::Poll);
-        for slot in &mut queries.slots {
+        // The frames in the order they were sent, up to the first not back.
+        while let Some(slot) = queries.slots.iter_mut().filter(|s| s.state != State::Free).min_by_key(|s| s.sent) {
             if slot.state != State::Mapping {
-                continue;
+                break;
             }
             match slot.mapped.load(Ordering::Acquire) {
                 MAPPED => {
@@ -250,14 +271,13 @@ impl GpuTimer {
                             continue;
                         };
                         let clocks: &[u64] = bytemuck::cast_slice(&view);
-                        // Where the GPU had got to: the last pass's end.
-                        let mut done: Option<u64> = None;
+                        let done = &mut self.done;
                         for (part, clock) in slot.parts.iter().zip(clocks.chunks_exact(2)) {
                             let (start, end) = (clock[0], clock[1]);
                             let read = |c: u64| c != 0 && c != NO_CLOCK;
                             // From its start, or from where the pass before
                             // ended if that's later or its start is wrong.
-                            let from = match (read(start) && start <= end, done) {
+                            let from = match (read(start) && start <= end, *done) {
                                 (true, Some(done)) => Some(start.max(done)),
                                 (true, None) => Some(start),
                                 (false, done) => done,
@@ -268,7 +288,7 @@ impl GpuTimer {
                             };
                             // Ended within what's counted already: adds
                             // nothing.
-                            done = Some(done.map_or(end, |d| d.max(end)));
+                            *done = Some(done.map_or(end, |d| d.max(end)));
                             let nanos = (end.saturating_sub(from) as f64 * self.period) as u64;
                             let t = &mut self.totals;
                             *match part {
@@ -287,7 +307,7 @@ impl GpuTimer {
                     slot.state = State::Free;
                 }
                 FAILED => slot.state = State::Free,
-                _ => {}
+                _ => break,
             }
         }
     }
