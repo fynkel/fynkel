@@ -385,23 +385,33 @@ final class ParticleCurve {
   final Float32List? _tables;
 
   /// The least it is, anywhere.
-  double get _least => _tables == null ? math.min(_min, _max) : _tables.reduce(math.min);
+  /// The least it is, anywhere.
+  double get _least {
+    final tables = _tables;
+    if (tables == null) return math.min(_min, _max);
+    var least = tables[0];
+    for (var i = 1; i < tables.length; i++) {
+      least = math.min(least, tables[i]);
+    }
+    return least;
+  }
 
-  bool get _finite => _tables == null ? _min.isFinite && _max.isFinite : _tables.every((v) => v.isFinite);
+  bool get _finite => _tables == null ? _min.isFinite && _max.isFinite : ParticleSystem._allFinite(_tables);
 
-  void _write(FyCurve to) {
+  void _write(_CurveViews to) {
     final tables = _tables;
     if (tables == null) {
-      to
+      to.curve
         ..mode = FY_CURVE_CONSTANT
         ..min = _min
         ..max = _max;
       return;
     }
-    to.mode = FY_CURVE_CURVES;
+    to.curve.mode = FY_CURVE_CURVES;
+    final (a, b) = (to.a, to.b);
     for (var i = 0; i < FY_PARTICLE_TABLE; i++) {
-      to.tables[0][i] = tables[i];
-      to.tables[1][i] = tables[FY_PARTICLE_TABLE + i];
+      a[i] = tables[i];
+      b[i] = tables[FY_PARTICLE_TABLE + i];
     }
   }
 
@@ -436,11 +446,11 @@ final class ParticleVector {
 
   bool get _finite => x._finite && y._finite && z._finite;
 
-  void _write(FyParticleVector to) {
+  void _write(_VectorViews to) {
     x._write(to.x);
     y._write(to.y);
     z._write(to.z);
-    to.space = space == ParticleSpace.world ? FY_PARTICLE_SPACE_WORLD : FY_PARTICLE_SPACE_LOCAL;
+    to.vector.space = space == ParticleSpace.world ? FY_PARTICLE_SPACE_WORLD : FY_PARTICLE_SPACE_LOCAL;
   }
 
   @override
@@ -743,89 +753,241 @@ final class ParticleSystem extends Component {
   /// How long its timeline is, in seconds, from 0.05 to 100,000 (as
   /// Unity's): one round of a looping system, the whole of one that isn't.
   double get duration => _duration;
-  set duration(double value) => _set(() => _duration, (v) => _duration = v, value);
+  set duration(double value) {
+    _checkChangeable();
+    final old = _duration;
+    _duration = value;
+    if (_write() case final failed?) {
+      _duration = old;
+      failed.raise();
+    }
+  }
 
   /// It plays its timeline again each time it ends.
   bool get looping => _looping;
-  set looping(bool value) => _set(() => _looping, (v) => _looping = v, value);
+  set looping(bool value) {
+    _checkChangeable();
+    final old = _looping;
+    _looping = value;
+    if (_write() case final failed?) {
+      _looping = old;
+      failed.raise();
+    }
+  }
 
   /// A looping system starts as if it had played a whole [duration], full:
   /// its particles have met its collision planes, but fired no sub emitters
   /// and told of no hits.
   bool get prewarm => _prewarm;
-  set prewarm(bool value) => _set(() => _prewarm, (v) => _prewarm = v, value);
+  set prewarm(bool value) {
+    _checkChangeable();
+    final old = _prewarm;
+    _prewarm = value;
+    if (_write() case final failed?) {
+      _prewarm = old;
+      failed.raise();
+    }
+  }
 
   /// Seconds from play to the first particle.
   double get startDelay => _startDelay;
-  set startDelay(double value) => _set(() => _startDelay, (v) => _startDelay = v, value);
+  set startDelay(double value) {
+    _checkChangeable();
+    final old = _startDelay;
+    _startDelay = value;
+    if (_write() case final failed?) {
+      _startDelay = old;
+      failed.raise();
+    }
+  }
 
   /// How long each particle lives, in seconds.
   Range get startLifetime => _startLifetime;
-  set startLifetime(Range value) => _set(() => _startLifetime, (v) => _startLifetime = v, value);
+  set startLifetime(Range value) {
+    _checkChangeable();
+    final old = _startLifetime;
+    _startLifetime = value;
+    if (_write() case final failed?) {
+      _startLifetime = old;
+      failed.raise();
+    }
+  }
 
   /// How fast each starts, in metres a second, the way its [shape] sends
   /// it.
   Range get startSpeed => _startSpeed;
-  set startSpeed(Range value) => _set(() => _startSpeed, (v) => _startSpeed = v, value);
+  set startSpeed(Range value) {
+    _checkChangeable();
+    final old = _startSpeed;
+    _startSpeed = value;
+    if (_write() case final failed?) {
+      _startSpeed = old;
+      failed.raise();
+    }
+  }
 
   /// How big each starts, across, in metres.
   Range get startSize => _startSize;
-  set startSize(Range value) => _set(() => _startSize, (v) => _startSize = v, value);
+  set startSize(Range value) {
+    _checkChangeable();
+    final old = _startSize;
+    _startSize = value;
+    if (_write() case final failed?) {
+      _startSize = old;
+      failed.raise();
+    }
+  }
 
   /// How far each is turned, in radians (`Range(0, 360.deg)` for any
   /// way).
   Range get startRotation => _startRotation;
-  set startRotation(Range value) => _set(() => _startRotation, (v) => _startRotation = v, value);
+  set startRotation(Range value) {
+    _checkChangeable();
+    final old = _startRotation;
+    _startRotation = value;
+    if (_write() case final failed?) {
+      _startRotation = old;
+      failed.raise();
+    }
+  }
 
   /// Each particle's colour: a [Color], or a [ColorRange] for one at
   /// random. Times the [material]'s colour and texture.
   ParticleColor get startColor => _startColor;
-  set startColor(ParticleColor value) => _set(() => _startColor, (v) => _startColor = v, value);
+  set startColor(ParticleColor value) {
+    _checkChangeable();
+    final old = _startColor;
+    _startColor = value;
+    if (_write() case final failed?) {
+      _startColor = old;
+      failed.raise();
+    }
+  }
 
   /// How much gravity pulls them, times 9.81 m/s² down in the world: 1 for
   /// sparks that fall, a little below 0 for smoke that rises.
   double get gravityModifier => _gravityModifier;
-  set gravityModifier(double value) => _set(() => _gravityModifier, (v) => _gravityModifier = v, value);
+  set gravityModifier(double value) {
+    _checkChangeable();
+    final old = _gravityModifier;
+    _gravityModifier = value;
+    if (_write() case final failed?) {
+      _gravityModifier = old;
+      failed.raise();
+    }
+  }
 
   /// Where its particles live: moved with its object, or left behind.
   ParticleSpace get simulationSpace => _simulationSpace;
-  set simulationSpace(ParticleSpace value) => _set(() => _simulationSpace, (v) => _simulationSpace = v, value);
+  set simulationSpace(ParticleSpace value) {
+    _checkChangeable();
+    final old = _simulationSpace;
+    _simulationSpace = value;
+    if (_write() case final failed?) {
+      _simulationSpace = old;
+      failed.raise();
+    }
+  }
 
   /// How fast its time goes, times the game's.
   double get simulationSpeed => _simulationSpeed;
-  set simulationSpeed(double value) => _set(() => _simulationSpeed, (v) => _simulationSpeed = v, value);
+  set simulationSpeed(double value) {
+    _checkChangeable();
+    final old = _simulationSpeed;
+    _simulationSpeed = value;
+    if (_write() case final failed?) {
+      _simulationSpeed = old;
+      failed.raise();
+    }
+  }
 
   /// Its time goes on when the world is paused or [Time.scale] is 0: for
   /// a pause menu's effects.
   bool get useUnscaledTime => _useUnscaledTime;
-  set useUnscaledTime(bool value) => _set(() => _useUnscaledTime, (v) => _useUnscaledTime = v, value);
+  set useUnscaledTime(bool value) {
+    _checkChangeable();
+    final old = _useUnscaledTime;
+    _useUnscaledTime = value;
+    if (_write() case final failed?) {
+      _useUnscaledTime = old;
+      failed.raise();
+    }
+  }
 
   /// It plays when it comes into the world, and each time it's shown
   /// again; else it waits for [play].
   bool get playOnAwake => _playOnAwake;
-  set playOnAwake(bool value) => _set(() => _playOnAwake, (v) => _playOnAwake = v, value);
+  set playOnAwake(bool value) {
+    _checkChangeable();
+    final old = _playOnAwake;
+    _playOnAwake = value;
+    if (_write() case final failed?) {
+      _playOnAwake = old;
+      failed.raise();
+    }
+  }
 
   /// The most particles it holds at once, 1 to 100,000; 1000 unless set.
   /// Past it, it makes no more till some die.
   int get maxParticles => _maxParticles;
-  set maxParticles(int value) => _set(() => _maxParticles, (v) => _maxParticles = v, value);
+  set maxParticles(int value) {
+    _checkChangeable();
+    final old = _maxParticles;
+    _maxParticles = value;
+    if (_write() case final failed?) {
+      _maxParticles = old;
+      failed.raise();
+    }
+  }
 
   /// What happens when it's done.
   StopAction get stopAction => _stopAction;
-  set stopAction(StopAction value) => _set(() => _stopAction, (v) => _stopAction = v, value);
+  set stopAction(StopAction value) {
+    _checkChangeable();
+    final old = _stopAction;
+    _stopAction = value;
+    if (_write() case final failed?) {
+      _stopAction = old;
+      failed.raise();
+    }
+  }
 
   /// The same particles each play, for a test or a replay; null, new ones
   /// each play (Unity's `useAutoRandomSeed`).
   int? get randomSeed => _randomSeed;
-  set randomSeed(int? value) => _set(() => _randomSeed, (v) => _randomSeed = v, value);
+  set randomSeed(int? value) {
+    _checkChangeable();
+    final old = _randomSeed;
+    _randomSeed = value;
+    if (_write() case final failed?) {
+      _randomSeed = old;
+      failed.raise();
+    }
+  }
 
   /// How many particles it makes: a rate and bursts.
   Emission get emission => _emission;
-  set emission(Emission value) => _set(() => _emission, (v) => _emission = v, value);
+  set emission(Emission value) {
+    _checkChangeable();
+    final old = _emission;
+    _emission = value;
+    if (_write() case final failed?) {
+      _emission = old;
+      failed.raise();
+    }
+  }
 
   /// Where its particles are made, and the way they go.
   ParticleShape get shape => _shape;
-  set shape(ParticleShape value) => _set(() => _shape, (v) => _shape = v, value);
+  set shape(ParticleShape value) {
+    _checkChangeable();
+    final old = _shape;
+    _shape = value;
+    if (_write() case final failed?) {
+      _shape = old;
+      failed.raise();
+    }
+  }
 
   /// Each particle's size over its life, times its [startSize]: any
   /// function of 0 (born) to 1 (gone), `(t) => 1 - t` or `Ease.outQuad`.
@@ -853,39 +1015,101 @@ final class ParticleSystem extends Component {
   /// Added to how each particle moves, over its life, in metres a
   /// second, without changing its velocity: a swirl, a drift.
   ParticleVector? get velocityOverLifetime => _velocityOverLifetime;
-  set velocityOverLifetime(ParticleVector? value) =>
-      _set(() => _velocityOverLifetime, (v) => _velocityOverLifetime = v, value);
+  set velocityOverLifetime(ParticleVector? value) {
+    _checkChangeable();
+    final old = _velocityOverLifetime;
+    _velocityOverLifetime = value;
+    if (_write() case final failed?) {
+      _velocityOverLifetime = old;
+      failed.raise();
+    }
+  }
 
   /// A speed limit and drag.
   LimitVelocity? get limitVelocity => _limitVelocity;
-  set limitVelocity(LimitVelocity? value) => _set(() => _limitVelocity, (v) => _limitVelocity = v, value);
+  set limitVelocity(LimitVelocity? value) {
+    _checkChangeable();
+    final old = _limitVelocity;
+    _limitVelocity = value;
+    if (_write() case final failed?) {
+      _limitVelocity = old;
+      failed.raise();
+    }
+  }
 
   /// Added to each particle's velocity each second, over its life: wind,
   /// an updraft.
   ParticleVector? get forceOverLifetime => _forceOverLifetime;
-  set forceOverLifetime(ParticleVector? value) => _set(() => _forceOverLifetime, (v) => _forceOverLifetime = v, value);
+  set forceOverLifetime(ParticleVector? value) {
+    _checkChangeable();
+    final old = _forceOverLifetime;
+    _forceOverLifetime = value;
+    if (_write() case final failed?) {
+      _forceOverLifetime = old;
+      failed.raise();
+    }
+  }
 
   /// How fast each particle turns, in radians a second, over its life.
   ParticleCurve? get rotationOverLifetime => _rotationOverLifetime;
-  set rotationOverLifetime(ParticleCurve? value) =>
-      _set(() => _rotationOverLifetime, (v) => _rotationOverLifetime = v, value);
+  set rotationOverLifetime(ParticleCurve? value) {
+    _checkChangeable();
+    final old = _rotationOverLifetime;
+    _rotationOverLifetime = value;
+    if (_write() case final failed?) {
+      _rotationOverLifetime = old;
+      failed.raise();
+    }
+  }
 
   /// Each particle's size by how fast it goes.
   SizeBySpeed? get sizeBySpeed => _sizeBySpeed;
-  set sizeBySpeed(SizeBySpeed? value) => _set(() => _sizeBySpeed, (v) => _sizeBySpeed = v, value);
+  set sizeBySpeed(SizeBySpeed? value) {
+    _checkChangeable();
+    final old = _sizeBySpeed;
+    _sizeBySpeed = value;
+    if (_write() case final failed?) {
+      _sizeBySpeed = old;
+      failed.raise();
+    }
+  }
 
   /// Each particle's colour by how fast it goes: sparks that cool as they
   /// slow.
   ColorBySpeed? get colorBySpeed => _colorBySpeed;
-  set colorBySpeed(ColorBySpeed? value) => _set(() => _colorBySpeed, (v) => _colorBySpeed = v, value);
+  set colorBySpeed(ColorBySpeed? value) {
+    _checkChangeable();
+    final old = _colorBySpeed;
+    _colorBySpeed = value;
+    if (_write() case final failed?) {
+      _colorBySpeed = old;
+      failed.raise();
+    }
+  }
 
   /// A smooth random wander.
   ParticleNoise? get noise => _noise;
-  set noise(ParticleNoise? value) => _set(() => _noise, (v) => _noise = v, value);
+  set noise(ParticleNoise? value) {
+    _checkChangeable();
+    final old = _noise;
+    _noise = value;
+    if (_write() case final failed?) {
+      _noise = old;
+      failed.raise();
+    }
+  }
 
   /// Frames of the material's texture, over each particle's life.
   TextureSheet? get textureSheet => _textureSheet;
-  set textureSheet(TextureSheet? value) => _set(() => _textureSheet, (v) => _textureSheet = v, value);
+  set textureSheet(TextureSheet? value) {
+    _checkChangeable();
+    final old = _textureSheet;
+    _textureSheet = value;
+    if (_write() case final failed?) {
+      _textureSheet = old;
+      failed.raise();
+    }
+  }
 
   /// What its particles are drawn with: its colour and base colour
   /// texture, unlit, and its emission; [Blending.additive] for fire and
@@ -894,37 +1118,83 @@ final class ParticleSystem extends Component {
   /// `in.color`, and `particle_age()` and `particle_random()` for each.
   /// Without one, nothing is drawn.
   Material? get material => _material;
-  set material(Material? value) => _set(() => _material, (v) => _material = v, value);
+  set material(Material? value) {
+    _checkChangeable();
+    final old = _material;
+    _material = value;
+    if (_write() case final failed?) {
+      _material = old;
+      failed.raise();
+    }
+  }
 
   /// How each particle is drawn: [ParticleRenderMode.billboard] unless
   /// set.
   ParticleRenderMode get renderMode => _renderMode;
-  set renderMode(ParticleRenderMode value) => _set(() => _renderMode, (v) => _renderMode = v, value);
+  set renderMode(ParticleRenderMode value) {
+    _checkChangeable();
+    final old = _renderMode;
+    _renderMode = value;
+    if (_write() case final failed?) {
+      _renderMode = old;
+      failed.raise();
+    }
+  }
 
   /// Lit by the scene's lights as a surface facing the camera, with the
   /// material's metal and roughness, rather than shown as it is: smoke and
   /// dust in the sun.
   bool get lit => _lit;
-  set lit(bool value) => _set(() => _lit, (v) => _lit = v, value);
+  set lit(bool value) {
+    _checkChangeable();
+    final old = _lit;
+    _lit = value;
+    if (_write() case final failed?) {
+      _lit = old;
+      failed.raise();
+    }
+  }
 
   /// How far, in metres, each particle fades out in front of what's
   /// behind it (Unity's soft particles), so smoke doesn't cut a hard line
   /// into the ground; 0 for a hard edge. A frame with soft particles keeps
   /// the solid scene's depth to read, which costs a little.
   double get softness => _softness;
-  set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
+  set softness(double value) {
+    _checkChangeable();
+    final old = _softness;
+    _softness = value;
+    if (_write() case final failed?) {
+      _softness = old;
+      failed.raise();
+    }
+  }
 
   /// A particle takes its object's velocity, as it's born or all its
   /// life.
   InheritVelocity? get inheritVelocity => _inheritVelocity;
-  set inheritVelocity(InheritVelocity? value) => _set(() => _inheritVelocity, (v) => _inheritVelocity = v, value);
+  set inheritVelocity(InheritVelocity? value) {
+    _checkChangeable();
+    final old = _inheritVelocity;
+    _inheritVelocity = value;
+    if (_write() case final failed?) {
+      _inheritVelocity = old;
+      failed.raise();
+    }
+  }
 
   /// Its particles bounce off planes. A plane whose object is destroyed
   /// later is left out; one destroyed already is refused.
   ParticleCollision? get collision => _collision;
   set collision(ParticleCollision? value) {
     if (_destroyedPlane(value) case final error?) throw error;
-    _set(() => _collision, (v) => _collision = v, value);
+    _checkChangeable();
+    final old = _collision;
+    _collision = value;
+    if (_write() case final failed?) {
+      _collision = old;
+      failed.raise();
+    }
   }
 
   static ArgumentError? _destroyedPlane(ParticleCollision? collision) =>
@@ -935,7 +1205,15 @@ final class ParticleSystem extends Component {
   /// Other systems that emit where its particles are born, hit a plane or
   /// die: at most 4.
   List<SubEmitter> get subEmitters => _subEmitters;
-  set subEmitters(List<SubEmitter> value) => _set(() => _subEmitters, (v) => _subEmitters = v, value);
+  set subEmitters(List<SubEmitter> value) {
+    _checkChangeable();
+    final old = _subEmitters;
+    _subEmitters = value;
+    if (_write() case final failed?) {
+      _subEmitters = old;
+      failed.raise();
+    }
+  }
 
   /// Plays from the start, keeping the particles it has; a paused system
   /// goes on from where it was.
@@ -1047,25 +1325,24 @@ final class ParticleSystem extends Component {
     if (_randomSeed case final seed? when seed < 0 || seed > 0xFFFFFFFF) {
       return ArgumentError.value(seed, 'randomSeed', 'must be 0 to 4294967295');
     }
-    for (final r in [_startLifetime, _startSpeed, _startSize, _startRotation]) {
-      if (!r._finite) return ArgumentError('a ParticleSystem\'s ranges must be finite; got $r');
-    }
-    if (_sizeTable case final t? when t.any((v) => !v.isFinite)) {
+    // No list or closure here: a system changed every frame checks it all
+    // each time (stage 14's DF2).
+    if (_rangeNotFinite() case final r?) return ArgumentError('a ParticleSystem\'s ranges must be finite; got $r');
+    if (_sizeTable case final t? when !_allFinite(t)) {
       return ArgumentError('sizeOverLifetime must give finite numbers from 0 to 1');
     }
-    if (_sizeBySpeed?._table case final t? when t.any((v) => !v.isFinite)) {
+    if (_sizeBySpeed?._table case final t? when !_allFinite(t)) {
       return ArgumentError('sizeBySpeed must give finite numbers from 0 to 1');
     }
-    final curves = [
-      _velocityOverLifetime?._finite,
-      _forceOverLifetime?._finite,
-      _rotationOverLifetime?._finite,
-      _limitVelocity?.limit._finite,
-      _limitVelocity?.drag._finite,
-      _noise?.strength._finite,
-      _textureSheet?.frameOverTime._finite,
-    ];
-    if (curves.contains(false)) return ArgumentError('a ParticleSystem\'s curves must be finite');
+    if (_velocityOverLifetime?._finite == false ||
+        _forceOverLifetime?._finite == false ||
+        _rotationOverLifetime?._finite == false ||
+        _limitVelocity?.limit._finite == false ||
+        _limitVelocity?.drag._finite == false ||
+        _noise?.strength._finite == false ||
+        _textureSheet?.frameOverTime._finite == false) {
+      return ArgumentError('a ParticleSystem\'s curves must be finite');
+    }
     if (_limitVelocity case final l? when l.limit._least < 0 || l.drag._least < 0 || l.dampen < 0 || l.dampen > 1) {
       return ArgumentError('limitVelocity: limit and drag can\'t be below 0, and dampen is 0 to 1; got $l');
     }
@@ -1089,13 +1366,31 @@ final class ParticleSystem extends Component {
       if (!c._finite) return ArgumentError('collision\'s numbers must be finite');
     }
     if (_subEmitters.length > 4) return ArgumentError('a ParticleSystem has at most 4 sub emitters');
-    for (final sub in _subEmitters) {
+    for (var i = 0; i < _subEmitters.length; i++) {
+      final sub = _subEmitters[i];
       if (identical(sub.system, this)) return ArgumentError('a ParticleSystem can\'t be its own sub emitter');
       if (!sub.probability.isFinite || sub.probability < 0 || sub.probability > 1) {
         return ArgumentError.value(sub.probability, 'probability', 'must be 0 to 1');
       }
     }
     return null;
+  }
+
+  Range? _rangeNotFinite() => !_startLifetime._finite
+      ? _startLifetime
+      : !_startSpeed._finite
+      ? _startSpeed
+      : !_startSize._finite
+      ? _startSize
+      : !_startRotation._finite
+      ? _startRotation
+      : null;
+
+  static bool _allFinite(Float32List table) {
+    for (var i = 0; i < table.length; i++) {
+      if (!table[i].isFinite) return false;
+    }
+    return true;
   }
 
   /// [f] at 64 points from 0 to 1.
@@ -1248,3 +1543,105 @@ extension _Particles on World {
     }
   }
 }
+
+/// Views into [scratch]'s particle settings, made once and kept: the
+/// memory never moves, and a view made for each field written is an
+/// object each, hundreds for a system with its modules, every time a
+/// setter writes it (stage 14's DF2).
+final class _ParticleViews {
+  _ParticleViews(FyParticleSettings s)
+    : settings = s,
+      startLifetime = s.start_lifetime,
+      startSpeed = s.start_speed,
+      startSize = s.start_size,
+      startRotation = s.start_rotation,
+      startColor = [s.start_color[0], s.start_color[1]],
+      bursts = [for (var i = 0; i < 8; i++) s.bursts[i]],
+      burstCounts = [for (var i = 0; i < 8; i++) s.bursts[i].count],
+      shape = s.shape,
+      shapeSize = s.shape.size,
+      sizeTable = s.size_table,
+      colorTable = [for (var i = 0; i < FY_PARTICLE_TABLE; i++) s.color_table[i]],
+      velocity = _VectorViews(s.velocity_over_lifetime),
+      force = _VectorViews(s.force_over_lifetime),
+      limit = s.limit_velocity,
+      limitCurve = _CurveViews(s.limit_velocity.limit),
+      drag = _CurveViews(s.limit_velocity.drag),
+      rotation = _CurveViews(s.rotation_over_lifetime),
+      sizeBySpeed = s.size_by_speed,
+      sizeSpeeds = s.size_speeds,
+      colorBySpeed = [for (var i = 0; i < FY_PARTICLE_TABLE; i++) s.color_by_speed[i]],
+      colorSpeeds = s.color_speeds,
+      noise = s.noise,
+      noiseStrength = _CurveViews(s.noise.strength),
+      sheet = s.texture_sheet,
+      sheetFrames = _CurveViews(s.texture_sheet.frame_over_time),
+      sheetStart = s.texture_sheet.start_frame,
+      inherit = s.inherit_velocity,
+      inheritCurve = _CurveViews(s.inherit_velocity.curve),
+      collision = s.collision,
+      planes = s.collision.planes,
+      dampen = _CurveViews(s.collision.dampen),
+      bounce = _CurveViews(s.collision.bounce),
+      lifetimeLoss = _CurveViews(s.collision.lifetime_loss),
+      subEmitters = [for (var i = 0; i < 4; i++) s.sub_emitters[i]];
+
+  final FyParticleSettings settings;
+  final FyRange startLifetime, startSpeed, startSize, startRotation;
+  final List<FyColor> startColor;
+  final List<FyParticleBurst> bursts;
+  final List<FyRange> burstCounts;
+  final FyParticleShape shape;
+  final FyVec3 shapeSize;
+  final Array<Float> sizeTable;
+  final List<FyColor> colorTable;
+  final _VectorViews velocity, force;
+  final FyParticleLimit limit;
+  final _CurveViews limitCurve, drag, rotation;
+  final Array<Float> sizeBySpeed;
+  final FyRange sizeSpeeds;
+  final List<FyColor> colorBySpeed;
+  final FyRange colorSpeeds;
+  final FyParticleNoise noise;
+  final _CurveViews noiseStrength;
+  final FyParticleSheet sheet;
+  final _CurveViews sheetFrames;
+  final FyRange sheetStart;
+  final FyParticleInherit inherit;
+  final _CurveViews inheritCurve;
+  final FyParticleCollision collision;
+  final Array<Uint64> planes;
+  final _CurveViews dampen, bounce, lifetimeLoss;
+  final List<FyParticleSubEmitter> subEmitters;
+}
+
+/// A curve's views, its two tables too.
+final class _CurveViews {
+  _CurveViews(this.curve) : a = curve.tables[0], b = curve.tables[1];
+
+  final FyCurve curve;
+  final Array<Float> a, b;
+}
+
+/// A vector's views, each axis's curve's too.
+final class _VectorViews {
+  _VectorViews(this.vector) : x = _CurveViews(vector.x), y = _CurveViews(vector.y), z = _CurveViews(vector.z);
+
+  final FyParticleVector vector;
+  final _CurveViews x, y, z;
+}
+
+/// [scratch]'s trail settings' views, made once, as [_ParticleViews].
+final class _TrailViews {
+  _TrailViews(FyTrailSettings s)
+    : settings = s,
+      widthTable = s.width_table,
+      colorTable = [for (var i = 0; i < FY_PARTICLE_TABLE; i++) s.color_table[i]];
+
+  final FyTrailSettings settings;
+  final Array<Float> widthTable;
+  final List<FyColor> colorTable;
+}
+
+final _particleViews = _ParticleViews(scratch.particleSettings.ref);
+final _trailViews = _TrailViews(scratch.trailSettings.ref);

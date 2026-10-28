@@ -854,6 +854,29 @@ fn a_death_sub_emitter_bursts_where_each_particle_dies_and_never_on_its_own() {
 }
 
 #[test]
+fn a_sub_emitter_is_one_while_a_parent_has_it_however_the_parent_changes() {
+    let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Death, 5.0, 0.5);
+    let mut settings = world.particles(parent).unwrap().settings().clone();
+    // Changing the parent's rate leaves it a sub emitter: silent alone.
+    settings.rate_over_time = 3.0;
+    world.set_particles(parent, settings.clone()).unwrap();
+    step(&mut world, 0.4, 0.01);
+    assert_eq!(world.particles(sub).unwrap().count(), 0, "still a sub emitter");
+    // Without it among the parent's, it emits on its own.
+    let subs = std::mem::take(&mut settings.sub_emitters);
+    world.set_particles(parent, settings.clone()).unwrap();
+    step(&mut world, 0.2, 0.01);
+    let alone = world.particles(sub).unwrap().count();
+    assert!(alone >= 10, "{alone}");
+    // Given back, it stops emitting on its own.
+    settings.sub_emitters = subs;
+    world.set_particles(parent, settings).unwrap();
+    world.particle_command(sub, ParticleCommand::Clear).unwrap();
+    step(&mut world, 0.2, 0.01);
+    assert_eq!(world.particles(sub).unwrap().count(), 0, "a sub emitter again");
+}
+
+#[test]
 fn a_birth_sub_emitter_emits_from_each_particle_all_its_life() {
     let (mut world, parent, sub) = parent_and_sub(SubEmitterKind::Birth, 3.0, 2.0);
     step(&mut world, 0.5, 0.01);

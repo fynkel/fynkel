@@ -46,16 +46,40 @@ final class TrailRenderer extends Component {
   /// How long each point lives, in seconds: how long the trail is behind
   /// a moving object.
   double get time => _time;
-  set time(double value) => _set(() => _time, (v) => _time = v, value);
+  set time(double value) {
+    _checkChangeable();
+    final old = _time;
+    _time = value;
+    if (_write() case final failed?) {
+      _time = old;
+      failed.raise();
+    }
+  }
 
   /// How far, in metres, the object goes before another point is added:
   /// smaller is smoother round a curve, with more points.
   double get minVertexDistance => _minVertexDistance;
-  set minVertexDistance(double value) => _set(() => _minVertexDistance, (v) => _minVertexDistance = v, value);
+  set minVertexDistance(double value) {
+    _checkChangeable();
+    final old = _minVertexDistance;
+    _minVertexDistance = value;
+    if (_write() case final failed?) {
+      _minVertexDistance = old;
+      failed.raise();
+    }
+  }
 
   /// Its width, in metres, times [widthCurve].
   double get widthMultiplier => _widthMultiplier;
-  set widthMultiplier(double value) => _set(() => _widthMultiplier, (v) => _widthMultiplier = v, value);
+  set widthMultiplier(double value) {
+    _checkChangeable();
+    final old = _widthMultiplier;
+    _widthMultiplier = value;
+    if (_write() case final failed?) {
+      _widthMultiplier = old;
+      failed.raise();
+    }
+  }
 
   /// Its width along it, times [widthMultiplier]: any function of 0 (at
   /// the object) to 1 (the tail), `(t) => 1 - t` to taper it. Read at 64
@@ -84,11 +108,27 @@ final class TrailRenderer extends Component {
   /// Adding points as it moves; off, the ones it has live out their time,
   /// so it can be turned off to let a trail end.
   bool get emitting => _emitting;
-  set emitting(bool value) => _set(() => _emitting, (v) => _emitting = v, value);
+  set emitting(bool value) {
+    _checkChangeable();
+    final old = _emitting;
+    _emitting = value;
+    if (_write() case final failed?) {
+      _emitting = old;
+      failed.raise();
+    }
+  }
 
   /// What it's drawn with; without one, nothing is.
   Material? get material => _material;
-  set material(Material? value) => _set(() => _material, (v) => _material = v, value);
+  set material(Material? value) {
+    _checkChangeable();
+    final old = _material;
+    _material = value;
+    if (_write() case final failed?) {
+      _material = old;
+      failed.raise();
+    }
+  }
 
   /// How many points it has now.
   int get positionCount {
