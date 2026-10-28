@@ -2,7 +2,11 @@
 //!
 //! A plain sky is a colour: the clear colour, and that much ambient light.
 //! A gradient or an image lights the scene from cubes worked out on the GPU
-//! once, when it's set (`env.wgsl`), not each frame:
+//! once, when it's set (`env.wgsl`), not each frame. An image's are
+//! unturned at intensity 1, the forward pass turning and scaling what it
+//! reads; a gradient's hold each of its colours' share of the light in a
+//! channel (zenith red, horizon green, ground blue), so they're made once
+//! for every gradient, the forward pass colouring what it reads:
 //!
 //! - the radiance cube, [`RADIANCE`] texels a side: the sky itself, with
 //!   mips, each the average of the one above;
@@ -254,16 +258,20 @@ impl Environment {
             ground: [0.0; 4],
         };
         let image = match kind {
-            SkyKind::Image { image, intensity, rotation } => {
-                base.zenith[3] = *intensity;
-                base.horizon[3] = *rotation;
+            // Unturned at intensity 1: the forward pass turns and scales
+            // what it reads, so a turning or brightening sky is never
+            // worked out again.
+            SkyKind::Image { image, .. } => {
                 base.ground[3] = 1.0;
                 Some(image_texture(device, &kit.queue, image.width(), image.height(), image.packed()))
             }
-            SkyKind::Gradient { zenith, horizon, ground } => {
-                base.zenith = zenith.extend(0.0).into();
-                base.horizon = horizon.extend(0.0).into();
-                base.ground = ground.extend(0.0).into();
+            // Each colour's share of the light in a channel of its own:
+            // blending is linear in the colours, so the forward pass gets
+            // any gradient's light from these.
+            SkyKind::Gradient { .. } => {
+                base.zenith = [1.0, 0.0, 0.0, 0.0];
+                base.horizon = [0.0, 1.0, 0.0, 0.0];
+                base.ground = [0.0, 0.0, 1.0, 0.0];
                 None
             }
             // A plain sky needs no cubes; nothing makes one for it.

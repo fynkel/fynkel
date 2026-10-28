@@ -20,9 +20,9 @@ struct Pass {
     roughness: f32,
     // The radiance cube's mip 0's side.
     source_size: f32,
-    // The gradient's colours; w of the zenith's: the image's intensity, of
-    // the horizon's: its turn (radians), of the ground's: 1 to read the
-    // image, 0 the gradient.
+    // The gradient's colours; w of the ground's: 1 to read the image, 0
+    // the gradient. An image is read unturned at intensity 1: the forward
+    // pass turns and scales the cubes as it reads them.
     zenith: vec4<f32>,
     horizon: vec4<f32>,
     ground: vec4<f32>,
@@ -67,10 +67,10 @@ fn gradient(d: vec3<f32>) -> vec3<f32> {
     return mix(pass_.horizon.rgb, pass_.ground.rgb, sqrt(-d.y));
 }
 
-// Where `d` is in the image, turned by `turn`: −Z the middle, +X three
-// quarters across, straight up the top row.
-fn equirect(d: vec3<f32>, turn: f32) -> vec2<f32> {
-    let u = 0.5 + (atan2(d.x, -d.z) - turn) / (2.0 * PI);
+// Where `d` is in the image: −Z the middle, +X three quarters across,
+// straight up the top row.
+fn equirect(d: vec3<f32>) -> vec2<f32> {
+    let u = 0.5 + atan2(d.x, -d.z) / (2.0 * PI);
     let v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     return vec2<f32>(fract(u), v);
 }
@@ -87,10 +87,10 @@ fn fs_source(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
         for (var x = 0; x < 6; x++) {
             let offset = (vec2<f32>(f32(x), f32(y)) + 0.5) / 6.0 - 0.5;
             let d = direction(pass_.face, at.xy + offset, pass_.size);
-            sum += textureSampleLevel(image, linear_sampler, equirect(d, pass_.horizon.w), 0.0).rgb;
+            sum += textureSampleLevel(image, linear_sampler, equirect(d), 0.0).rgb;
         }
     }
-    return vec4<f32>(sum / 36.0 * pass_.zenith.w, 1.0);
+    return vec4<f32>(sum / 36.0, 1.0);
 }
 
 // A radiance mip from the one above: the bilinear sample at a texel's

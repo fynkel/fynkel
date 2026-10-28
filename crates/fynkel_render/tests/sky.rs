@@ -271,3 +271,83 @@ fn a_new_sky_lights_the_next_frame() {
     let red = render(&gpu, &mut r, &ball(0.0, 1.0, gradient(RED, RED, RED)), 32, 32).0.pixel(16, 16);
     assert!(blue[2] > blue[0] && red[0] > red[2], "blue {blue:?}, then red {red:?}");
 }
+
+#[test]
+fn an_image_sky_turned_or_brightened_lights_as_it_should_without_its_light_worked_out_again() {
+    // Stage 14's RN2: turning or brightening an image sky worked its light
+    // out again, 9.5 ms a frame for a 2K image.
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let image = columns();
+    let sky = |intensity: f32, rotation: f32, lighting: f32| Sky {
+        kind: SkyKind::Image { image: image.clone(), intensity, rotation },
+        lighting,
+    };
+    // A half-shiny ball, seen from `degrees` round to the right: a sky
+    // turned that much and the camera with it see the same ball.
+    let ball_from = |degrees: f32, sky: Sky| {
+        let mut scene = ball(0.6, 0.3, sky);
+        let (s, c) = degrees.to_radians().sin_cos();
+        scene.camera = Some(CameraView::looking_at(Vec3::new(-s, 0.0, c) * 1.5, Vec3::ZERO));
+        scene
+    };
+    // The ball's middle, where the sphere's own facets matter least.
+    let middle = |image: &Image| {
+        let mut all = Vec::new();
+        for y in (24..=40).step_by(4) {
+            for x in (24..=40).step_by(4) {
+                all.push(rgb(image.pixel(x, y)));
+            }
+        }
+        all
+    };
+    let assert_same = |got: &Image, want: &Image, what: &str| {
+        for (g, w) in middle(got).iter().zip(middle(want)) {
+            for c in 0..3 {
+                assert!(g[c].abs_diff(w[c]) <= 3, "{what}: got {g:?}, want {w:?}");
+            }
+        }
+    };
+    let (still, stats) = render(&gpu, &mut r, &ball_from(0.0, sky(1.0, 0.0, 1.0)), 64, 64);
+    assert!(stats.sky_light_made, "a new sky's light is worked out");
+    let (again, stats) = render(&gpu, &mut r, &ball_from(0.0, sky(1.0, 0.0, 1.0)), 64, 64);
+    assert!(!stats.sky_light_made, "and kept");
+    assert_same(&again, &still, "the same sky");
+    for degrees in [45.0, 100.0, -70.0] {
+        let (turned, stats) =
+            render(&gpu, &mut r, &ball_from(degrees, sky(1.0, f32::to_radians(degrees), 1.0)), 64, 64);
+        assert!(!stats.sky_light_made, "turned {degrees}°: its light kept");
+        assert_same(&turned, &still, &format!("turned {degrees}°, seen from as far round"));
+    }
+    // Twice as bright lights the ball as twice the lighting does.
+    let (brighter, stats) = render(&gpu, &mut r, &ball_from(0.0, sky(2.0, 0.0, 1.0)), 64, 64);
+    assert!(!stats.sky_light_made, "brightened: its light kept");
+    let lit = render(&gpu, &mut r, &ball_from(0.0, sky(1.0, 0.0, 2.0)), 64, 64).0;
+    assert_same(&brighter, &lit, "twice as bright");
+    // Another image is worked out.
+    let other = Sky { kind: SkyKind::Image { image: columns(), intensity: 1.0, rotation: 0.0 }, lighting: 1.0 };
+    assert!(render(&gpu, &mut r, &ball_from(0.0, other), 64, 64).1.sky_light_made, "another image");
+}
+
+#[test]
+fn a_gradient_sky_changing_colour_lights_as_it_should_without_its_light_worked_out_again() {
+    // A day passing: 6 ms a frame on a Mac when each change worked its
+    // light out again.
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let ball = |sky: Sky| ball(0.6, 0.3, sky);
+    assert!(render(&gpu, &mut r, &ball(gradient(BLUE, ORANGE, RED)), 64, 64).1.sky_light_made, "a new sky");
+    for (zenith, horizon, ground) in
+        [(RED, BLUE, ORANGE), (BLUE * 0.2, ORANGE * 0.3, RED * 0.1), (ORANGE, ORANGE, BLUE)]
+    {
+        let (got, stats) = render(&gpu, &mut r, &ball(gradient(zenith, horizon, ground)), 64, 64);
+        assert!(!stats.sky_light_made, "{zenith} {horizon} {ground}: its light kept");
+        let want = render(&gpu, &mut renderer(&gpu, SRGB), &ball(gradient(zenith, horizon, ground)), 64, 64).0;
+        for y in (12..=52).step_by(5) {
+            for x in (12..=52).step_by(5) {
+                let (g, w) = (rgb(got.pixel(x, y)), rgb(want.pixel(x, y)));
+                assert!((0..3).all(|c| g[c].abs_diff(w[c]) <= 1), "({x}, {y}): got {g:?}, want {w:?}");
+            }
+        }
+    }
+}

@@ -95,6 +95,9 @@ pub struct FrameStats {
     /// GPU memory the view holds for the sky's light, and an image sky's
     /// pixels.
     pub sky_bytes: u64,
+    /// Whether the frame works out the sky's light: a new gradient or
+    /// image. One turned or brightened isn't new.
+    pub sky_light_made: bool,
     /// Whether a see-through surface in view reads what's behind it
     /// (`scene_depth`, `scene_color`), so the frame keeps the solid
     /// scene's depth and colour for it.
@@ -149,6 +152,9 @@ struct FrameUniforms {
     view_size: [f32; 4],
     /// x: the game's time ([`RenderScene::time`]), y: its step this frame.
     time: [f32; 4],
+    /// What the sky's cubes' red, green and blue are worth: a gradient's
+    /// zenith, horizon and ground colours; an image's intensity, alone.
+    sky_colors: [[f32; 4]; 3],
 }
 
 /// `Sky` in forward.wgsl and sky.wgsl.
@@ -1035,7 +1041,7 @@ impl Renderer {
             inverse_view_proj: (projection * camera.view).inverse().to_cols_array_2d(),
             ..SkyUniform::zeroed()
         };
-        u.sky_light = [0.0, (SPECULAR_MIPS - 1) as f32, 0.0, 0.0];
+        u.sky_light = [0.0, (SPECULAR_MIPS - 1) as f32, 1.0, 0.0];
         let mut horizon = Vec3::from(camera.clear_color);
         if let Some(sky) = &scene.sky {
             match &sky.kind {
@@ -1062,7 +1068,19 @@ impl Renderer {
             }
             stats.sky_bytes = sky::bytes(&sky.kind);
             if !matches!(sky.kind, SkyKind::Color(_)) {
-                u.sky_light[0] = sky.lighting;
+                // An image's light is worked out unturned at intensity 1, a
+                // gradient's for unit colours.
+                let (colors, rotation) = match sky.kind {
+                    SkyKind::Image { intensity, rotation, .. } => {
+                        (Mat3::from_diagonal(Vec3::splat(intensity)), rotation)
+                    }
+                    SkyKind::Gradient { zenith, horizon, ground } => (Mat3::from_cols(zenith, horizon, ground), 0.0),
+                    SkyKind::Color(_) => unreachable!("tested above"),
+                };
+                let (sin, cos) = rotation.sin_cos();
+                u.sky_light = [sky.lighting, (SPECULAR_MIPS - 1) as f32, cos, sin];
+                u.sky_colors = [colors.x_axis, colors.y_axis, colors.z_axis].map(|c| c.extend(0.0).into());
+                stats.sky_light_made = self.environment.as_ref().is_none_or(|e| !e.kind.same_light(&sky.kind));
                 self.sky_next = Some(sky.kind.clone());
                 self.sky_drawn = camera.sky;
             }
@@ -1602,7 +1620,7 @@ impl Renderer {
         }
         // A new sky's light, worked out before anything reads it.
         if let Some(kind) = &self.sky_next
-            && self.environment.as_ref().is_none_or(|e| e.kind != *kind)
+            && self.environment.as_ref().is_none_or(|e| !e.kind.same_light(kind))
         {
             self.environment = Some(Environment::new(&self.kit.sky, encoder, kind));
         }
