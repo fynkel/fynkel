@@ -22,6 +22,7 @@ final class ViewStats {
     this.meshBytes = 0,
     this.skyBytes = 0,
     this.busy = Duration.zero,
+    this.gpu = const GpuTimes(),
   });
 
   /// Scenes handed to the render worker by [WorldView.frame].
@@ -61,6 +62,10 @@ final class ViewStats {
   /// includes waiting for the GPU to finish each frame.
   final Duration busy;
 
+  /// The GPU's time for each part of the frames timed while
+  /// [WorldView.timeGpu] was on.
+  final GpuTimes gpu;
+
   /// The counts since [earlier]. The memory is the newer one's.
   ViewStats operator -(ViewStats earlier) => ViewStats(
     posted: posted - earlier.posted,
@@ -73,12 +78,108 @@ final class ViewStats {
     meshBytes: meshBytes,
     skyBytes: skyBytes,
     busy: busy - earlier.busy,
+    gpu: gpu - earlier.gpu,
   );
 
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds}';
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds} gpu=($gpu)';
+}
+
+/// The GPU's time for each part of a view's frames, added up over
+/// [frames] frames timed while [WorldView.timeGpu] was on: for finding
+/// what a frame's GPU time goes on. Part of [ViewStats]; subtract an
+/// earlier one for a stretch, and divide by [frames] for a frame's.
+///
+/// On a phone's GPU each part's work may start before the one before it
+/// ends, so the parts can add up to a little more than the frame took.
+final class GpuTimes {
+  /// None unless given: a start to subtract from, and for tests.
+  const GpuTimes({
+    this.frames = 0,
+    this.shadows = Duration.zero,
+    this.skyLight = Duration.zero,
+    this.ambientOcclusion = Duration.zero,
+    this.scene = Duration.zero,
+    this.bloom = Duration.zero,
+    this.finish = Duration.zero,
+    this.effects = Duration.zero,
+  });
+
+  /// The frames timed.
+  final int frames;
+
+  /// The sun's and the spot lights' shadow maps.
+  final Duration shadows;
+
+  /// A new sky's light, worked out when the sky changes.
+  final Duration skyLight;
+
+  /// [AmbientOcclusion]: the solid scene's depth, the occlusion and its
+  /// blur.
+  final Duration ambientOcclusion;
+
+  /// The scene itself: solid, sky, see-through, particles and lines.
+  final Duration scene;
+
+  /// [Bloom]'s chain of smaller and larger images.
+  final Duration bloom;
+
+  /// The scene image onto the view: tone mapping, the glow added. Not
+  /// drawn at [Quality.low], which draws straight onto the view.
+  final Duration finish;
+
+  /// The screen effects.
+  final Duration effects;
+
+  /// Every part's time added up.
+  Duration get total => shadows + skyLight + ambientOcclusion + scene + bloom + finish + effects;
+
+  /// These and [more] together: for adding up stretches.
+  GpuTimes operator +(GpuTimes more) => GpuTimes(
+    frames: frames + more.frames,
+    shadows: shadows + more.shadows,
+    skyLight: skyLight + more.skyLight,
+    ambientOcclusion: ambientOcclusion + more.ambientOcclusion,
+    scene: scene + more.scene,
+    bloom: bloom + more.bloom,
+    finish: finish + more.finish,
+    effects: effects + more.effects,
+  );
+
+  /// The frames and times since [earlier].
+  GpuTimes operator -(GpuTimes earlier) => GpuTimes(
+    frames: frames - earlier.frames,
+    shadows: shadows - earlier.shadows,
+    skyLight: skyLight - earlier.skyLight,
+    ambientOcclusion: ambientOcclusion - earlier.ambientOcclusion,
+    scene: scene - earlier.scene,
+    bloom: bloom - earlier.bloom,
+    finish: finish - earlier.finish,
+    effects: effects - earlier.effects,
+  );
+
+  @override
+  bool operator ==(Object other) =>
+      other is GpuTimes &&
+      other.frames == frames &&
+      other.shadows == shadows &&
+      other.skyLight == skyLight &&
+      other.ambientOcclusion == ambientOcclusion &&
+      other.scene == scene &&
+      other.bloom == bloom &&
+      other.finish == finish &&
+      other.effects == effects;
+
+  @override
+  int get hashCode => Object.hash(frames, shadows, skyLight, ambientOcclusion, scene, bloom, finish, effects);
+
+  @override
+  String toString() =>
+      'frames=$frames shadows=${shadows.inMicroseconds} skyLight=${skyLight.inMicroseconds} '
+      'ambientOcclusion=${ambientOcclusion.inMicroseconds} scene=${scene.inMicroseconds} '
+      'bloom=${bloom.inMicroseconds} finish=${finish.inMicroseconds} effects=${effects.inMicroseconds}';
 }
 
 /// A view of a [World]: a render worker on its own thread that draws the
@@ -164,6 +265,18 @@ abstract base class WorldView implements Finalizable {
     _height = height;
   }
 
+  /// Whether every view's frames are timed on the GPU, each part of a frame
+  /// on its own, into [ViewStats.gpu]: for measuring, off by default.
+  /// Timing costs a little GPU time, and on Apple GPUs keeps some driver
+  /// memory in use. Where the GPU can't time its work nothing is timed.
+  static bool get timeGpu => _timeGpu;
+  static set timeGpu(bool on) {
+    _timeGpu = on;
+    fy_gpu_timing_set(on);
+  }
+
+  static var _timeGpu = false;
+
   /// What the view did since it was made, and the GPU memory it holds
   /// now. Subtract an earlier one for the counts in between.
   ViewStats get stats {
@@ -181,6 +294,18 @@ abstract base class WorldView implements Finalizable {
       meshBytes: r.mesh_bytes,
       skyBytes: r.sky_bytes,
       busy: Duration(microseconds: r.busy_micros),
+      gpu: r.gpu_frames == 0
+          ? const GpuTimes()
+          : GpuTimes(
+              frames: r.gpu_frames,
+              shadows: Duration(microseconds: r.gpu_shadows_micros),
+              skyLight: Duration(microseconds: r.gpu_sky_light_micros),
+              ambientOcclusion: Duration(microseconds: r.gpu_ambient_occlusion_micros),
+              scene: Duration(microseconds: r.gpu_scene_micros),
+              bloom: Duration(microseconds: r.gpu_bloom_micros),
+              finish: Duration(microseconds: r.gpu_finish_micros),
+              effects: Duration(microseconds: r.gpu_effects_micros),
+            ),
     );
   }
 

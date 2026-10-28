@@ -197,6 +197,9 @@ external int fy_find(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Void Function(ffi.Bool)>(isLeaf: true)
+external void fy_gpu_timing_set(bool on);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Uint64, ffi.Pointer<ffi.Bool>)>(isLeaf: true)
 external int fy_is_part_of(ffi.Pointer<FyWorld> world, int id, int root, ffi.Pointer<ffi.Bool> out);
 
@@ -900,7 +903,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 45;
+const int FY_ABI_VERSION = 46;
 
 const int FY_APPLE_MORE = 2;
 
@@ -2057,6 +2060,30 @@ final class FyViewStats extends ffi.Struct {
   @ffi.Uint64()
   external int busy_micros;
 
+  @ffi.Uint64()
+  external int gpu_frames;
+
+  @ffi.Uint64()
+  external int gpu_shadows_micros;
+
+  @ffi.Uint64()
+  external int gpu_sky_light_micros;
+
+  @ffi.Uint64()
+  external int gpu_ambient_occlusion_micros;
+
+  @ffi.Uint64()
+  external int gpu_scene_micros;
+
+  @ffi.Uint64()
+  external int gpu_bloom_micros;
+
+  @ffi.Uint64()
+  external int gpu_finish_micros;
+
+  @ffi.Uint64()
+  external int gpu_effects_micros;
+
   static ffi.Pointer<FyViewStats> $allocate(
     ffi.Allocator $allocator, {
     required int posted,
@@ -2069,6 +2096,14 @@ final class FyViewStats extends ffi.Struct {
     required int mesh_bytes,
     required int sky_bytes,
     required int busy_micros,
+    required int gpu_frames,
+    required int gpu_shadows_micros,
+    required int gpu_sky_light_micros,
+    required int gpu_ambient_occlusion_micros,
+    required int gpu_scene_micros,
+    required int gpu_bloom_micros,
+    required int gpu_finish_micros,
+    required int gpu_effects_micros,
   }) => $allocator<FyViewStats>()
     ..ref.posted = posted
     ..ref.rendered = rendered
@@ -2079,7 +2114,15 @@ final class FyViewStats extends ffi.Struct {
     ..ref.texture_bytes = texture_bytes
     ..ref.mesh_bytes = mesh_bytes
     ..ref.sky_bytes = sky_bytes
-    ..ref.busy_micros = busy_micros;
+    ..ref.busy_micros = busy_micros
+    ..ref.gpu_frames = gpu_frames
+    ..ref.gpu_shadows_micros = gpu_shadows_micros
+    ..ref.gpu_sky_light_micros = gpu_sky_light_micros
+    ..ref.gpu_ambient_occlusion_micros = gpu_ambient_occlusion_micros
+    ..ref.gpu_scene_micros = gpu_scene_micros
+    ..ref.gpu_bloom_micros = gpu_bloom_micros
+    ..ref.gpu_finish_micros = gpu_finish_micros
+    ..ref.gpu_effects_micros = gpu_effects_micros;
 }
 
 final class FyWorld extends ffi.Opaque {}
