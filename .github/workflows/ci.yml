@@ -37,6 +37,12 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         run: cargo test --workspace
+      # The benchmarks (stage 14's GT1, crates/fynkel_bench): each times
+      # one thing the frame path does, in release, and fails when its
+      # median is over its bar (the Mac's time when it was set, doubled),
+      # so a slowdown fails the PR that makes it.
+      - name: benchmarks
+        run: cargo test --release -p fynkel_mesh -p fynkel_physics -p fynkel_ffi -- --ignored bench_
       # package:fynkel. Its build hook compiles fynkel_ffi; its tests draw
       # the stage 1 scene from Dart to the same golden image. The bindings
       # are generated again from the header and must match the committed

@@ -232,13 +232,13 @@ fn a_mesh_set_again_reshapes_each_collider_made_of_it() {
     near(height(&mut physics, 1.0), 0.5);
 }
 
-/// How long a ground of `n` × `n` squares takes to be set again, with one
-/// static collider made of it: `cargo test --release -p fynkel_physics
-/// --test meshes -- --ignored --nocapture`.
+/// How long a ground of `n` × `n` squares takes to be set again and
+/// stepped, with one static collider made of it, held to a bar (stage 14's
+/// GT1): `cargo test --release -p fynkel_physics -- --ignored bench_`.
 #[test]
-#[ignore = "a measurement"]
-fn how_long_a_mesh_takes_to_set_again() {
-    for n in [23_u32, 71] {
+#[ignore = "a benchmark: run in release"]
+fn bench_setting_a_ground_again() {
+    for (n, bar_ms) in [(23_u32, 0.45), (71, 5.6)] {
         let points: Vec<Vector> =
             (0..=n).flat_map(|z| (0..=n).map(move |x| Vector::new(x as f32, 0.0, z as f32))).collect();
         let row = n + 1;
@@ -253,13 +253,14 @@ fn how_long_a_mesh_takes_to_set_again() {
         let mut physics = Physics::new();
         let mesh = physics.add_mesh(&points, &triangles).unwrap();
         physics.add_static_collider(1, spec(mesh, false), at(0.0, 0.0, 0.0)).unwrap();
-        let rounds = 100;
-        let start = std::time::Instant::now();
-        for _ in 0..rounds {
-            physics.set_mesh(mesh, &points, &triangles).unwrap();
-            physics.step(STEP).unwrap();
-        }
-        let each = start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds);
-        println!("{} triangles: {each:.3} ms to set and step", triangles.len());
+        fynkel_bench::bench(
+            &format!("a ground of {} triangles, set and stepped", triangles.len()),
+            100,
+            bar_ms,
+            || {
+                physics.set_mesh(mesh, &points, &triangles).unwrap();
+                physics.step(STEP).unwrap();
+            },
+        );
     }
 }

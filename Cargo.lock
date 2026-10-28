@@ -422,6 +422,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "fynkel_bench"
+version = "0.1.0"
+
+[[package]]
 name = "fynkel_cabi"
 version = "0.1.0"
 
@@ -430,6 +434,7 @@ name = "fynkel_ffi"
 version = "0.1.0"
 dependencies = [
  "cbindgen",
+ "fynkel_bench",
  "fynkel_cabi",
  "fynkel_golden",
  "fynkel_present",
@@ -463,6 +468,7 @@ version = "0.1.0"
 dependencies = [
  "bevy_mikktspace",
  "bytemuck",
+ "fynkel_bench",
  "glam 0.34.1",
 ]
 
@@ -470,6 +476,7 @@ dependencies = [
 name = "fynkel_physics"
 version = "0.1.0"
 dependencies = [
+ "fynkel_bench",
  "rapier3d",
 ]
 

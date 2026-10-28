@@ -12,3 +12,7 @@ workspace = true
 
 [dependencies]
 rapier3d.workspace = true
+
+[dev-dependencies]
+# The benchmarks' median and bar (stage 14's GT1).
+fynkel_bench.workspace = true

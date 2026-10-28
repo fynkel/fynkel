@@ -469,23 +469,24 @@ fn an_inactive_object_and_everything_below_it_are_left_out() {
 
 /// Probe for the stage 2 budget (§3.1): 10,000 drawn objects extract in
 /// under 1 ms on the iPhone. Run it in release, on the Mac or a phone:
-/// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture extract_probe`.
-/// Prints the median and the slowest of 500 steady frames for each shape.
+/// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture bench_extract`.
+/// Prints the median and the slowest of 500 steady frames for each shape,
+/// and holds the median to the Mac's bar (stage 14's GT1).
 /// The fourth shape hides one tree in ten (stage 3 plan §3.3), so the flags
 /// are looked up for every object. The last draws nothing (a culling mask
 /// of 0): the gap to the first is all culling in the extract could save,
 /// the most (stage 7 phase 6).
 #[test]
-#[ignore = "a measurement, run by hand"]
-fn extract_probe() {
+#[ignore = "a benchmark: run in release"]
+fn bench_extract() {
     const N: usize = 10_000;
     let wide = (|i: usize| (!i.is_multiple_of(100)).then(|| i - i % 100)) as fn(usize) -> Option<usize>;
-    for (name, parent_of, hidden, mask) in [
-        ("100 × 100 wide", wide, 0, u32::MAX),
-        ("100 chains 100 deep", |i| (!i.is_multiple_of(100)).then(|| i - 1), 0, u32::MAX),
-        ("no tree (stage 1)", |_| None, 0, u32::MAX),
-        ("wide, 1 in 10 hidden", wide, 1000, u32::MAX),
-        ("wide, nothing drawn", wide, 0, 0),
+    for (name, parent_of, hidden, mask, bar_ms) in [
+        ("100 × 100 wide", wide, 0, u32::MAX, 0.6),
+        ("100 chains 100 deep", |i| (!i.is_multiple_of(100)).then(|| i - 1), 0, u32::MAX, 0.6),
+        ("no tree (stage 1)", |_| None, 0, u32::MAX, 0.3),
+        ("wide, 1 in 10 hidden", wide, 1000, u32::MAX, 0.6),
+        ("wide, nothing drawn", wide, 0, 0, 0.25),
     ] {
         let (mut world, _) = stage1_world();
         let mut lens = None;
@@ -538,6 +539,10 @@ fn extract_probe() {
             ms(times[times.len() / 2]),
             ms(times[times.len() - 1])
         );
+        fynkel_bench::bench(&format!("extracting 10,000 objects, {name}"), 500, bar_ms, || {
+            ops.clear();
+            extract.run(&world, &mut scene, &mut ops);
+        });
     }
 }
 

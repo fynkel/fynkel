@@ -523,11 +523,11 @@ fn recalculated_tangents_point_along_u_with_the_bitangent_up_the_image() {
     check_tangents(&mesh);
 }
 
-/// What changing a 101 × 101 grid costs, part by part: `cargo test
-/// --release -p fynkel_mesh --test mesh -- --ignored --nocapture`.
+/// What changing a 101 × 101 grid costs, part by part, each held to a bar
+/// (stage 14's GT1): `cargo test --release -p fynkel_mesh -- --ignored bench_`.
 #[test]
-#[ignore = "a measurement"]
-fn what_changing_a_grid_costs() {
+#[ignore = "a benchmark: run in release"]
+fn bench_changing_a_grid() {
     let n = 101_u32;
     let positions: Vec<[f32; 3]> = (0..n * n).map(|i| [(i % n) as f32, 0.0, (i / n) as f32]).collect();
     let mut indices = Vec::new();
@@ -540,21 +540,14 @@ fn what_changing_a_grid_costs() {
     let mut mesh = MeshData::empty();
     mesh.change(MeshChange { positions: Some(&positions), indices: Some((&indices, &[])), ..MeshChange::default() })
         .unwrap();
-    let rounds = 200;
-    let time = |name: &str, f: &mut dyn FnMut()| {
-        let start = std::time::Instant::now();
-        for _ in 0..rounds {
-            f();
-        }
-        println!("{name}: {:.3} ms", start.elapsed().as_secs_f64() * 1000.0 / f64::from(rounds));
-    };
+    use fynkel_bench::bench;
     let shared = std::sync::Arc::new(mesh.clone());
-    time("clone", &mut || drop(std::hint::black_box((*shared).clone())));
-    time("positions", &mut || {
+    bench("a 101 × 101 grid: clone", 200, 0.03, || drop(std::hint::black_box((*shared).clone())));
+    bench("a 101 × 101 grid: positions", 200, 0.07, || {
         mesh.change(MeshChange { positions: Some(&positions), ..MeshChange::default() }).unwrap();
     });
-    time("normals", &mut || mesh.recalculate_normals());
-    time("tangents", &mut || mesh.recalculate_tangents());
+    bench("a 101 × 101 grid: normals", 200, 0.15, || mesh.recalculate_normals());
+    bench("a 101 × 101 grid: tangents", 200, 0.12, || mesh.recalculate_tangents());
 }
 
 #[test]

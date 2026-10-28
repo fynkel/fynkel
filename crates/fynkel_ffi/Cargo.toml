@@ -25,6 +25,8 @@ jni-sys.workspace = true
 
 [dev-dependencies]
 fynkel_golden.workspace = true
+# The benchmarks' median and bar (stage 14's GT1).
+fynkel_bench.workspace = true
 # Encoding .hdr skies to decode.
 image.workspace = true
 cbindgen.workspace = true
