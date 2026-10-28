@@ -8,6 +8,9 @@
 // scale, `--define SHEEPDOG_AA=0` (or 2, 4) with that anti-aliasing.
 // `--define SHEEPDOG_PROBE=noparticles` turns the particles off (the dust,
 // the embers and the puffs), for the game as it was before them.
+//
+// `--define FIELD=true` measures the field built the same in Unity
+// (tool/field.dart, tools/unity_field) in place of the game.
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
@@ -17,10 +20,13 @@ import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/hud.dart';
 
+import 'field.dart';
+
 const _quality = String.fromEnvironment('SHEEPDOG_QUALITY');
 const _probe = String.fromEnvironment('SHEEPDOG_PROBE');
 const _scale = String.fromEnvironment('SHEEPDOG_SCALE');
 const _antiAliasing = String.fromEnvironment('SHEEPDOG_AA');
+const _field = bool.fromEnvironment('FIELD');
 
 SheepdogGame _make() {
   final game = SheepdogGame(
@@ -58,23 +64,25 @@ SheepdogGame _make() {
 }
 
 void main() => runApp(
-  MeasuredApp(
-    _make,
-    overlay: (game) {
-      game as SheepdogGame;
-      return Stack(
-        fit: StackFit.expand,
-        children: [
-          // A menu over the game, as the pause menu: the view pauses it.
-          if (_probe.contains('menu')) const _Menu(),
-          if (!_probe.contains('nomap')) Minimap(game),
-          Hud(game, onPause: () {}),
-        ],
-      );
-    },
-    change: (game) => (game as SheepdogGame).restart(),
-    onStats: _shaderProbes,
-  ),
+  _field
+      ? MeasuredApp(Field.new, onStats: (root, stats) => (root as Field).onStats(stats))
+      : MeasuredApp(
+          _make,
+          overlay: (game) {
+            game as SheepdogGame;
+            return Stack(
+              fit: StackFit.expand,
+              children: [
+                // A menu over the game, as the pause menu: the view pauses it.
+                if (_probe.contains('menu')) const _Menu(),
+                if (!_probe.contains('nomap')) Minimap(game),
+                Hud(game, onPause: () {}),
+              ],
+            );
+          },
+          change: (game) => (game as SheepdogGame).restart(),
+          onStats: _shaderProbes,
+        ),
 );
 
 /// The shaders' probes: `nograss` and `nopond` hide them, `noground`
