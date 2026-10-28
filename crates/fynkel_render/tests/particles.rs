@@ -357,6 +357,32 @@ fn a_soft_particle_fades_where_it_meets_what_is_behind_it() {
 }
 
 #[test]
+fn soft_particles_read_a_depth_of_their_own_and_the_scene_stays_one_pass() {
+    // Their depth is the solid scene's, drawn at one sample before it: the
+    // scene isn't split as for what's behind, its samples are never kept,
+    // and the only image held is one sample's depth (stage 14, RN11).
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let high = QualityLevel::High.quality();
+    assert!(high.samples > 1, "anti-aliased, where keeping the samples costs most");
+    let mut s = RenderScene {
+        quality: Some(high),
+        ..scene(vec![square(0.0, 4.0, glow(RED, 1.0, Blend::Opaque))], QualityLevel::High)
+    };
+    add_as(&mut s, &[particle(Vec3::new(0.0, 0.0, 0.1), 1.0, GREEN, 1.0)], plain(Blend::Transparent), |d| {
+        ParticleDraw { softness: 1.0, ..d }
+    });
+    let (image, stats) = render(&gpu, &mut r, &s, 33, 33);
+    assert!(!stats.behind, "nothing reads what's behind");
+    assert_eq!(stats.behind_bytes, 33 * 33 * 4, "one sample's depth, and nothing else, is kept");
+    let want = to_srgb8(over(GREEN, 0.1, RED));
+    let soft = image.pixel(16, 16);
+    for c in 0..3 {
+        assert!(soft[c].abs_diff(want[c]) <= 12, "still soft: got {soft:?}, want {want:?}");
+    }
+}
+
+#[test]
 fn a_lit_particle_takes_the_light_and_an_unlit_one_does_not() {
     let gpu = gpu();
     let mut r = renderer(&gpu, SRGB);
