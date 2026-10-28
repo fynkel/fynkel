@@ -39,6 +39,7 @@ fn a_views_frames_are_timed_on_the_gpu_when_asked() {
     fy_gpu_timing_set(false);
     if cfg!(target_os = "macos") {
         assert!(on.gpu_frames >= 3, "a Mac's GPU times its frames: {on:?}");
+        assert!(on.gpu_untimed_passes < on.gpu_frames, "the passes' clocks are read: {on:?}");
     }
     if on.gpu_frames > 0 {
         assert!(on.gpu_scene_micros + on.gpu_finish_micros > 0, "the scene took some time: {on:?}");

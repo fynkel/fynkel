@@ -449,7 +449,8 @@ pub struct FyViewStats {
     /// Frames timed on the GPU while `fy_gpu_timing_set` had timing on,
     /// and the GPU's time over them for each part of a frame, in
     /// microseconds. Each frame's come back a frame or two after it's
-    /// drawn. On a phone's GPU the parts may overlap a little.
+    /// drawn. Each part counts only the time it adds past the parts
+    /// before it, so they never overlap.
     pub gpu_frames: u64,
     /// The shadow maps.
     pub gpu_shadows_micros: u64,
@@ -465,6 +466,9 @@ pub struct FyViewStats {
     pub gpu_finish_micros: u64,
     /// The screen effects.
     pub gpu_effects_micros: u64,
+    /// Passes in the frames timed whose clocks the GPU didn't give, left
+    /// out of the times: many of them say the times fall short.
+    pub gpu_untimed_passes: u64,
 }
 
 /// Times every view's frames on the GPU, each part of a frame on its own,
@@ -503,6 +507,7 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             gpu_bloom_micros: w.gpu.bloom / 1000,
             gpu_finish_micros: w.gpu.finish / 1000,
             gpu_effects_micros: w.gpu.effects / 1000,
+            gpu_untimed_passes: w.gpu.untimed,
             ..Default::default()
         };
         #[cfg(target_vendor = "apple")]

@@ -897,7 +897,8 @@ typedef struct FyViewStats {
   // Frames timed on the GPU while `fy_gpu_timing_set` had timing on,
   // and the GPU's time over them for each part of a frame, in
   // microseconds. Each frame's come back a frame or two after it's
-  // drawn. On a phone's GPU the parts may overlap a little.
+  // drawn. Each part counts only the time it adds past the parts
+  // before it, so they never overlap.
   uint64_t gpu_frames;
   // The shadow maps.
   uint64_t gpu_shadows_micros;
@@ -913,6 +914,9 @@ typedef struct FyViewStats {
   uint64_t gpu_finish_micros;
   // The screen effects.
   uint64_t gpu_effects_micros;
+  // Passes in the frames timed whose clocks the GPU didn't give, left
+  // out of the times: many of them say the times fall short.
+  uint64_t gpu_untimed_passes;
 } FyViewStats;
 
 // Called on a GPU thread each time an Apple view finishes a frame.
