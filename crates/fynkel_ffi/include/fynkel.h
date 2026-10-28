@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 46
+#define FY_ABI_VERSION 47
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1117,6 +1117,18 @@ FyStatus fy_shaders_waiting(uint32_t *out);
 //
 // `out` is null or writable.
 FyStatus fy_quality_auto(uint32_t *out);
+
+// Writes what GPU this is, for a game choosing its quality by device
+// (Unity's `SystemInfo.graphicsDeviceName`): its name as its driver gives
+// it, its maker's PCI id (0 if not known) and the API drawing with it
+// (`metal`, `vulkan`, `gl`, `dx12`), a line each, as UTF-8. Its length goes
+// to `out_len`; it's copied into `buf` only when it fits in `cap`. Makes
+// the device if there's none yet.
+//
+// # Safety
+//
+// `buf` is null or valid for `cap` writes; `out_len` is null or writable.
+FyStatus fy_gpu_describe(uint8_t *buf, size_t cap, size_t *out_len);
 
 // Decodes a Radiance `.hdr` (equirectangular: −Z the middle, straight up
 // the top row) of `len` bytes into a sky image handle and writes it to
