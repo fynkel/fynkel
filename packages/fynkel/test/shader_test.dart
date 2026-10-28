@@ -59,6 +59,14 @@ void main() {
     material.set('tint', Color(0xFF00FF00));
     expect(_centre(view), _near([0, 255, 0]));
     expect(material.value('tint'), Color(0xFF00FF00));
+    // Set in place (stage 14's DF7a): a list too, and one refused leaves
+    // what was there.
+    material.set('tint', [0.0, 0.0, 1.0, 1.0]);
+    expect(_centre(view), _near([0, 0, 255]));
+    expect(() => material.set('tint', [1.0, double.nan, 0.0, 1.0]), throwsArgumentError);
+    expect(() => material.set('tint', Vec2(1, 0)), throwsArgumentError);
+    expect(_centre(view), _near([0, 0, 255]));
+    material.set('tint', Color(0xFF00FF00));
 
     renderer.set('boost', 1);
     expect(renderer.number('boost'), 1);

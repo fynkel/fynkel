@@ -208,6 +208,20 @@ extension _Resources on World {
     return true;
   }
 
+  /// Sends [length] bytes of [material]'s shader values from [offset], as
+  /// [_updateMaterial] does.
+  bool _updateValues(Material material, int offset, int length) {
+    final id = _materialIds[material];
+    if (id == null || isDisposed) return false;
+    final bytes = material._bytes!;
+    final native = scratch.bytes(length);
+    for (var i = 0; i < length; i++) {
+      native[i] = bytes[offset + i];
+    }
+    check(fy_material_values_set(_pointer, id, offset, native, length));
+    return true;
+  }
+
   /// Sends [material]'s shader values to the engine, its material [id].
   void _writeValues(Material material, int id) {
     if (material._shader case final shader? when !identical(material._packedFor, shader._layout)) {
