@@ -61,9 +61,8 @@ void main() {
               '${curve.name.padRight(14)} $kind: empty ${ms(base)} ms; '
               '${points.map((p) => '${p.n} ${ms(pick(p.cost))}').join(', ')} ms; '
               'growth ${growth.toStringAsFixed(2)}';
-          final known = kind == 'game' ? curve.known : null;
-          results.add(known == null ? line : '$line (known: $known)');
-          if (first < tooSmall || known != null) continue;
+          results.add(line);
+          if (first < tooSmall) continue;
           expect(growth, lessThan(tooSteep), reason: line);
         }
       },
@@ -76,17 +75,16 @@ void main() {
 typedef Cost = ({double game, double drawn});
 
 /// A count of something put into a scene, and the counts to time it at.
-typedef Curve = ({String name, List<int> counts, void Function(CurveScene scene, int n) make, String? known});
+typedef Curve = ({String name, List<int> counts, void Function(CurveScene scene, int n) make});
 
 final curves = <Curve>[
   // Objects drawn and moved by the game each frame.
   // Past 4,000 or so their data no longer fits the cache, and each costs
   // more: the growth is read from above that.
-  (name: 'moving objects', counts: [2000, 4000, 16000, 32000], make: (s, n) => s.cubes(n, moving: true), known: null),
-  // Objects drawn and left where they are: a frame should cost little
-  // more for them than for none. On the game's thread it grows faster
-  // than they do, as the updates visit each one three times (DC4).
-  (name: 'still objects', counts: [2000, 4000, 16000, 32000], make: (s, n) => s.cubes(n), known: 'DC4'),
+  (name: 'moving objects', counts: [2000, 4000, 16000, 32000], make: (s, n) => s.cubes(n, moving: true)),
+  // Objects drawn and left where they are: on the game's thread a frame
+  // should cost little more for them than for none (DC4).
+  (name: 'still objects', counts: [2000, 4000, 16000, 32000], make: (s, n) => s.cubes(n)),
   // Lamps over 1,000 objects.
   (
     name: 'lamps',
@@ -95,11 +93,10 @@ final curves = <Curve>[
       s.cubes(1000);
       s.lamps(n);
     },
-    known: null,
   ),
-  (name: 'particles', counts: [1250, 2500, 5000, 10000], make: (s, n) => s.particles(n), known: null),
-  (name: 'sounds', counts: [4, 8, 16, 32], make: (s, n) => s.sounds(n), known: null),
-  (name: 'bodies', counts: [100, 200, 400, 800], make: (s, n) => s.bodies(n), known: null),
+  (name: 'particles', counts: [1250, 2500, 5000, 10000], make: (s, n) => s.particles(n)),
+  (name: 'sounds', counts: [4, 8, 16, 32], make: (s, n) => s.sounds(n)),
+  (name: 'bodies', counts: [100, 200, 400, 800], make: (s, n) => s.bodies(n)),
 ];
 
 /// The median frame of [curve]'s scene with [n] of its things, on the

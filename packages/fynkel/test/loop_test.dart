@@ -10,14 +10,16 @@ final log = <String>[];
 
 /// Logs its starts, updates and destroys, and runs [onEachUpdate].
 class Logged extends GameObject {
-  Logged(String name, {super.transform, super.components, this.onEachUpdate}) : super(name: name);
+  Logged(String name, {super.transform, super.components, this.onEachUpdate, this.onStarting}) : super(name: name);
 
   final void Function(Logged self)? onEachUpdate;
+  final void Function()? onStarting;
 
   @override
   void onStart() {
     super.onStart();
     log.add('start $name');
+    onStarting?.call();
   }
 
   @override
@@ -56,6 +58,21 @@ mixin Ages on GameObject {
 }
 
 class Windmill extends GameObject with Spins, Ages {}
+
+/// A behaviour that logs its starts and updates as its object's name.
+class LoggedBehaviour extends Behaviour {
+  @override
+  void onStart() {
+    super.onStart();
+    log.add('start ${gameObject.name} behaviour');
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    log.add('update ${gameObject.name} behaviour');
+  }
+}
 
 /// Takes taps, or passes them on, and logs both.
 class Tappable extends GameObject {
@@ -317,6 +334,53 @@ void main() {
     moved.parent = b;
     world.update(0.1);
     expect(log, ['update a', 'update b', 'update moved', 'update below']);
+  });
+
+  test('plain objects, with nothing of the game\'s to call, cost the updates nothing (DC4)', () {
+    world.time.fixedDelta = 1 / 60;
+    for (var i = 0; i < 20000; i++) {
+      world.add(GameObject(components: [cube()]));
+    }
+    world.add(Logged('one'));
+    final calls = <int>[];
+    for (var i = 0; i < 9; i++) {
+      world.update(1 / 60);
+      final p = world.profile;
+      calls.add((p.updates + p.lateUpdates + p.fixedUpdates).inMicroseconds);
+    }
+    calls.sort();
+    // Visited, they were 0.3 ms on a Mac, three walks over 20,000.
+    expect(calls[4], lessThan(50), reason: '${world.profile}');
+    expect(log.where((l) => l == 'update one'), hasLength(9));
+  });
+
+  test('a plain object given a behaviour updates in its place: after its parent, before its children', () {
+    final top = world.add(GameObject(name: 'top'));
+    final middle = top.add(GameObject(name: 'middle'));
+    middle.add(Logged('child'));
+    world.update(0.1);
+    log.clear();
+
+    middle.addComponent(LoggedBehaviour());
+    top.addComponent(LoggedBehaviour());
+    world.update(0.1);
+    // Started in the order they were put on; updated in the objects'.
+    expect(log, [
+      'start middle behaviour',
+      'start top behaviour',
+      'update top behaviour',
+      'update middle behaviour',
+      'update child',
+    ]);
+  });
+
+  test('a behaviour put on a plain object during a start starts and updates that frame', () {
+    final plain = world.add(GameObject(name: 'plain'));
+    world.update(0.1);
+    log.clear();
+    world.add(Logged('adder', onStarting: () => plain.addComponent(LoggedBehaviour())));
+    world.update(0.1);
+    expect(log, ['start adder', 'start plain behaviour', 'update plain behaviour', 'update adder']);
   });
 
   test('a dispose from inside an update waits for it: the phases left are skipped, then the world is freed', () {

@@ -10,13 +10,48 @@ extension _Objects on World {
     if (same != null && same.remove(thing) && same.isEmpty) _byClass.remove(thing.runtimeType);
   }
 
-  /// Puts an object the game didn't add (a model's part) in the update
-  /// order, once something on it needs updates.
+  /// Puts an object that wasn't in the update order (a plain one, or a
+  /// model's part) in it, once something on it needs updates: in its
+  /// place, before the frame's fixed steps ([_join]).
   void _enterLoop(GameObject object) {
     if (object._inLoop) return;
     object._inLoop = true;
-    _live.add(object);
+    _joining.add(object);
+    // A model's part has had no start; a plain object's waits, or is
+    // done (the starts skip one already started).
     _starting.add(object);
+  }
+
+  /// Puts what [_enterLoop] put by in [_live], each in its place by
+  /// [GameObject._order]: between the starts and the fixed steps, when
+  /// nothing walks it.
+  void _join() {
+    for (var i = 0; i < _joining.length; i++) {
+      final object = _joining[i];
+      if (object._destroyed) continue;
+      final order = object._order;
+      var low = 0, high = _live.length;
+      while (low < high) {
+        final mid = (low + high) >> 1;
+        if (_live[mid]._order < order) {
+          low = mid + 1;
+        } else {
+          high = mid;
+        }
+      }
+      _live.insert(low, object);
+    }
+    _joining.clear();
+  }
+
+  /// Whether [object] has anything of the game's to call each frame: it's
+  /// a subclass of [GameObject], or has a behaviour.
+  bool _calls(GameObject object) {
+    if (object.runtimeType != GameObject) return true;
+    for (final component in object._components ?? const <Component>[]) {
+      if (component is Behaviour && !component._removed) return true;
+    }
+    return false;
   }
 
   /// The object with engine id [id]: every live one is known, a model's
@@ -119,7 +154,7 @@ extension _Objects on World {
       final ids = scratch.ids();
       final childIds = [for (var j = 0; j < count; j++) ids[j]];
       for (final id in childIds) {
-        final part = _objects[id] = GameObject._live(this, id);
+        final part = _objects[id] = GameObject._live(this, id).._order = _nextOrder++;
         _link(part, node);
         queue.add(part);
       }
@@ -203,9 +238,12 @@ extension _Objects on World {
     final transform = described.transform;
     GameObject._check(transform);
     final id = described.model == null ? _spawn() : _spawnModel(described.model!, described.transform);
+    // Its place in the update order, parents first, before its model's
+    // parts' (in the loop now or later).
     object
       .._world = this
-      .._id = id;
+      .._id = id
+      .._order = _nextOrder++;
     spawned.add((object, parent));
     if (parent != null) check(fy_parent_set(pointer, id, parent.id));
     if (described.model != null) _readParts(object);
@@ -247,7 +285,7 @@ extension _Objects on World {
       .._activeSelf = described.active
       .._probed = described.model == null
       .._model = described.model
-      .._inLoop = true
+      .._inLoop = _calls(object)
       .._pending = 1;
     if (described.asset case final asset?) (object._uses ??= []).add(asset);
     if (parent != null && parent._pending > 0) {
@@ -259,7 +297,7 @@ extension _Objects on World {
     if (described.model == null) object._setTransform(described.transform);
     _objects[object._id] = object;
     _register(object);
-    _live.add(object);
+    if (object._inLoop) _live.add(object);
     _starting.add(object);
     for (final component in object._components ?? const <Component>[]) {
       if (component._removed) continue;
@@ -515,6 +553,8 @@ extension _Objects on World {
       _unlink(root);
       for (final object in objects) {
         if (object._unsent) _unsentGone = true;
+        // Only those in the update order need a pass over it.
+        if (object._inLoop) _liveDirty = true;
         object
           .._gone = true
           .._transform = null
@@ -528,7 +568,6 @@ extension _Objects on World {
           _unregister(c);
         }
       }
-      _liveDirty = true;
       _shape++;
       _forget(objects);
     }

@@ -166,6 +166,7 @@ final class World implements Finalizable {
     _objects.clear();
     _byClass.clear();
     _live.clear();
+    _joining.clear();
     _starting.clear();
     _compact.clear();
     _waits.clear();
@@ -321,11 +322,17 @@ final class World implements Finalizable {
 
   // --- The loop ---
 
-  // Every object the game added, in the order it became live, so parents
-  // come before their children. Destroyed ones are dropped and moved ones
-  // put last at the start of the next update.
+  // The objects with something of the game's to call (a subclass's, or a
+  // behaviour's), by [GameObject._order]: the order they became live, so
+  // parents come before their children. Destroyed ones are dropped and
+  // moved ones put last at the start of the next update. A plain object,
+  // and a model's part, isn't in it (DC4: three walks over 32,000 still
+  // objects cost 1.3 ms) until a behaviour is put on it: then it joins in
+  // its place, before the frame's fixed steps.
   final _live = <GameObject>[];
   var _liveDirty = false;
+  final _joining = <GameObject>[];
+  var _nextOrder = 1;
   // The objects given a new parent this frame: they and what's below them
   // go last in [_live] at the start of the next update.
   final _reparented = <GameObject>[];
@@ -706,7 +713,8 @@ final class World implements Finalizable {
     for (var i = 0; i < _starting.length; i++) {
       switch (_starting[i]) {
         case final GameObject object:
-          if (object._destroyed) continue;
+          // Started already: a plain object that's since joined the loop.
+          if (object._destroyed || object._started) continue;
           if (_isHidden(object)) {
             _starting[kept++] = object;
             continue;
@@ -726,6 +734,7 @@ final class World implements Finalizable {
     }
     // Shorter unless an onStart disposed the world, which empties it.
     if (kept < _starting.length) _starting.length = kept;
+    if (_joining.isNotEmpty) _join();
     profile._lap(_Part.starts);
 
     if (_disposeAsked) return;
