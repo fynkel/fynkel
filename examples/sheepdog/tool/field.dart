@@ -18,7 +18,7 @@
 // medium with one thing at a time taken away, to find what its GPU time
 // goes on; `--define FIELD_CONTENT=true` shows [contentLevels]: medium
 // with and without anti-aliasing, with one kind of thing in the field
-// hidden at a time.
+// hidden at a time; `--define FIELD_SCALES=true` shows [scaleLevels].
 
 import 'dart:math' as math;
 
@@ -37,6 +37,12 @@ final partLevels = [
   Quality.medium.copyWith(name: 'medium, no soft particles', softParticles: false),
 ];
 
+/// Low with fewer and fewer pixels: whether a level held under 60 is short
+/// of time on the GPU (fewer pixels lift it) or of something else.
+final scaleLevels = [
+  for (final scale in [0.75, 0.6, 0.5, 0.75]) Quality.low.copyWith(name: 'low, scale $scale', renderScale: scale),
+];
+
 /// The levels compared: ours, and low with less anti-aliasing.
 final fieldLevels = [
   Quality.low,
@@ -49,6 +55,7 @@ final fieldLevels = [
 const _timeGpu = bool.fromEnvironment('FIELD_GPU');
 const _parts = bool.fromEnvironment('FIELD_PARTS');
 const _content = bool.fromEnvironment('FIELD_CONTENT');
+const _scales = bool.fromEnvironment('FIELD_SCALES');
 
 /// With FIELD_CONTENT, the dust unlit and the levels only with nothing
 /// hidden: whether its light is what anti-aliasing multiplies.
@@ -226,7 +233,7 @@ class Field extends GameObject {
     Measurement.report('FIELD gpu: ${SystemInfo.graphicsDeviceName} (${SystemInfo.graphicsApi})');
     final levels = _content
         ? contentLevels
-        : [for (final level in _parts ? partLevels : fieldLevels) (level, 'nothing')];
+        : [for (final level in _parts ? partLevels : (_scales ? scaleLevels : fieldLevels)) (level, 'nothing')];
     for (final (level, hidden) in levels) {
       if (isDestroyed) return;
       world.quality = level;
