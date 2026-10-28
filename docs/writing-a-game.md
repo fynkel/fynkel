@@ -1601,10 +1601,12 @@ final road = Mesh.sweep(river, Shape2D.rect(4, 0.3), segmentsPerMetre: 2);
   or `setPositions(floats)` for every knot at once; `version` goes up
   each time. `mesh.setSweep(spline, shape)` sweeps again into the same
   mesh: a road whose knots are dragged, or a rope that swings each frame,
-  which makes no garbage when it's filled with `setPositions`.
+  which makes no garbage when it's filled with `setPositions`, and
+  allocates nothing in the engine either once it has swept one that size.
+  The caps are filled once while the shape stays the same.
 - **Samples**: `segmentsPerMetre` (2 unless given) and more where it
   bends, at most `maxSegments`. A 100 m road with a 12-point profile
-  takes about 0.1 ms in Rust on a Mac.
+  takes about 0.06 ms in Rust on a Mac.
 
 On objects, as Unity's Splines package has them:
 

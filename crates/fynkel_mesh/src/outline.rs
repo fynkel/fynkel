@@ -76,20 +76,26 @@ fn within(q: Vec2, ring: &[Vec2]) -> bool {
 /// own for a sharp corner, one between them for a smooth one. Edge k runs
 /// from point k to k + 1; `normal` gives an edge's outward normal.
 pub(crate) fn edge_ends(edges: &[Vec2], closed: bool) -> Vec<(Vec2, Vec2)> {
+    let mut ends = Vec::with_capacity(edges.len());
+    edge_ends_into(edges, closed, &mut ends);
+    ends
+}
+
+/// [`edge_ends`] into `ends`, in place of what it had.
+pub(crate) fn edge_ends_into(edges: &[Vec2], closed: bool, ends: &mut Vec<(Vec2, Vec2)>) {
     let n = edges.len();
     let limit = SMOOTH_DEGREES.to_radians().cos();
-    (0..n)
-        .map(|k| {
-            let own = edges[k];
-            let start = if closed || k > 0 { Some(edges[(k + n - 1) % n]) } else { None };
-            let end = if closed || k + 1 < n { Some(edges[(k + 1) % n]) } else { None };
-            let blend = |other: Option<Vec2>| match other {
-                Some(o) if o.dot(own) >= limit => (o + own).normalize_or(own),
-                _ => own,
-            };
-            (blend(start), blend(end))
-        })
-        .collect()
+    ends.clear();
+    ends.extend((0..n).map(|k| {
+        let own = edges[k];
+        let start = if closed || k > 0 { Some(edges[(k + n - 1) % n]) } else { None };
+        let end = if closed || k + 1 < n { Some(edges[(k + 1) % n]) } else { None };
+        let blend = |other: Option<Vec2>| match other {
+            Some(o) if o.dot(own) >= limit => (o + own).normalize_or(own),
+            _ => own,
+        };
+        (blend(start), blend(end))
+    }));
 }
 
 /// `tangent` made square to `normal`: at a smoothed corner the normal is

@@ -5,11 +5,12 @@
 //! edges are joined from each to the next, as an extrusion's sides; the
 //! ends are filled as an extrusion's are.
 
+use std::cell::RefCell;
+
 use glam::{Vec2, Vec3};
 
-use crate::outline::{area, edge_ends, fill, square_to};
-use crate::shapes::Shape;
-use crate::{MeshData, MeshError};
+use crate::outline::{edge_ends_into, fill, square_to};
+use crate::{Made, MeshData, MeshError, Vertex, WHITE};
 
 /// A point of a path to sweep along.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -57,21 +58,57 @@ impl MeshData {
     /// whether it's dynamic: a rope swept again each frame. When the
     /// triangles come out as they were (the same number of points, the
     /// same outline), they're kept, so a copy into the GPU leaves them.
+    /// Once a sweep of its size has been made on the thread, it allocates
+    /// nothing (stage 14's WO8).
     pub fn sweep_into(&mut self, sweep: &Sweep<'_>) -> Result<(), MeshError> {
         if !self.skin.is_empty() {
             return Err(MeshError::Skinned);
         }
-        let swept = swept(sweep)?;
-        let same = self.indices == swept.indices && self.submeshes == swept.submeshes;
-        self.vertices = swept.vertices;
-        if !same {
-            self.indices = swept.indices;
-            self.submeshes = swept.submeshes;
-            self.indices_made = swept.indices_made;
-        }
-        self.bounds = swept.bounds;
-        Ok(())
+        SCRATCH.with_borrow_mut(|scratch| {
+            let bounds = swept(sweep, scratch)?;
+            // The old vertices become the next sweep's room.
+            std::mem::swap(&mut self.vertices, &mut scratch.vertices);
+            let whole = 0..scratch.indices.len() as u32;
+            if self.indices != scratch.indices || self.submeshes[..] != [whole.clone()] {
+                std::mem::swap(&mut self.indices, &mut scratch.indices);
+                self.submeshes.clear();
+                self.submeshes.push(whole);
+                self.indices_made = Made::next();
+            }
+            self.bounds = bounds;
+            Ok(())
+        })
     }
+}
+
+/// A point's frame: its position, right, up and forward.
+type Frame = (Vec3, Vec3, Vec3, Vec3);
+
+/// What sweeping works in, kept on each thread between sweeps so one again
+/// allocates nothing.
+#[derive(Default)]
+struct Scratch {
+    frames: Vec<Frame>,
+    /// One loop of the outline at a time, the outside on its right, its
+    /// edges' directions, their outward normals, and the normals at each
+    /// edge's ends.
+    ring: Vec<Vec2>,
+    along: Vec<Vec2>,
+    outward: Vec<Vec2>,
+    ends: Vec<(Vec2, Vec2)>,
+    /// What's swept: the mesh's next vertices and triangles.
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+    /// The outline and holes (one after another, and each one's length)
+    /// the caps were last filled for, and their triangles: filling is slow,
+    /// and a rope keeps its outline.
+    filled: Vec<Vec2>,
+    filled_lengths: Vec<usize>,
+    triangles: Vec<u32>,
+}
+
+thread_local! {
+    static SCRATCH: RefCell<Scratch> = RefCell::default();
 }
 
 /// Each point's frame: its position, then right and up, at right angles
@@ -80,33 +117,29 @@ impl MeshData {
 /// from the point before (or the first point after, at the start), turned
 /// as little as it can be: an outline doesn't flip where a path goes
 /// straight up.
-fn frames(path: &[PathPoint]) -> Result<Vec<(Vec3, Vec3, Vec3, Vec3)>, MeshError> {
+fn frames(path: &[PathPoint], frames: &mut Vec<Frame>) -> Result<(), MeshError> {
     if path.len() < 2 {
         return Err(MeshError::Outline(format!("a path needs at least 2 points; this has {}", path.len())));
     }
     // Each point's forward, and its right where its up gives one.
-    let mut frames = path
-        .iter()
-        .enumerate()
-        .map(|(at, p)| {
-            if !(p.position.is_finite() && p.forward.is_finite() && p.up.is_finite() && p.distance.is_finite()) {
-                return Err(MeshError::NotFinite { what: "path point", at });
-            }
-            let forward = p
-                .forward
-                .try_normalize()
-                .ok_or_else(|| MeshError::Outline(format!("path point {at} has no direction: its forward is 0")))?;
-            let right = forward.cross(p.up);
-            let right =
-                if right.length_squared() > 1e-8 * p.up.length_squared() { right.normalize() } else { Vec3::NAN };
-            Ok((p.position, right, Vec3::ZERO, forward))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    frames.clear();
+    for (at, p) in path.iter().enumerate() {
+        if !(p.position.is_finite() && p.forward.is_finite() && p.up.is_finite() && p.distance.is_finite()) {
+            return Err(MeshError::NotFinite { what: "path point", at });
+        }
+        let forward = p
+            .forward
+            .try_normalize()
+            .ok_or_else(|| MeshError::Outline(format!("path point {at} has no direction: its forward is 0")))?;
+        let right = forward.cross(p.up);
+        let right = if right.length_squared() > 1e-8 * p.up.length_squared() { right.normalize() } else { Vec3::NAN };
+        frames.push((p.position, right, Vec3::ZERO, forward));
+    }
     // `from` at right angles to `forward`, turned as little as it can be.
     let carried = |from: Vec3, forward: Vec3| {
         (from - forward * from.dot(forward)).try_normalize().unwrap_or_else(|| forward.any_orthonormal_vector())
     };
-    let good = |f: &(Vec3, Vec3, Vec3, Vec3)| !f.1.is_nan();
+    let good = |f: &Frame| !f.1.is_nan();
     let first = frames.iter().position(good).unwrap_or_else(|| {
         frames[0].1 = frames[0].3.any_orthonormal_vector();
         0
@@ -119,15 +152,19 @@ fn frames(path: &[PathPoint]) -> Result<Vec<(Vec3, Vec3, Vec3, Vec3)>, MeshError
             frames[at].1 = carried(frames[at - 1].1, frames[at].3);
         }
     }
-    for (_, right, up, forward) in &mut frames {
+    for (_, right, up, forward) in frames.iter_mut() {
         *up = right.cross(*forward);
     }
-    Ok(frames)
+    Ok(())
 }
 
-fn swept(sweep: &Sweep<'_>) -> Result<MeshData, MeshError> {
+/// Sweeps into `scratch.vertices` and `scratch.indices`, as
+/// [`MeshData::new`] would make them from the same corners: the box around
+/// them.
+fn swept(sweep: &Sweep<'_>, scratch: &mut Scratch) -> Result<(Vec3, Vec3), MeshError> {
     let Sweep { path, outline, holes, caps, uv_per_metre: k } = *sweep;
-    let frames = frames(path)?;
+    let Scratch { frames, ring, along, outward, ends, vertices, indices, filled, filled_lengths, triangles } = scratch;
+    self::frames(path, frames)?;
     let loops = || std::iter::once(outline).chain(holes.iter().copied());
     for ring in loops() {
         if ring.len() < 3 {
@@ -137,20 +174,35 @@ fn swept(sweep: &Sweep<'_>) -> Result<MeshData, MeshError> {
             return Err(MeshError::NotFinite { what: "outline point", at });
         }
     }
-    let across = |(at, right, up, _): (Vec3, Vec3, Vec3, Vec3), p: Vec2| at + right * p.x + up * p.y;
-    let mut s = Shape::default();
+    if caps {
+        let same = filled_lengths.iter().copied().eq(loops().map(<[_]>::len)) && filled.iter().eq(loops().flatten());
+        if !same {
+            *triangles = fill(outline, holes)?;
+            filled.clear();
+            filled.extend(loops().flatten());
+            filled_lengths.clear();
+            filled_lengths.extend(loops().map(<[_]>::len));
+        }
+    }
+    vertices.clear();
+    indices.clear();
+    let across = |(at, right, up, _): Frame, p: Vec2| at + right * p.x + up * p.y;
     // The sides, each loop walked with the outside on its right, as an
     // extrusion's: the path goes as the extrusion's from front to back.
-    for (index, ring) in loops().enumerate() {
-        let mut ring: Vec<Vec2> = ring.to_vec();
-        let ids: Vec<u32> = (0..ring.len() as u32).collect();
-        if (area(&ring, &ids) > 0.0) != (index == 0) {
+    for (index, points) in loops().enumerate() {
+        ring.clear();
+        ring.extend_from_slice(points);
+        // Twice its area: more than 0 for counter-clockwise.
+        let area: f32 = (0..ring.len()).map(|i| ring[i].perp_dot(ring[(i + 1) % ring.len()])).sum();
+        if (area > 0.0) != (index == 0) {
             ring.reverse();
         }
         let n = ring.len();
-        let along: Vec<Vec2> = (0..n).map(|i| (ring[(i + 1) % n] - ring[i]).normalize_or_zero()).collect();
-        let outward: Vec<Vec2> = along.iter().map(|d| Vec2::new(d.y, -d.x)).collect();
-        let ends = edge_ends(&outward, true);
+        along.clear();
+        along.extend((0..n).map(|i| (ring[(i + 1) % n] - ring[i]).normalize_or_zero()));
+        outward.clear();
+        outward.extend(along.iter().map(|d| Vec2::new(d.y, -d.x)));
+        edge_ends_into(outward, true, ends);
         let mut around = 0.0;
         for i in 0..n {
             let (a, b) = (ring[i], ring[(i + 1) % n]);
@@ -159,45 +211,71 @@ fn swept(sweep: &Sweep<'_>) -> Result<MeshData, MeshError> {
                 continue;
             }
             let (u0, u1) = (around * k, (around + length) * k);
-            let base = s.positions.len() as u32;
-            for (frame, point) in frames.iter().zip(path) {
-                let (_, right, up, _) = *frame;
+            let base = vertices.len() as u32;
+            for (&frame, point) in frames.iter().zip(path) {
+                let (_, right, up, _) = frame;
                 let turn = |v: Vec2| right * v.x + up * v.y;
                 let tangent = turn(along[i]);
                 let (na, nb) = (turn(ends[i].0), turn(ends[i].1));
                 let v = point.distance * k;
-                s.push(across(*frame, a), na, square_to(tangent, na), [u0, v]);
-                s.push(across(*frame, b), nb, square_to(tangent, nb), [u1, v]);
+                corner(vertices, across(frame, a), na, square_to(tangent, na), [u0, v])?;
+                corner(vertices, across(frame, b), nb, square_to(tangent, nb), [u1, v])?;
             }
             for j in 0..frames.len() as u32 - 1 {
                 // This point's a and b, then the next's.
                 let (a0, b0, a1, b1) = (base + 2 * j, base + 2 * j + 1, base + 2 * j + 2, base + 2 * j + 3);
-                s.indices.extend([a0, a1, b1, a0, b1, b0]);
+                indices.extend([a0, a1, b1, a0, b1, b0]);
             }
             around += length;
         }
     }
     if caps {
-        let triangles = fill(outline, holes)?;
-        let points: Vec<Vec2> = loops().flatten().copied().collect();
         let (first, last) = (frames[0], frames[frames.len() - 1]);
         // The start faces back along the path, as an extrusion's front;
         // the end forward, as its back.
         for (frame, start) in [(first, true), (last, false)] {
             let (_, right, _, forward) = frame;
             let (normal, image_right, mirror) = if start { (-forward, right, 1.0) } else { (forward, -right, -1.0) };
-            let base = s.positions.len() as u32;
-            for &p in &points {
-                s.push(across(frame, p), normal, image_right, [p.x * mirror * k, -p.y * k]);
+            let base = vertices.len() as u32;
+            for &p in loops().flatten() {
+                corner(vertices, across(frame, p), normal, image_right, [p.x * mirror * k, -p.y * k])?;
             }
             for tri in triangles.chunks_exact(3) {
                 let [a, b, c] = [tri[0] + base, tri[1] + base, tri[2] + base];
-                s.indices.extend(if start { [a, b, c] } else { [a, c, b] });
+                indices.extend(if start { [a, b, c] } else { [a, c, b] });
             }
         }
     }
-    if s.indices.is_empty() {
+    if indices.is_empty() {
         return Err(MeshError::NoTriangles);
     }
-    Ok(s.build())
+    let (lo, hi) = vertices.iter().fold((Vec3::INFINITY, Vec3::NEG_INFINITY), |(lo, hi), v| {
+        (lo.min(Vec3::from(v.position)), hi.max(Vec3::from(v.position)))
+    });
+    Ok((lo, hi))
+}
+
+/// A corner pushed onto `vertices` as [`MeshData::new`] takes it: normal
+/// and tangent made unit length, the position finite.
+fn corner(
+    vertices: &mut Vec<Vertex>,
+    position: Vec3,
+    normal: Vec3,
+    tangent: Vec3,
+    uv: [f32; 2],
+) -> Result<(), MeshError> {
+    let at = vertices.len();
+    if !position.is_finite() {
+        return Err(MeshError::NotFinite { what: "position", at });
+    }
+    let normal = normal.try_normalize().ok_or(MeshError::ZeroLength { what: "normal", at })?;
+    let tangent = tangent.try_normalize().ok_or(MeshError::ZeroLength { what: "tangent", at })?;
+    vertices.push(Vertex {
+        position: position.into(),
+        normal: normal.into(),
+        tangent: tangent.extend(1.0).into(),
+        uv,
+        color: WHITE,
+    });
+    Ok(())
 }
