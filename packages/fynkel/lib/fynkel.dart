@@ -5,6 +5,7 @@ library;
 export 'src/color.dart';
 export 'src/error.dart';
 export 'src/math.dart';
+export 'src/system_info.dart';
 export 'src/view.dart' show GpuTimes, HeadlessView, ViewStats, WorldView;
 export 'src/world.dart'
     hide AssetKind, cameraObjectId, GameObjectSystems, SendTransforms, WorldPointer, WorldSystem, WorldSystems;
