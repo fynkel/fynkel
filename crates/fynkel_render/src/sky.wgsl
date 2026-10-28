@@ -26,6 +26,31 @@ struct Frame {
 
 const PI: f32 = 3.14159265359;
 
+// forward.wgsl's `dither_step` and `fy_dither`.
+override dither_step: f32 = 0.0;
+
+// Interleaved gradient noise would need the pixel's position, and reading
+// it costs Mali GPUs about a tenth of the scene (Note10+); the bits of a
+// point that differs pixel to pixel are hashed instead (lowbias32, Chris
+// Wellons), which is even noise at any distance.
+fn fy_dither(c: vec3<f32>, seed: vec3<f32>) -> vec3<f32> {
+    if dither_step == 0.0 {
+        return c;
+    }
+    let b = bitcast<vec3<u32>>(seed);
+    var h = b.x ^ (b.y * 0x9e3779b9u) ^ (b.z * 0x85ebca6bu);
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    let noise = f32(h >> 8u) / 16777216.0;
+    // Only the darks: above about 0.023 a step is finer than the screen's
+    // own 8 sRGB bits.
+    let dark = select(vec3<f32>(0.0), vec3<f32>(dither_step), c < vec3<f32>(0.025));
+    return max(c + (noise - 0.5) * dark, vec3<f32>(0.0));
+}
+
 struct Out {
     @builtin(position) clip: vec4<f32>,
     @location(0) ndc: vec2<f32>,
@@ -75,12 +100,12 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     // not light that glows (renderer.rs, the scene image).
     if frame.sky.zenith.w < 1.5 {
         if d.y >= 0.0 {
-            return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.zenith.rgb, sqrt(d.y)), 0.0);
+            return vec4<f32>(fy_dither(mix(frame.sky.horizon.rgb, frame.sky.zenith.rgb, sqrt(d.y)), vec3<f32>(in.ndc, 0.0)), 0.0);
         }
-        return vec4<f32>(mix(frame.sky.horizon.rgb, frame.sky.ground.rgb, sqrt(-d.y)), 0.0);
+        return vec4<f32>(fy_dither(mix(frame.sky.horizon.rgb, frame.sky.ground.rgb, sqrt(-d.y)), vec3<f32>(in.ndc, 0.0)), 0.0);
     }
     let u = 0.5 + (atan2(d.x, -d.z) - frame.sky.ground.w) / (2.0 * PI);
     let v = acos(clamp(d.y, -1.0, 1.0)) / PI;
     let light = textureSampleLevel(image, image_sampler, vec2<f32>(fract(u), v), 0.0).rgb;
-    return vec4<f32>(tonemap_neutral(light * frame.sky.horizon.w), 1.0);
+    return vec4<f32>(fy_dither(tonemap_neutral(light * frame.sky.horizon.w), vec3<f32>(in.ndc, 0.0)), 1.0);
 }

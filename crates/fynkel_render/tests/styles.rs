@@ -150,9 +150,11 @@ fn banded_light_gives_few_shades_and_sees_the_shadow() {
     let mut r = renderer(&gpu, SRGB);
     shader(&mut r, ShaderKey(1), "bands.wgsl", &source(BANDS));
     shader(&mut r, ShaderKey(2), "shadow.wgsl", &source(SHADOW_ONLY));
-    // Only the sun, no sky light: the bands are all there is.
+    // Only the sun, no sky light: the bands are all there is. Low draws
+    // straight to the screen: medium's 10-bit image dithers the darkest
+    // band into two shades (forward.wgsl, `fy_dither`).
     let alone = |shader| {
-        let mut scene = stage(QualityLevel::Medium, shader);
+        let mut scene = stage(QualityLevel::Low, shader);
         scene.lights.truncate(1);
         scene.sky = None;
         scene.ambient = Vec3::ZERO;

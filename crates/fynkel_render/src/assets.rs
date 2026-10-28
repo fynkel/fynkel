@@ -29,7 +29,7 @@ pub struct Kit {
     pub(crate) gpu: Gpu,
     quality: QualityLevel,
     pub(crate) frame_layout: wgpu::BindGroupLayout,
-    /// The last pass's input: the scene's half-float image.
+    /// The last pass's input: the scene's image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
     /// The multisampled depth one sample of is copied from, for shaders
     /// that read what's behind (behind.wgsl). Drawn with one sample, it's
