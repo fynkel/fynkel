@@ -190,7 +190,7 @@ the moving objects (moved by the scene, plain themselves) 3.1 ms.
 | DF7a | `material.set` packs every value again | ~70 objects a set (the guide's way to tween) | S |
 | WO10 | Each view recomputes every world matrix each frame | 75 µs for 3000 objects. **Half done with WO4**: a frame where nothing moved skips them; one moved object still recomputes them all | M |
 | RN4 | Transparent particles re-sorted with depth recomputed per compare | 0.73 ms for 10k, 0.13 keyed | S |
-| PH5 | Any mesh change, colours too, rebuilds its collider; each rebuild scans all colliders | 10 colour sets = 10 rebuilds | S |
+| PH5 | Any mesh change, colours too, rebuilds its collider; each rebuild scans all colliders | 10 colour sets = 10 rebuilds. **Done**: a mesh counts the changes to its positions or triangles apart (`shapeVersion`, in `extend.dart`), and physics follows only those; colours, UVs, normals and tangents changed every frame leave its colliders, and what sleeps on them, alone. The scan over all colliders stays: it runs only when the shape changes, and making the shape again costs far more (3 ms for 10,000 triangles against microseconds for the scan) | S |
 | RN5 ½ | Soft particles turn on the whole what's-behind path | bandwidth on the Note10+; the depth-only idea doesn't avoid MSAA's round trip | M |
 | RN3 📖 | Vulkan pipeline cache rewritten after every pipeline | Android only | S |
 | AU7 | A streamed voice copies its whole file each start and loop | 2.1 MB for 3 loops of 256 KB | S |

@@ -57,6 +57,10 @@ final class Mesh implements Finalizable {
   // times they've been given a change; whether it's dynamic.
   bool _changed = false;
   int _version = 0;
+  // Its positions or triangles changed since then; how many times the
+  // worlds have been given such a change.
+  bool _reshaped = false;
+  int _shapeVersion = 0;
   bool _dynamic = false;
 
   // The meshes changed this frame, for the worlds that have them.
@@ -285,7 +289,7 @@ final class Mesh implements Finalizable {
     bool caps = true,
     double uvPerMetre = 1,
   }) {
-    _changeable();
+    _reshape();
     // The setting through a field, not passed on: a JIT build boxes a
     // double passed to a call, or kept for a throw. (It boxes one passed
     // to the engine too, unless it's a constant; a release build doesn't.)
@@ -495,7 +499,7 @@ final class Mesh implements Finalizable {
   /// first, or [clear]. Throws an [ArgumentError], changing nothing, for a
   /// length that isn't a multiple of 3 or a value that isn't finite.
   void setPositions(Float32List positions) {
-    _changeable();
+    _reshape();
     if (positions.length % 3 != 0) {
       throw ArgumentError.value(positions.length, 'positions.length', 'must be a multiple of 3 (x, y, z)');
     }
@@ -555,7 +559,7 @@ final class Mesh implements Finalizable {
   /// Throws an [ArgumentError], changing nothing, for an index past the
   /// last vertex or a start out of order or not on a triangle.
   void setTriangles(Uint32List indices, {Uint32List? submeshStarts}) {
-    _changeable();
+    _reshape();
     final starts = submeshStarts ?? _noStarts;
     check(fy_mesh_set_triangles(_live, indices.address, indices.length, starts.address, starts.length));
     _staleNormals = !_ownNormals;
@@ -568,7 +572,7 @@ final class Mesh implements Finalizable {
   /// nothing until it's given more. Its normals and tangents are worked
   /// out by themselves again.
   void clear() {
-    _changeable();
+    _reshape();
     check(fy_mesh_set_triangles(_live, nullptr, 0, nullptr, 0));
     check(fy_mesh_set_positions(_live, nullptr, 0));
     _ownNormals = _ownTangents = _staleNormals = _staleTangents = _hasUvs = false;
@@ -618,6 +622,13 @@ final class Mesh implements Finalizable {
     }
   }
 
+  /// [_changeable], for a change to its positions or triangles: what a
+  /// collider made of it collides as.
+  void _reshape() {
+    _changeable();
+    _reshaped = true;
+  }
+
   int _per(int length, int per, String name) {
     if (length % per != 0) throw ArgumentError.value(length, '$name.length', 'must be a multiple of $per');
     return length ~/ per;
@@ -643,6 +654,10 @@ final class Mesh implements Finalizable {
       if (mesh.isDisposed) continue;
       mesh._settle();
       mesh._version++;
+      if (mesh._reshaped) {
+        mesh._reshaped = false;
+        mesh._shapeVersion++;
+      }
       mesh._release.updateMesh(mesh);
     }
     changed.clear();
@@ -759,9 +774,13 @@ final class Mesh implements Finalizable {
 
 /// What packages read of a [Mesh] (package:fynkel/extend.dart).
 extension MeshVersions on Mesh {
-  /// How many changes the worlds that have it have been given: a
-  /// collider made of it is made again when this moves on.
+  /// How many changes the worlds that have it have been given.
   int get version => _version;
+
+  /// How many of those changed its positions or triangles: a collider made
+  /// of it is made again when this moves on, not for its colours, UVs,
+  /// normals or tangents.
+  int get shapeVersion => _shapeVersion;
 
   /// Copies its positions, 3 floats a vertex, into [positions] and its
   /// indices into [indices], as many as each has room for, making nothing
