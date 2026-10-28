@@ -15,6 +15,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use glam::Mat4;
 
 use crate::assets::PipelineMaker;
+use crate::gpu_time::{GpuTimer, Part};
 use crate::scene::AmbientOcclusion;
 use fynkel_mesh::Vertex;
 
@@ -326,7 +327,12 @@ impl AoImages {
 
     /// Begins the depth pass: the caller draws the solid scene into it
     /// with [`AoKit::depth_pipeline`].
-    pub(crate) fn depth_pass<'e>(&self, kit: &AoKit, encoder: &'e mut wgpu::CommandEncoder) -> wgpu::RenderPass<'e> {
+    pub(crate) fn depth_pass<'e>(
+        &self,
+        kit: &AoKit,
+        encoder: &'e mut wgpu::CommandEncoder,
+        timer: &GpuTimer,
+    ) -> wgpu::RenderPass<'e> {
         let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
             label: Some("ambient occlusion depth"),
             color_attachments: &[],
@@ -335,7 +341,7 @@ impl AoImages {
                 depth_ops: Some(wgpu::Operations { load: wgpu::LoadOp::Clear(0.0), store: wgpu::StoreOp::Store }),
                 stencil_ops: None,
             }),
-            timestamp_writes: None,
+            timestamp_writes: timer.pass(Part::AmbientOcclusion),
             occlusion_query_set: None,
             multiview_mask: None,
         });
@@ -344,7 +350,7 @@ impl AoImages {
     }
 
     /// Records the occlusion and its blur, after the depth pass.
-    pub(crate) fn encode(&self, kit: &AoKit, encoder: &mut wgpu::CommandEncoder) {
+    pub(crate) fn encode(&self, kit: &AoKit, encoder: &mut wgpu::CommandEncoder, timer: &GpuTimer) {
         let pipelines = kit.pipelines();
         for (label, into, pipeline, group) in [
             ("ambient occlusion", &self.raw, &pipelines.ao, &self.ao_group),
@@ -362,7 +368,7 @@ impl AoImages {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: timer.pass(Part::AmbientOcclusion),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

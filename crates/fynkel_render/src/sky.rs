@@ -25,6 +25,7 @@ use std::sync::OnceLock;
 use glam::Vec3;
 
 use crate::assets::PipelineMaker;
+use crate::gpu_time::{GpuTimer, Part};
 use crate::scene::SkyKind;
 
 /// The radiance cube's side, in texels: 6 × 128² half-float texels, about
@@ -245,7 +246,7 @@ pub(crate) fn bytes(kind: &SkyKind) -> u64 {
 impl Environment {
     /// Works out `kind`'s light (a gradient's or an image's) in passes
     /// recorded into `encoder`.
-    pub(crate) fn new(kit: &SkyKit, encoder: &mut wgpu::CommandEncoder, kind: &SkyKind) -> Self {
+    pub(crate) fn new(kit: &SkyKit, encoder: &mut wgpu::CommandEncoder, kind: &SkyKind, timer: &GpuTimer) -> Self {
         let device = &kit.device;
         let pipelines = kit.env_pipelines();
         let mut base = PassUniform {
@@ -389,7 +390,7 @@ impl Environment {
                     },
                 })],
                 depth_stencil_attachment: None,
-                timestamp_writes: None,
+                timestamp_writes: timer.pass(Part::SkyLight),
                 occlusion_query_set: None,
                 multiview_mask: None,
             });

@@ -58,10 +58,12 @@ impl Gpu {
             // between runs (assets.rs). And drawing into 32-bit float
             // images where it can, for bloom's (bloom.rs). And sample
             // counts beyond WebGPU's 1 and 4 where it draws them, for
-            // Quality::samples' 2.
+            // Quality::samples' 2. And timing passes on the GPU where it
+            // can, for measuring (gpu_time.rs).
             required_features: wgpu::Features::MAPPABLE_PRIMARY_BUFFERS
                 | (adapter.features()
                     & (wgpu::Features::PIPELINE_CACHE
+                        | wgpu::Features::TIMESTAMP_QUERY
                         | wgpu::Features::RG11B10UFLOAT_RENDERABLE
                         | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)),
             // WebGPU's defaults, lowered wherever this adapter offers less
