@@ -5,10 +5,15 @@
 //! clocks back is a blit every frame, which keeps a pool of driver memory
 //! dirty on Apple GPUs (tests/gpu_memory.rs).
 //!
-//! On a tiled GPU (every phone's) a pass's start is when its vertices start
-//! and its end when its last pixels are written, and the next pass's
-//! vertices may start before that, so the parts may overlap a little and
-//! add up to more than the frame.
+//! A pass's clocks are read as its vertices start and as its last pixels
+//! are written. On a tiled GPU (Apple's, every phone's) those are rough:
+//! the next pass's vertices may start before that, a small pass's start
+//! may be read after its end, and even its end before the end of the pass
+//! it reads from. So each pass counts only the time it adds past the
+//! latest end so far, from its start if that's later: the parts never
+//! overlap, add up to the frame's time on the GPU less any waits between
+//! passes, and a pass done within another's time counts nothing. They
+//! say where the time goes, not to the tenth of a millisecond.
 //!
 //! [`Renderer::set_gpu_timing`]: crate::Renderer::set_gpu_timing
 
@@ -39,6 +44,10 @@ pub struct GpuTimes {
     pub finish: u64,
     /// The screen effects.
     pub effects: u64,
+    /// Passes in the frames timed whose end the GPU didn't give (or, first
+    /// in a frame, whose start): left out of the times above. Many of them say the times are short
+    /// of the frames'.
+    pub untimed: u64,
 }
 
 /// The part of a frame a pass belongs to.
@@ -72,7 +81,15 @@ const PENDING: u8 = 0;
 const MAPPED: u8 = 1;
 const FAILED: u8 = 2;
 
+/// What Metal gives for a clock it didn't read (`MTLCounterErrorValue`).
+const NO_CLOCK: u64 = u64::MAX;
+
+/// One frame's clocks: written by its passes, copied back and read. Each
+/// frame on its way has its own, so a frame's passes never write over the
+/// clocks of the one before while they're being copied (Metal doesn't
+/// order the two).
 struct Slot {
+    set: wgpu::QuerySet,
     buffer: wgpu::Buffer,
     state: State,
     mapped: Arc<AtomicU8>,
@@ -80,7 +97,6 @@ struct Slot {
 }
 
 struct Queries {
-    set: wgpu::QuerySet,
     resolve: wgpu::Buffer,
     slots: Vec<Slot>,
 }
@@ -129,14 +145,14 @@ impl GpuTimer {
                 })
             };
             self.queries = Some(Queries {
-                set: device.create_query_set(&wgpu::QuerySetDescriptor {
-                    label: Some("gpu time"),
-                    ty: wgpu::QueryType::Timestamp,
-                    count: PASSES * 2,
-                }),
                 resolve: buffer("gpu time resolve", wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC),
                 slots: (0..RING)
                     .map(|_| Slot {
+                        set: device.create_query_set(&wgpu::QuerySetDescriptor {
+                            label: Some("gpu time"),
+                            ty: wgpu::QueryType::Timestamp,
+                            count: PASSES * 2,
+                        }),
                         buffer: buffer("gpu time read", wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST),
                         state: State::Free,
                         mapped: Arc::new(AtomicU8::new(PENDING)),
@@ -168,8 +184,7 @@ impl GpuTimer {
 
     /// The clocks for a pass of `part` to write, if this frame is timed.
     pub(crate) fn pass(&self, part: Part) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        self.frame?;
-        let queries = self.queries.as_ref()?;
+        let slot = &self.queries.as_ref()?.slots[self.frame?];
         let n = self.used.get();
         if n == PASSES {
             return None;
@@ -177,7 +192,7 @@ impl GpuTimer {
         self.used.set(n + 1);
         self.passes.borrow_mut().push(part);
         Some(wgpu::RenderPassTimestampWrites {
-            query_set: &queries.set,
+            query_set: &slot.set,
             beginning_of_pass_write_index: Some(n * 2),
             end_of_pass_write_index: Some(n * 2 + 1),
         })
@@ -190,9 +205,9 @@ impl GpuTimer {
         if used == 0 {
             return;
         }
-        encoder.resolve_query_set(&queries.set, 0..used * 2, &queries.resolve, 0);
-        let bytes = u64::from(used * 2) * u64::from(wgpu::QUERY_SIZE);
         let slot = &mut queries.slots[slot];
+        encoder.resolve_query_set(&slot.set, 0..used * 2, &queries.resolve, 0);
+        let bytes = u64::from(used * 2) * u64::from(wgpu::QUERY_SIZE);
         encoder.copy_buffer_to_buffer(&queries.resolve, 0, &slot.buffer, 0, bytes);
         slot.state = State::Written;
         slot.parts.clear();
@@ -235,13 +250,26 @@ impl GpuTimer {
                             continue;
                         };
                         let clocks: &[u64] = bytemuck::cast_slice(&view);
+                        // Where the GPU had got to: the last pass's end.
+                        let mut done: Option<u64> = None;
                         for (part, clock) in slot.parts.iter().zip(clocks.chunks_exact(2)) {
-                            // A pass the GPU skipped, or a clock that went
-                            // back, adds nothing.
-                            if clock[0] == 0 || clock[1] <= clock[0] {
+                            let (start, end) = (clock[0], clock[1]);
+                            let read = |c: u64| c != 0 && c != NO_CLOCK;
+                            // From its start, or from where the pass before
+                            // ended if that's later or its start is wrong.
+                            let from = match (read(start) && start <= end, done) {
+                                (true, Some(done)) => Some(start.max(done)),
+                                (true, None) => Some(start),
+                                (false, done) => done,
+                            };
+                            let (true, Some(from)) = (read(end), from) else {
+                                self.totals.untimed += 1;
                                 continue;
-                            }
-                            let nanos = ((clock[1] - clock[0]) as f64 * self.period) as u64;
+                            };
+                            // Ended within what's counted already: adds
+                            // nothing.
+                            done = Some(done.map_or(end, |d| d.max(end)));
+                            let nanos = (end.saturating_sub(from) as f64 * self.period) as u64;
                             let t = &mut self.totals;
                             *match part {
                                 Part::Shadows => &mut t.shadows,
