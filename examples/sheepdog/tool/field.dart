@@ -16,7 +16,9 @@
 // default: timing costs the GPU a little, so the frame rates are read
 // without it. `--define FIELD_PARTS=true` shows [partLevels] instead:
 // medium with one thing at a time taken away, to find what its GPU time
-// goes on.
+// goes on; `--define FIELD_CONTENT=true` shows [contentLevels]: medium
+// with and without anti-aliasing, with one kind of thing in the field
+// hidden at a time.
 
 import 'dart:math' as math;
 
@@ -46,6 +48,21 @@ final fieldLevels = [
 
 const _timeGpu = bool.fromEnvironment('FIELD_GPU');
 const _parts = bool.fromEnvironment('FIELD_PARTS');
+const _content = bool.fromEnvironment('FIELD_CONTENT');
+
+/// With FIELD_CONTENT, the dust unlit and the levels only with nothing
+/// hidden: whether its light is what anti-aliasing multiplies.
+const _unlit = bool.fromEnvironment('FIELD_UNLIT_DUST');
+
+/// Medium and medium without anti-aliasing, with each kind of thing hidden
+/// in turn: what makes anti-aliasing cost.
+final contentLevels = [
+  for (final hidden in [
+    if (!_unlit) ...['nothing', 'dust', 'animals', 'lamps', 'posts'] else 'nothing',
+  ])
+    for (final quality in [Quality.medium, Quality.medium.copyWith(antiAliasing: 0)])
+      (quality.copyWith(name: '${quality.antiAliasing == 0 ? 'medium, no AA' : 'medium'}, $hidden hidden'), hidden),
+];
 const _sky = Color(0xFF9DB8CF);
 const _sheep = 60;
 const _posts = 120;
@@ -56,6 +73,7 @@ class Field extends GameObject {
 
   final int seconds;
   final _walkers = <(GameObject, double radius, double speed, double angle)>[];
+  final _kinds = <String, List<GameObject>>{'dust': [], 'animals': [], 'lamps': [], 'posts': []};
   var _t = 0.0;
 
   var _counting = false, _shown = 0, _window = 0.0, _drawn = 0;
@@ -97,10 +115,12 @@ class Field extends GameObject {
     final wood = Material(color: const Color(0xFF8B6B4A), roughness: 0.8);
     for (var i = 0; i < _posts; i++) {
       final a = i / _posts * math.pi * 2;
-      add(
-        GameObject(
-          transform: Transform(position: Vec3(math.cos(a) * 26, 0.6, math.sin(a) * 26), scale: Vec3(0.15, 1.2, 0.15)),
-          components: [MeshRenderer(Mesh.cube(), wood)],
+      _kinds['posts']!.add(
+        add(
+          GameObject(
+            transform: Transform(position: Vec3(math.cos(a) * 26, 0.6, math.sin(a) * 26), scale: Vec3(0.15, 1.2, 0.15)),
+            components: [MeshRenderer(Mesh.cube(), wood)],
+          ),
         ),
       );
     }
@@ -109,41 +129,47 @@ class Field extends GameObject {
     for (var i = 0; i < _lamps; i++) {
       final a = (i + 0.5) / _lamps * math.pi * 2;
       final x = math.cos(a) * 18, z = math.sin(a) * 18;
-      add(
-        GameObject(
-          transform: Transform(position: Vec3(x, 1.25, z), scale: Vec3(0.1, 2.5, 0.1)),
-          components: [MeshRenderer(Mesh.cube(), pole)],
+      _kinds['lamps']!.add(
+        add(
+          GameObject(
+            transform: Transform(position: Vec3(x, 1.25, z), scale: Vec3(0.1, 2.5, 0.1)),
+            components: [MeshRenderer(Mesh.cube(), pole)],
+          ),
         ),
       );
-      add(
-        GameObject(
-          transform: Transform(position: Vec3(x, 2.6, z), scale: Vec3(0.3, 0.3, 0.3)),
-          components: [
-            MeshRenderer(Mesh.sphere(), glass),
-            Light.point(color: const Color(0xFFFFC880), intensity: 4, range: 10),
-          ],
+      _kinds['lamps']!.add(
+        add(
+          GameObject(
+            transform: Transform(position: Vec3(x, 2.6, z), scale: Vec3(0.3, 0.3, 0.3)),
+            components: [
+              MeshRenderer(Mesh.sphere(), glass),
+              Light.point(color: const Color(0xFFFFC880), intensity: 4, range: 10),
+            ],
+          ),
         ),
       );
     }
     final dust = await assets.texture('particles/smoke_04.png');
-    add(
-      GameObject(
-        name: 'dust',
-        components: [
-          ParticleSystem(
-            maxParticles: 500,
-            startLifetime: const Range(2, 2),
-            startSpeed: const Range(0.2, 0.5),
-            startSize: const Range(0.5, 0.8),
-            startColor: const ColorRange(Color(0xFFC8B48E), Color(0xFFC8B48E)),
-            emission: const Emission(rateOverTime: 250),
-            shape: const ParticleShape.box(size: Vec3(40, 0.2, 40)),
-            prewarm: true,
-            lit: true,
-            softness: 0.3,
-            material: Material(baseColorTexture: dust, blending: Blending.transparent, roughness: 1),
-          ),
-        ],
+    _kinds['dust']!.add(
+      add(
+        GameObject(
+          name: 'dust',
+          components: [
+            ParticleSystem(
+              maxParticles: 500,
+              startLifetime: const Range(2, 2),
+              startSpeed: const Range(0.2, 0.5),
+              startSize: const Range(0.5, 0.8),
+              startColor: const ColorRange(Color(0xFFC8B48E), Color(0xFFC8B48E)),
+              emission: const Emission(rateOverTime: 250),
+              shape: const ParticleShape.box(size: Vec3(40, 0.2, 40)),
+              prewarm: true,
+              lit: !_unlit,
+              softness: 0.3,
+              material: Material(baseColorTexture: dust, blending: Blending.transparent, roughness: 1),
+            ),
+          ],
+        ),
       ),
     );
     for (var i = 0; i < _sheep + 1; i++) {
@@ -155,6 +181,7 @@ class Field extends GameObject {
       final radius = dog ? 14.0 : 4 + (i % 6) * 2.5;
       final speed = dog ? 4.0 : 1.2;
       _walkers.add((walker, radius, speed / radius, i * 2.399963));
+      _kinds['animals']!.add(walker);
       final animator = model.animator!..play(dog ? 'Run' : 'Walk');
       animator.time = (i * 0.37) % animator.length;
     }
@@ -196,9 +223,17 @@ class Field extends GameObject {
   Future<void> _run() async {
     await loaded;
     WorldView.timeGpu = _timeGpu;
-    for (final level in _parts ? partLevels : fieldLevels) {
+    final levels = _content
+        ? contentLevels
+        : [for (final level in _parts ? partLevels : fieldLevels) (level, 'nothing')];
+    for (final (level, hidden) in levels) {
       if (isDestroyed) return;
       world.quality = level;
+      for (final MapEntry(:key, :value) in _kinds.entries) {
+        for (final o in value) {
+          o.active = key != hidden;
+        }
+      }
       await world.shadersReady();
       await Future<void>.delayed(const Duration(seconds: 5));
       _shown = _drawn = 0;
