@@ -1,0 +1,5 @@
+tags:
+  # Timed and held to a bar (stage 14's GT1). CI runs them in a step of
+  # their own, which warns when they're over and doesn't fail the run:
+  # `flutter test -t timing`.
+  timing:
