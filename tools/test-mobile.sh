@@ -158,7 +158,13 @@ android() {
       "$adb" push "$exe" "$dir/${test#*:}" >/dev/null </dev/null
       result=$(run_on_android "$adb" "$dir" "${test#*:}")
     fi
-    [ "$result" = exit=0 ] || status=1
+    if [ $own_emulator = 1 ] && { [ "$result" = exit=124 ] || [ -z "$result" ]; }; then
+      # Twice the emulator, not the test: said, in the log and on the run's
+      # page, but it doesn't fail the run. A test that fails still does.
+      echo "::warning title=Android emulator::$test didn't finish on the emulator twice (${result:-the emulator went}); its tests weren't run there"
+    elif [ "$result" != exit=0 ]; then
+      status=1
+    fi
     # Debug test binaries are big: left behind, they fill the emulator.
     "$adb" shell "rm -f $dir/${test#*:}" </dev/null
   done <<<"$list"

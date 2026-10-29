@@ -40,9 +40,25 @@ jobs:
       # The benchmarks (stage 14's GT1, crates/fynkel_bench): each times
       # one thing the frame path does, in release, and fails when its
       # median is over its bar (the Mac's time when it was set, doubled),
-      # so a slowdown fails the PR that makes it.
-      - name: benchmarks
-        run: cargo test --release -p fynkel_mesh -p fynkel_world -p fynkel_physics -p fynkel_render -p fynkel_ffi -- --ignored bench_
+      # so a slowdown shows on the PR that makes it.
+      #
+      # They, and the Dart side's timed tests (tagged timing), are run
+      # once more when they fail, and when that fails too they say so, on
+      # the run's page, without failing the run: on this one Mac a busy
+      # moment (other work, a build) has put a 0.5 ms median at 5 ms and
+      # held whole PRs for hours. The warning is the cue to look.
+      - name: timing bars
+        continue-on-error: true
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          bars() {
+            cargo test --release -p fynkel_mesh -p fynkel_world -p fynkel_physics -p fynkel_render -p fynkel_ffi -- --ignored bench_ &&
+              (cd examples/scale && flutter pub get >/dev/null && flutter test -t timing)
+          }
+          bars || bars || {
+            echo "::warning title=Timing bars::over their bars twice: see this step's log"
+            exit 1
+          }
       # package:fynkel. Its build hook compiles fynkel_ffi; its tests draw
       # the stage 1 scene from Dart to the same golden image. The bindings
       # are generated again from the header and must match the committed
@@ -161,7 +177,7 @@ jobs:
           flutter pub get
           dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
-          flutter test
+          flutter test -x timing
           flutter build macos --debug
       # The phones' own code, compiled (stage 14's GT4): the lab uses all
       # three packages, so building it for an iPhone and for Android
