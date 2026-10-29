@@ -88,6 +88,24 @@ run_on_android() {
     tee /dev/stderr | grep '^exit=' | tail -1
 }
 
+# Starts the emulator $3 and waits until adb lists it. Only one emulator
+# runs here, so the first one to show up is it.
+start_emulator() {
+  local sdk=$1 adb=$2 avd=$3
+  "$sdk/emulator/emulator" -avd "$avd" -no-window -no-audio -no-snapshot-save -gpu host >>/tmp/fynkel-emulator.log 2>&1 &
+  until "$adb" devices | grep -q '^emulator-'; do sleep 1; done
+}
+
+# Waits until the device has booted, and puts the goldens in $2 on it.
+ready_android() {
+  local adb=$1 dir=$2
+  "$adb" wait-for-device
+  until [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do sleep 2; done
+  echo "== Android: $ANDROID_SERIAL ($("$adb" shell getprop ro.product.model | tr -d '\r'))"
+  "$adb" shell "rm -rf $dir && mkdir -p $dir/golden" >/dev/null
+  "$adb" push tests/golden/. "$dir/golden/" >/dev/null
+}
+
 android() {
   local sdk="${ANDROID_SDK:-$HOME/Library/Android/sdk}"
   local ndk="${ANDROID_NDK:-$(ls -d "$sdk"/ndk/* | sort -V | tail -1)}"
@@ -97,24 +115,18 @@ android() {
   local list
   list=$(binaries aarch64-linux-android) || return 1
 
-  local started_here=0
+  local started_here=0 own_emulator=0
   if [ -z "${ANDROID_SERIAL:-}" ]; then
+    own_emulator=1
     if ! "$adb" devices | grep -q '^emulator-'; then
-      "$sdk/emulator/emulator" -avd "$avd" -no-window -no-audio -no-snapshot-save -gpu host >/tmp/fynkel-emulator.log 2>&1 &
+      start_emulator "$sdk" "$adb" "$avd"
       started_here=1
-      # Only one emulator runs here, so the first one to show up is it.
-      until "$adb" devices | grep -q '^emulator-'; do sleep 1; done
     fi
     # Every adb call below goes to it, also with a phone plugged in.
     export ANDROID_SERIAL=$("$adb" devices | awk '/^emulator-/ { print $1; exit }')
   fi
-  "$adb" wait-for-device
-  until [ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" = 1 ]; do sleep 2; done
-  echo "== Android: $ANDROID_SERIAL ($("$adb" shell getprop ro.product.model | tr -d '\r'))"
-
   local dir=/data/local/tmp/fynkel
-  "$adb" shell "rm -rf $dir && mkdir -p $dir/golden" >/dev/null
-  "$adb" push tests/golden/. "$dir/golden/" >/dev/null
+  ready_android "$adb" "$dir"
   local status=0
   while read -r test exe; do
     "$adb" push "$exe" "$dir/${test#*:}" >/dev/null </dev/null
@@ -129,6 +141,21 @@ android() {
     result=$(run_on_android "$adb" "$dir" "${test#*:}")
     if [ "$result" = exit=124 ]; then
       echo "== $test hung for 10 minutes on the emulator: running it once more" >&2
+      result=$(run_on_android "$adb" "$dir" "${test#*:}")
+    elif [ -z "$result" ] && [ $own_emulator = 1 ]; then
+      # No result line: the emulator itself went. Its software Vulkan
+      # (SwiftShader) has segfaulted compiling a pipeline on a test's first
+      # frame, now and then, on main too (2026-10-29, two crash reports in
+      # ~/Library/Logs/DiagnosticReports/qemu-system-aarch64-*): it's
+      # started afresh and the binary run once more.
+      echo "== the emulator went during $test: starting it again and running it once more" >&2
+      "$adb" emu kill >/dev/null 2>&1 </dev/null || true
+      while "$adb" devices | grep -q "^$ANDROID_SERIAL"; do sleep 1; done
+      start_emulator "$sdk" "$adb" "$avd" </dev/null
+      started_here=1
+      export ANDROID_SERIAL=$("$adb" devices | awk '/^emulator-/ { print $1; exit }')
+      ready_android "$adb" "$dir" </dev/null
+      "$adb" push "$exe" "$dir/${test#*:}" >/dev/null </dev/null
       result=$(run_on_android "$adb" "$dir" "${test#*:}")
     fi
     [ "$result" = exit=0 ] || status=1
