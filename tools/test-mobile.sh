@@ -79,6 +79,15 @@ for runtime, devices in json.load(sys.stdin)['devices'].items():
   return $status
 }
 
+# Runs one test binary pushed to $2 on the device, its output to stderr,
+# and prints its result line: exit=124 if it was stopped after 10 minutes.
+# The line starts afresh: a binary stopped mid-test leaves its own unended.
+run_on_android() {
+  local adb=$1 dir=$2 exe=$3
+  "$adb" shell "cd $dir && FYNKEL_GOLDEN_DIR=$dir/golden timeout -k 10 600 ./$exe --test-threads=1; e=\$?; echo; echo exit=\$e" </dev/null |
+    tee /dev/stderr | grep '^exit=' | tail -1
+}
+
 android() {
   local sdk="${ANDROID_SDK:-$HOME/Library/Android/sdk}"
   local ndk="${ANDROID_NDK:-$(ls -d "$sdk"/ndk/* | sort -V | tail -1)}"
@@ -111,9 +120,18 @@ android() {
     "$adb" push "$exe" "$dir/${test#*:}" >/dev/null </dev/null
     # </dev/null: adb shell would otherwise eat the rest of the loop's list.
     # adb shell doesn't pass the exit status through older devices, so the
-    # result line decides.
-    "$adb" shell "cd $dir && FYNKEL_GOLDEN_DIR=$dir/golden ./${test#*:} --test-threads=1; echo exit=\$?" </dev/null |
-      tee /dev/stderr | grep -q '^exit=0' || status=1
+    # result line decides. The emulator's GPU has twice wedged on a test's
+    # first frame after it had been up a while (2026-10-28: the test alone,
+    # and the whole run on a fresh emulator, pass in seconds), which held
+    # CI for hours: a binary still running after 10 minutes is stopped and
+    # run once more, and the log says so.
+    local result
+    result=$(run_on_android "$adb" "$dir" "${test#*:}")
+    if [ "$result" = exit=124 ]; then
+      echo "== $test hung for 10 minutes on the emulator: running it once more" >&2
+      result=$(run_on_android "$adb" "$dir" "${test#*:}")
+    fi
+    [ "$result" = exit=0 ] || status=1
     # Debug test binaries are big: left behind, they fill the emulator.
     "$adb" shell "rm -f $dir/${test#*:}" </dev/null
   done <<<"$list"
