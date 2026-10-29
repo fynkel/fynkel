@@ -128,6 +128,32 @@ override sky_lit: bool = false;
 // On where the camera has ambient occlusion (ao.rs): the ambient and sky
 // light darken where surfaces meet.
 override ao: bool = false;
+// One step of the scene image when it holds 10 bits a colour, 0 when it
+// holds half floats or is the screen: what's drawn is shaken by up to half
+// a step, differently pixel to pixel, so a slow gradient doesn't band.
+override dither_step: f32 = 0.0;
+
+// The noise is a hash of the bits of `seed`, a point that differs pixel to
+// pixel (lowbias32, Chris Wellons): even at any distance. Interleaved
+// gradient noise from the pixel's position cost the Note10+'s scene about
+// a tenth more; this, a third of that.
+fn fy_dither(c: vec3<f32>, seed: vec3<f32>) -> vec3<f32> {
+    if dither_step == 0.0 {
+        return c;
+    }
+    let b = bitcast<vec3<u32>>(seed);
+    var h = b.x ^ (b.y * 0x9e3779b9u) ^ (b.z * 0x85ebca6bu);
+    h ^= h >> 16u;
+    h *= 0x7feb352du;
+    h ^= h >> 15u;
+    h *= 0x846ca68bu;
+    h ^= h >> 16u;
+    let noise = f32(h >> 8u) / 16777216.0;
+    // Only the darks: above about 0.023 a step is finer than the screen's
+    // own 8 sRGB bits.
+    let dark = select(vec3<f32>(0.0), vec3<f32>(dither_step), c < vec3<f32>(0.025));
+    return max(c + (noise - 0.5) * dark, vec3<f32>(0.0));
+}
 
 // A material's textures. A slot without a texture holds a 1×1 one that
 // changes nothing: white, or a flat normal. Colour slots (base colour,
@@ -704,7 +730,7 @@ fn fogged(seen: vec3<f32>, p: vec3<f32>) -> vec3<f32> {
 // so the hardware encodes, and the MSAA resolve averages in linear light.
 @fragment
 fn fs_main(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @location(0) vec4<f32> {
-    return vec4<f32>(fogged(tonemap_neutral(shade(in, front_facing).rgb), in.world_position), 1.0);
+    return vec4<f32>(fy_dither(fogged(tonemap_neutral(shade(in, front_facing).rgb), in.world_position), in.world_position), 1.0);
 }
 
 // Cut-outs (glTF's MASK): the surface is there where alpha reaches the
@@ -723,7 +749,7 @@ fn fs_cutout(in: VertexOut, @builtin(front_facing) front_facing: bool) -> @locat
     let shaded = shade(in, front_facing);
     let cutoff = in.params.z;
     let sharp = (shaded.a - cutoff) / max(fwidth(shaded.a), 1e-4) + 0.5;
-    return vec4<f32>(fogged(tonemap_neutral(shaded.rgb), in.world_position), clamp(sharp, 0.0, 1.0));
+    return vec4<f32>(fy_dither(fogged(tonemap_neutral(shaded.rgb), in.world_position), in.world_position), clamp(sharp, 0.0, 1.0));
 }
 
 // See-through surfaces (glTF's BLEND), laid over what's behind: the

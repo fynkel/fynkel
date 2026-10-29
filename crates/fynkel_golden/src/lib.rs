@@ -56,7 +56,8 @@ pub fn read_png(path: &Path) -> Option<Image> {
 }
 
 /// Compares `image` with `tests/golden/<name>.png`. A channel may differ by
-/// at most 2/255, and at most 0.1 % of pixels may be outside that.
+/// at most 2/255 (4/255 near black, see [`within`]), and at most 0.1 % of
+/// pixels may be outside that.
 ///
 /// `FYNKEL_BLESS=1` writes the reference instead. Do that only on purpose,
 /// and look at the image before committing it. On a mismatch the actual
@@ -64,6 +65,13 @@ pub fn read_png(path: &Path) -> Option<Image> {
 pub fn assert_golden(name: &str, image: &Image) {
     let pixels = (image.width * image.height) as usize;
     assert_golden_within(name, image, pixels / 1000);
+}
+
+/// How far a channel may be from the golden's: 2/255, or 4/255 where both
+/// are near black, as a 10-bit scene image's step is there, and its dither
+/// moves a pixel by up to one (fynkel_render's forward.wgsl, `fy_dither`).
+pub fn within(a: u8, b: u8) -> u8 {
+    if a.max(b) <= 48 { 4 } else { 2 }
 }
 
 /// [`assert_golden`], with at most `pixels` outside 2/255 instead of
@@ -87,7 +95,7 @@ pub fn assert_golden_within(name: &str, image: &Image, pixels: usize) {
     for (i, (a, b)) in image.rgba.chunks(4).zip(golden.rgba.chunks(4)).enumerate() {
         let d = a.iter().zip(b).map(|(x, y)| x.abs_diff(*y)).max().unwrap();
         worst = worst.max(d);
-        if d > 2 {
+        if a.iter().zip(b).any(|(x, y)| x.abs_diff(*y) > within(*x, *y)) {
             off += 1;
         }
         diff.rgba[i * 4..i * 4 + 4].copy_from_slice(&[d.saturating_mul(16), 0, 0, 255]);
@@ -98,7 +106,7 @@ pub fn assert_golden_within(name: &str, image: &Image, pixels: usize) {
         write_png(&failure_dir().join(format!("{name}.actual.png")), image);
         write_png(&failure_dir().join(format!("{name}.diff.png")), &diff);
         panic!(
-            "{name}: {off} of {pixels} pixels differ by more than 2/255 ({allowed} may; worst {worst}); see {}",
+            "{name}: {off} of {pixels} pixels differ by more than 2/255, 4 near black ({allowed} may; worst {worst}); see {}",
             failure_dir().display()
         );
     }

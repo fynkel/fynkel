@@ -248,8 +248,8 @@ fn whats_behind_is_kept_only_while_its_read() {
 
     let (_, stats) = render(&gpu, &mut r, &reading, 64, 64);
     assert!(stats.behind);
-    // 4 depth samples, one more, and a half-float colour, a pixel.
-    assert_eq!(stats.behind_bytes, 64 * 64 * (16 + 4 + 8));
+    // 4 depth samples, one more, and a 10-bit colour, a pixel.
+    assert_eq!(stats.behind_bytes, 64 * 64 * (16 + 4 + 4));
     let mut frames = 0;
     loop {
         let (_, stats) = render(&gpu, &mut r, &plain, 64, 64);

@@ -2855,6 +2855,7 @@ impl Pipelines {
             ("textured", on(textured)),
             ("ao", on(ao)),
             ("sky_lit", on(sky_lit)),
+            ("dither_step", self.dither_step()),
         ];
         let compilation_options = wgpu::PipelineCompilationOptions { constants: &constants, ..Default::default() };
         // Into the scene image, alpha says how much is light (bloom): all
@@ -3245,6 +3246,13 @@ impl Pipelines {
         })
     }
 
+    /// One step of the target, for the shaders' `dither_step`: a 10-bit
+    /// scene image's, else 0 (the screen's 8 sRGB bits are finest in the
+    /// darks already).
+    fn dither_step(&self) -> f64 {
+        if self.format == wgpu::TextureFormat::Rgb10a2Unorm { 1.0 / 1023.0 } else { 0.0 }
+    }
+
     /// The sky's pipeline: one triangle at the far plane, drawn where
     /// nothing is (reversed-Z: the depth is still its clear value, 0).
     fn sky(&self) -> &wgpu::RenderPipeline {
@@ -3276,7 +3284,10 @@ impl Pipelines {
                 fragment: Some(wgpu::FragmentState {
                     module: &shader,
                     entry_point: Some("fs_main"),
-                    compilation_options: Default::default(),
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &[("dither_step", self.dither_step())],
+                        ..Default::default()
+                    },
                     targets: &[Some(wgpu::ColorTargetState {
                         format: self.format,
                         blend: None,

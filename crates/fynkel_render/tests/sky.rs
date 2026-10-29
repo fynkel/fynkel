@@ -351,3 +351,24 @@ fn a_gradient_sky_changing_colour_lights_as_it_should_without_its_light_worked_o
         }
     }
 }
+
+#[test]
+fn a_dark_gradient_doesnt_band_in_the_scene_image() {
+    // Black at the horizon to a dim zenith: 10 of the scene image's 10-bit
+    // steps, about 28 of the screen's. Undithered, each step shows as a
+    // band 3 of the screen's apart; dithered, a row's average climbs
+    // smoothly, as with half floats. The last rows, nearest the horizon,
+    // are left out: the gradient is steepest there, and the screen's own
+    // steps show.
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let sky = gradient(Vec3::splat(0.01), Vec3::ZERO, Vec3::ZERO);
+    let scene = empty(Vec3::new(0.0, 0.6, -1.0), sky, QualityLevel::High);
+    let (image, _) = render(&gpu, &mut r, &scene, 64, 128);
+    let rows: Vec<f32> = (0..112).map(|y| (0..64).map(|x| image.pixel(x, y)[0] as f32).sum::<f32>() / 64.0).collect();
+    let span = rows[0] - rows[111];
+    assert!(span > 8.0, "a gradient of {span} levels, top {} bottom {}", rows[0], rows[111]);
+    // A band's edge is spread over a row or two by anti-aliasing.
+    let jump = rows.windows(4).map(|w| (w[0] - w[3]).abs()).fold(0.0, f32::max);
+    assert!(jump <= 2.0, "a band: rows' averages climb {jump} over 3 rows");
+}

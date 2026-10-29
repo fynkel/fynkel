@@ -1086,9 +1086,10 @@ final class Quality {
   /// or a game's.
   final String name;
 
-  /// Whether the scene is drawn into a half-float image, with a last pass
+  /// Whether the scene is drawn into an image of its own, with a last pass
   /// after it, rather than straight to the screen: its brightest light is
-  /// kept and toned down evenly. Bloom draws into it whether this is on or
+  /// kept and toned down evenly. The image holds 10 bits a colour, its
+  /// darkest tones dithered so slow gradients don't band. Bloom draws into it whether this is on or
   /// not.
   final bool hdr;
 

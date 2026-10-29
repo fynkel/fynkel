@@ -280,8 +280,9 @@ impl Light {
 /// these say whether they're drawn.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Quality {
-    /// Whether the scene is drawn into a half-float image, with a last
-    /// pass after it, rather than straight to the screen: its brightest
+    /// Whether the scene is drawn into an image of its own (10 bits a
+    /// colour, [`Quality::image_format`]), with a last pass after it,
+    /// rather than straight to the screen: its brightest
     /// light is kept, for [`Quality::bloom`], and toned down evenly. Bloom
     /// draws into it whether this is on or not.
     pub hdr: bool,
@@ -369,10 +370,13 @@ impl Quality {
     };
 
     /// The format of the image the scene is drawn into, with a last pass
-    /// after it: half floats, with [`Quality::hdr`] or bloom, or `None`,
-    /// straight to the screen.
+    /// after it: 10 bits a colour, with [`Quality::hdr`] or bloom, or
+    /// `None`, straight to the screen. It holds colour already tone mapped
+    /// (0 to 1), so 10 bits are enough above the darkest tones, which are
+    /// dithered (forward.wgsl, `fy_dither`). Half floats cost the Note10+
+    /// about 2 ms more of a 22 ms frame at medium (stage 14, RN12).
     pub(crate) fn image_format(&self) -> Option<wgpu::TextureFormat> {
-        (self.hdr || self.bloom).then_some(wgpu::TextureFormat::Rgba16Float)
+        (self.hdr || self.bloom).then_some(wgpu::TextureFormat::Rgb10a2Unorm)
     }
 
     /// Why it can't be drawn, if it can't: a shadow level out of range.

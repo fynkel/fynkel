@@ -515,7 +515,7 @@ from:
 
 | | `Quality.low` | `Quality.medium` | `Quality.high` |
 |---|---|---|---|
-| `hdr`: drawn into a half-float image, then to the screen | no | yes | yes |
+| `hdr`: drawn into an image of its own (10 bits a colour), then to the screen | no | yes | yes |
 | `bloom` | no | yes | yes |
 | `ambientOcclusion` | no | no | yes |
 | `lampHighlights`: lamps give shiny surfaces a highlight | no | yes | yes |
