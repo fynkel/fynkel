@@ -31,7 +31,7 @@ void main() {
     // Held to a bar (stage 14's GT1): the Mac's median when it was set,
     // 0.5 ms, doubled, as the crates' benchmarks are (fynkel_bench).
     expect(times[300], lessThan(1000), reason: 'world.update for 10,000 objects, median µs');
-  });
+  }, tags: 'timing');
 
   test('churn destroys and makes groups, and the count holds', () {
     final world = World();
