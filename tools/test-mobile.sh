@@ -132,25 +132,29 @@ android() {
     "$adb" push "$exe" "$dir/${test#*:}" >/dev/null </dev/null
     # </dev/null: adb shell would otherwise eat the rest of the loop's list.
     # adb shell doesn't pass the exit status through older devices, so the
-    # result line decides. The emulator's GPU has twice wedged on a test's
-    # first frame after it had been up a while (2026-10-28: the test alone,
-    # and the whole run on a fresh emulator, pass in seconds), which held
-    # CI for hours: a binary still running after 10 minutes is stopped and
-    # run once more, and the log says so.
+    # result line decides. A binary still running after 10 minutes is
+    # stopped: the emulator's GPU has wedged on a test's first frame after
+    # it had been up a while (2026-10-28: the test alone, and the whole run
+    # on a fresh emulator, pass in seconds), which held CI for hours.
     local result
     result=$(run_on_android "$adb" "$dir" "${test#*:}")
-    if [ "$result" = exit=124 ]; then
-      echo "== $test hung for 10 minutes on the emulator: running it once more" >&2
-      result=$(run_on_android "$adb" "$dir" "${test#*:}")
-    elif [ -z "$result" ] && [ $own_emulator = 1 ]; then
-      # No result line: the emulator itself went. Its software Vulkan
-      # (SwiftShader) has segfaulted compiling a pipeline on a test's first
-      # frame, now and then, on main too (2026-10-29, two crash reports in
-      # ~/Library/Logs/DiagnosticReports/qemu-system-aarch64-*): it's
-      # started afresh and the binary run once more.
-      echo "== the emulator went during $test: starting it again and running it once more" >&2
+    if [ $own_emulator = 1 ] && { [ "$result" = exit=124 ] || [ -z "$result" ]; }; then
+      # Stopped after 10 minutes, or no result line: the emulator itself
+      # went. Its software Vulkan (SwiftShader) has segfaulted compiling a
+      # pipeline on a test's first frame, now and then (2026-10-29, crash
+      # reports in ~/Library/Logs/DiagnosticReports/qemu-system-aarch64-*),
+      # and an emulator up a while has hung there twice running, then
+      # taken 18 minutes to take the next binary: it's started afresh and
+      # the binary run once more.
+      echo "== $test ${result:+hung for 10 minutes}${result:-lost the emulator}: starting the emulator again and running it once more" >&2
+      # A wedged emulator may not hear adb: then it's stopped outright.
       "$adb" emu kill >/dev/null 2>&1 </dev/null || true
-      while "$adb" devices | grep -q "^$ANDROID_SERIAL"; do sleep 1; done
+      local waited=0
+      while "$adb" devices </dev/null | grep -q "^$ANDROID_SERIAL"; do
+        sleep 1
+        waited=$((waited + 1))
+        [ $waited = 30 ] && pkill -9 -f "qemu-system.*-avd $avd" || true
+      done
       start_emulator "$sdk" "$adb" "$avd" </dev/null
       started_here=1
       export ANDROID_SERIAL=$("$adb" devices | awk '/^emulator-/ { print $1; exit }')
