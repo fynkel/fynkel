@@ -864,6 +864,45 @@ fn an_outline_with_a_hole_is_extruded_and_a_profile_lathed() {
     }
 }
 
+/// Text made solid from a font's bytes, measured, and refused for a file
+/// that isn't a font or a choice that isn't one.
+#[test]
+fn text_is_made_solid_from_a_font_and_measured() {
+    let font =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/assets/fonts/Roboto-Regular.ttf")).unwrap();
+    let text = "Hi\no";
+    // SAFETY: slices of the lengths given, and out.
+    unsafe {
+        assert_eq!(fy_font_check(font.as_ptr(), font.len()), FyStatus::Ok);
+        assert_eq!(fy_font_check(b"nope".as_ptr(), 4), FyStatus::InvalidValue);
+        assert!(last_error().contains("font"), "{}", last_error());
+
+        let make = |align, out| {
+            fy_mesh_text(font.as_ptr(), font.len(), text.as_ptr(), text.len(), 2.0, align, 1.0, 0.25, 1.0, out)
+        };
+        let mesh = made(|out| make(FY_TEXT_CENTER, out)).unwrap();
+        assert!(mesh.counts().1 / 3 > 50, "an H, an i and an o: {} triangles", mesh.counts().1 / 3);
+        assert_eq!(made(|out| make(7, out)).err(), Some(FyStatus::InvalidValue));
+        assert_eq!(last_error(), "align is 7; it must be FY_TEXT_LEFT, FY_TEXT_CENTER or FY_TEXT_RIGHT");
+        let blank = made(|out| {
+            fy_mesh_text(font.as_ptr(), font.len(), " ".as_ptr(), 1, 1.0, FY_TEXT_LEFT, 1.0, 0.25, 1.0, out)
+        });
+        assert_eq!(blank.unwrap().counts().1, 0, "a space is an empty mesh");
+        assert_eq!(
+            made(|out| fy_mesh_text(font.as_ptr(), font.len(), text.as_ptr(), text.len(), 0.0, 0, 1.0, 0.25, 1.0, out))
+                .err(),
+            Some(FyStatus::InvalidValue)
+        );
+        assert_eq!(last_error(), "size is 0; it must be more than 0");
+
+        let mut size = FyVec2 { x: 0.0, y: 0.0 };
+        let status = fy_text_measure(font.as_ptr(), font.len(), text.as_ptr(), text.len(), 2.0, 1.0, &mut size);
+        assert_eq!(status, FyStatus::Ok);
+        assert!(size.x > 1.0 && size.x < 3.0, "Hi at 2 m is about 2 m wide: {}", size.x);
+        assert!(size.y > 4.0 && size.y < 6.0, "two lines of a little over 2 m: {}", size.y);
+    }
+}
+
 /// An outline swept along a path (stage 13 phase 3), and swept again into
 /// the same mesh: ten floats a point, the outline's loops as an
 /// extrusion's.

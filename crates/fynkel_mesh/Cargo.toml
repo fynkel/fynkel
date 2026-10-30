@@ -14,6 +14,7 @@ workspace = true
 glam.workspace = true
 bytemuck.workspace = true
 bevy_mikktspace.workspace = true
+ttf-parser.workspace = true
 
 [dev-dependencies]
 # The benchmarks' median and bar (stage 14's GT1).
