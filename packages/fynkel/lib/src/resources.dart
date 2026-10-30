@@ -231,6 +231,50 @@ final class Mesh implements Finalizable {
     });
   }
 
+  /// [text] in [font] made solid, as Unity's TextMesh but with depth: each
+  /// letter a slab [depth] thick along Z, its front facing +Z, with the
+  /// holes the font gives it (an o's middle). [size] is the font's em in
+  /// metres (capitals are about 0.7 of it). The first line's letters stand
+  /// on the X axis, `\n` starts a line [lineSpacing] times the font's line
+  /// height below, and [align] puts each line's start, middle or end on
+  /// the origin. Letters are kerned as the font says. The front and back
+  /// show the texture flat across the letters, [uvPerMetre] repeats a
+  /// metre. Text with nothing to draw (spaces) is an empty mesh; a letter
+  /// the font hasn't got is its missing-letter box.
+  ///
+  /// For text that changes (a score), make a new mesh and give it to the
+  /// [MeshRenderer]: a line of text takes a fraction of a millisecond.
+  factory Mesh.text(
+    String text, {
+    required Font font,
+    double size = 1,
+    double depth = 0.2,
+    TextAlignment align = TextAlignment.center,
+    double lineSpacing = 1,
+    double uvPerMetre = 1,
+  }) {
+    final shown = text.length > 24 ? '${text.substring(0, 24)}…' : text;
+    return using((arena) {
+      final utf8Text = utf8.encode(text);
+      final chars = Font._utf8In(arena, utf8Text);
+      return _made(
+        'Mesh.text(${jsonEncode(shown)})',
+        (out) => fy_mesh_text(
+          font._bytes,
+          font._length,
+          chars,
+          utf8Text.length,
+          size,
+          align._native,
+          lineSpacing,
+          depth,
+          uvPerMetre,
+          out,
+        ),
+      );
+    });
+  }
+
   /// [shape] swept along [path], as Unity's `SplineExtrude`: a road, a
   /// rope, a pipe, a rail. The shape is drawn across the path all along
   /// it, its X to the right and Y up seen going along, and its edges are

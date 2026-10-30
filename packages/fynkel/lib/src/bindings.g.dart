@@ -197,6 +197,9 @@ external int fy_find(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
+external int fy_font_check(ffi.Pointer<ffi.Uint8> font_bytes, int len);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)>(isLeaf: true)
 external int fy_gpu_describe(ffi.Pointer<ffi.Uint8> buf, int cap, ffi.Pointer<ffi.Size> out_len);
 
@@ -511,6 +514,33 @@ external int fy_mesh_sweep(
   ffi.Pointer<ffi.Pointer<FyMesh>> out,
 );
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Float,
+    ffi.Uint32,
+    ffi.Float,
+    ffi.Float,
+    ffi.Float,
+    ffi.Pointer<ffi.Pointer<FyMesh>>,
+  )
+>()
+external int fy_mesh_text(
+  ffi.Pointer<ffi.Uint8> font_bytes,
+  int font_len,
+  ffi.Pointer<ffi.Uint8> text,
+  int text_len,
+  double size,
+  int align,
+  double line_spacing,
+  double depth,
+  double uv_per_metre,
+  ffi.Pointer<ffi.Pointer<FyMesh>> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyMesh>)>(isLeaf: true)
 external int fy_mesh_update(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FyMesh> mesh);
 
@@ -724,6 +754,27 @@ external int fy_submesh_materials_set(
   int count,
 );
 
+@ffi.Native<
+  ffi.Int32 Function(
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Pointer<ffi.Uint8>,
+    ffi.Size,
+    ffi.Float,
+    ffi.Float,
+    ffi.Pointer<FyVec2>,
+  )
+>(isLeaf: true)
+external int fy_text_measure(
+  ffi.Pointer<ffi.Uint8> font_bytes,
+  int font_len,
+  ffi.Pointer<ffi.Uint8> text,
+  int text_len,
+  double size,
+  double line_spacing,
+  ffi.Pointer<FyVec2> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyTexture>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_texture_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyTexture> texture, ffi.Pointer<ffi.Uint64> out);
 
@@ -906,7 +957,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 47;
+const int FY_ABI_VERSION = 48;
 
 const int FY_APPLE_MORE = 2;
 
@@ -1043,6 +1094,12 @@ const int FY_SKY_GRADIENT = 2;
 const int FY_SKY_IMAGE = 3;
 
 const int FY_SKY_NONE = 0;
+
+const int FY_TEXT_CENTER = 1;
+
+const int FY_TEXT_LEFT = 0;
+
+const int FY_TEXT_RIGHT = 2;
 
 final class FyAnimationEvent extends ffi.Struct {
   @ffi.Uint64()

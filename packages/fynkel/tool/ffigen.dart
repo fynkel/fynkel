@@ -43,6 +43,7 @@ const _blocking = {
   'fy_mesh_new_torus',
   'fy_mesh_extrude',
   'fy_mesh_lathe',
+  'fy_mesh_text', // a page of text is a few milliseconds
   'fy_mesh_combine',
   'fy_mesh_recalculate',
   'fy_particles_simulate', // up to 1800 steps

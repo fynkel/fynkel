@@ -68,6 +68,16 @@ final class Assets {
     return shader;
   }
 
+  /// The font in [name] (a `.ttf` or `.otf`), for [Mesh.text], shared by
+  /// everything that asks for it. A file that isn't a font throws a
+  /// [FormatException].
+  Future<Font> font(String name) async {
+    final asset = _hold(name, _font);
+    final font = await asset.ready as Font;
+    _stillUsable(name);
+    return font;
+  }
+
   /// The asset in [name] as [kind] loads it: a package's kind of asset,
   /// such as a sound, held and shared as a texture is, and freed with
   /// [AssetKind.free]. A package gives it a getter of its own
@@ -92,7 +102,7 @@ final class Assets {
 
   AssetKind<Object> _kindOf(String name) {
     final lower = name.toLowerCase();
-    final kinds = <AssetKind<Object>>[_model, _texture, _skyImage, _shader, ..._world._assetKinds];
+    final kinds = <AssetKind<Object>>[_model, _texture, _skyImage, _shader, _font, ..._world._assetKinds];
     for (final kind in kinds) {
       for (final extension in kind.extensions) {
         if (lower.endsWith(extension.toLowerCase())) return kind;

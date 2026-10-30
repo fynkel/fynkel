@@ -39,6 +39,7 @@ part 'sky.dart';
 part 'spline_objects.dart';
 part 'splines.dart';
 part 'systems.dart';
+part 'text.dart';
 part 'time.dart';
 part 'trails.dart';
 part 'world_loop.dart';
