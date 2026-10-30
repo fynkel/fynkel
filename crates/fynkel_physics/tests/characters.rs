@@ -275,3 +275,114 @@ fn a_move_says_what_it_stands_on() {
     physics.follow(&[character.id], &[character.object]).unwrap();
     assert_eq!(character.go(&mut physics, Vector::new(0.0, -0.01, 0.0)).ground, None, "in the air");
 }
+
+#[test]
+fn walking_on_open_ground_it_never_loses_a_frame() {
+    // The Ring Ring Deals player: 1.6 m tall, 0.3 m round, steps of 0.1 m,
+    // walking circles at 3.2 m/s, held down as that game does.
+    let mut physics = floor();
+    let settings = CharacterSettings { step_offset: 0.1, mass: 0.0, ..CharacterSettings::default() };
+    let shape = ColliderShape::Capsule { radius: 0.3, height: 1.6, direction: Axis::Y };
+    let mut object = at(0.0, 0.8 + settings.skin_width, 0.0);
+    let id = physics.add_static_collider(1, spec(shape), object).unwrap();
+    let mut hits = Vec::new();
+    let (mut fall, mut grounded, mut stalls) = (0.0f32, false, Vec::new());
+    for frame in 0..3600 {
+        let turn = frame as f32 * DT / 6.0 * std::f32::consts::TAU;
+        let velocity = Vector::new(turn.cos(), 0.0, turn.sin()) * 3.2;
+        if grounded {
+            fall = -1.0;
+        }
+        fall -= 9.81 * DT;
+        let moved =
+            physics.move_character(id, velocity * DT + Vector::new(0.0, fall * DT, 0.0), DT, settings, &mut hits);
+        let moved = moved.unwrap();
+        grounded = moved.flags & COLLIDED_BELOW != 0;
+        object.position += moved.translation;
+        physics.follow(&[id], &[object]).unwrap();
+        physics.step(DT).unwrap();
+        let along = Vector::new(moved.translation.x, 0.0, moved.translation.z).length();
+        if frame > 10 && along < 0.5 * 3.2 * DT {
+            stalls.push((frame, along, object.position.y));
+        }
+        let feet = object.position.y - 0.8 - settings.skin_width;
+        assert!(frame < 10 || (grounded && feet.abs() < 2.0e-4), "frame {frame}: feet {feet}, grounded {grounded}");
+    }
+    assert!(stalls.is_empty(), "{} frames of 3600 lost their step: {:?}", stalls.len(), &stalls[..stalls.len().min(8)]);
+}
+
+#[test]
+fn up_and_down_a_ramp_and_a_step_it_never_loses_a_frame() {
+    // A 15° ramp up to a deck 0.5 m high, and a 0.08 m step off its far
+    // side, walked over and back at 3.2 m/s.
+    let mut physics = floor();
+    let rise = 0.5f32;
+    let run = rise / 15f32.to_radians().tan();
+    let slope = (rise * rise + run * run).sqrt();
+    block(&mut physics, 2, Vector::new(slope, 0.2, 4.0), Vector::new(run / 2.0, rise / 2.0 - 0.1, 0.0), 15.0);
+    block(&mut physics, 3, Vector::new(3.0, rise, 4.0), Vector::new(run + 1.5, rise / 2.0, 0.0), 0.0);
+    block(&mut physics, 4, Vector::new(3.0, rise - 0.08, 4.0), Vector::new(run + 4.5, (rise - 0.08) / 2.0, 0.0), 0.0);
+    let settings = CharacterSettings { step_offset: 0.1, mass: 0.0, ..CharacterSettings::default() };
+    let shape = ColliderShape::Capsule { radius: 0.3, height: 1.6, direction: Axis::Y };
+    let mut object = at(-2.0, 0.8 + settings.skin_width, 0.0);
+    let id = physics.add_static_collider(1, spec(shape), object).unwrap();
+    let mut hits = Vec::new();
+    let (mut fall, mut grounded, mut stalls) = (0.0f32, false, Vec::new());
+    let mut furthest = 0.0f32;
+    for frame in 0..1200 {
+        // Out for 5 s, back for 5 s, twice.
+        let way = if (frame / 300) % 2 == 0 { 1.0 } else { -1.0 };
+        let velocity = Vector::new(3.2 * way * 0.5, 0.0, 0.0);
+        if grounded {
+            fall = -1.0;
+        }
+        fall -= 9.81 * DT;
+        let moved =
+            physics.move_character(id, velocity * DT + Vector::new(0.0, fall * DT, 0.0), DT, settings, &mut hits);
+        let moved = moved.unwrap();
+        grounded = moved.flags & COLLIDED_BELOW != 0;
+        object.position += moved.translation;
+        physics.follow(&[id], &[object]).unwrap();
+        physics.step(DT).unwrap();
+        furthest = furthest.max(object.position.x);
+        if frame % 300 > 10 && moved.translation.x * way < 0.5 * 1.6 * DT {
+            stalls.push((frame, moved.translation.x, object.position));
+        }
+    }
+    assert!(furthest > run + 3.5, "it went over the deck and down the step: furthest {furthest}");
+    assert!(stalls.is_empty(), "{} frames of 1200 lost their step: {:?}", stalls.len(), &stalls[..stalls.len().min(8)]);
+}
+
+/// What moving 20 characters takes, one move each, as in a frame, among
+/// boxes on a floor, held to a bar (stage 14's GT1): `cargo test --release
+/// -p fynkel_physics -- --ignored bench_`.
+#[test]
+#[ignore = "a benchmark: run in release"]
+fn bench_moving_characters() {
+    let mut physics = floor();
+    for i in 0..20 {
+        let (x, z) = ((i % 5) as f32 * 4.0 - 8.0, (i / 5) as f32 * 4.0 - 6.0);
+        block(&mut physics, 10 + i, Vector::new(1.0, 0.8, 1.0), Vector::new(x + 2.0, 0.4, z + 2.0), 0.0);
+    }
+    let settings = CharacterSettings { step_offset: 0.1, mass: 0.0, ..CharacterSettings::default() };
+    let shape = ColliderShape::Capsule { radius: 0.3, height: 1.6, direction: Axis::Y };
+    let mut characters: Vec<(u64, ObjectPose)> = (0..20)
+        .map(|i| {
+            let object = at((i % 5) as f32 * 4.0 - 8.0, 0.8 + settings.skin_width, (i / 5) as f32 * 4.0 - 6.0);
+            (physics.add_static_collider(1000 + i, spec(shape), object).unwrap(), object)
+        })
+        .collect();
+    physics.step(DT).unwrap();
+    let mut hits = Vec::new();
+    let mut frame = 0u32;
+    fynkel_bench::bench("20 characters moved", 200, 0.36, || {
+        frame += 1;
+        let turn = frame as f32 * DT / 6.0 * std::f32::consts::TAU;
+        let motion = Vector::new(turn.cos(), -1.2, turn.sin()) * (3.2 * DT);
+        for (id, object) in &mut characters {
+            let moved = physics.move_character(*id, motion, DT, settings, &mut hits).unwrap();
+            object.position += moved.translation;
+            physics.follow(&[*id], &[*object]).unwrap();
+        }
+    });
+}
