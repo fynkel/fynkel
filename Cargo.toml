@@ -37,6 +37,9 @@ gltf = { version = "1.4.1", default-features = false, features = ["utils", "name
 jni-sys = "0.3.1"
 ndk-context = "0.1.1"
 bevy_mikktspace = { version = "1.0.0", default-features = false, features = ["std"] }
+# Letters' outlines for 3D text (fynkel_mesh): TrueType and OpenType, and
+# their kerning (the kern table, or GPOS's); no other shaping.
+ttf-parser = { version = "0.25.1", default-features = false, features = ["std", "opentype-layout"] }
 # Physics (packages/fynkel_physics): single-threaded, 32-bit floats.
 rapier3d = "0.36.1"
 cbindgen = { version = "0.29.4", default-features = false }
