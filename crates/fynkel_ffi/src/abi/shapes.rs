@@ -4,7 +4,7 @@
 use std::cell::RefCell;
 use std::sync::Arc;
 
-use fynkel_world::{MeshData, Vec2, Vec3};
+use fynkel_world::{Font, MeshData, TextAlign, TextStyle, Vec2, Vec3};
 
 use crate::error::{Error, FyStatus, guard};
 
@@ -1079,5 +1079,131 @@ pub unsafe extern "C" fn fy_material_values_set(
             unsafe { std::slice::from_raw_parts(handle(bytes, "bytes")?, len) }
         };
         Ok(world.lock()?.set_material_values(material(id)?, offset, bytes)?)
+    })
+}
+
+/// `fy_mesh_text`'s lines start at the origin.
+pub const FY_TEXT_LEFT: u32 = 0;
+/// `fy_mesh_text`'s lines are centred on the origin.
+pub const FY_TEXT_CENTER: u32 = 1;
+/// `fy_mesh_text`'s lines end at the origin.
+pub const FY_TEXT_RIGHT: u32 = 2;
+
+/// The font in `len` bytes, or an error saying why they aren't one the
+/// engine can read.
+///
+/// # Safety
+///
+/// `font` is valid for `len` bytes (null when `len` is 0).
+unsafe fn font<'a>(font: *const u8, len: usize) -> Result<Font<'a>, Error> {
+    let bytes = if len == 0 {
+        &[][..]
+    } else {
+        // SAFETY: per this function's contract.
+        unsafe { std::slice::from_raw_parts(handle(font, "font")?, len) }
+    };
+    Font::parse(bytes).map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))
+}
+
+/// Checks that `len` bytes are a TrueType (.ttf) or OpenType (.otf) font
+/// `fy_mesh_text` can read: `FY_STATUS_INVALID_VALUE` saying why not.
+///
+/// # Safety
+///
+/// `font_bytes` is valid for `len` bytes (it may be null when `len` is 0).
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_font_check(font_bytes: *const u8, len: usize) -> FyStatus {
+    // SAFETY: per this function's contract.
+    guard(|| unsafe { font(font_bytes, len) }.map(|_| ()))
+}
+
+/// Makes `text` (UTF-8) in the font in `font_bytes` solid, each letter a
+/// slab `depth` thick along Z around the origin, its front facing +Z, and
+/// writes the mesh to `out`. The font's em is `size` metres; the first
+/// line's letters stand on the X axis, `\n` starts another
+/// `line_spacing` times the font's line height below, and `align`
+/// (`FY_TEXT_LEFT`, `FY_TEXT_CENTER` or `FY_TEXT_RIGHT`) puts each line's
+/// start, middle or end on the origin. The front and back show the
+/// texture flat, `uv_per_metre` times a metre. Text with nothing to draw
+/// is an empty mesh.
+///
+/// # Safety
+///
+/// `font_bytes` is valid for `font_len` bytes and `text` for `text_len`
+/// (each may be null when its length is 0); `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_text(
+    font_bytes: *const u8,
+    font_len: usize,
+    text: *const u8,
+    text_len: usize,
+    size: f32,
+    align: u32,
+    line_spacing: f32,
+    depth: f32,
+    uv_per_metre: f32,
+    out: *mut *mut FyMesh,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let font = unsafe { font(font_bytes, font_len) }?;
+        // SAFETY: per this function's contract.
+        let text = unsafe { utf8(text, text_len, "text") }?;
+        let align = match align {
+            FY_TEXT_LEFT => TextAlign::Left,
+            FY_TEXT_CENTER => TextAlign::Center,
+            FY_TEXT_RIGHT => TextAlign::Right,
+            _ => {
+                return Err(Error::new(
+                    FyStatus::InvalidValue,
+                    format!("align is {align}; it must be FY_TEXT_LEFT, FY_TEXT_CENTER or FY_TEXT_RIGHT"),
+                ));
+            }
+        };
+        let style =
+            TextStyle { size: length(size, "size")?, align, line_spacing: at_least_0(line_spacing, "line_spacing")? };
+        let data =
+            MeshData::text(&font, text, &style, length(depth, "depth")?, at_least_0(uv_per_metre, "uv_per_metre")?)
+                .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
+        // SAFETY: per this function's contract.
+        unsafe { new_mesh(data, out) }
+    })
+}
+
+/// Writes how wide the widest line of `text` (UTF-8) is, and how tall its
+/// lines are together, in metres, to `out`, laid out as `fy_mesh_text`
+/// lays it out.
+///
+/// # Safety
+///
+/// `font_bytes` is valid for `font_len` bytes and `text` for `text_len`
+/// (each may be null when its length is 0); `out` is null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_text_measure(
+    font_bytes: *const u8,
+    font_len: usize,
+    text: *const u8,
+    text_len: usize,
+    size: f32,
+    line_spacing: f32,
+    out: *mut FyVec2,
+) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let font = unsafe { font(font_bytes, font_len) }?;
+        // SAFETY: per this function's contract.
+        let text = unsafe { utf8(text, text_len, "text") }?;
+        let style = TextStyle {
+            size: length(size, "size")?,
+            align: TextAlign::Left,
+            line_spacing: at_least_0(line_spacing, "line_spacing")?,
+        };
+        if out.is_null() {
+            return Err(Error::null("out"));
+        }
+        let measured = font.measure(text, &style);
+        // SAFETY: checked non-null; the caller promises it's writable.
+        unsafe { out.write(FyVec2 { x: measured.x, y: measured.y }) };
+        Ok(())
     })
 }

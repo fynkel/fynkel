@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 47
+#define FY_ABI_VERSION 48
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -92,6 +92,15 @@
 // `FySky::kind`: `image`, an equirectangular `.hdr`, tone mapped as the
 // scene is.
 #define FY_SKY_IMAGE 3
+
+// `fy_mesh_text`'s lines start at the origin.
+#define FY_TEXT_LEFT 0
+
+// `fy_mesh_text`'s lines are centred on the origin.
+#define FY_TEXT_CENTER 1
+
+// `fy_mesh_text`'s lines end at the origin.
+#define FY_TEXT_RIGHT 2
 
 // `FyParticleSettings::space`: particles move with the object.
 #define FY_PARTICLE_SPACE_LOCAL 0
@@ -1820,6 +1829,55 @@ FyStatus fy_material_values_set(const struct FyWorld *world,
                                 size_t offset,
                                 const uint8_t *bytes,
                                 size_t len);
+
+// Checks that `len` bytes are a TrueType (.ttf) or OpenType (.otf) font
+// `fy_mesh_text` can read: `FY_STATUS_INVALID_VALUE` saying why not.
+//
+// # Safety
+//
+// `font_bytes` is valid for `len` bytes (it may be null when `len` is 0).
+FyStatus fy_font_check(const uint8_t *font_bytes, size_t len);
+
+// Makes `text` (UTF-8) in the font in `font_bytes` solid, each letter a
+// slab `depth` thick along Z around the origin, its front facing +Z, and
+// writes the mesh to `out`. The font's em is `size` metres; the first
+// line's letters stand on the X axis, `\n` starts another
+// `line_spacing` times the font's line height below, and `align`
+// (`FY_TEXT_LEFT`, `FY_TEXT_CENTER` or `FY_TEXT_RIGHT`) puts each line's
+// start, middle or end on the origin. The front and back show the
+// texture flat, `uv_per_metre` times a metre. Text with nothing to draw
+// is an empty mesh.
+//
+// # Safety
+//
+// `font_bytes` is valid for `font_len` bytes and `text` for `text_len`
+// (each may be null when its length is 0); `out` is null or writable.
+FyStatus fy_mesh_text(const uint8_t *font_bytes,
+                      size_t font_len,
+                      const uint8_t *text,
+                      size_t text_len,
+                      float size,
+                      uint32_t align,
+                      float line_spacing,
+                      float depth,
+                      float uv_per_metre,
+                      struct FyMesh **out);
+
+// Writes how wide the widest line of `text` (UTF-8) is, and how tall its
+// lines are together, in metres, to `out`, laid out as `fy_mesh_text`
+// lays it out.
+//
+// # Safety
+//
+// `font_bytes` is valid for `font_len` bytes and `text` for `text_len`
+// (each may be null when its length is 0); `out` is null or writable.
+FyStatus fy_text_measure(const uint8_t *font_bytes,
+                         size_t font_len,
+                         const uint8_t *text,
+                         size_t text_len,
+                         float size,
+                         float line_spacing,
+                         struct FyVec2 *out);
 
 // Compiles `source` (`source_len` bytes of WGSL) for a material, or for a
 // screen effect when it has `fn effect` (`fy_camera_effects_set`):
