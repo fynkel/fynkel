@@ -1,7 +1,8 @@
 //! The crates' benchmarks (stage 14's GT1): each times one thing the frame
 //! path does, takes the median of many runs, and fails when it's over its
-//! bar, so a slowdown fails the PR that makes it rather than being found
-//! stages later.
+//! bar, so a slowdown shows on the PR that makes it rather than being found
+//! stages later: in CI as a warning on the run's page, after a second try
+//! (a busy moment on the runner Mac isn't a slowdown).
 //!
 //! They're `#[ignore]`d, named `bench_…`, and run in release, on CI's
 //! runner (the Mac) after the other tests:
