@@ -68,6 +68,11 @@ pub struct CharacterHit {
 // rather than on the sides.
 const LEAN: f32 = 0.05;
 
+// How far past its skin a character is lifted before it moves along.
+const SKIN_CLEARANCE: f32 = 1.0e-3;
+// How far into its skin it may be left.
+const SKIN_SLACK: f32 = 1.0e-5;
+
 impl CharacterSettings {
     fn check(&self) -> Result<(), PhysicsError> {
         if !(0.0..=180.0).contains(&self.slope_limit) {
@@ -146,8 +151,48 @@ impl Physics {
         let mut collisions = std::mem::take(&mut self.character_collisions);
         collisions.clear();
         let w = &mut self.world;
-        let moved = controller
-            .move_shape(dt, &w.query_pipeline_with_filter(filter), &*shape, &pose, motion, |c| collisions.push(c));
+        let queries = w.query_pipeline_with_filter(filter);
+        // On the ground, a character stands a skin width above it, or a
+        // hair less after a snap down. From there, Rapier's controller finds
+        // the ground in the way of any move along it, at once, and gives up
+        // on the move: the character stops for a frame (Ring Ring Deals'
+        // player, about once a second). And its casts down from there can
+        // miss the ground, sinking the character into the skin, or through
+        // it by a whole frame's fall. So a move goes in two, each from a
+        // little clear of the skin: along, where only what stands up from
+        // the ground is in its way, then up or down; and a character it
+        // leaves sunk in its skin is stood back on it.
+        let skin = settings.skin_width;
+        let cast = |at: &Pose, dir: Vector, max: f32| {
+            let options = ShapeCastOptions { max_time_of_impact: max, ..ShapeCastOptions::default() };
+            queries.cast_shape(at, dir, &*shape, options).map(|(_, hit)| hit.time_of_impact)
+        };
+        // How far to raise it, at most, for `to` above the ground under it,
+        // as far as there's room above (and a skin's width to spare there).
+        let raise = |at: &Pose, to: f32| {
+            let Some(gap) = cast(at, -Vector::Y, to) else { return 0.0 };
+            let want = to - gap;
+            cast(at, Vector::Y, want + skin).map_or(want, |room| want.min((room - skin).max(0.0)))
+        };
+        let clear = skin + SKIN_CLEARANCE;
+        let mut at = pose;
+        at.translation.y += raise(&at, clear);
+        let along = controller.move_shape(dt, &queries, &*shape, &at, motion.with_y(0.0), |c| collisions.push(c));
+        at.translation += along.translation;
+        at.translation.y += raise(&at, clear);
+        // Not down a slope or step it has just gone up, as Rapier's own
+        // move wouldn't: it would slide back off.
+        let fall = pose.translation.y + motion.y - at.translation.y;
+        let down = Vector::Y * if along.translation.y > 0.0 { fall.max(0.0) } else { fall };
+        let mut moved = controller.move_shape(dt, &queries, &*shape, &at, down, |c| collisions.push(c));
+        at.translation += moved.translation;
+        let sunk = raise(&at, skin - SKIN_SLACK);
+        if sunk > 0.0 {
+            at.translation.y += sunk + SKIN_SLACK;
+            moved.grounded = true;
+        }
+        moved.translation = at.translation - pose.translation;
+        moved.grounded |= along.grounded;
         if settings.mass > 0.0 && !collisions.is_empty() {
             let mut queries = w.broad_phase.as_query_pipeline_mut(
                 w.narrow_phase.query_dispatcher(),
@@ -174,7 +219,8 @@ impl Physics {
         }
         // What it stands on: the hit below that faces up the most, or what
         // a short cast down from where it ended finds (it may have snapped
-        // to the ground without hitting it).
+        // to the ground, or been stood back on it, without hitting it). A
+        // move pushing down into that ground hit it, as Unity's says.
         let below = collisions
             .iter()
             .filter(|c| c.hit.normal1.y > LEAN)
@@ -183,16 +229,21 @@ impl Physics {
         if ground.is_none() && flags & COLLIDED_BELOW != 0 {
             let mut at = pose;
             at.translation += moved.translation;
-            ground = self
-                .world
-                .query_pipeline_with_filter(filter)
-                .cast_shape(
-                    &at,
-                    -Vector::Y,
-                    &*shape,
-                    ShapeCastOptions::with_max_time_of_impact(settings.skin_width * 2.0 + 0.02),
-                )
-                .map(|(handle, _)| handle);
+            let under = self.world.query_pipeline_with_filter(filter).cast_shape(
+                &at,
+                -Vector::Y,
+                &*shape,
+                ShapeCastOptions::with_max_time_of_impact(settings.skin_width * 2.0 + 0.02),
+            );
+            if let Some((handle, hit)) = under {
+                let id = collider_id(handle);
+                if motion.y < 0.0 && hits.iter().all(|h| h.collider != id) {
+                    #[allow(clippy::cast_possible_truncation)]
+                    let key = self.world.colliders[handle].user_data as u64;
+                    hits.push(CharacterHit { collider: id, key, point: hit.witness1, normal: hit.normal1 });
+                }
+                ground = Some(handle);
+            }
         }
         self.character_collisions = collisions;
         // The key went in as a u64, so it comes back whole.
