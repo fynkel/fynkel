@@ -8,19 +8,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show Blending, Camera, HeadlessView, Light, LightKind, MeshRenderer, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/look.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: everything: all of the look, the levels, and night', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
@@ -28,13 +20,13 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: ScenePage(LookScene.new)));
     // The sky image loads first.
     await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 300)));
-    await wait(tester);
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as LookScene;
+    await tester.frames(10);
+    final scene = tester.game<LookScene>();
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     // Everything stage 8 brought.

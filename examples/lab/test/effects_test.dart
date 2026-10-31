@@ -8,28 +8,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show HeadlessView, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/effects.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: screen effects: they run in the order asked, and a hit comes and goes', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(EffectsScene.new)));
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as EffectsScene;
+    final scene = tester.game<EffectsScene>();
     for (var i = 0; i < 100 && scene.rogue == null; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await wait(tester, 1);
+      await tester.frames(1);
     }
     expect(scene.rogue, isNotNull, reason: 'the shaders and the Rogue loaded');
     expect(scene.log.value.where((l) => l.error), isEmpty);
@@ -39,22 +31,22 @@ void main() {
 
     await tester.pump();
     await tester.tap(find.text('four colours'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.camera.effects, [scene.palette, scene.tv]);
     expect(scene.readout.value, contains('palette.wgsl → old_tv.wgsl'));
     await tester.ensureVisible(find.text('TV before the palette'));
     await tester.pump();
     await tester.tap(find.text('TV before the palette'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.camera.effects, [scene.tv, scene.palette]);
 
     await tester.ensureVisible(find.text('hit'));
 
     await tester.pump();
     await tester.tap(find.text('hit'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.camera.effects.last, scene.hit);
-    await wait(tester, 40);
+    await tester.frames(40);
     expect(scene.camera.effects, isNot(contains(scene.hit)), reason: 'the flash is over');
     expect(scene.readout.value, contains('hits 1'));
 
@@ -62,7 +54,7 @@ void main() {
 
     await tester.pump();
     await tester.tap(find.text('pixel look'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.camera.pixels, 160);
 
     // The colour grade and the scanner go first, over the picture as drawn.
@@ -72,7 +64,7 @@ void main() {
     await tester.ensureVisible(find.text('scanner'));
     await tester.pump();
     await tester.tap(find.text('scanner'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.camera.effects.take(2), [scene.scanner, scene.grade]);
     expect(scene.grade!.shader.textures, ['table']);
     expect(scene.scanner!.shader.readsBehind, isTrue, reason: 'it reads the scene\'s depth');

@@ -7,18 +7,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show Light, LightKind, Quality, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/lamps.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: lamps: the buttons set the lights and the level, and the torch follows the pointer', (
     tester,
   ) async {
@@ -26,8 +19,8 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(LampsScene.new)));
-    await wait(tester);
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as LampsScene;
+    await tester.frames(10);
+    final scene = tester.game<LampsScene>();
 
     int lights() =>
         scene.children.where((o) => const [LightKind.point, LightKind.spot].contains(o.get<Light>()?.kind)).length;
@@ -38,12 +31,12 @@ void main() {
 
     for (final count in [64, 8, 32]) {
       await tester.tap(find.text('$count lights'));
-      await wait(tester, 2);
+      await tester.frames(2);
       expect((scene.lamps, lights()), (count - 1, count));
       expect(scene.readout.value, startsWith('$count lights '));
     }
     await tester.tap(find.text('low'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.world.quality, Quality.low);
     expect(scene.readout.value, contains('drawn at low '));
 
@@ -53,10 +46,10 @@ void main() {
     final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
     addTearDown(pointer.removePointer);
     await pointer.addPointer(location: view.centerLeft + const Offset(40, 0));
-    await wait(tester, 2);
+    await tester.frames(2);
     final left = torch.forward;
     await pointer.moveTo(view.centerRight - const Offset(40, 0));
-    await wait(tester, 2);
+    await tester.frames(2);
     final right = torch.forward;
     expect(left.x, lessThan(0), reason: 'shining left: $left');
     expect(right.x, greaterThan(left.x + 0.2), reason: 'then right: $right');

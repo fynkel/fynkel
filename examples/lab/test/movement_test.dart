@@ -9,19 +9,11 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show Camera, HeadlessView, MeshRenderer, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/movement.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: movement: they load and move, a jelly wobbles alone, and the wind carries the reach', (
     tester,
   ) async {
@@ -29,11 +21,11 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(MovementScene.new)));
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as MovementScene;
+    final scene = tester.game<MovementScene>();
     // The files and the Knight load off the frame.
     for (var i = 0; i < 100 && scene.cape == null; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await wait(tester, 1);
+      await tester.frames(1);
     }
     expect(scene.cape, isNotNull, reason: 'the shaders and the Knight loaded');
     expect(scene.log.value.where((l) => l.error), isEmpty);
@@ -49,14 +41,14 @@ void main() {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     await tap('poke a jelly');
     final poked = [for (final j in scene.jellies) j.get<MeshRenderer>()!.number('poke')];
     expect(poked.where((p) => p > 0), hasLength(1), reason: 'one jelly wobbles: $poked');
     expect(scene.readout.value, contains('pokes 1'));
-    await wait(tester, 90);
+    await tester.frames(90);
     expect([for (final j in scene.jellies) j.get<MeshRenderer>()!.number('poke')], everyElement(0.0));
 
     scene.wind = 0.4;
@@ -64,19 +56,19 @@ void main() {
     expect(scene.grass!.reach, closeTo(0.4, 1e-6));
     scene.waves = 1.5;
     expect(scene.water!.value('height'), closeTo(1.5, 1e-6));
-    await wait(tester, 1);
+    await tester.frames(1);
     expect(scene.readout.value, contains('wind 0.40 m'));
 
     // The pixel look, while the camera drifts.
     await tester.ensureVisible(find.text('pixel look'));
     await tester.pump();
     await tester.tap(find.text('pixel look'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.find('camera')!.get<Camera>()!.pixels, 180);
     expect(scene.readout.value, contains('180 px high'));
     scene.drift = true;
     final from = scene.find('camera')!.position;
-    await wait(tester, 30);
+    await tester.frames(30);
     expect(scene.find('camera')!.position.x, isNot(from.x), reason: 'the camera drifts');
     scene.drift = false;
 

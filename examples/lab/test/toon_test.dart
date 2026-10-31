@@ -8,28 +8,20 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show HeadlessView, MeshRenderer, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/toon.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: toon: it lights in bands, outlined, and the switches carry it', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(ToonScene.new)));
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as ToonScene;
+    final scene = tester.game<ToonScene>();
     for (var i = 0; i < 100 && scene.rogue == null; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await wait(tester, 1);
+      await tester.frames(1);
     }
     expect(scene.rogue, isNotNull, reason: 'the shader and the characters loaded');
     expect(scene.log.value.where((l) => l.error), isEmpty);
@@ -40,17 +32,17 @@ void main() {
 
     scene.bands = 4.4;
     expect(ball.material!.value('bands'), 4.0);
-    await wait(tester, 1);
+    await tester.frames(1);
     expect(scene.readout.value, contains('4 bands'));
 
     await tester.ensureVisible(find.text('outlines'));
 
     await tester.pump();
     await tester.tap(find.text('outlines'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(ball.material!.outline, isNull);
     await tester.tap(find.text('toon'));
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(ball.material!.shader, isNull, reason: "the engine's own light");
     expect(scene.readout.value, contains("the engine's light"));
 

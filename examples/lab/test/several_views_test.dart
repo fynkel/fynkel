@@ -9,6 +9,7 @@ import 'package:fynkel/fynkel.dart' hide Material, Transform, Color;
 import 'package:fynkel/fynkel.dart' as fy show Transform;
 import 'package:fynkel_physics/fynkel_physics.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer;
 import 'package:lab/lab.dart';
 import 'package:lab/main.dart';
@@ -16,20 +17,13 @@ import 'package:lab/scenes/minimap_basics.dart';
 import 'package:lab/scenes/split_screen_basics.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 30]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   Future<T> open<T extends LabScene>(WidgetTester tester, T Function() make) async {
     tester.view.physicalSize = const Size(1000, 700);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(make)));
-    await wait(tester);
-    return FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as T;
+    await tester.frames(30);
+    return tester.game<T>();
   }
 
   testWidgets('Minimap: the basics: a second view follows the player from above, and moves it once a frame', (
@@ -40,7 +34,7 @@ void main() {
     expect(find.byType(WorldWidgetLayer), findsOneWidget, reason: 'none over the minimap');
     final from = scene.player.position.x;
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyD);
-    await wait(tester, 30);
+    await tester.frames(30);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyD);
     // Half a second at 5 m/s: once a frame, not twice.
     expect(scene.player.position.x - from, closeTo(2.5, 0.2));
@@ -49,10 +43,10 @@ void main() {
     // A tap on the minimap isn't the game's.
     final minimap = tester.getCenter(find.byType(FynkelView).last);
     final finger = await tester.startGesture(minimap);
-    await wait(tester, 2);
+    await tester.frames(2);
     expect(scene.world.input.fingers, isEmpty);
     await finger.up();
-    await wait(tester, 2);
+    await tester.frames(2);
   });
 
   testWidgets('Split screen: the basics: each half follows its player, and both show both name tags', (tester) async {
@@ -63,7 +57,7 @@ void main() {
     final (blue, orange) = (scene.blue.position, scene.orange.position);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.keyW);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.arrowLeft);
-    await wait(tester);
+    await tester.frames(30);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyW);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.arrowLeft);
     expect(scene.blue.position.z, lessThan(blue.z - 2), reason: 'W: away from the camera');
