@@ -222,8 +222,9 @@ class Yard extends GameObject {
   unless there's exactly one). These find by type, so a game rarely needs
   names or tags (the `name` checks in §16 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
-  (and the components on them) unless `includeInactive: true`, and so
-  objects still loading (§6), which aren't drawn or started yet.
+  (and the components on them) unless `includeInactive: true`. They do
+  find an object still loading (§6), as Unity finds one before its
+  `Awake`: `await object.loaded` before reading what its `onLoad` sets.
   `all` gives a new list, so destroying or releasing what's in it while
   going through it is safe.
 
