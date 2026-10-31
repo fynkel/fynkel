@@ -3627,7 +3627,7 @@ which way the point is, for an arrow:
 // lib/goal_arrow.dart
 import 'package:flutter/material.dart' show Colors, Icon, Icons;
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/fynkel.dart' show GameObject, Vec3;
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 /// The goal: "goal" over it, an arrow at the screen's edge toward it
