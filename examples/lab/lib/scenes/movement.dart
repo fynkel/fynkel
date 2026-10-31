@@ -118,7 +118,7 @@ class MovementScene extends LabScene {
     for (final extra in ['1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Spike_Shield', '2H_Sword']) {
       k.find(extra)?.active = false;
     }
-    k.animator?.crossFade('Idle', duration: 0);
+    k.animator?.crossFade('Idle', seconds: 0);
     // The cape alone gets the shader: a copy of the Knight's material.
     final renderer = k.find('Knight_Cape')!.get<MeshRenderer>()!;
     cape = renderer.material!.copy(name: 'cape')

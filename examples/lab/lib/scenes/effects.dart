@@ -80,7 +80,7 @@ class EffectsScene extends LabScene {
     add(r)
       ..position = Vec3(-0.3, 0, 0.2)
       ..rotation = Quat.axisAngle(Vec3.up, 0.3);
-    r.animator?.crossFade('Idle', duration: 0);
+    r.animator?.crossFade('Idle', seconds: 0);
     rogue = r;
     _apply();
   }

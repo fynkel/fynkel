@@ -89,7 +89,7 @@ class MeshesBuildScene extends LabScene {
         transform: Transform(position: Vec3(-0.4, 0, 1.6)),
         components: [
           MeshRenderer(
-            Mesh.lathe(vaseProfile(), sides: 40),
+            Mesh.lathe(vaseProfile(), segments: 40),
             Material(color: const Color(0xFF2A9D8F), roughness: 0.25, metallic: 0.1),
           ),
         ],
