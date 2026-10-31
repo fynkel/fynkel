@@ -9,7 +9,6 @@ import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../lab.dart';
-import '../stick.dart';
 
 class FlutterBasicsScene extends LabScene {
   @override
