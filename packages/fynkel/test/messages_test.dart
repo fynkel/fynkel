@@ -188,6 +188,22 @@ void main() {
     expect(o.isPartOf(GameObject()), isFalse);
   });
 
+  test("setting a destroyed object's position or rotation says so (C9)", () {
+    final o = world.add(
+      GameObject(
+        name: 'crate',
+        children: [GameObject(name: 'lid')],
+      ),
+    );
+    final lid = o.find('lid')!;
+    o.destroy();
+    world.update(1 / 60);
+    for (final object in [o, lid]) {
+      expect(() => object.position = Vec3.zero, throwsStateSaying(["position can't be set"]));
+      expect(() => object.rotation = Quat.identity, throwsStateSaying(["rotation can't be set"]));
+    }
+  });
+
   test("an object prints its name (C10)", () {
     expect('${GameObject(name: 'player')}', "GameObject 'player' (not added)");
     final o = world.add(GameObject(name: 'player'));

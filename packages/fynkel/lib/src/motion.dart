@@ -1077,6 +1077,7 @@ mixin _Moving {
   // and rotation are turned into the parent's here.
   void _setPosition(Vec3 v) {
     final self = _self;
+    if (self._gone) self._engine('its position can\'t be set');
     final parent = self._above;
     if (parent == null) return _setLocalPosition(v);
     final before = self._described == null && identical(self._worldLocal, self.transform) ? self._worldTransform : null;
@@ -1091,6 +1092,7 @@ mixin _Moving {
   }
 
   void _setRotation(Quat q) {
+    if (_self._gone) _self._engine('its rotation can\'t be set');
     final parent = _self._above;
     _setLocalRotation(parent == null ? q : (parent.worldTransform.rotation.inverse * q).normalized);
   }
