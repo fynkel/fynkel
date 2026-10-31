@@ -521,13 +521,13 @@ final class World implements Finalizable {
 
   /// Says once, in a debug build, for each of bloom and ambient occlusion,
   /// when a camera asks for it and the quality drawn doesn't draw it: the
-  /// world's own, or, once a view draws it, the device's level's.
+  /// world's own, or else the device's level's. Only once a view draws it:
+  /// a test's world, drawn by none, stays quiet.
   void _checkEffects() {
     if (const bool.fromEnvironment('dart.vm.product')) return;
     final bloom = _bloomAsked && !_warnedBloom, ao = _aoAsked && !_warnedAo;
-    if (!bloom && !ao) return;
-    final quality = _quality ?? (_viewed ? Quality.device : null);
-    if (quality == null) return;
+    if (!bloom && !ao || !_viewed) return;
+    final quality = _quality ?? Quality.device;
     String says(String effect, String field) =>
         'Fynkel: a camera asks for $effect, but the quality drawn (${quality.name}'
         '${_quality == null ? ", the device's pick" : ''}) doesn\'t draw it. Fine for a cheaper quality chosen on '

@@ -184,7 +184,16 @@ void main() {
       }
       expect(lowest, lessThan(-0.3));
       expect(mesh.normals.length, mesh.vertexCount * 3);
-      expect(() => Mesh.sweep(Spline.linear([Vec3.zero]), shape), throwsArgumentError);
+      expect(
+        () => Mesh.sweep(Spline.linear([Vec3.zero]), shape),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'says', contains('1 knot'))),
+      );
+      // GD11: knots all at one point say so, not that there are too few.
+      rope.setPositions(Float32List(9));
+      expect(
+        () => mesh.setSweep(rope, shape),
+        throwsA(isA<ArgumentError>().having((e) => '$e', 'says', contains('all at one point (length 0)'))),
+      );
       expect(() => Mesh.sweep(rope, shape, segmentsPerMetre: 0), throwsArgumentError);
       expect(() => Mesh.cube().setSweep(rope, shape), throwsStateError);
     });

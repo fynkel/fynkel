@@ -772,8 +772,16 @@ final class Spline {
   /// way the path goes is halfway between the ways either side.
   void _sample(int most) {
     _update();
+    if (_count < 2) {
+      throw ArgumentError(
+        'a spline needs at least two knots to sweep along; this has $_count knot${_count == 1 ? '' : 's'}',
+      );
+    }
     if (_curves == 0 || _length == 0) {
-      throw ArgumentError('a spline needs at least two knots apart to sweep along; this has $_count');
+      throw ArgumentError(
+        "a spline's knots are all at one point (length 0), so there's nothing to sweep along: "
+        'move them apart, or check spline.length first',
+      );
     }
     if (_pieces.length < _curves) _pieces = Int32List(math.max(_curves, _pieces.length * 2));
     const bendEach = 8 * math.pi / 180;

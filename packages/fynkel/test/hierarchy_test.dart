@@ -229,6 +229,22 @@ void main() {
       expect(theirs.scale.closeTo(child.worldTransform.scale, 1e-4), isTrue, reason: '${theirs.scale}');
     });
   });
+
+  test('getInChildren and getInParent see the children given before the object is added (DC7)', () {
+    final light = Light.ambient();
+    final child = GameObject(components: [light]);
+    final top = GameObject(children: [child]);
+    expect(top.getInChildren<Light>(), same(light));
+    expect(child.getInParent<Light>(), same(light));
+    final camera = Camera();
+    final above = GameObject(components: [camera], children: [top]);
+    expect(child.getInParent<Camera>(), same(camera), reason: 'all the way up, before any is added');
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(above);
+    expect(top.getInChildren<Light>(), same(light));
+    expect(child.getInParent<Camera>(), same(camera));
+  });
 }
 
 class _LetsGoOfWeapon extends GameObject {
