@@ -54,10 +54,22 @@ void main() {
   });
 
   testWidgets('a measured app shows the game, with the stats line over it', (tester) async {
-    await tester.pumpWidget(MeasuredApp(_Spinner.new, overlay: (root) => const Text('the overlay')));
+    await tester.pumpWidget(
+      MeasuredApp(
+        _Spinner.new,
+        overlay: (context, game) =>
+            Text('turned ${game.turned >= 0}, ${FynkelGame.of<_Spinner>(context).game == game}'),
+      ),
+    );
     await tester.run(0.5);
     expect(tester.game<_Spinner>().turned, greaterThan(0));
-    expect(find.text('the overlay'), findsOneWidget);
+    await tester.pump();
+    expect(find.text('turned true, true'), findsOneWidget, reason: "typed, and in the game's FynkelGame");
+    expect(
+      tester.getTopLeft(find.textContaining('turned')),
+      Offset.zero,
+      reason: 'loose from the top left, as FynkelApp',
+    );
     expect(find.byType(StatsLine), findsOneWidget);
   });
 }

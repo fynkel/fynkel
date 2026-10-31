@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/gestures.dart';
@@ -18,6 +19,7 @@ import 'package:fynkel/fynkel.dart'
         Input,
         ObjectError,
         Quality,
+        SignalSubscription,
         ViewStats,
         WorldView,
         World;
@@ -44,7 +46,7 @@ bool? debugAndroid;
 
 bool get _android => debugAndroid ?? Platform.isAndroid;
 
-/// Whether views on screen ([FynkelView.onScreen]) talk to the plugin the
+/// Whether views on screen ([FynkelView.directToScreen]) talk to the plugin the
 /// iOS way: a layer of their own under Flutter's view, which the plugin
 /// makes, with a size and a place. Null for this platform's way. A test
 /// sets it to check iOS's way on a Mac, where the view is then a
@@ -158,19 +160,36 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 ///
 /// A [FynkelGame]'s root is shown in the game's world, which the game
 /// makes and disposes, and so is a root already in a world (another
-/// view's: a minimap beside it), which its maker disposes. Any other root,
-/// the view adds to a world of its own, which wears the theme around the
-/// view (`world.theme`) from before the root is added. The root is used once, when the view is first
-/// built: to change level,
-/// destroy the old root and add another to its world (`root.world`); to
-/// start over, make the root in a [FynkelGame] (as [FynkelApp] does) and
-/// restart it. The world is [FynkelViewState.world] too, for code outside
+/// view's: a minimap beside it). Any other root, the view adds to a world
+/// of its own, which wears the theme around the view (`world.theme`) from
+/// before the root is added. A world a view made goes when the last view
+/// showing it goes, so a view Flutter makes again for the same root (one
+/// wrapped in a `Stack` now) goes on with the same game.
+///
+/// The view keeps the root it was first built with
+/// ([FynkelViewState.root]), and a debug build says so when it's given
+/// another. To change level, destroy the old root and add the next to its
+/// world (`root.world`) first; to start over, make the root in a
+/// [FynkelGame] (as [FynkelApp] does) and restart it, or give the view a
+/// new `key`. The world is [FynkelViewState.world] too, for code outside
 /// the game.
+///
+/// **The bare view**, `FynkelView(root:)` with no [FynkelGame] around it,
+/// is for a second view of a game or a quick tool: a game starts with
+/// [FynkelApp], or with a [FynkelGame] and its view inside a bigger app.
+/// Alone, the view can't start the game over (no `restart`, no F5), and
+/// the game's world is there only once the view is built, so a widget
+/// beside it can't take `game.world.input` in the same build, as one in a
+/// [FynkelGame]'s builder can.
 ///
 /// `FynkelView.world(world)` shows a world made and driven by hand
 /// instead, for tests and tools; the world is the caller's to dispose.
 /// [onFrame] is called each frame with the seconds since the last one,
 /// before the world's loop.
+///
+/// A hot reload reads the world's shaders and sounds again
+/// ([World.reloadAssets]), whichever way it was made; a [FynkelGame] does
+/// it for its own.
 ///
 /// It gives the world's [World.input] Flutter's events as they come. It
 /// reads pointers with a `Listener`, which takes part in no gesture
@@ -192,17 +211,19 @@ AssetSource bundleSource([AssetBundle? bundle]) => (name) async {
 /// world runs on.
 ///
 /// The frames are drawn at the widget's size in physical pixels times
-/// [resolutionScale] and scaled to fit. Below 1 trades sharpness for
+/// [renderScale] and scaled to fit. Below 1 trades sharpness for
 /// speed; the view never lowers it by itself.
 ///
 /// **Several views of one world** (a minimap over the game, split screen)
 /// each draw it from their own [camera], or from the world's main one
 /// ([World.camera]) when it's null, and the world is updated once a frame
 /// however many show it. Each draws its frames at its own size and
-/// cost; the world's meshes and textures are on the GPU once. A view that
-/// doesn't take [input] keeps the taps on it from the game and from the
-/// views under it; one that does aims what's under a finger from its
-/// camera ([Input.camera]).
+/// cost; the world's meshes and textures are on the GPU once. One view
+/// takes the input: the first of them with [input] on (a debug build says
+/// so when two have it). It aims what's under a finger from its camera
+/// ([Input.camera]); the others keep the taps on them from the game and
+/// from the views under them. The game's errors show in one view too
+/// ([showErrors]).
 ///
 /// macOS, iOS and Android.
 class FynkelView extends StatefulWidget {
@@ -213,7 +234,7 @@ class FynkelView extends StatefulWidget {
     required GameObject this.root,
     this.source,
     this.onFrame,
-    this.resolutionScale = 1.0,
+    this.renderScale = 1.0,
     this.onStats,
     this.onViewStats,
     this.focusNode,
@@ -223,18 +244,21 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
-    this.onScreen = true,
+    this.directToScreen = true,
     this.onError,
     this.errorBuilder,
   }) : world = null,
-       assert(resolutionScale > 0 && resolutionScale <= 4);
+       assert(
+         renderScale > 0 && renderScale <= 4,
+         'FynkelView.renderScale is $renderScale: give one above 0 and at most 4 (1 draws every pixel)',
+       );
 
   /// Shows [world], made and driven by hand: the caller disposes of it.
   const FynkelView.world(
     World this.world, {
     super.key,
     this.onFrame,
-    this.resolutionScale = 1.0,
+    this.renderScale = 1.0,
     this.onStats,
     this.onViewStats,
     this.focusNode,
@@ -244,21 +268,24 @@ class FynkelView extends StatefulWidget {
     this.camera,
     this.input = true,
     this.worldWidgets = true,
-    this.onScreen = true,
+    this.directToScreen = true,
     this.onError,
     this.errorBuilder,
   }) : root = null,
        source = null,
-       assert(resolutionScale > 0 && resolutionScale <= 4);
+       assert(
+         renderScale > 0 && renderScale <= 4,
+         'FynkelView.renderScale is $renderScale: give one above 0 and at most 4 (1 draws every pixel)',
+       );
 
   /// The game: shown in its [FynkelGame]'s world, or in the world it's in
   /// already, or else added to the view's own world when the view is first
-  /// built.
+  /// built. The view keeps the first it's given ([FynkelViewState.root]).
   final GameObject? root;
 
   /// Where the view's own world loads assets from; the app's bundle
-  /// ([bundleSource]) when null. A [FynkelGame]'s root loads from the
-  /// game's: give it there.
+  /// ([bundleSource]) when null. A root in a world already loads from
+  /// that world's: a [FynkelGame]'s, say, is given its source there.
   final AssetSource? source;
 
   /// A world made by hand ([FynkelView.world]), shown in place of a
@@ -276,7 +303,7 @@ class FynkelView extends StatefulWidget {
   /// given. Below 1 is faster and softer. It multiplies the world's
   /// [Quality.renderScale], which a game sets for all its views (a
   /// settings page); this is for one view of its own, a minimap say.
-  final double resolutionScale;
+  final double renderScale;
 
   /// Called about once a second with what the view did since the last call.
   final void Function(FynkelViewStats stats)? onStats;
@@ -308,14 +335,22 @@ class FynkelView extends StatefulWidget {
   /// Whether the errors the game's code throws ([World.errors]) are shown
   /// over the game and reported to Flutter (the console, and a failing
   /// widget test), rather than left to the game. On in debug builds.
+  /// Of several views of one world, one shows them: the one taking
+  /// [input] if it shows errors, else the first that does.
   final bool showErrors;
 
   /// Whether a page or dialog over the view pauses the game
   /// ([World.paused]): a pause menu, a settings page, a pop-up. Closing
-  /// the last one goes on, unless the game was paused already, or paused
-  /// itself meanwhile. Covered, the view gets no taps or keys either, and,
+  /// the last one goes on, unless the game was paused already, or set
+  /// [World.paused] itself meanwhile (a game over under the settings page),
+  /// which it keeps. Covered, the view gets no taps or keys either, and,
   /// as nothing in it moves, it's drawn only 10 times a second, which keeps
   /// a phone cool behind a menu.
+  ///
+  /// The cover's pause is [World.paused] itself, so a game that sets it to
+  /// true while the cover holds it (true already) changes nothing the view
+  /// can see, and goes on when the page closes: to stay paused then, set
+  /// it once the page has closed.
   final bool pauseWhenCovered;
 
   /// The camera the view draws from, read each frame; the world's main
@@ -325,9 +360,9 @@ class FynkelView extends StatefulWidget {
   final Camera? camera;
 
   /// Whether the view gives the world the player's taps and keys (and
-  /// takes focus for them), and shows what the game's code throws
-  /// ([showErrors]). Off for a minimap or the second half of a split
-  /// screen: one view takes input, and the errors show once.
+  /// takes focus for them). Off for a minimap or the second half of a
+  /// split screen: of the views of one world, only the first with it on
+  /// takes input, and a debug build says so when there are two.
   final bool input;
 
   /// Whether the world's [WorldWidget]s show over the view, placed by its
@@ -337,7 +372,7 @@ class FynkelView extends StatefulWidget {
 
   /// Phones: whether the view draws straight to the screen, on a layer of
   /// its own behind Flutter's view, rather than into a texture Flutter
-  /// draws. On Android it needs the app's activity to be a
+  /// draws (false). On by default. On Android it needs the app's activity to be a
   /// `FynkelActivity` (the guide, §1); on iOS nothing. Flutter then never
   /// waits for the game's frames, which on a slower Android phone is the
   /// difference between 40 and 60 fps (docs/android-surface-report.md),
@@ -352,7 +387,7 @@ class FynkelView extends StatefulWidget {
   /// than two views on one another (a minimap over the game is two). Off,
   /// or with another activity, and on the Mac, the view is a texture, with
   /// no such limits.
-  final bool onScreen;
+  final bool directToScreen;
 
   @override
   State<FynkelView> createState() => FynkelViewState();
@@ -361,15 +396,22 @@ class FynkelView extends StatefulWidget {
 /// A [FynkelView]'s state: its [world], for code outside the game, such
 /// as a HUD (`GlobalKey<FynkelViewState>().currentState!.world`).
 class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
-  // The root's world, and whether the view made it (and so disposes it);
-  // the FynkelGame that made it, if one did.
+  // The root's world, and the root shown in it.
   World? _rootWorld;
-  bool _owns = false;
-  FynkelGameState? _game;
+  GameObject? _root;
+
+  // The FynkelGame that made the world shown, if one did; and it again
+  // while this view takes the game's errors from it.
+  FynkelGameState? _maker, _game;
 
   /// The world shown: the root's (the view's own, which it added the root
   /// to, or a [FynkelGame]'s), or the one it was given.
   World get world => widget.world ?? _rootWorld!;
+
+  /// The root shown: the one the view was first built with, or the next
+  /// one added to its world in its place (a new level); null for a world
+  /// given by hand ([FynkelView.world]).
+  GameObject? get root => _root;
 
   late final Ticker _ticker = createTicker(_tick)..start();
   // Moves the world widgets, after each update.
@@ -380,7 +422,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   FocusNode get _focus => widget.focusNode ?? (_ownFocus ??= FocusNode(debugLabel: 'FynkelView'));
 
   /// The size the last layout gave, in logical pixels, and the physical
-  /// pixels per logical one times [FynkelView.resolutionScale].
+  /// pixels per logical one times [FynkelView.renderScale].
   Size _logical = Size.zero;
   double _ratio = 1;
 
@@ -440,13 +482,28 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   // The world whose clock counts this view.
   World? _clocked;
 
-  /// Counts the view on its world's clock, and off the last one's.
-  void _clock() {
-    final world = this.world;
+  // Whether the view is in the tree: one taken out (to be put back
+  // elsewhere, or freed at the end of the frame) takes no input and shows
+  // no errors.
+  bool _active = true;
+
+  /// Counts the view on [world]'s clock, and off the last one's.
+  void _clock(World world) {
     if (identical(world, _clocked)) return;
-    if (_clocked case final old?) _WorldClock.of(old).views--;
-    _WorldClock.of(world).views++;
+    _unclock();
+    _WorldClock.of(world).views.add(this);
     _clocked = world;
+  }
+
+  /// Takes the view off its world's clock. A world that views made goes
+  /// with the last view showing it, whichever that is: one Flutter made
+  /// again for the same root goes on with it.
+  void _unclock() {
+    final world = _clocked;
+    if (world == null) return;
+    _clocked = null;
+    final clock = _WorldClock.of(world)..leave(this);
+    if (clock.views.isEmpty && clock.made && !world.isDisposed) world.dispose();
   }
 
   var _started = false;
@@ -457,16 +514,32 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     // The first time, after initState: the theme can be read from here on.
     if (!_started) {
       _started = true;
-      _rootWorld = _worldOfRoot();
-      if (widget.world case final world?) _listen(world);
-      _clock();
+      _show();
     }
     _wearTheme();
     _cover();
   }
 
+  @override
+  void activate() {
+    super.activate();
+    _active = true;
+    _hearErrors();
+  }
+
+  @override
+  void deactivate() {
+    _active = false;
+    _hearErrors();
+    super.deactivate();
+  }
+
   // Whether a route is over the view's, and whether that paused the world.
   bool _covered = false, _pausedIt = false;
+
+  // While the view's pause holds: hears the game set [World.paused]
+  // itself, which makes the pause the game's.
+  SignalSubscription<bool>? _pauseWatch;
 
   /// The frames a second of a world the view paused when a route covered
   /// it ([FynkelView.pauseWhenCovered]): enough for a resize to show.
@@ -488,6 +561,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         if (!world.paused) {
           world.paused = true;
           _pausedIt = true;
+          _pauseWatch = world.onPausedChanged.listen((_) => _gameTookPause());
         }
       } else {
         _letGo(world);
@@ -495,22 +569,30 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     });
   }
 
+  /// The game set [World.paused] while the view's pause held: from then on
+  /// the pause, or the lack of one, is the game's, and stays when the view
+  /// is uncovered.
+  void _gameTookPause() {
+    _pausedIt = false;
+    _pauseWatch?.cancel();
+    _pauseWatch = null;
+  }
+
   /// Goes on, if covering paused [world].
   void _letGo(World world) {
+    _pauseWatch?.cancel();
+    _pauseWatch = null;
     if (!_pausedIt) return;
     _pausedIt = false;
     if (world.paused && !world.isDisposed) world.paused = false;
   }
 
-  /// Gives the world the app's theme, unless a [FynkelGame] does: the view
-  /// made it, or was given it.
+  /// Gives the world the app's theme, unless a [FynkelGame] does: a view
+  /// made it, or this one was given it.
   void _wearTheme() {
-    final theme = Theme.of(context);
-    if (_owns) {
-      _rootWorld!.theme = theme;
-    } else if (widget.world case final world? when !identical(world, FynkelGame.maybeOf(context)?.world)) {
-      world.theme = theme;
-    }
+    final world = _clocked;
+    if (world == null || _maker != null) return;
+    if (widget.world != null || _WorldClock.of(world).made) world.theme = Theme.of(context);
   }
 
   /// Tells the world when the app goes away and comes back
@@ -530,56 +612,142 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
-  /// The world of the widget's root, if it has one: its [FynkelGame]'s,
-  /// or else one the view makes and adds it to. It's heard before the root is added, which may throw at once.
-  World? _worldOfRoot() {
-    final root = widget.root;
-    _owns = false;
-    if (root == null) return null;
+  /// A hot reload: the world's shaders and sounds are read again
+  /// ([World.reloadAssets]), once for all its views. A [FynkelGame] does
+  /// it for its own world.
+  @override
+  void reassemble() {
+    super.reassemble();
+    final world = _clocked;
+    if (world == null || world.isDisposed || _maker != null) return;
+    final clock = _WorldClock.of(world);
+    if (clock.reloading) return;
+    clock.reloading = true;
+    // Every view is reassembled before this runs.
+    scheduleMicrotask(() => clock.reloading = false);
+    unawaited(world.reloadAssets());
+  }
+
+  /// Shows the world the widget gives, or its root's.
+  void _show() {
     final game = FynkelGame.maybeOf(context);
+    _root = null;
+    _rootWorld = null;
+    if (widget.world case final world?) {
+      _maker = identical(game?.world, world) ? game : null;
+      _clock(world);
+      _hearErrors();
+    } else {
+      _rootWorld = _worldOfRoot(widget.root!, game);
+    }
+  }
+
+  /// The world of [root]: its [FynkelGame]'s, the world it's in already,
+  /// or else one the view makes and adds it to. The errors are heard before
+  /// the root is added, which may throw at once.
+  World _worldOfRoot(GameObject root, FynkelGameState? game) {
+    _root = root;
+    _maker = null;
     if (game != null && identical(game.game, root)) {
       if (widget.source != null) {
-        // Reported, not thrown: the view goes on with the game's world.
-        FlutterError.reportError(
-          FlutterErrorDetails(
-            exception: ArgumentError.value(
-              widget.source,
-              'source',
-              "$root is a FynkelGame's, whose world loads its assets: give source: to the FynkelGame, not its view",
-            ),
-            library: 'fynkel_flutter',
-          ),
-        );
+        _reportSource("$root is a FynkelGame's, whose world loads its assets: give source: to the FynkelGame");
       }
+      _maker = game;
+      final world = game.world;
+      _clock(world);
       // The game hears its world's errors from the start (what onLoad
-      // threw, before this view was made), and passes them on.
-      _listen(null);
-      // A view without input leaves the game's errors to the one with it.
-      if (widget.input) {
-        _game = game;
-        hearGameErrors(game, widget.showErrors ? _heard : null);
-      }
-      return game.world;
+      // threw, before this view was made), and passes them on to the view
+      // that shows them; a view that takes input but shows no errors,
+      // with no other view showing them, leaves them to the game.
+      if (!_hearErrors() && widget.input && _WorldClock.of(world).errorView == null) hearGameErrors(game, null);
+      return world;
     }
     // In a world already, as another view's root (a minimap beside the
-    // game): shown there, and left to whoever made that world.
+    // game): shown there, and freed with it.
     if (root.isAlive) {
-      _listen(root.world);
-      return root.world;
+      final world = root.world;
+      // The view that made it for this root was given its source.
+      if (widget.source != null && !_WorldClock.of(world).made) {
+        _reportSource('$root is in a World already, which loads its assets: give source: to the World it was added to');
+      }
+      _clock(world);
+      _hearErrors();
+      return world;
     }
     final world = World(source: widget.source ?? bundleSource())..theme = Theme.of(context);
-    _owns = true;
-    _listen(world);
+    _WorldClock.of(world).made = true;
+    _clock(world);
+    _hearErrors();
     return world..add(root);
   }
 
-  void _listen(World? world) {
+  /// Reports, rather than throws, a [FynkelView.source] that isn't used:
+  /// the view goes on with the root's world.
+  void _reportSource(String message) {
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: ArgumentError('FynkelView.source is given, but $message, not to its view.'),
+        library: 'fynkel_flutter',
+      ),
+    );
+  }
+
+  // Whether the view's widget had another root than the one it shows,
+  // which a debug build said.
+  bool _toldRoot = false;
+
+  /// The widget gives a root other than the one shown: the next level,
+  /// added to the same world, is shown from now on; any other is said
+  /// once, in a debug build.
+  void _newRoot(GameObject next) {
+    if (next.isAlive && identical(next.world, _rootWorld)) {
+      _root = next;
+      return;
+    }
+    if (!kDebugMode || _toldRoot) return;
+    _toldRoot = true;
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: FlutterError(
+          "FynkelView's root changed from $_root to $next, but a FynkelView keeps the game it started with: "
+          'give it a Key to start another (FynkelView(key: ValueKey(level), root: ...)), or make the root in a '
+          'FynkelGame and restart it. For the next level in the same world, destroy the old root and add the next '
+          'to its world (root.world.add) first.',
+        ),
+        library: 'fynkel_flutter',
+      ),
+    );
+  }
+
+  // Whether this view shows its world's errors: one view of a world does.
+  bool _showsErrors = false;
+
+  /// Starts or stops showing the world's errors as this view's turn to
+  /// show them ([_WorldClock.errorView]) comes or goes; true while it
+  /// shows them.
+  bool _hearErrors() {
+    final world = _clocked;
+    final shows = _active && world != null && !world.isDisposed && identical(_WorldClock.of(world).errorView, this);
+    if (shows == _showsErrors) return shows;
+    _stopHearing();
+    if (!shows) return false;
+    _showsErrors = true;
+    final game = _maker;
+    if (game != null && hearGameErrors(game, _heard)) {
+      _game = game;
+    } else {
+      _errorsHeard = world.errors.listen(_heard);
+    }
+    return true;
+  }
+
+  void _stopHearing() {
+    _showsErrors = false;
     _errorsHeard?.cancel();
     _errorsHeard = null;
     _gameErrors.clear();
     if (_game case final game?) stopHearingGameErrors(game, _heard);
     _game = null;
-    if (widget.showErrors && widget.input && world != null) _errorsHeard = world.errors.listen(_heard);
   }
 
   void _heard(ObjectError error) {
@@ -605,36 +773,72 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
+  /// Whether the view takes the player's input: of the views of its world,
+  /// the first in the tree with [FynkelView.input] on.
+  bool get _takesInput {
+    final world = _clocked;
+    return widget.input && _active && world != null && identical(_WorldClock.of(world).inputView, this);
+  }
+
+  // Whether the view took input when it was last built.
+  bool _tookInput = false;
+
+  /// Picks up, each frame, a change in which of the world's views takes
+  /// its input and shows its errors, as views come and go; and says once
+  /// for the world, in a debug build, that two views take input.
+  void _roles() {
+    final world = _clocked;
+    if (world == null) return;
+    final showed = _showsErrors;
+    _hearErrors();
+    final takes = _takesInput;
+    if (showed != _showsErrors || takes != _tookInput) setState(() {});
+    if (!kDebugMode || takes || !widget.input || !_active) return;
+    final clock = _WorldClock.of(world);
+    if (clock.toldInput) return;
+    clock.toldInput = true;
+    FlutterError.reportError(
+      FlutterErrorDetails(
+        exception: FlutterError(
+          'Two FynkelViews of one World take input, and only the first of them does: give input: false to all but '
+          'one (a minimap, the other half of a split screen). The one that takes input aims the taps from its camera.',
+        ),
+        library: 'fynkel_flutter',
+      ),
+    );
+  }
+
   @override
   void didUpdateWidget(FynkelView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    // A new root alone changes nothing (see FynkelView); a new world, or
-    // from a root to a world or back, starts the view over.
+    // A new world, or from a root to a world or back, starts the view
+    // over; a new root alone is the next level, or a mistake (_newRoot).
     if (oldWidget.world != widget.world) {
       _letGo(oldWidget.world ?? _rootWorld!);
       _covered = false;
       _release();
-      if (_owns) _rootWorld?.dispose();
-      _rootWorld = _worldOfRoot();
-      if (widget.world case final world?) _listen(world);
-      _clock();
+      _stopHearing();
+      _unclock();
+      _show();
       _wearTheme();
+    } else if (widget.root case final next? when !identical(next, _root)) {
+      _newRoot(next);
     }
+    _hearErrors();
     _cover();
   }
 
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    if (_clocked case final world?) _WorldClock.of(world).views--;
     _letGo(world);
-    _listen(null);
+    _stopHearing();
     _ticker.dispose();
     _ticks.dispose();
     _ownFocus?.dispose();
     _release();
     // A view still drawing keeps what it last had until it's freed.
-    if (_owns) _rootWorld?.dispose();
+    _unclock();
     super.dispose();
   }
 
@@ -643,6 +847,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   void _tick(Duration elapsed) {
     final micros = elapsed.inMicroseconds;
     try {
+      _roles();
       _frame(micros);
     } catch (error, stack) {
       final reported = _reportedMicros;
@@ -762,8 +967,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         final view = Platform.isAndroid
             ? AndroidSurfaceView(world, width: _width, height: _height)
             : HeadlessView(world, width: _width, height: _height);
-        host = _AndroidSurface(view, asksOnScreen: widget.onScreen);
-      } else if (_ios && widget.onScreen && !_noLayer) {
+        host = _AndroidSurface(view, asksOnScreen: widget.directToScreen);
+      } else if (_ios && widget.directToScreen && !_noLayer) {
         host = _AppleLayer(
           Platform.isIOS
               ? AppleLayerView(world, width: _width, height: _height)
@@ -993,7 +1198,11 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final error = _error;
     if (error != null) return widget.errorBuilder?.call(context, error, _retry) ?? ErrorWidget(error);
     _built = true;
-    final ratio = MediaQuery.devicePixelRatioOf(context) * widget.resolutionScale;
+    // A release build doesn't check the scale: one that isn't a number
+    // above 0 draws every pixel, and one past 4 draws 4.
+    final scale = widget.renderScale;
+    final ratio = MediaQuery.devicePixelRatioOf(context) * (scale > 0 && scale.isFinite ? math.min(scale, 4) : 1);
+    final takesInput = _tookInput = _takesInput;
     final view = LayoutBuilder(
       builder: (context, constraints) {
         if (!constraints.hasBoundedWidth || !constraints.hasBoundedHeight) {
@@ -1003,7 +1212,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           );
         }
         final size = constraints.biggest;
-        if (widget.input && !world.isDisposed) {
+        if (takesInput && !world.isDisposed) {
           _input.resize(size);
           world.input.camera = widget.camera;
         }
@@ -1019,7 +1228,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       },
     );
     // Without input it keeps the taps on it from what's under it.
-    final game = !widget.input
+    final game = !takesInput
         ? Listener(behavior: HitTestBehavior.opaque, child: view)
         : Focus(
             focusNode: _focus,
@@ -1095,7 +1304,7 @@ sealed class _Host {
   int? texture;
 
   /// Whether it asks to be drawn straight to the screen, behind Flutter's
-  /// view ([FynkelView.onScreen]), and so is registered with its place.
+  /// view ([FynkelView.directToScreen]), and so is registered with its place.
   bool get asksOnScreen;
 
   /// It draws straight to the screen, not to a texture: the plugin says so
@@ -1197,14 +1406,15 @@ class _Window extends CustomPainter {
   bool shouldRepaint(_Window oldDelegate) => false;
 }
 
-/// A world's frames, shared by the views that show it: the first of them
-/// to tick in a display frame updates the world, the rest draw what that
-/// made. The seconds between updates start from 0 when its first view
-/// comes, as they did for a view alone.
 // The device's quality level, for a world without its own: looked up
 // once, the first time a view is laid out.
 Quality? _deviceQuality;
 
+/// A world's frames, shared by the views that show it: the first of them
+/// to tick in a display frame updates the world, the rest draw what that
+/// made. The seconds between updates start from 0 when its first view
+/// comes, as they did for a view alone. Which of the views takes the
+/// input and shows the errors, and whether views made the world.
 class _WorldClock {
   static final _clocks = Expando<_WorldClock>('FynkelView clock');
 
@@ -1213,12 +1423,41 @@ class _WorldClock {
   // The display frame the world was last updated in; null before the
   // first, and again when its last view goes.
   Duration? _updated;
-  int _views = 0;
 
-  int get views => _views;
-  set views(int value) {
-    _views = value;
-    if (value == 0) _updated = _asked = null;
+  /// The views showing the world, in the order they came.
+  final views = <FynkelViewState>[];
+
+  /// Whether a view made the world for its root: it goes when the last
+  /// view showing it goes.
+  bool made = false;
+
+  /// Whether a debug build said that two views take input, and whether a
+  /// hot reload is reading the world's files again.
+  bool toldInput = false, reloading = false;
+
+  void leave(FynkelViewState view) {
+    views.remove(view);
+    if (views.isEmpty) _updated = _asked = null;
+  }
+
+  /// The view that takes the input: the first in the tree with
+  /// [FynkelView.input] on.
+  FynkelViewState? get inputView {
+    for (final view in views) {
+      if (view._active && view.widget.input) return view;
+    }
+    return null;
+  }
+
+  /// The view that shows the errors: the one taking input, if it shows
+  /// them, or else the first in the tree that does.
+  FynkelViewState? get errorView {
+    final input = inputView;
+    if (input != null && input.widget.showErrors) return input;
+    for (final view in views) {
+      if (view._active && view.widget.showErrors) return view;
+    }
+    return null;
   }
 
   // The display frame [_due] was worked out in, so every view showing the

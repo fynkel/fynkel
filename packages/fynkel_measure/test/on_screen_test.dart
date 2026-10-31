@@ -52,6 +52,25 @@ void main() {
     expect(await shownAt(const ViewStats(), readings), 2);
   });
 
+  test('asked again before the first is on screen, both complete, each when its own is', () async {
+    final clock = OnScreenClock()..onViewStats(at(10, 8, presented: 7));
+    Duration? first, second;
+    clock.next(Stopwatch()).then((d) => first = d);
+    clock.onViewStats(at(11, 9, presented: 8));
+    clock.next(Stopwatch()).then((d) => second = d);
+    for (final reading in [
+      at(12, 10, presented: 9),
+      at(13, 11, presented: 10), // the first's frame drawn
+      at(14, 12, presented: 11), // and taken
+      at(15, 13, presented: 12),
+    ]) {
+      clock.onViewStats(reading);
+    }
+    await Future<void>.delayed(Duration.zero);
+    expect(first, isNotNull);
+    expect(second, isNotNull);
+  });
+
   test('a hidden view never shows it', () async {
     final readings = [for (var i = 1; i < 20; i++) ViewStats(posted: 10 + i, rendered: 8, skipped: i)];
     expect(await shownAt(at(10, 8), readings), isNull);

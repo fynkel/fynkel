@@ -21,6 +21,21 @@ class _Level extends _Root {}
 
 class _Other extends GameObject {}
 
+/// Makes a new root each time it builds: a slip that's easy to write.
+class _Rebuilt extends StatefulWidget {
+  const _Rebuilt({super.key});
+
+  @override
+  State<_Rebuilt> createState() => _RebuiltState();
+}
+
+class _RebuiltState extends State<_Rebuilt> {
+  void again() => setState(() {});
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(home: FynkelView(root: _Root()));
+}
+
 void main() {
   testWidgets('frames and run move the game on that many frames, and game finds it', (tester) async {
     await tester.pumpWidget(const FynkelApp(_Root.new));
@@ -39,9 +54,7 @@ void main() {
     tester,
   ) async {
     await tester.pumpWidget(
-      MaterialApp(
-        home: FynkelGame<_Root>(make: _Level.new, builder: (context, game) => FynkelView.world(game.world)),
-      ),
+      MaterialApp(home: FynkelGame<_Root>(_Level.new, builder: (context, game) => FynkelView.world(game.world))),
     );
     await tester.frames();
     expect(tester.game<_Level>(), isA<_Level>());
@@ -56,6 +69,19 @@ void main() {
     await tester.pumpWidget(MaterialApp(home: FynkelView(root: _Level())));
     await tester.frames();
     expect(tester.game<_Level>().frames, greaterThan(0));
+  });
+
+  testWidgets('game is the root the view shows, though it was built again with a new one', (tester) async {
+    final key = GlobalKey<_RebuiltState>();
+    await tester.pumpWidget(_Rebuilt(key: key));
+    await tester.frames(2);
+    final shown = tester.game<_Root>();
+    key.currentState!.again();
+    await tester.pump();
+    expect('${tester.takeException()}', contains('give it a Key to start another'));
+    await tester.frames(2);
+    expect(tester.game<_Root>(), same(shown));
+    expect(tester.game<_Root>().frames, greaterThan(2));
   });
 
   testWidgets('with no game on screen, game says so', (tester) async {
