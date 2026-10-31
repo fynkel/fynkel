@@ -146,6 +146,15 @@ void main() {
     expect(Quality.low.toString(), contains('low'));
   });
 
+  test('a world nothing draws says nothing about effects it would leave out (a test at low stays quiet)', () {
+    final world = World()..quality = Quality.low;
+    addTearDown(world.dispose);
+    var lines = printed(() => world.add(GameObject(components: [Camera(bloom: const Bloom())])));
+    expect(lines, isEmpty, reason: 'no view draws it');
+    lines = printed(() => addTearDown(HeadlessView(world, width: 8, height: 8).dispose));
+    expect(lines, hasLength(1), reason: 'once a view draws it, it says');
+  });
+
   test('a debug build says once when the quality drawn leaves out what a camera asks for', () {
     final (:view, :camera, :world) = glowing(8, Quality.low);
     var lines = printed(() {

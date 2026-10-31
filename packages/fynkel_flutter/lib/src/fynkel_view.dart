@@ -224,6 +224,8 @@ class FynkelView extends StatefulWidget {
     this.input = true,
     this.worldWidgets = true,
     this.onScreen = true,
+    this.onError,
+    this.errorBuilder,
   }) : world = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
 
@@ -243,6 +245,8 @@ class FynkelView extends StatefulWidget {
     this.input = true,
     this.worldWidgets = true,
     this.onScreen = true,
+    this.onError,
+    this.errorBuilder,
   }) : root = null,
        source = null,
        assert(resolutionScale > 0 && resolutionScale <= 4);
@@ -290,6 +294,16 @@ class FynkelView extends StatefulWidget {
   /// Whether the view takes focus when it first appears, so keys work
   /// before it's tapped.
   final bool autofocus;
+
+  /// Called once when the view fails for good and can't show the game: a
+  /// GPU device lost or a surface refused more than three times in a
+  /// minute, or no view at all. The world runs on (a HUD over it still
+  /// works). For a crash reporter; the error is reported to Flutter too.
+  final void Function(Object error, StackTrace stack)? onError;
+
+  /// What shows in the view's place once it has failed ([onError]): an
+  /// [ErrorWidget] unless given. `retry` starts again with a new view.
+  final Widget Function(BuildContext context, Object error, VoidCallback retry)? errorBuilder;
 
   /// Whether the errors the game's code throws ([World.errors]) are shown
   /// over the game and reported to Flutter (the console, and a failing
@@ -896,6 +910,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     );
     _withoutPicture();
     setState(() => _error = error);
+    widget.onError?.call(error, stack);
+  }
+
+  /// After a failure: a new view from the next frame, with no losses held
+  /// against it.
+  void _retry() {
+    if (!mounted || _error == null) return;
+    _losses.clear();
+    setState(() {
+      _error = null;
+      _noPicture = false;
+    });
   }
 
   /// The GPU device was lost, the render worker stopped, or the plugin
@@ -965,7 +991,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   Widget build(BuildContext context) {
     final error = _error;
-    if (error != null) return ErrorWidget(error);
+    if (error != null) return widget.errorBuilder?.call(context, error, _retry) ?? ErrorWidget(error);
     _built = true;
     final ratio = MediaQuery.devicePixelRatioOf(context) * widget.resolutionScale;
     final view = LayoutBuilder(

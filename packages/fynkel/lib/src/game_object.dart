@@ -828,20 +828,22 @@ class GameObject with _Moving {
   bool has<T extends Object>() => get<T>() != null;
 
   /// The first component of type [T] on this object, or else on the
-  /// nearest object above it that has one, or null.
+  /// nearest object above it that has one, or null. Before it's added, the
+  /// objects it's been given to count as above it.
   T? getInParent<T extends Object>() {
-    for (GameObject? o = this; o != null; o = o.parent) {
+    for (GameObject? o = this; o != null; o = o._world == null ? o._queuedIn : o.parent) {
       if (o.get<T>() case final found?) return found;
     }
     return null;
   }
 
   /// The first component of type [T] on this object, or else below it,
-  /// depth first in [children] order, or null.
+  /// depth first in [children] order, or null. Before it's added, the
+  /// children it's been given count (a model's parts come once it is).
   T? getInChildren<T extends Object>() {
     if (get<T>() case final found?) return found;
     // By index, as [children] makes a list.
-    final children = _children;
+    final children = _world == null ? _described?.children : _children;
     for (var i = 0; children != null && i < children.length; i++) {
       if (children[i].getInChildren<T>() case final found?) return found;
     }

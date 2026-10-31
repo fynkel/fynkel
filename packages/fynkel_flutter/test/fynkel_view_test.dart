@@ -568,6 +568,52 @@ void main() {
       expect(find.byType(ErrorWidget), findsOneWidget);
     });
 
+    testWidgets('a failed view tells onError once, shows errorBuilder, and its retry brings a new view', (
+      tester,
+    ) async {
+      var failing = true;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.setMockMethodCallHandler(channel, (call) async {
+        if (call.method == 'resize' && failing) throw PlatformException(code: 'attach', message: 'no RGBA8 format');
+        return call.method == 'register' ? nextTexture++ : null;
+      });
+      final errors = <Object>[];
+      VoidCallback? retry;
+      Widget view(double width) => sized(
+        FynkelView.world(
+          world,
+          onError: (error, stack) => errors.add(error),
+          errorBuilder: (context, error, again) {
+            retry = again;
+            return const Text('the view failed', textDirection: TextDirection.ltr);
+          },
+        ),
+        width: width,
+        height: 40,
+      );
+      await tester.pumpWidget(view(300));
+      await tester.pump(const Duration(milliseconds: 8));
+      for (var i = 0; i < 4; i++) {
+        await tester.pumpWidget(view(60.0 + i));
+        for (var j = 0; j < 3; j++) {
+          await tester.pump(const Duration(milliseconds: 8));
+        }
+        tester.takeException();
+      }
+      expect(find.text('the view failed'), findsOneWidget);
+      expect(find.byType(ErrorWidget), findsNothing);
+      expect(errors, hasLength(1), reason: 'once, when it fails for good, not for each new view');
+      expect(errors.single.toString(), contains('no RGBA8 format'));
+      failing = false;
+      retry!();
+      for (var j = 0; j < 3; j++) {
+        await tester.pump(const Duration(milliseconds: 8));
+      }
+      expect(find.text('the view failed'), findsNothing);
+      expect(find.byType(Texture), findsOneWidget, reason: 'a new view, after the retry');
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
     testWidgets("the plugin's failure to give a view its new surface brings a new view", (tester) async {
       await tester.pumpWidget(sized(FynkelView.world(world)));
       for (var i = 0; i < 3; i++) {

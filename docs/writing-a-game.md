@@ -124,7 +124,9 @@ class Cube extends GameObject {
 ```
 
 - **Everything in the game is a `GameObject`**, in a tree. `Hello` is the
-  root; `FynkelApp(Hello.new)` makes one and shows it full screen.
+  root; `FynkelApp(Hello.new)` makes one and shows it full screen. A root
+  that takes arguments is made by a function of your own:
+  `FynkelApp(() => Level(number: 3))`.
 - **An object has a transform** (where it is, relative to its parent) and
   **components**: a `Camera` to see from, a `Light`, a `MeshRenderer` to
   be drawn.
@@ -271,6 +273,12 @@ class Turret extends GameObject {
   first, then the object is shown, so its `onEnable` sees what the
   function set. A new object is made by the pool's function and added
   below the pool's parent.
+- **A released object's particles and trail go**: hidden, its particle
+  systems stop and clear, and its trail is cleared, at the next particles
+  step; shown again, they start afresh. One released and got again in the
+  same frame never sees that step: call `trail.clear()` (and the
+  particles' `clear()`) in `get`'s function, so it doesn't streak from
+  where it was.
 - **A released object starts clean**: it's hidden, the routines and
   motions it and everything below it ran are stopped (a hidden object's
   would only pause, and resume stale), what they listened to with `on`
@@ -1349,7 +1357,9 @@ void main() => runApp(
 and `services.dart` for the keys, as here. A pause panel shows itself
 when the game pauses, from wherever it's paused, with
 `ValueListenableBuilder(valueListenable: game.world.pausedListenable,
-...)`; game code hears it with `on(world.onPausedChanged, ...)`.
+...)` (`pausedListenable` comes from `package:fynkel_flutter`'s
+`WorldListenables`: import it in the widget's file); game code hears it
+with `on(world.onPausedChanged, ...)`.
 
 ## 12. Assets
 
@@ -2143,7 +2153,9 @@ Sound in 3D costs the frame little: on the Note10+, 32 sounds moving
 take under a tenth of a millisecond.
 
 **Music** is `audio.music`: one track at a time, looping unless told
-not to, playing on through a pause (as a pause menu's music should), and
+not to, playing on through a pause (as a pause menu's music should;
+`audio.music.ignorePause = false` pauses it with the game, from the next
+track it plays), and
 never given up for other sounds. `play(clip, fadeIn:)` starts a track
 (the one already playing plays on, so a level that starts its music
 again doesn't restart it), `crossFade(clip, seconds)` fades the next in
@@ -2316,7 +2328,11 @@ class Fountain extends GameObject {
   furthest first (sorting 10,000 takes about 0.1 ms on a Mac);
   `Blending.additive` adds their light, for fire, sparks and magic, and
   needs no order. A material that isn't blended is drawn
-  as transparent. Behind something solid, they're hidden.
+  as transparent. Behind something solid, they're hidden. Additive ones
+  that overlap add up past white, which bloom (threshold 1) catches: many
+  near-white sparks or trails on top of each other glow as one big halo.
+  Darker colours, fewer of them, or a higher bloom `threshold` keep it
+  small.
 
 **The look.** Unity's other modules, by the same names:
 
@@ -3063,6 +3079,11 @@ colliders start to touch, stay every step after while either body is
 awake, and exit the step they part, or after one is disabled, removed,
 destroyed, hidden, put on a layer that doesn't meet, or switched between
 trigger and solid (Unity skips those; here the other side always hears).
+Both objects in a collision get it, each once, as in Unity: a ball and the
+wall it hits each hear `onCollisionEnter`, with the other in
+`collision`. To act once per pair, let one side do it, the one with the
+lower `gameObject.id` (every object's own number, unique in its world),
+say.
 Between frames, they come at the start of the next frame, before
 `onFixedUpdate`. What a callback throws goes to `world.errors`:
 
@@ -3589,6 +3610,14 @@ paused already stays paused.
 For a game that runs on under a see-through pop-up, give
 `FynkelView(pauseWhenCovered: false)`.
 
+**If the view can't draw.** A lost GPU device or a refused surface gets
+a new view by itself, up to three times a minute; after that the view
+gives up, and its place shows an `ErrorWidget` while the world runs on.
+`FynkelView(onError: (error, stack) => ...)` hears that once, for a crash
+reporter, and `errorBuilder: (context, error, retry) => ...` shows your
+own message in its place, with a button calling `retry` to try a new
+view.
+
 ```dart
 // lib/menus.dart
 import 'package:flutter/material.dart';
@@ -3958,6 +3987,40 @@ List<int> pixel(HeadlessView view, int x, int y) {
 
  `examples/arena/test` tests a whole game this
 way.
+
+**A game that loads assets** needs to be told where they are: a test has
+no app bundle. `World(source: ...)` takes a function from an asset's name
+to its bytes, the files in the game's `assets/` folder here, and a game
+whose `onLoad` is `async` is ready after `await world.add(game).loaded`,
+with no frames run:
+
+```dart
+// test/level_test.dart
+import 'dart:io';
+
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
+
+class Level extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    add(GameObject(name: 'floor', components: [MeshRenderer(Mesh.cube(), Material())]));
+  }
+}
+
+void main() {
+  test('the level loads', () async {
+    final world = World(source: (name) async => File('assets/$name').readAsBytesSync());
+    addTearDown(world.dispose);
+    final level = world.add(Level());
+    await level.loaded;
+    expect(level.find('floor'), isNotNull);
+    world.run(1);
+  });
+}
+```
 
 **An error in the game fails the test** by itself, as it would be an
 uncaught error: nothing listens to `world.errors`. To test that something
