@@ -185,6 +185,9 @@ class Breaks extends WorldSystem {
   var calls = 0;
 
   @override
+  String get name => 'the breaker';
+
+  @override
   void beforeUpdate() {
     super.beforeUpdate();
     calls++;
@@ -480,7 +483,7 @@ void main() {
       expect(breaks.calls, WorldSystem.turnOffAfter);
       expect(breaks.isTurnedOff, isTrue);
       expect(errors, hasLength(WorldSystem.turnOffAfter), reason: "the last in the turned-off one");
-      expect('${errors.last.error}', contains('Breaks threw in ${WorldSystem.turnOffAfter} frames in a row'));
+      expect('${errors.last.error}', contains('the breaker threw in ${WorldSystem.turnOffAfter} frames in a row'));
     });
 
     test('a frame without an error starts the count again', () async {

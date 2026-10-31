@@ -191,6 +191,7 @@ final class Mesh implements Finalizable {
   /// Throws an [ArgumentError] for an outline of fewer than 3 points, or a
   /// hole that isn't inside the outline.
   factory Mesh.extrude(Shape2D shape, {double depth = 1, double uvPerMetre = 1}) {
+    shape._checkSize('Mesh.extrude');
     final loops = [shape.outline, ...shape.holes];
     final count = loops.fold(0, (n, loop) => n + loop.length);
     return using((arena) {
@@ -213,13 +214,20 @@ final class Mesh implements Finalizable {
     });
   }
 
-  /// [profile] turned around Y with [sides] slices, as on a lathe: a
+  /// [profile] turned around Y with [segments] slices, as on a lathe: a
   /// vase, a bottle, a chess piece, a column. Each point is (distance from
   /// the Y axis, height). The outside is on the right of the way the
   /// profile goes, so a vase's goes from the middle of its base out, then
   /// up (and back down inside, for a thick wall). The texture wraps around
-  /// once; corners sharper than 40° are sharp.
-  factory Mesh.lathe(List<Vec2> profile, {int sides = 24}) {
+  /// once; corners sharper than 40° are sharp. Throws an [ArgumentError]
+  /// for a profile all on the axis (x 0), which turns into no surface.
+  factory Mesh.lathe(List<Vec2> profile, {int segments = 24}) {
+    if (profile.length >= 2 && profile.every((p) => p.x == 0)) {
+      throw ArgumentError(
+        'Mesh.lathe: the profile is all on the axis (x = 0), so turning it makes no surface; each point is '
+        '(distance from the Y axis, height)',
+      );
+    }
     return using((arena) {
       final points = arena<FyVec2>(profile.length);
       for (var i = 0; i < profile.length; i++) {
@@ -227,7 +235,7 @@ final class Mesh implements Finalizable {
           ..x = profile[i].x
           ..y = profile[i].y;
       }
-      return _made('Mesh.lathe()', (out) => fy_mesh_lathe(points, profile.length, sides, out));
+      return _made('Mesh.lathe()', (out) => fy_mesh_lathe(points, profile.length, segments, out));
     });
   }
 
@@ -296,6 +304,7 @@ final class Mesh implements Finalizable {
     bool caps = true,
     double uvPerMetre = 1,
   }) {
+    shape._checkSize('Mesh.sweep');
     _sampled(path, segmentsPerMetre, maxSegments);
     final packed = shape._packed, sizes = shape._sizes;
     final count = path._pathCount, closed = path.closed;
@@ -334,6 +343,7 @@ final class Mesh implements Finalizable {
     double uvPerMetre = 1,
   }) {
     _reshape();
+    shape._checkSize('setSweep');
     // The setting through a field, not passed on: a JIT build boxes a
     // double passed to a call, or kept for a throw. (It boxes one passed
     // to the engine too, unless it's a constant; a release build doesn't.)
@@ -385,7 +395,7 @@ final class Mesh implements Finalizable {
   /// make a town that's two draws, with `MeshRenderer.materials` for each.
   /// Throws an [ArgumentError] for a skinned mesh, or for none.
   factory Mesh.combine(List<CombineInstance> parts) {
-    if (parts.isEmpty) throw ArgumentError.value(parts, 'parts', 'must have at least one mesh');
+    if (parts.isEmpty) throw ArgumentError('Mesh.combine: parts is empty; it needs at least one mesh');
     return using((arena) {
       final meshes = arena<Pointer<FyMesh>>(parts.length);
       final transforms = arena<FyTransform>(parts.length);
@@ -451,6 +461,12 @@ final class Mesh implements Finalizable {
         out[i * 3 + 2] = vs[i].z;
       }
       return out;
+    }
+
+    for (final (list, name) in [(normals, 'normals'), (uvs, 'uvs')]) {
+      if (list != null && list.length != positions.length) {
+        throw ArgumentError('$name has ${list.length}; it needs one for each of the ${positions.length} positions');
+      }
     }
 
     Float32List? flat2(List<Vec2>? vs) {
@@ -1037,7 +1053,7 @@ final class Material {
        _uvScale = _uv(uvScale, 'uvScale'),
        _uvOffset = _uv(uvOffset, 'uvOffset'),
        _alphaCutoff = _unit(alphaCutoff, 'alphaCutoff'),
-       _color = opacity == null ? color : _withAlpha(color, _unit(opacity, 'opacity')),
+       _color = opacity == null ? color : color.withAlpha(_unit(opacity, 'opacity')),
        _blending = blending ?? (opacity != null && opacity < 1 ? Blending.transparent : Blending.opaque),
        _textures = [
          _usable(baseColorTexture),
@@ -1050,7 +1066,7 @@ final class Material {
        _reach = _metres(reach, 'reach'),
        _outline = _usableOutline(outline) {
     if (values.isNotEmpty && shader == null) {
-      throw ArgumentError.value(values, 'values', 'are for a shader, and the material has none');
+      throw ArgumentError('values is $values, but the material has no shader: values are a shader\'s inputs');
     }
     values.forEach(_setValue);
     _pack();
@@ -1252,7 +1268,7 @@ final class Material {
   /// alone, not [blending].
   double get opacity => _color.a;
   set opacity(double value) {
-    _color = _withAlpha(_color, _unit(value, 'opacity'));
+    _color = _color.withAlpha(_unit(value, 'opacity'));
     _changed();
   }
 
@@ -1374,8 +1390,6 @@ final class Material {
     return value;
   }
 
-  static Color _withAlpha(Color c, double a) => Color.rgb(c.r, c.g, c.b, a);
-
   static double _atLeast0(double value, String name) {
     if (!(value >= 0 && value <= 1e6)) throw RangeError.value(value, name, 'must be between 0 and 1e6');
     return value;
@@ -1402,7 +1416,7 @@ final class Material {
   static Shader? _usableShader(Shader? shader) {
     if (shader != null && shader.isDisposed) throw StateError('$shader was disposed');
     if (shader != null && shader.isEffect) {
-      throw ArgumentError.value(shader, 'shader', 'is a screen effect, for a ScreenEffect, not a material');
+      throw ArgumentError('shader is $shader, a screen effect: give it to a ScreenEffect, not a Material');
     }
     return shader;
   }

@@ -1,6 +1,6 @@
 part of 'world.dart';
 
-/// A material's own look, written in WGSL (docs/guide.md, "Shaders"): a
+/// A material's own look, written in WGSL (docs/writing-a-game.md, "14. Shaders"): a
 /// `.wgsl` file with a `surface` function, lit by the engine as the
 /// built-in material is, or an `unlit` one, which gives the colour as it
 /// is. Load it with `assets.shader('lava.wgsl')` and give it to a
@@ -177,7 +177,9 @@ final class ScreenEffect {
   ScreenEffect(this.shader, {Map<String, Object> values = const {}}) {
     if (shader.isDisposed) throw StateError('$shader was disposed');
     if (!shader.isEffect) {
-      throw ArgumentError.value(shader, 'shader', 'has no effect function, so is no screen effect');
+      throw ArgumentError(
+        'shader is $shader, which has no effect function, so is no screen effect: give it to a Material',
+      );
     }
     values.forEach(_setValue);
     _bytes = shader._layout.pack(_values, shader);
@@ -437,10 +439,8 @@ final class _ShaderValue {
   List<List<num>> parseAll(Object value, Shader shader) {
     if (!isArray) return [parse(value, shader)];
     if (value is! List || value.length > count) {
-      throw ArgumentError.value(
-        value,
-        name,
-        "is no value for $shader's $name, which is $_type: a list of up to $count",
+      throw ArgumentError(
+        "$name is $value; that's no value for $shader's $name, which is $_type: a list of up to $count",
       );
     }
     return [for (final element in value) parse(element as Object, shader)];
@@ -449,7 +449,7 @@ final class _ShaderValue {
   /// [value] as its parts, or what's wrong with it: one element's, for an
   /// array.
   List<num> parse(Object value, Shader shader) {
-    List<num> wrong() => throw ArgumentError.value(value, name, "is no value for $shader's $name, which is $_type");
+    List<num> wrong() => _wrong(value, shader);
     final List<num> got = switch (value) {
       num n => [n],
       Vec2 v => [v.x, v.y],
@@ -464,9 +464,9 @@ final class _ShaderValue {
     final parts_ = value is Color && parts == 3 ? got.sublist(0, 3) : got;
     if (parts_.length != parts) return wrong();
     for (final n in parts_) {
-      if (kind == 'f32' && !n.isFinite) throw ArgumentError.value(value, name, 'must be finite');
+      if (kind == 'f32' && !n.isFinite) throw ArgumentError('$name is $value; it must be finite');
       if (kind != 'f32' && n is! int) return wrong();
-      if (kind == 'u32' && n < 0) throw ArgumentError.value(value, name, 'must be 0 or more');
+      if (kind == 'u32' && n < 0) throw ArgumentError('$name is $value; it must be 0 or more');
     }
     return parts_;
   }
@@ -512,12 +512,12 @@ final class _ShaderValue {
   }
 
   Never _wrong(Object value, Shader shader) =>
-      throw ArgumentError.value(value, name, "is no value for $shader's $name, which is $_type");
+      throw ArgumentError("$name is $value; that's no value for $shader's $name, which is $_type");
 
   void _check(num n, Object value, Shader shader) {
-    if (kind == 'f32' && !n.isFinite) throw ArgumentError.value(value, name, 'must be finite');
+    if (kind == 'f32' && !n.isFinite) throw ArgumentError('$name is $value; it must be finite');
     if (kind != 'f32' && n is! int) _wrong(value, shader);
-    if (kind == 'u32' && n < 0) throw ArgumentError.value(value, name, 'must be 0 or more');
+    if (kind == 'u32' && n < 0) throw ArgumentError('$name is $value; it must be 0 or more');
   }
 
   void _put(ByteData data, int at, num n) {

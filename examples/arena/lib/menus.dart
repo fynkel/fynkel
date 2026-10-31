@@ -79,7 +79,7 @@ class PlayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: () => ArenaGame(seed: seed, controls: settings.controls),
+    () => ArenaGame(seed: seed, controls: settings.controls),
     builder: (context, game) {
       void pause() => showPauseMenu(context, game, settings);
       return PopScope(

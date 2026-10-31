@@ -76,7 +76,7 @@ class _ScenePageState extends State<ScenePage> {
   var _open = !_full;
 
   @override
-  Widget build(BuildContext context) => FynkelGame(make: widget.make, builder: _page);
+  Widget build(BuildContext context) => FynkelGame(widget.make, builder: _page);
 
   Widget _page(BuildContext context, lab.LabScene scene) {
     final wide = MediaQuery.sizeOf(context).width >= 700;

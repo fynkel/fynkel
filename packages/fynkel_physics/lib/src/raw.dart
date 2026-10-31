@@ -172,13 +172,18 @@ final class RawPhysics implements Finalizable {
     // made after this throws before it can harm anything.
   }
 
+  /// The world's gravity, in m/s²: (0, -9.81, 0) unless set.
+  Vec3 get gravity => _gravity;
   set gravity(Vec3 value) {
     _vec.ref
       ..x = value.x
       ..y = value.y
       ..z = value.z;
     _check(fp_gravity_set(_live, _vec.ref));
+    _gravity = value;
   }
+
+  var _gravity = const Vec3(0, -9.81, 0);
 
   /// Adds a body at [position] and [rotation], with [key] to know it by in
   /// [movedKey], and returns its id.

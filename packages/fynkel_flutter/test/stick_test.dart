@@ -22,6 +22,12 @@ void main() {
     ),
   );
 
+  // At the top left, at its own size.
+  Widget loose(Widget stick) => Directionality(
+    textDirection: TextDirection.ltr,
+    child: Stack(children: [Positioned(left: 0, top: 0, child: stick)]),
+  );
+
   testWidgets('dragging its knob sets the axis, up is +y, it stops at the rim, and letting go zeroes it', (
     tester,
   ) async {
@@ -83,5 +89,30 @@ void main() {
     await tester.pumpWidget(at(const SizedBox()));
     expect(input.axis2('move'), Vec2.zero);
     await g.cancel();
+  });
+
+  testWidgets("the game's own ring and knob, at the knob's size given; the knob reaches the ring's rim", (
+    tester,
+  ) async {
+    final input = Input();
+    await tester.pumpWidget(
+      loose(
+        Stick(
+          input,
+          ring: const ColoredBox(key: ValueKey('ring'), color: Color(0xFF00FF00)),
+          knob: const ColoredBox(key: ValueKey('knob'), color: Color(0xFFFF0000)),
+          knobSize: 40,
+        ),
+      ),
+    );
+    expect(tester.getSize(find.byKey(const ValueKey('ring'))), const Size(120, 120));
+    expect(tester.getSize(find.byKey(const ValueKey('knob'))), const Size(40, 40));
+    // The rim is (120 - 40) / 2 = 40 from the middle.
+    final g = await tester.startGesture(const Offset(60, 60));
+    await g.moveBy(const Offset(20, 0));
+    await tester.pump();
+    expect(input.axis2('move').x, closeTo(0.5, 1e-6));
+    expect(tester.getCenter(find.byKey(const ValueKey('knob'))), const Offset(80, 60));
+    await g.up();
   });
 }

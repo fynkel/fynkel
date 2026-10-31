@@ -215,13 +215,16 @@ class Yard extends GameObject {
 - **`active = false`** hides an object and everything below it: not drawn,
   not touched, not updated. `activeInHierarchy` says whether it and all its
   parents are on.
-- **Finding**: `parent`, `children`, `find(name)` below this one,
+- **Finding**: `parent`, `children` (or `childCount` and `childAt(i)`,
+  Unity's `GetChild`, which make no list), `find(name)` below this one,
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
   names or tags (the `name` checks in §16 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
-  (and the components on them) unless `includeInactive: true`.
+  (and the components on them) unless `includeInactive: true`. They do
+  find an object still loading (§6), as Unity finds one before its
+  `Awake`: `await object.loaded` before reading what its `onLoad` sets.
   `all` gives a new list, so destroying or releasing what's in it while
   going through it is safe.
 
@@ -340,14 +343,17 @@ class Coin extends GameObject {
 
 From a behaviour, its object is near: `gameObject`, and the same
 shortcuts an object has (`transform`, `position`, `get<T>()`, `world`,
-`time`, `input`, `assets`, `start`, `on`).
+`time`, `input`, `assets`, `startRoutine`, `on`).
 
 - **`addComponent(b)`** puts a behaviour on at any time and returns it;
   **`removeComponent(b)`** takes it off for good.
 - **`get<T>()`** gives the first component of type `T` (or a subtype, or an
   interface it implements), or null; `getAll<T>()` all of them;
   `has<T>()`. `getInParent<T>()` and `getInChildren<T>()` look up or down
-  the tree too.
+  the tree too, and `getAllInChildren<T>()` gives every one below; as
+  Unity's, they skip objects turned off unless `includeInactive: true`.
+  They find components: `getInParent<Level>()` for a `Level` object throws
+  and points at `ancestor<Level>()`.
 - **`enabled = false`** stops its calls, its routines and its tweens
   until it's turned back on.
 - A destroyed object still has its components, to read: a dead enemy's
@@ -600,7 +606,7 @@ or leave it to the player's settings page.
   went from 43 fps to 55. Put it on the settings page beside the levels:
   `world.quality = Quality.high.copyWith(renderScale: 0.75)`, or
   `Quality.low.copyWith(renderScale: 1)` for low at every pixel. A view's
-  own `FynkelView(resolutionScale:)` multiplies it, for one view (a
+  own `FynkelView(renderScale:)` multiplies it, for one view (a
   minimap).
 - **Smoother edges: `antiAliasing`**, as Unity's anti-aliasing (MSAA): 4
   samples a pixel at every level, or 2, or 0 for none. On phones' GPUs the
@@ -1023,7 +1029,12 @@ class Pilot extends GameObject {}
 - **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
-  `Transform.lookAt(eye, target)`.
+  `Transform.lookAt(eye, target)`. `rotation.eulerAngles` reads the
+  angles back (x the pitch, y the yaw, z the roll, in radians), so
+  `rotation.eulerAngles.y` is the way an object faces;
+  `Quat.fromTo(Vec3.up, normal)` turns one direction to another, and
+  `Quat.rotateTowards(rotation, goal, turnSpeed * time.delta)` turns by
+  steps, never past.
 - `v.withY(0.5)` (and `withX`, `withZ`) changes one part, `v.flat` puts
   it on the ground (y = 0) for walking, and `Vec3.all(2)` is a uniform
   scale.
@@ -1032,7 +1043,10 @@ class Pilot extends GameObject {}
   as the way to a target the object may have reached, write
   `normalizedOrZero`, which gives zero (as Unity's `normalized`):
   `position += (target - position).normalizedOrZero * speed * time.delta`.
-  `lookAt` the point the object is at leaves it as it is.
+  `lookAt` the point the object is at leaves it as it is. A `Vec2` has
+  `normalized` and `normalizedOrZero` too.
+- `color.withAlpha(0.5)` is the colour half see-through (Unity's
+  `color.a = 0.5`).
 - Unity's Mathf: `lerp`, `inverseLerp`, `clamp01`, `moveTowards`,
   `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`, and
   `Vec3.lerp`, `Vec3.moveTowards`, `Quat.slerp`, `Color.lerp`.
@@ -1305,7 +1319,7 @@ class WalkPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -1544,7 +1558,7 @@ class Waves extends GameObject {
   about 1.3 ms a frame on a Note10+ and 0.2 ms on a Mac, on top of the
   game's own work out of the new shape. A few thousand vertices a frame
   is nothing; tens of thousands want a look at `world.profile` (§6):
-  its `meshes` is what sending them took, as `world.meshChangeTime` is.
+  its `meshes` is what sending them took.
   Built-in shapes and models' meshes can't be changed: copy what you
   need into a `Mesh()`.
 
@@ -1574,6 +1588,7 @@ final window = Mesh.extrude(frame, depth: 0.1);
 
 // A profile turned around Y: (distance from the axis, height), with
 // the outside on the right of the way it goes.
+// 24 slices around unless `segments:` says, as the round meshes.
 final bowl = Mesh.lathe([Vec2(0, 0), Vec2(0.3, 0), Vec2(0.5, 0.3), Vec2(0.46, 0.3), Vec2(0.27, 0.04), Vec2(0, 0.04)]);
 ```
 
@@ -1765,7 +1780,8 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
   along the spline unless `align` is false, `offset` from it.
 - **`SplineAnimate`** moves its object along at a `speed` or over
   `seconds`, `once`, `loop` or `pingPong`, turned to face the way it goes;
-  `play`, `pause`, `restart`, `distance` and `normalizedTime`.
+  `play`, `pause`, `restart`, `distance` and `normalizedTime`. When its
+  container's object is destroyed it holds still, as `Follow` does.
 - **`world.debug.drawSplines = true`** draws every container's splines
   and knots.
 
@@ -1797,7 +1813,7 @@ class Hero extends GameObject {
 
   void jump() {
     _animator
-      ..crossFade('jump', duration: 0.1, loop: false)
+      ..crossFade('jump', seconds: 0.1, loop: false)
       ..onEnd = (clip) => _animator.crossFade('idle');
   }
 
@@ -1806,19 +1822,20 @@ class Hero extends GameObject {
     super.onUpdate();
     position += _velocity * time.delta;
     if (_animator.current != 'jump') {
-      _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', duration: 0.2);
+      _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', seconds: 0.2);
     }
   }
 }
 ```
 
-- `play(name)` starts a clip at once; `crossFade(name, duration:)` fades
+- `play(name)` starts a clip at once; `crossFade(name, seconds:)` fades
   to it from what plays. Asking for the clip that's already playing
   changes nothing, so an update can say what it wants every frame.
 - `loop: false` holds a clip's last pose at its end (a jump, a fall) and
   calls `onEnd`; clips loop unless told not to.
 - `speed` (1 as made, 0 paused, negative backwards), `time`, `length`,
-  `current`, `isPlaying(name)` and `weight(name)` are there too, and
+  `current` (a clip's name or a blend's), `isPlaying(name)` and
+  `weight(name)` (each taking a blend's name too) are there, and
   `stop()` keeps the pose it's in. Game time scales it: a paused world
   pauses its clips.
 - `at(clip, seconds, callback)` calls back each time a clip passes that
@@ -1887,7 +1904,7 @@ class Runner extends GameObject {
 
   void wave(bool on) {
     final arm = _animator.layer(1);
-    on ? arm.crossFade('Cheer', duration: 0.3) : arm.stop(duration: 0.3);
+    on ? arm.crossFade('Cheer', seconds: 0.3) : arm.stop(seconds: 0.3);
   }
 
   @override
@@ -1905,7 +1922,7 @@ class Runner extends GameObject {
   mixes the two around it. The clips keep one pace, each as far through
   itself, so the feet land together at any mix; with thresholds at the
   speeds the clips' feet go, they don't slide. Call it every frame with
-  the number: it's made the first time, and fades in (`duration:`) only
+  the number: it's made the first time, and fades in (`seconds:`) only
   when something else was playing.
 - `layer(1…7, mask:, additive:, strength:)` plays over the layers below
   it: on the whole model, or from a part down (`mask`, a name as
@@ -1916,7 +1933,7 @@ class Runner extends GameObject {
   `current`, `time` and `weight`; the animator itself is the base layer.
 - Every fade starts from the pose shown, however it got there: mid-fade,
   mid-blend, or held after a `stop()`. A game can change its mind every
-  frame and the character never jumps. `stop(duration:)` fades a layer
+  frame and the character never jumps. `stop(seconds:)` fades a layer
   out to what's underneath.
 - A layer's clips call `onEnd` and `at(…)` callbacks as the base's do.
 
@@ -1941,15 +1958,15 @@ class Farmer extends GameObject {
     await super.onLoad();
     final model = add(await assets.instantiate('character.glb'));
     _animator = model.animator!
-      ..blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: 0, duration: 0)
+      ..blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: 0, seconds: 0)
       // A gesture is played once; then the layer fades out.
-      ..onEnd = (_) => _animator.layer(1).stop(duration: 0.15);
+      ..onEnd = (_) => _animator.layer(1).stop(seconds: 0.15);
     _animator.layer(1, mask: 'torso'); // the legs stay the blend's
   }
 
   void walkTo(Vec3 point) => _goal = point.flat;
 
-  void wave() => _animator.layer(1).crossFade('wave', duration: 0.1, loop: false);
+  void wave() => _animator.layer(1).crossFade('wave', seconds: 0.1, loop: false);
 
   @override
   void onUpdate() {
@@ -2020,9 +2037,12 @@ with `playOneShot(clip, volume:, pitch:)`, for footsteps and hits. It has
 Unity's `volume`, `pitch` (2 is an octave up and twice as fast), `loop`,
 `mute`, `priority`, `playOnAwake` (on unless set: it plays `clip` when
 it's enabled), `isPlaying` and `playTime` (Unity's `time`; here `time`
-is the game's). `onEnd` is called when `clip` reaches its end, not when
-it's stopped. Disabling the source, or destroying its object, stops its
-sounds.
+is the game's; set it to seek, but not past the clip's end). `onEnd` is
+called when `clip` reaches its end, not when it's stopped. Disabling the
+source, or destroying its object, stops its sounds; and as in Unity, a
+source that's disabled, or whose object is inactive, refuses to play (a
+`StateError`), so no sound outlives its object. What an `onLoad` asks
+for plays when the object is shown.
 
 ```dart
 // lib/dog.dart
@@ -2171,24 +2191,29 @@ track it plays), and
 never given up for other sounds. `play(clip, fadeIn:)` starts a track
 (the one already playing plays on, so a level that starts its music
 again doesn't restart it), `crossFade(clip, seconds)` fades the next in
-as the last fades out, and `stop(fadeOut:)` ends it. Its `onEnd` is
-called when a track that doesn't `loop` reaches its end.
+as the last fades out, and `stop(fadeOut:)` ends it. `playTime` is where
+the track is, as a source's: set it to seek, or, before `play`, to start
+partway in (say, where a track was left before a scene change). Its
+`onEnd` is called when a track that doesn't `loop` reaches its end.
 
 **A long clip streams.** A file over 10 seconds is decoded as it plays,
 a second ahead, on a thread of its own, so a three-minute song takes its
 file's memory rather than 30 MB of samples. `AudioClip.streamed` says
 which; `AudioClip.decode(bytes, stream: true)` streams a short one, and
 `stream: false` decodes a long one whole. It plays as it would decoded,
-from any `time`, looping without a gap; `audio.stats.starved` counts the
-times a stream wasn't ready (it should stay 0).
+from any `playTime`, looping without a gap; `audio.stats.starved` counts
+the times a stream wasn't ready (it should stay 0).
 
 **Groups** are a settings screen's "music" and "effects" (a group of
 Unity's `AudioMixer`): `audio.group('effects')` is made the first time
 it's asked for, and up to 15 can be. Each has a `volume` and `mute`
 under `audio.volume`, and `fade(to, seconds)`, all heard within a few
-milliseconds, without a click. A source joins one with `group`, a
-one-shot with `playOneShot(clip, group:)` or `playAt(..., group:)`, and
-the music plays in `audio.group('music')`.
+milliseconds, without a click. A group is passed as itself, never by
+name: a source joins one as it's made, `AudioSource(clip: hit, group:
+audio.group('effects'))` (or later, with its `group`), a one-shot with
+`playOneShot(clip, group: audio.group('effects'))` or `playAt(...,
+group:)`, and the music plays in `audio.group('music')`. A group belongs
+to its world's `audio`: another world's throws.
 
 ```dart
 // lib/sound_settings.dart
@@ -2300,7 +2325,7 @@ class Fountain extends GameObject {
   function, an `Ease` or your own, times `startSize`;
   `colorOverLifetime` is a `ColorGradient` of stops, times `startColor`,
   its alpha fading as the colour does (`ColorGradient.fadeOut()`,
-  `fadeInOut()`). Both are read 64 times along the life when set, so
+  `fadeInOut(color, fadeIn:, fadeOut:)`). Both are read 64 times along the life when set, so
   they cost nothing a frame.
 - **Shapes** face +Y, as Unity's do, turned with their object:
   `ParticleShape.point()`, `sphere(radius:)`, `hemisphere`,
@@ -2853,7 +2878,8 @@ class CameraRig extends GameObject {
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
   target turns left and right.
-- `world.cameras.shake(strength, frequency:)`, `setBlend(blend, from:, to:)`, `live`.
+- `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
+  told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
   the game or the virtual camera put it, so moving it during a shake
   never drifts. `world.cameras.shakeOf(camera)` says how far it's moved
@@ -3025,7 +3051,7 @@ shows a frame later, and `await fixedStep` resumes before that step has
 run. `physics.stepBetweenFrames = false` steps
 within the frame instead, as Unity does.
 
-A Flutter widget that reads a body as it builds (`body.velocity` for a
+A Flutter widget that reads a body as it builds (`body.linearVelocity` for a
 speedometer) waits for the step running then, giving back the time the
 thread saved. So read it in the game, in `onUpdate`, and hand the
 widget the number through a `ValueNotifier`. The views and world widgets
@@ -3077,7 +3103,9 @@ GameObject wall(Vec3 at) => GameObject(
 
 A hit is a `RaycastHit`, as Unity's: `point`, `normal`, `distance`,
 `collider`, `gameObject` and `rigidbody`. As Unity's, a ray doesn't hit what it starts inside, and a
-query that misses allocates nothing. `collider.raycast(ray)` and
+query that misses allocates nothing. The lists the `…All` casts and the
+overlaps give are read-only, hit or miss: `.toList()` to sort or change
+one. `collider.raycast(ray)` and
 `collider.closestPoint(point)` ask one collider. `world.raycast` still
 finds what's drawn, with no colliders; taps find both (§11).
 `physics.drawColliders = true` draws every collider with the debug lines.
@@ -3210,6 +3238,10 @@ other body's object is destroyed, `connectedBody` goes null and the
 joint holds its body to the world where it is, as in Unity. With a `breakForce` or
 `breakTorque`, a joint that holds harder than that breaks: `with
 JointBreaks` hears of it in `onJointBreak`, and the joint is taken off.
+A joint on an object with no `Rigidbody` joins nothing, and says so once
+in `world.errors` (Unity adds the rigidbody; here the game does). A value
+a joint refuses (an anchor that isn't finite, its own rigidbody as
+`connectedBody`) throws and leaves the joint as it was.
 
 ```dart
 // lib/door.dart
@@ -3243,6 +3275,12 @@ class Door extends GameObject with JointBreaks {
   void onJointBreak(Joint joint, double breakForce) => print('the door came off');
 }
 ```
+
+`JointLimits`, `JointMotor`, `JointSpring`, `SoftJointLimit` and
+`PhysicsMaterial` are values, as Unity's structs are; to change one part,
+copy it with `copyWith`: `hinge.motor = hinge.motor.copyWith(targetVelocity:
+3)` turns a wheel faster with the same force, where `JointMotor(targetVelocity:
+3)` would have none.
 
 **Bullets** can be done two ways. A bullet that's an object, with a
 small trigger collider and a kinematic rigidbody moved with
@@ -3419,7 +3457,10 @@ class ScoreHud extends StatelessWidget {
 ```
 
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
-ScoreHud(game)))`.
+ScoreHud(game)))`. The overlay lies in a `Stack` over the view: a HUD
+that isn't `Positioned` sits loose at the top-left, and a `Positioned`
+one goes where it says (`Positioned(right: 16, bottom: 16, child:
+...)`).
 
 **On a phone the view is under Flutter, not in it** (on Android with a
 `FynkelActivity`, §1). Widgets over the view draw over the game, as
@@ -3436,7 +3477,7 @@ things differ from the Mac:
 - Two views stack, no more: a minimap over the game. A view lying within
   another goes over it.
 
-Where one of those matters, give that view `onScreen: false`: it's a
+Where one of those matters, give that view `directToScreen: false`: it's a
 texture Flutter draws, as on the Mac, slower on some Android phones and
 warmer on an iPhone.
 
@@ -3455,7 +3496,8 @@ then waits for the step running between frames to finish first.
 `FynkelApp` is a `MaterialApp` with the game as its page, so the overlay
 can hold any Material widget (a `Slider`, a `TextField`, a button), open a
 dialog with `showDialog`, or push a page over the game with
-`Navigator.of(context)`. Give it a `theme:` (Material's dark one if not),
+`Navigator.of(context)`: a page pushed there finds the game with
+`FynkelGame.of(context)`, as the overlay does. Give it a `theme:` (Material's dark one if not),
 and a `navigatorKey:` to open pages from the game's code.
 
 **Keep the HUD in its own file.** Flutter and Fynkel both have a `Color`
@@ -3584,7 +3626,7 @@ class PlayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -3609,6 +3651,12 @@ the view can take `game.world.input` while it's built, as an on-screen
 stick does (`Stick(game.world.input)`). The view shows the game's world;
 a game whose assets don't come from the app's bundle gives
 `FynkelGame(source: ...)`.
+
+A page pushed over this one with `Navigator` (or a dialog) isn't below
+its `FynkelGame`, so `FynkelGame.of` there doesn't find it: give the page
+the game (`SettingsPage(game)`). A `FynkelGame` keeps the game it
+started with when it's built again with another `make`; give it a `Key`
+to start another (`key: ValueKey(level)`).
 
 Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
@@ -3646,7 +3694,7 @@ class GamePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -3795,7 +3843,7 @@ class FieldPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Field.new,
+    Field.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -3902,8 +3950,8 @@ class Levels extends GameObject {
 
 **Saving.** What's kept between runs is plain data, never objects: the
 level reached, the best score, the settings (`Controls` has `toJson` and
-`fromJson`, §17). Write it as JSON to a file in the app's own folder,
-which the app finds with the `path_provider` package
+`Controls.fromJson`, §17). Write it as JSON to a file in the app's own
+folder, which the app finds with the `path_provider` package
 (`getApplicationSupportDirectory()`) and hands to the game:
 
 ```dart
@@ -4205,7 +4253,7 @@ What keeps a game fast:
 - **Shaders that read what's behind cost most** (§14): the frame takes
   three passes while one is in view. On an older phone give low quality
   a material that doesn't read it.
-- **Views on screen** (`onScreen`, on unless turned off; on Android with
+- **Views on screen** (`directToScreen`, on unless turned off; on Android with
   a `FynkelActivity`, §1), so Flutter neither waits for the game's
   frames nor copies them.
 - **A cheaper quality for an older phone.** `world.quality =
@@ -4236,6 +4284,161 @@ What keeps a game fast:
   time. The parts never overlap, and say where the time goes rather than
   to the tenth of a millisecond.
 
+## 20b. Your own systems and packages
+
+A game adds to Fynkel in three ways:
+- **a behaviour** (§4), for what one object does;
+- **a shader** (§14), for how something looks;
+- **a world system**, for work done once a frame over many objects:
+  physics, sound, a wind, a flock, a day's clock.
+
+Physics and sound are packages built as systems. So are the engine's
+own animators, particles and cameras. A system is where Unity would have
+a manager object, or a system added to its player loop. It's in
+`package:fynkel/extend.dart`, which a game itself doesn't need.
+
+```dart
+// lib/wind.dart
+import 'dart:math' as math;
+
+import 'package:fynkel/extend.dart';
+import 'package:fynkel/fynkel.dart';
+
+/// The world's wind: everything with a Sway leans with it.
+final class Wind extends WorldSystem {
+  Wind(super.world);
+
+  /// How far it leans what sways, at most.
+  double strength = 10.deg;
+
+  final _swaying = <Sway>[];
+
+  @override
+  String get name => 'wind';
+
+  @override
+  void afterUpdate() {
+    super.afterUpdate();
+    final t = world.time.sinceStart;
+    for (var i = 0; i < _swaying.length; i++) {
+      _swaying[i]._lean(t, strength);
+    }
+  }
+}
+
+/// `world.wind`, `gameObject.wind` and a behaviour's `wind`, made the
+/// first time they're asked for.
+extension WorldWind on World {
+  Wind get wind => system(Wind.new);
+}
+
+extension GameObjectWind on GameObject {
+  Wind get wind => world.wind;
+}
+
+extension BehaviourWind on Behaviour {
+  Wind get wind => world.wind;
+}
+
+/// Leans its object with the wind, around where it stood.
+class Sway extends Behaviour {
+  Sway({this.phase = 0});
+
+  /// Where in the gust it is, so a field doesn't sway as one.
+  final double phase;
+
+  Quat _rest = Quat.identity;
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    _rest = localRotation;
+    wind._swaying.add(this);
+  }
+
+  @override
+  void onDisable() {
+    wind._swaying.remove(this);
+    localRotation = _rest;
+    super.onDisable();
+  }
+
+  void _lean(double t, double strength) {
+    final angle = strength * (0.6 + 0.4 * math.sin(t * 1.7 + phase));
+    localRotation = _rest * Quat.axisAngle(Vec3.back, angle);
+  }
+}
+```
+
+```dart
+// test/wind_test.dart
+import 'package:flutter_test/flutter_test.dart';
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
+import 'package:my_game/wind.dart';
+
+void main() {
+  test('what sways leans with the wind, and stands up when it stops', () {
+    final world = World();
+    final grass = GameObject(components: [Sway()]);
+    world.add(grass);
+    world.run(1);
+    expect(grass.localRotation, isNot(Quat.identity));
+    expect(world.profile.systems.map((s) => s.name), contains('wind'));
+
+    grass.get<Sway>()!.enabled = false;
+    expect(grass.localRotation, Quat.identity);
+    world.dispose();
+  });
+}
+```
+
+- **One of each per world.** `world.system(Wind.new)` makes it the
+  first time and gives the same one after. A getter in an extension, as
+  above, is how physics gives `world.physics` and sound `world.audio`.
+- **Its hooks run in the frame** (§6), whether paused or not. In order:
+  - `beforeFrame`;
+  - `beforeFixedUpdate` and `afterFixedUpdate` round each fixed step;
+  - `beforeUpdate`;
+  - `afterUpdate`, after the objects' updates, where the animators pose;
+  - `afterLateUpdate`, before the cameras move;
+  - `afterFrame`.
+
+  Override the ones you need, and call `super`. `order` puts it before
+  (lower) or after (higher) other systems. `name` is what `world.profile`
+  shows, with the time its hooks took (`frameTime`).
+- **Its components are behaviours.** One joins its system in `onEnable`
+  and leaves in `onDisable`, as a collider does. So one that's off, or
+  on an object that's off, costs the system nothing. To watch components
+  that aren't its own, a system overrides `componentAdded` and
+  `componentRemoved`. Physics hears of `with Triggers` that way.
+- **What it throws goes to `world.errors`**, and the frame goes on. A
+  system whose hooks throw 5 frames in a row is turned off
+  (`isTurnedOff`). Code of the game's that a system calls (a callback)
+  reports with `world.report(object, error, stack)`, so one object's
+  bug doesn't stop the rest.
+- **`dispose`** is called once, when the world is. A game may keep the
+  system past it, so its public calls should throw a `StateError` after.
+- **Following objects without visiting them all**: `world.movedReader()`
+  lists those whose transform was set since it last read, and
+  `world.transformVersion` says whether any was.
+  `readWorldTransforms` reads many in one call; `writeTransforms` sets
+  many from native code. `componentCount`/`componentAt` and
+  `childCount`/`childAt` walk an object without making lists.
+- **Files of its own**: an `AssetKind` loads them through `assets`, shared
+  and freed as models are. `world.addAssetKind` lets `assets.preload`
+  load them by their ending.
+- **Taps**: `pointerHit(ray, layers)` makes what the system holds
+  tappable (§11) though it has no mesh. Physics answers with its
+  colliders.
+
+**Making it a package.** Move `wind.dart` into a Dart package of its own
+that depends on `fynkel`, export it from the package's library, and the
+game imports that. Its tests are the same.
+
+A package whose code is in Rust, as physics and sound are, isn't covered
+yet (§21).
+
 ## 21. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
@@ -4254,17 +4457,26 @@ What keeps a game fast:
 - **Sound** (§13b): effects on the sound (reverb, echo, a low-pass for
   under water), Doppler, 3D over headphones (HRTF), a custom rolloff
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
-  it by hand), the microphone, and sound made in code as it plays. On
-  Android, another app taking the sound doesn't pause the game's.
+  it by hand), the microphone, and sound made in code as it plays. A
+  one-shot gives nothing back to stop it alone or hear of its end (a
+  source of its own, with `onEnd`, does); a source can't fade (set its
+  `volume` each frame, or put it in a group and `fade` that), and music
+  can't pause (keep its `playTime`, `stop` it, and set `playTime` again
+  before the next `play`). On Android, another app taking the sound
+  doesn't pause the game's.
 - **Particles** (§13c): particles on the GPU (Unity's VFX Graph), lights
   on particles, collision with the physics world's colliders (only
   planes), triggers, wind zones, a mesh's surface as a shape, shadows
   from particles, a `LineRenderer`, and an editor.
 - **Input:** gamepads.
+- **Packages:** one with Rust code of its own: `package:fynkel/hooks.dart`
+  builds only the engine's crates.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
-- **Physics:** 2D physics, `ConfigurableJoint`, and chains of joints that
-  don't stretch (Rapier's multibody joints).
+- **Physics:** 2D physics, `ConfigurableJoint`, chains of joints that
+  don't stretch (Rapier's multibody joints), and stepping physics by hand
+  (Unity's `Physics.Simulate` with the Simulation Mode set to Script), for
+  a throw's arc worked out ahead or a replay.
 
 ## 22. From Unity
 
@@ -4289,6 +4501,8 @@ What keeps a game fast:
 | `WaitUntil`, `WaitWhile` | `await waitUntil(...)`, `await waitWhile(...)` |
 | `FindObjectOfType<T>()`, `FindObjectsByType<T>()` | `world.first<T>()`, `world.all<T>()` (`includeInactive:` too) |
 | Degrees (`Quaternion.Euler(0, 90, 0)`, joint limits, `fieldOfView`) | radians, with `90.deg`: `Quat.euler(0, 90.deg, 0)` |
+| `transform.eulerAngles`, `Quaternion.FromToRotation`, `Quaternion.RotateTowards` | `rotation.eulerAngles` (radians), `Quat.fromTo`, `Quat.rotateTowards` |
+| `color.a = 0.5`, `Vector2.normalized` | `color.withAlpha(0.5)`, `v.normalized` (or `normalizedOrZero`, as Unity's) |
 | `Camera.main`, `ScreenPointToRay`, `WorldToScreenPoint` | `world.camera`, `screenPointToRay`, `worldToScreenPoint` |
 | `RaycastHit` | `RaycastHit` (physics) and `RayHit` (`world.raycast`), each with `gameObject` |
 | `transform.position`, `rotation`, `localPosition`, `localRotation`, `localScale`, `lossyScale` | the same, on the object or a behaviour |
@@ -4296,6 +4510,8 @@ What keeps a game fast:
 | `transform.parent = p`, `SetParent(p, false)` | `parent = p`, `setParent(p, worldPositionStays: false)` |
 | `transform.Find("name")` | `find('name')` |
 | `GetComponentInParent<T>()` | `getInParent<T>()`, or `ancestor<T>()` for an object |
+| `GetComponentInChildren<T>()`, `GetComponentsInChildren<T>()` | `getInChildren<T>()`, `getAllInChildren<T>()` (`includeInactive:` too) |
+| `transform.childCount`, `GetChild(i)` | `childCount`, `childAt(i)` |
 | C# events, `UnityEvent` | `Signal<T>` and `on(signal, ...)` |
 | `Input.GetKeyDown(KeyCode.Space)`, `Input.GetKey` | `input.wasPressed(KeyCode.space)`, `input.isPressed` |
 | `IPointerClickHandler` | `onClick` |
@@ -4369,7 +4585,7 @@ What keeps a game fast:
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `removeMark`, `removeMarks`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
-| `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
+| `Physics.gravity` | `physics.gravity` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
 | `OnTriggerEnter(Collider)`, `OnCollisionEnter(Collision)` | `with Triggers`, `with Collisions`, then `onTriggerEnter`, `onCollisionEnter` |
@@ -4409,11 +4625,90 @@ What keeps a game fast:
   hidden or moved to a layer that doesn't meet; Unity skips some.
 - **A `CharacterController` turns with its object**; Unity's stays
   upright. Keep its object upright and turn a child for the model.
+- **`ControllerColliderHit.moveLength` is the move asked for**, the length
+  given to `move`; Unity's is how far the controller went before the hit.
 - **A HUD is Flutter**: widgets over the view, not a Canvas in the scene.
 
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **Stage 14's pass over the public API** (2026-10-31): names,
+  defaults and messages, made alike across the packages.
+  - Renamed, with no old names kept:
+    - `FynkelGame(make: X, …)` is `FynkelGame(X, …)`.
+    - `FynkelView(resolutionScale:)` is `renderScale:`, and
+      `FynkelView(onScreen:)` is `directToScreen:`.
+    - `MeasureSettings.resolution` is `renderScale`, and
+      `FYNKEL_RESOLUTION` is `FYNKEL_RENDER_SCALE`.
+    - `MeasuredApp`'s `overlay: (root)` is `overlay: (context, game)`;
+      `MeasuredApp<T>` is typed, so `change`, `timings` and `onStats`
+      take the game without a cast.
+    - `controls.fromJson(json)` is `Controls.fromJson(json, defaults:)`,
+      which makes new controls.
+    - `Animator.crossFade`, `blend` and `stop` take `seconds:`, not
+      `duration:`.
+    - `Mesh.lathe(profile, sides:)` is `segments:`.
+    - `ColorGradient.fadeInOut` takes the colour, then `fadeIn:` and
+      `fadeOut:` (0.2 and 0.4 unless given).
+    - `audio.music.time` is `audio.music.playTime`, and can be set: to
+      seek, or before `play` to start the next track partway in.
+    - `world.meshChangeTime` is gone: `world.profile.meshes` has it.
+    - `childCount` and `childAt` are on `GameObject` itself, not from
+      `package:fynkel/extend.dart`.
+  - Unity's defaults:
+    - `getInParent` and `getInChildren` skip objects turned off, as
+      Unity's do; `includeInactive: true` finds them.
+      `getAllInChildren` is new.
+    - `GameObject.shake` lasts 0.4 s unless told, as `Cameras.shake`
+      does.
+  - Refused where it's given, rather than later or not at all: a
+    camera's, light's, fog's or quality's value out of range, a
+    `Transform` that isn't finite, a `VirtualCamera`'s `fovY` (1–179°)
+    or `orthographicSize`, a particle range whose min is above its max,
+    a `Shape2D` of no size, a spline distance that isn't a number, a
+    joint joined to its own body or given an axis that isn't finite, a
+    collider `center` that isn't finite, a clip's `rate` or `channels`,
+    a `playTime` past the clip's end, a one-shot `pitch` below 0.05,
+    and a sound group from another world's `audio`. Each says what was
+    given and what it may be.
+  - `get`, `getAll`, `has`, `getInParent` and `getInChildren` given a
+    `GameObject` type throw, pointing at `ancestor`, `find` or `all`;
+    they found nothing before.
+  - Physics:
+    - The lists from `raycastAll`, the other `…CastAll` and the
+      `overlap…` queries are read-only even when they hit: `.toList()`
+      to sort one.
+    - `Rigidbody.position` and `rotation`, before the add or while the
+      body is turned off, read and set the object's; they threw.
+    - A joint whose object has no `Rigidbody` is reported once to
+      `world.errors` (a test with no listener there fails on it).
+  - Sound:
+    - `AudioSource.play()` and `playOneShot()` throw while the source
+      is turned off or its object is; a looping sound could outlive its
+      object. Asked for while the object loads (from its `onLoad`), the
+      sound plays when it's shown.
+    - Setting `music.volume` leaves a changed `loop` or `group` to the
+      next track; it put them on the playing one.
+  - Flutter:
+    - A world a view made goes with the last view showing it, not with
+      the view that made it. A view keeps its first root: a new one (or
+      a `FynkelGame` given another type to make) is reported in debug
+      builds; give it a `Key` to start another.
+    - Of several views taking one world's input, the first takes it;
+      the others are reported once.
+    - `FynkelApp` passes its view's settings on, its overlay may be
+      `Positioned`, and pages pushed over it find the game with
+      `FynkelGame.of`.
+    - A game that changes `paused` while the app is covered keeps what
+      it set.
+  - A `WorldSystem` turned off for throwing is named by its `name` in
+    the error.
+  - Many messages say more, and an object prints its name
+    (`GameObject#4 'player'`): a test that matched a message's words
+    may need new ones.
+  - Rust only: `fynkel_mesh`'s box, grid, cone, torus and sized capsule
+    return a `Result`.
 
 - **Stage 14's frame timing** (2026-10-27): `WorldSystem` has a `name`
   (its type's, unless overridden) and a `frameTime`, for

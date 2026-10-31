@@ -154,7 +154,7 @@ abstract final class Ease {
 /// one is destroyed or removed, and holds still while it's hidden or
 /// disabled, as routines do. It moves from the frame after the one it was
 /// made in, in the world's routines step: after every update, before the
-/// routines' waits end (docs/stage-4.md §3.2).
+/// routines' waits end (docs/writing-a-game.md, "8. Tweens").
 sealed class Motion implements Future<void> {
   Motion._(
     this._world,
@@ -417,8 +417,9 @@ sealed class Motion implements Future<void> {
   Stream<void> asStream() => _done.future.asStream();
 }
 
-/// Motion on objects and behaviours (docs/stage-4.md §3.7): tweens and
-/// their helpers, and moving things by hand.
+/// Motion on objects and behaviours: tweens and their helpers, and moving
+/// things by hand (docs/writing-a-game.md, "7. Moving things" and "8.
+/// Tweens").
 mixin _Moving {
   /// The object moved.
   GameObject get _self;
@@ -498,7 +499,7 @@ mixin _Moving {
   /// by default (`rotate(Vec3.up, a)` turns it about its own up), or of the
   /// world's with `relativeTo: Space.world`.
   void rotate(Vec3 axis, double angle, {Space relativeTo = Space.self}) {
-    final turn = Quat.axisAngle(axis.normalized, angle);
+    final turn = Quat.axisAngle(_axis(axis, 'rotate'), angle);
     switch (relativeTo) {
       case Space.self:
         _setLocalRotation((_self.transform.rotation * turn).normalized);
@@ -855,7 +856,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) {
-    final along = axis.normalized;
+    final along = _axis(axis, 'rotateBy');
     var start = Quat.identity;
     return _value<double>(
       () {
@@ -1024,12 +1025,13 @@ mixin _Moving {
   }
 
   /// Shakes the object about where it is, up to [strength] along each
-  /// axis, [frequency] times a second, fading over [seconds] and ending
-  /// where it began. [seed] makes the same shake each time. It takes
-  /// [seconds] only, no `speed:`.
+  /// axis, [frequency] times a second, fading over [seconds] (0.4 unless
+  /// given, as [Cameras.shake]) and ending where it began. [seed] makes
+  /// the same shake each time. It takes [seconds] only, no `speed:`.
+  /// [strength] and [frequency] are 0 or more.
   Motion shake(
     double strength, {
-    required double seconds,
+    double seconds = 0.4,
     double frequency = 20,
     int? seed,
     double delay = 0,
@@ -1037,6 +1039,7 @@ mixin _Moving {
     bool unscaled = false,
     void Function()? onComplete,
   }) {
+    _checkShake(strength, seconds, frequency);
     final random = math.Random(seed);
     final phase = Vec3(random.nextDouble(), random.nextDouble(), random.nextDouble()) * (2 * math.pi);
     var base = Vec3.zero;
@@ -1074,6 +1077,7 @@ mixin _Moving {
   // and rotation are turned into the parent's here.
   void _setPosition(Vec3 v) {
     final self = _self;
+    if (self._gone) self._engine('its position can\'t be set');
     final parent = self._above;
     if (parent == null) return _setLocalPosition(v);
     final before = self._described == null && identical(self._worldLocal, self.transform) ? self._worldTransform : null;
@@ -1088,6 +1092,7 @@ mixin _Moving {
   }
 
   void _setRotation(Quat q) {
+    if (_self._gone) _self._engine('its rotation can\'t be set');
     final parent = _self._above;
     _setLocalRotation(parent == null ? q : (parent.worldTransform.rotation.inverse * q).normalized);
   }
@@ -1098,3 +1103,10 @@ mixin _Moving {
 }
 
 double _distance3(Vec3 a, Vec3 b) => (b - a).length;
+
+/// [axis], given to [call], with length 1; throws for a zero one.
+Vec3 _axis(Vec3 axis, String call) {
+  final l = axis.length;
+  if (l < 1e-12 || !l.isFinite) throw ArgumentError('$call: axis is $axis; it needs a direction to turn about');
+  return axis / l;
+}

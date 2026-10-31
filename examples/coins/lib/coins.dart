@@ -270,9 +270,9 @@ class Player extends GameObject {
     addComponent(Rigidbody(isKinematic: true));
     addComponent(Collector());
     _animator = model.animator!
-      ..blend('move', _moves, thresholds: _paces, at: 0, duration: 0)
+      ..blend('move', _moves, thresholds: _paces, at: 0, seconds: 0)
       // A gesture (on layer 2) fades out when it's done.
-      ..onEnd = (_) => _animator.layer(2).stop(duration: 0.15);
+      ..onEnd = (_) => _animator.layer(2).stop(seconds: 0.15);
     // The right arm holds what it carries, over the walk's swing.
     _animator.layer(1, mask: 'arm-right').play('holding-right');
     // Gestures from the torso up, the legs walking on.
@@ -288,7 +288,7 @@ class Player extends GameObject {
   }
 
   /// Plays [clip] once from the torso up, the legs going on as they were.
-  void gesture(String clip) => _animator.layer(2).crossFade(clip, duration: 0.08, loop: false);
+  void gesture(String clip) => _animator.layer(2).crossFade(clip, seconds: 0.08, loop: false);
 
   @override
   void onUpdate() {

@@ -98,7 +98,7 @@ fn a_capped_pipe_swept_again_allocates_nothing() {
 
 #[test]
 fn a_mesh_changed_with_its_tangents_worked_out_again_allocates_nothing() {
-    let mut mesh = MeshData::grid(Vec2::new(10.0, 10.0), [40, 40], 1.0);
+    let mut mesh = MeshData::grid(Vec2::new(10.0, 10.0), [40, 40], 1.0).unwrap();
     let mut positions: Vec<[f32; 3]> = mesh.vertices().iter().map(|v| v.position).collect();
     let change = |mesh: &mut MeshData, positions: &mut [[f32; 3]], t: f32| {
         for p in positions.iter_mut() {

@@ -726,7 +726,7 @@ class Dog extends GameObject {
     // A pug (assets/CREDITS.md), a game's size, its feet on the grass.
     final model = add(await assets.instantiate('dog.glb'));
     model.transform = _farmAnimal(lift: 0.35, scale: 0.28);
-    _moves = model.animator!..blend('move', _clips, thresholds: _dogPaces, at: 0, duration: 0);
+    _moves = model.animator!..blend('move', _clips, thresholds: _dogPaces, at: 0, seconds: 0);
     // Dust at its feet when it runs.
     _dust = add(Dust((parent! as Round).game.particles, lift: 0.35, from: 3.5, size: 0.4));
     on(input.onTap, (_) => bark());
@@ -840,7 +840,7 @@ class Sheep extends GameObject {
     for (final part in _parts) {
       part.material = game.flashing(part.material!);
     }
-    _moves = model.animator!..blend('move', _clips, thresholds: _sheepPaces, at: 0, duration: 0);
+    _moves = model.animator!..blend('move', _clips, thresholds: _sheepPaces, at: 0, seconds: 0);
     // Dust at its feet when it runs, not as it grazes or walks.
     _dust = add(Dust(game.particles, lift: 0.4, from: 2));
     // Its name over it: a Flutter widget, placed where the camera sees it
@@ -956,7 +956,7 @@ class Sheep extends GameObject {
     moveTo(spot, seconds: 1.2, ease: Ease.inOutSine);
     punchScale(Vec3.all(0.25), seconds: 0.4);
     _moves
-      ..crossFade('Jump', duration: 0.1, loop: false)
+      ..crossFade('Jump', seconds: 0.1, loop: false)
       ..onEnd = (_) => _moves.crossFade('Idle');
   }
 
@@ -968,7 +968,7 @@ class Sheep extends GameObject {
     _dust.pace(0);
     removeComponent(get<WorldWidget>()!);
     taken.emit(this);
-    _moves.crossFade('Death', duration: 0.05, loop: false);
+    _moves.crossFade('Death', seconds: 0.05, loop: false);
     tween(
       1.0,
       0.0,

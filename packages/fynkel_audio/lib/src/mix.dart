@@ -87,12 +87,41 @@ final class AudioMusic {
   /// Whether a track plays: not stopped, nor stopping, nor ended.
   bool get isPlaying => _voice != 0 && _audio._read(_voice);
 
-  /// Where the track is, in seconds; 0 when none plays.
-  double get time => _voice == 0 ? 0 : _audio._timeOf(_voice);
+  /// Where the track is, in seconds, as [AudioSource.playTime]: set it to
+  /// play on from there, or, when none plays, for the next track to start
+  /// there. Past the track's end throws an [ArgumentError].
+  double get playTime => _voice == 0 ? _from : _audio._timeOf(_voice);
+  set playTime(double value) {
+    if (!(value >= 0 && value.isFinite)) throw ArgumentError.value(value, 'playTime', 'is not 0 or more');
+    final clip = _clip;
+    if (clip != null && value > clip.length) {
+      throw ArgumentError.value(value, 'playTime', 'is past the end of $clip');
+    }
+    _from = value;
+    if (_voice == 0 || clip == null || _audio._disposed) return;
+    // Started again from there, as the track it is.
+    _check(fa_voice_stop(_audio._native, _voice));
+    _voice = 0;
+    _start(clip, 0, looping: _trackLoop, pausable: _trackPausable, group: _trackGroup);
+  }
+
+  double _from = 0;
 
   /// The group it plays in: `audio.group('music')` unless set. From the
-  /// next track.
-  late AudioGroup group = _audio.group('music');
+  /// next track. Another world's group throws an [ArgumentError].
+  AudioGroup get group => _group ??= _audio.group('music');
+  set group(AudioGroup value) {
+    _audio._indexOf(value);
+    _group = value;
+  }
+
+  AudioGroup? _group;
+
+  // What the playing track started with: [loop], [ignorePause] and
+  // [group] are from the next track.
+  var _trackLoop = true;
+  var _trackPausable = false;
+  var _trackGroup = 0;
 
   /// Whether a track starts again at its end; true unless set. From the
   /// next track.
@@ -111,7 +140,7 @@ final class AudioMusic {
     _audio._settingsFloats
       ..[0] = value
       ..[1] = 1;
-    _audio._set(_voice, looping: loop, group: group._index);
+    _audio._set(_voice, looping: _trackLoop, group: _trackGroup);
   }
 
   var _volume = 1.0;
@@ -123,9 +152,10 @@ final class AudioMusic {
   /// and stops what played before. If [clip] is playing already, it plays
   /// on: a level that starts its music again doesn't restart it.
   void play(AudioClip clip, {double fadeIn = 0}) {
+    _checkFade(fadeIn, 'fadeIn');
     if (identical(clip, _clip) && isPlaying) return;
     stop();
-    _start(clip, fadeIn);
+    _startNext(clip, fadeIn);
   }
 
   /// Fades what plays out over [seconds] while [clip] fades in over the
@@ -135,7 +165,7 @@ final class AudioMusic {
     _checkFade(seconds, 'seconds');
     if (_voice != 0) _audio._fadeVoice(_voice, 0, seconds, stop: true);
     _voice = 0;
-    _start(clip, seconds);
+    _startNext(clip, seconds);
   }
 
   /// Stops the track, fading it out over [fadeOut] seconds (or a few
@@ -153,8 +183,12 @@ final class AudioMusic {
     }
   }
 
-  void _start(AudioClip clip, double fadeIn) {
-    _checkFade(fadeIn, 'fadeIn');
+  /// Starts [clip] as the next track, with [loop], [ignorePause] and
+  /// [group] as they are now.
+  void _startNext(AudioClip clip, double fadeIn) =>
+      _start(clip, fadeIn, looping: loop, pausable: !ignorePause, group: _audio._indexOf(group));
+
+  void _start(AudioClip clip, double fadeIn, {required bool looping, required bool pausable, required int group}) {
     final audio = _audio;
     audio._playFloats
       ..[0] = _volume
@@ -168,17 +202,21 @@ final class AudioMusic {
       ..[17] = 0
       ..[18] = fadeIn;
     audio._playWords[14] = 0;
-    audio._playFrom.value = 0;
+    audio._playFrom.value = _from < clip.length ? _from : clip.length;
     _voice = audio._start(
       clip,
-      looping: loop,
+      looping: looping,
       priority: 0,
-      pausable: !ignorePause,
+      pausable: pausable,
       owner: _owner,
-      group: group._index,
+      group: group,
       fading: true,
     );
+    _from = 0;
     _clip = _voice == 0 ? null : clip;
+    _trackLoop = looping;
+    _trackPausable = pausable;
+    _trackGroup = group;
   }
 
   /// [handle] stopped on its own: at its end, or [stolen], which music

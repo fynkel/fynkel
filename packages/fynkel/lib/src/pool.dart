@@ -99,7 +99,10 @@ final class Pool<T extends GameObject> {
   /// pool's or was released already.
   void release(T object) {
     if (object._destroyed) return;
-    if (!identical(object._pool, this)) throw ArgumentError.value(object, 'object', 'isn\'t from this pool');
+    if (!identical(object._pool, this)) {
+      final from = object._pool == null ? 'from no pool' : 'from another pool';
+      throw ArgumentError('$object isn\'t from this pool: it is $from', 'object');
+    }
     if (object._pooled != _PoolState.out) throw StateError('$object was released already');
     _takeOut(object);
     object._generation++;

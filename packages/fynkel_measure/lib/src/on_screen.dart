@@ -14,31 +14,37 @@ import 'package:fynkel/fynkel.dart' show ViewStats;
 /// frame late.)
 class OnScreenClock {
   ViewStats _last = const ViewStats();
-  ({ViewStats at, Stopwatch clock, Completer<Duration> done, int? presented})? _waiting;
+
+  // What each call of [next] still waits for, in order.
+  final _waiting = <({ViewStats at, Stopwatch clock, Completer<Duration> done, int? presented})>[];
 
   /// Completes with [clock]'s time when the objects spawned until now are
-  /// first on screen.
+  /// first on screen. Asked again before that, each wait completes when
+  /// its own objects are.
   Future<Duration> next(Stopwatch clock) {
     final done = Completer<Duration>();
-    _waiting = (at: _last, clock: clock, done: done, presented: null);
+    _waiting.add((at: _last, clock: clock, done: done, presented: null));
     return done.future;
   }
 
+  /// The view's counts after each frame it hands to the engine: give it
+  /// as the view's [FynkelView.onViewStats].
   void onViewStats(ViewStats stats) {
     _last = stats;
-    final waiting = _waiting;
-    if (waiting == null) return;
-    final at = waiting.at;
-    if (waiting.presented case final presented?) {
-      if (stats.presented > presented) {
-        _waiting = null;
-        waiting.done.complete(waiting.clock.elapsed);
+    for (var i = 0; i < _waiting.length; i++) {
+      final waiting = _waiting[i];
+      final at = waiting.at;
+      if (waiting.presented case final presented?) {
+        if (stats.presented > presented) {
+          _waiting.removeAt(i--);
+          waiting.done.complete(waiting.clock.elapsed);
+        }
+        continue;
       }
-      return;
-    }
-    final olderLeft = at.posted - (at.rendered + at.coalesced + at.skipped);
-    if (stats.rendered - at.rendered > olderLeft) {
-      _waiting = (at: at, clock: waiting.clock, done: waiting.done, presented: stats.presented);
+      final olderLeft = at.posted - (at.rendered + at.coalesced + at.skipped);
+      if (stats.rendered - at.rendered > olderLeft) {
+        _waiting[i] = (at: at, clock: waiting.clock, done: waiting.done, presented: stats.presented);
+      }
     }
   }
 }

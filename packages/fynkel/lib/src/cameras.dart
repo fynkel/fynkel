@@ -52,8 +52,11 @@ final class _Pose {
 /// ```
 final class VirtualCamera extends Behaviour {
   /// A virtual camera of [priority] 0 unless given, with a 60° [fovY] and
-  /// an [orthographicSize] of 5.
-  VirtualCamera({this._priority = 0, this.fovY = 60 * (math.pi / 180), this.orthographicSize = 5});
+  /// an [orthographicSize] of 5. Throws an [ArgumentError] for either
+  /// outside what a [Camera] takes.
+  VirtualCamera({this._priority = 0, double fovY = 60 * (math.pi / 180), double orthographicSize = 5})
+    : _fovY = _checkFovY(fovY),
+      _orthographicSize = _checkSize(orthographicSize);
 
   int _priority;
   int _order = 0;
@@ -67,12 +70,31 @@ final class VirtualCamera extends Behaviour {
   }
 
   /// The view's field of view, in radians, while this is live
-  /// ([Camera.fovY]): 60.deg unless set.
-  double fovY;
+  /// ([Camera.fovY]): 60.deg unless set, and 1.deg to 179.deg.
+  double get fovY => _fovY;
+  set fovY(double value) => _fovY = _checkFovY(value);
+  double _fovY;
 
   /// Half the view's height, while this is live and the camera is
-  /// orthographic ([Camera.orthographicSize]), in metres: 5 unless set.
-  double orthographicSize;
+  /// orthographic ([Camera.orthographicSize]), in metres: 5 unless set,
+  /// and 0.0001 to 1,000,000.
+  double get orthographicSize => _orthographicSize;
+  set orthographicSize(double value) => _orthographicSize = _checkSize(value);
+  double _orthographicSize;
+
+  // Checked where they're given, as the view's camera would check them
+  // only later, in the frame this is live.
+  static double _checkFovY(double value) {
+    if (value >= 1 * (math.pi / 180) && value <= 179 * (math.pi / 180)) return value;
+    // 60 is 60 degrees, given as radians by habit.
+    final hint = value >= 1 && value <= 179 ? ': did you mean ${_plain(value)}.deg? It' : '; it';
+    throw ArgumentError('VirtualCamera.fovY is ${_plain(value)}, in radians$hint must be from 1.deg to 179.deg');
+  }
+
+  static double _checkSize(double value) {
+    if (value >= 1e-4 && value <= 1e6) return value;
+    throw ArgumentError('VirtualCamera.orthographicSize is ${_plain(value)}; it must be from 0.0001 to 1,000,000 m');
+  }
 
   /// Whether the view's camera follows this one now (or is blending to it).
   bool get isLive => _enabledNow && world.cameras.live == this;
@@ -80,7 +102,7 @@ final class VirtualCamera extends Behaviour {
   _Pose get _pose {
     final object = gameObject;
     final t = object.parent == null ? object.transform : object.worldTransform;
-    return _Pose(t.position, t.rotation, fovY, orthographicSize);
+    return _Pose(t.position, t.rotation, _fovY, _orthographicSize);
   }
 
   @override
@@ -126,6 +148,24 @@ sealed class _Rig extends Behaviour {
 }
 
 bool _present(GameObject o) => o._world != null && !o._gone;
+
+/// Throws for a shake that [Cameras.shake] or [GameObject.shake] can't
+/// make, saying which number is wrong.
+void _checkShake(double strength, double seconds, double frequency) {
+  if (!(strength >= 0 && strength.isFinite)) {
+    throw ArgumentError('shake: strength is ${_plain(strength)}; it must be 0 or more, in metres');
+  }
+  if (!(seconds > 0 && seconds.isFinite)) {
+    throw ArgumentError('shake: seconds is ${_plain(seconds)}; it must be more than 0');
+  }
+  if (!(frequency >= 0 && frequency.isFinite)) {
+    throw ArgumentError('shake: frequency is ${_plain(frequency)}; it must be 0 or more times a second');
+  }
+}
+
+/// [value] as a game would write it: 60, not 60.0.
+String _plain(double value) =>
+    value.isFinite && value == value.roundToDouble() && value.abs() < 1e15 ? '${value.toInt()}' : '$value';
 
 /// How much of the way to go this frame with [damping]: all of it with
 /// none; with some, 99 % of the way after [damping] seconds (Cinemachine's).
@@ -462,7 +502,9 @@ final class Cameras {
   /// Shakes the view's camera by up to [strength] metres, across the view,
   /// fading out over [seconds]; [frequency] is about how many times a second
   /// it goes to and fro. Shakes at once add up. [unscaled] keeps it going
-  /// while the game is paused; [seed] makes it the same each time.
+  /// while the game is paused; [seed] makes it the same each time. As
+  /// [GameObject.shake]: [strength] and [frequency] are 0 or more, and
+  /// [seconds] more than 0.
   ///
   /// The shake is added when the frame is drawn, never written into the
   /// camera's transform: whatever moves the camera meanwhile (a virtual
@@ -470,7 +512,7 @@ final class Cameras {
   /// moves it from where it really is, and the shake ends exactly there.
   /// [shakeOf] says how far it's moved now; world widgets move with it.
   void shake(double strength, {double seconds = 0.4, double frequency = 20, bool unscaled = false, int? seed}) {
-    if (!(seconds > 0)) return;
+    _checkShake(strength, seconds, frequency);
     final random = math.Random(seed);
     _shakes.add(
       _Shake(
@@ -524,7 +566,18 @@ final class Cameras {
     if (live != null && camera != null && camera != live._owner) {
       final pose = _poseNow(live, unscaled ? time._unscaledDelta : dt);
       _current = pose;
-      _put(camera, pose);
+      try {
+        _put(camera, pose);
+      } catch (error, stack) {
+        // On the virtual camera's object, and not as the cameras' system:
+        // one that throws a frame after another would be turned off,
+        // and every camera with it.
+        _world._report(
+          live._owner,
+          StateError("the view's camera, $camera, can't be put where $live on ${live._owner} is: $error"),
+          stack,
+        );
+      }
     }
     _shake(camera, dt, time._unscaledDelta);
   }

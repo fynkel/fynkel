@@ -80,7 +80,7 @@ class SkinnedScene extends LabScene {
     _people.addAll([knight, rogue]);
     for (final person in _people) {
       final animator = person.animator!
-        ..blend('move', _moves, thresholds: _speeds, at: 0, duration: 0)
+        ..blend('move', _moves, thresholds: _speeds, at: 0, seconds: 0)
         ..onEnd = (_) => _playing = null;
       // The right arm from the shoulder down, over whatever plays.
       animator.layer(1, mask: 'upperarm.r');
@@ -93,7 +93,7 @@ class SkinnedScene extends LabScene {
   void playOnce(String clip) {
     _playing = clip;
     for (final animator in _animators) {
-      animator.crossFade(clip, duration: 0.2, loop: false);
+      animator.crossFade(clip, seconds: 0.2, loop: false);
     }
   }
 
@@ -117,7 +117,7 @@ class SkinnedScene extends LabScene {
     _waving = on;
     for (final animator in _animators) {
       final arm = animator.layer(1);
-      on ? arm.crossFade('Cheer', duration: 0.3) : arm.stop(duration: 0.3);
+      on ? arm.crossFade('Cheer', seconds: 0.3) : arm.stop(seconds: 0.3);
     }
   }
 
@@ -131,7 +131,7 @@ class SkinnedScene extends LabScene {
     // that ends.
     if (_playing == null) {
       for (final animator in _animators) {
-        animator.blend('move', _moves, thresholds: _speeds, at: _speed, duration: 0.3);
+        animator.blend('move', _moves, thresholds: _speeds, at: _speed, seconds: 0.3);
       }
     }
     if (_speed > 0) {

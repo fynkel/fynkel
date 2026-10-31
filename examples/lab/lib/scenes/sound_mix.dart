@@ -102,7 +102,7 @@ class SoundMixScene extends LabScene {
       stats.device
           ? 'playing through the device at ${stats.rate} Hz'
           : 'no device: ${world.audio.outputError ?? 'not on screen'}',
-      'music: ${music.clip?.name.split('/').last ?? 'nothing'} at ${music.time.toStringAsFixed(1)} s'
+      'music: ${music.clip?.name.split('/').last ?? 'nothing'} at ${music.playTime.toStringAsFixed(1)} s'
           '${music.clip?.streamed ?? false ? ', streamed' : ''}',
       'master ${world.audio.volume.toStringAsFixed(2)}, $_music, $_effects',
       'starved callbacks: ${stats.starved} (a gap would count here)',

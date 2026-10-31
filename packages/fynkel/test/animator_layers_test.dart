@@ -59,7 +59,7 @@ void main() {
     // Stopped with a fade, it's gone when the fade is done.
     layer
       ..strength = 1
-      ..stop(duration: 0.1);
+      ..stop(seconds: 0.1);
     for (var i = 0; i < 8; i++) {
       world.update(dt);
     }
@@ -95,7 +95,7 @@ void main() {
     final lengths = {for (final c in knight.clips) c.name: c.length};
     const clips = ['Idle', 'Walking_A', 'Running_A'];
     const speeds = [0.0, 1.1, 3.0];
-    animator.blend('move', clips, thresholds: speeds, at: 0.55, duration: 0);
+    animator.blend('move', clips, thresholds: speeds, at: 0.55, seconds: 0);
     expect(animator.current, 'move');
     expect(animator.weight('Idle'), closeTo(0.5, 1e-6));
     expect(animator.weight('Walking_A'), closeTo(0.5, 1e-6));
@@ -109,7 +109,7 @@ void main() {
     expect((animator.weight('Running_A'), animator.weight('Walking_A')), (1, 0));
     expect(animator.length, closeTo(lengths['Running_A']!, 1e-5));
     // Thresholds left out: 0, 1, 2.
-    animator.blend('steps', const ['Idle', 'Walking_A', 'Running_A'], at: 1.5, duration: 0);
+    animator.blend('steps', const ['Idle', 'Walking_A', 'Running_A'], at: 1.5, seconds: 0);
     expect((animator.current, animator.weight('Walking_A'), animator.weight('Running_A')), ('steps', 0.5, 0.5));
 
     expect(() => animator.blend('move', const ['Idle'], at: 0), throwsArgumentError, reason: 'other clips');
@@ -129,7 +129,7 @@ void main() {
       throwsA(isA<ArgumentError>().having((e) => e.message, 'message', contains('no part'))),
     );
     expect(() => animator.layer(1).strength = double.nan, throwsArgumentError);
-    expect(() => animator.layer(1).crossFade('Idle', duration: -1), throwsArgumentError);
+    expect(() => animator.layer(1).crossFade('Idle', seconds: -1), throwsArgumentError);
     expect(animator.layer(3).current, isNull);
     // Clamped to 0 to 1.
     expect((animator.layer(1)..strength = 3).strength, 1);

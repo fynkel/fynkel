@@ -129,7 +129,8 @@ extension _Queries on Physics {
     checkPhysics(fp_found_read(_world, _found, count));
     // An FpFound is two 64-bit ids: the collider's, then its key.
     final ids = _found.cast<Uint64>();
-    return [for (var i = 0; i < count; i++) _byKey[ids[i * 2 + 1]]!];
+    // No closure here: its context would be made on a miss too.
+    return UnmodifiableListView([for (var i = 0; i < count; i++) _byKey[ids[i * 2 + 1]]!]);
   }
 
   bool _check(LayerMask layers, QueryTriggers triggers) {
@@ -161,7 +162,8 @@ extension _Queries on Physics {
     }
     checkPhysics(fp_hits_read(_world, _hits, count));
     final (floats, ids) = (_hits.cast<Float>(), _hits.cast<Uint64>());
-    return [for (var i = 0; i < count; i++) _readHit(floats, ids, i)!];
+    // No closure here: its context would be made on a miss too.
+    return UnmodifiableListView([for (var i = 0; i < count; i++) _readHit(floats, ids, i)!]);
   }
 }
 
@@ -170,6 +172,12 @@ extension _Queries on Physics {
 /// where its object is now. As Unity's, a ray doesn't hit a collider it
 /// starts inside, and a cast doesn't hit one it starts in, except the
 /// `All` casts, which give those at distance 0.
+///
+/// The lists the `All` casts and the overlaps give are read-only, hit or
+/// miss (a miss gives the same empty one, and allocates nothing): `.toList()`
+/// to sort or change one. A radius or half size of 0 or less, a negative
+/// `maxDistance`, a point or direction that isn't finite, or an
+/// orientation that isn't unit length throws an [ArgumentError].
 extension PhysicsQueries on Physics {
   /// The first collider [ray] hits within [maxDistance], or null (Unity's
   /// `Physics.Raycast`).

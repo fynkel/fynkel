@@ -197,7 +197,7 @@ class SplinesScene extends LabScene {
     }
     readout.value = [
       'road ${road.spline.length.toStringAsFixed(1)} m, ${road.mesh.indexCount ~/ 3} triangles, swept again in '
-          '${_ms(road.lastSweep)} (sent in ${_ms(world.meshChangeTime.inMicroseconds)})',
+          '${_ms(road.lastSweep)} (sent in ${_ms(world.profile.meshes.inMicroseconds)})',
       'rope ${rope.mesh.indexCount ~/ 3} triangles each frame in ${_ms(rope.work)}; '
           'fence ${fence.get<SplineInstantiate>()!.copies.length} posts; cart at '
           '${cart.get<SplineAnimate>()!.distance.toStringAsFixed(1)} m',
@@ -449,7 +449,7 @@ final class Timing extends GameObject {
 
   /// Moves a knot and sweeps again; true when the 120 frames are done.
   bool step() {
-    if (_sweeps.isNotEmpty) _sends.add(world.meshChangeTime.inMicroseconds);
+    if (_sweeps.isNotEmpty) _sends.add(world.profile.meshes.inMicroseconds);
     if (_sweeps.length == 120) {
       int median(List<int> t) => (t..sort())[t.length ~/ 2];
       result =

@@ -43,13 +43,15 @@ void main() {
     expect(world.input.axis2('move'), const Vec2(-1, 0), reason: 'the arrows move too');
   });
 
-  test('toJson and fromJson keep them between runs; what fromJson does not know is left', () {
+  test('toJson and Controls.fromJson keep them between runs; what fromJson does not know is left', () {
     final controls = make()..set('dash', KeyCode.e);
     final json = controls.toJson();
     expect(json['dash'], 'e');
-    final again = make()..fromJson({...json, 'jump': 'j', 'up': 'no such key', 'down': 3});
+    final again = Controls.fromJson({...json, 'jump': 'j', 'up': 'no such key', 'down': 3}, defaults: make().defaults);
     expect(again['dash'], KeyCode.e);
     expect((again['up'], again['down']), (KeyCode.w, KeyCode.s));
+    expect(again.defaults, make().defaults, reason: 'reset goes back to the defaults, not to what was saved');
+    expect(Controls.fromJson(null, defaults: make().defaults)['dash'], KeyCode.space, reason: 'nothing saved yet');
   });
 
   testWidgets('ControlsSettings lists them, changes one with the key pressed, and resets', (tester) async {

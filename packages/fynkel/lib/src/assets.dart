@@ -91,8 +91,9 @@ final class Assets {
 
   /// Loads [names] without adding anything, so what asks for them later
   /// has them at once: models (`.glb`), textures (`.png`, `.jpg`,
-  /// `.jpeg`), sky images (`.hdr`), shaders (`.wgsl`) and the kinds packages added ([WorldSystems.addAssetKind]),
-  /// told apart by their extension. They're held as anything else asked
+  /// `.jpeg`), sky images (`.hdr`), shaders (`.wgsl`), fonts (`.ttf`,
+  /// `.otf`, `.ttc`) and the kinds packages added
+  /// ([WorldSystems.addAssetKind]), told apart by their extension. They're held as anything else asked
   /// for here is.
   Future<void> preload(Iterable<String> names) async {
     final assets = [for (final name in names) _hold(name, _kindOf(name))];

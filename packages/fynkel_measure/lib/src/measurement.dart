@@ -38,10 +38,10 @@ abstract final class MeasureSettings {
   /// does.
   static final baseline = _setting('FYNKEL_BASELINE', const String.fromEnvironment('FYNKEL_BASELINE')) == '1';
 
-  /// The view's `resolutionScale` (`--define FYNKEL_RESOLUTION=0.5`), to
+  /// The view's `renderScale` (`--define FYNKEL_RENDER_SCALE=0.5`), to
   /// see what drawing fewer pixels gives.
-  static final resolution =
-      double.tryParse(_setting('FYNKEL_RESOLUTION', const String.fromEnvironment('FYNKEL_RESOLUTION'))) ?? 1.0;
+  static final renderScale =
+      double.tryParse(_setting('FYNKEL_RENDER_SCALE', const String.fromEnvironment('FYNKEL_RENDER_SCALE'))) ?? 1.0;
 
   /// The world's `targetFrameRate` (`--define FYNKEL_FRAME_RATE=120`, or 0
   /// for every display frame); the engine's own (60) when not given.
@@ -55,6 +55,8 @@ abstract final class MeasureSettings {
 /// `initState`, pass [onStats] to the `FynkelView`, show [line], and
 /// [dispose] it with the state.
 class Measurement {
+  /// Starts measuring: hears Flutter's frame timings, and answers the
+  /// tool's calls for marks.
   Measurement() {
     _registerExtensions();
     SchedulerBinding.instance.addTimingsCallback(_onTimings);
@@ -110,6 +112,7 @@ class Measurement {
     return state == null ? '' : ' thermal=$state';
   }
 
+  /// Stops measuring: no more frame timings, and [line] is disposed.
   void dispose() {
     _baselineStats?.cancel();
     SchedulerBinding.instance.removeTimingsCallback(_onTimings);
@@ -208,8 +211,10 @@ class Measurement {
 /// The stats line, top left, clear of the iPhone's status bar and Dynamic
 /// Island, and wrapped to the screen's width. For a `Stack` over the view.
 class StatsLine extends StatelessWidget {
+  /// The line of [measurement].
   const StatsLine(this.measurement, {super.key});
 
+  /// Whose line it shows.
   final Measurement measurement;
 
   @override
@@ -235,6 +240,7 @@ class StatsLine extends StatelessWidget {
 /// with the engine's view, but nothing of the engine's. The baseline
 /// ([MeasureSettings.baseline]) shows it in place of the view.
 class BaselineSpinner extends StatefulWidget {
+  /// A spinner filling the space it's given.
   const BaselineSpinner({super.key});
 
   @override

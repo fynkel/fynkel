@@ -82,28 +82,32 @@ final class CharacterController extends Collider {
   double _radius;
 
   /// The steepest slope it walks up, in radians from flat (45.deg unless
-  /// given).
+  /// given): 0 to pi, or it throws an [ArgumentError], so `45` in degrees
+  /// is refused; write `45.deg`.
   double get slopeLimit => _slopeLimit;
   set slopeLimit(double value) => _setOrUndo(_slopeLimit, value, (v) => _slopeLimit = v, _checkMoving);
 
   double _slopeLimit;
 
   /// The highest step it walks up, in metres (0.3 unless given). It also
-  /// keeps to the ground going down one this high.
+  /// keeps to the ground going down one this high. Finite and 0 or more,
+  /// or it throws an [ArgumentError].
   double get stepOffset => _stepOffset;
   set stepOffset(double value) => _setOrUndo(_stepOffset, value, (v) => _stepOffset = v, _checkMoving);
 
   double _stepOffset;
 
   /// The gap it keeps from what it meets, in metres (0.08 unless given):
-  /// big enough not to get stuck, small enough not to be seen.
+  /// big enough not to get stuck, small enough not to be seen. Finite and
+  /// more than 0, or it throws an [ArgumentError].
   double get skinWidth => _skinWidth;
   set skinWidth(double value) => _setOrUndo(_skinWidth, value, (v) => _skinWidth = v, _checkMoving);
 
   double _skinWidth;
 
   /// How heavy it is, in kilograms, when it pushes the rigidbodies it walks
-  /// into (70 unless given): 0 pushes none, and it stops at them.
+  /// into (70 unless given): 0 pushes none, and it stops at them. Finite
+  /// and 0 or more, or it throws an [ArgumentError].
   double get mass => _mass;
   set mass(double value) => _setOrUndo(_mass, value, (v) => _mass = v, _checkMoving);
 
@@ -278,7 +282,8 @@ mixin ControllerHits {
   void onControllerColliderHit(ControllerColliderHit hit) {}
 }
 
-/// What a [CharacterController]'s move hit (Unity's `ControllerColliderHit`).
+/// What a [CharacterController]'s move hit (Unity's `ControllerColliderHit`,
+/// but for [moveLength]: see there).
 final class ControllerColliderHit {
   ControllerColliderHit._(this.controller, this.collider, this.point, this.normal, this.moveDirection, this.moveLength);
 
@@ -297,7 +302,11 @@ final class ControllerColliderHit {
   /// Which way the move went, unit length, in the world: zero for no move.
   final Vec3 moveDirection;
 
-  /// How far the move was asked to go, in metres.
+  /// How far the move was asked to go, in metres: the length of the
+  /// motion given to [CharacterController.move]. Unity's is how far the
+  /// controller went before it hit the collider; physics doesn't say that
+  /// here, so to tell a graze from a head-on stop, look at how [normal]
+  /// faces [moveDirection].
   final double moveLength;
 
   /// The object hit.

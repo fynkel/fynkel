@@ -13,9 +13,11 @@ import 'on_screen.dart';
 /// that in place of `lib/main.dart`, so the game's own code knows nothing
 /// of measuring.
 ///
-/// It shows the root [make] makes in a [FynkelView], with the game's
-/// [overlay] and the stats line over it, and reports how long the root
-/// took to load and to reach the screen. Its lifecycle check,
+/// It's shaped as [FynkelApp]: it shows the root [make] makes in a
+/// [FynkelView], in a [FynkelGame] (so a HUD's `FynkelGame.of(context)`
+/// works as in the game), with the game's [overlay] over it, laid out as
+/// `FynkelApp`'s, and the stats line over that. It reports how long the
+/// root took to load and to reach the screen. Its lifecycle check,
 /// [MeasureSettings.cycles] times each, with a mark after each step:
 ///
 /// 0. if the game has a [change], makes it (`changed`), as the next
@@ -29,51 +31,61 @@ import 'on_screen.dart';
 ///
 /// The bench runs [bench] (this package's timings), then the game's own
 /// [timings], if any.
-class MeasuredApp extends StatelessWidget {
+class MeasuredApp<T extends GameObject> extends StatelessWidget {
+  /// The game whose root [make] makes, measured as the tool asks, with
+  /// [overlay] over it.
   const MeasuredApp(this.make, {super.key, this.source, this.overlay, this.change, this.timings, this.onStats});
 
   /// Makes a new root, as `Garden.new` does.
-  final GameObject Function() make;
+  final T Function() make;
 
   /// Where the game's assets come from: the app's bundle if null.
   final AssetSource? source;
 
-  /// What the game shows over its view, such as a HUD, given its root.
-  final Widget Function(GameObject root)? overlay;
+  /// What the game shows over its view, such as a HUD, given its root, as
+  /// [FynkelApp.overlay].
+  final Widget Function(BuildContext context, T game)? overlay;
 
   /// A change the game makes again and again, given its root, such as
   /// going to the next level: done when what it adds has loaded.
-  final Future<void> Function(GameObject root)? change;
+  final Future<void> Function(T game)? change;
 
   /// The game's own timings for the bench, given its loaded root: each a
   /// line for [Measurement.report].
-  final List<String> Function(GameObject root)? timings;
+  final List<String> Function(T game)? timings;
 
   /// Told the view's stats each second, given the root, for a game that
   /// works out rates of its own (a tour of scenes, each measured apart).
-  final void Function(GameObject root, FynkelViewStats stats)? onStats;
+  final void Function(T game, FynkelViewStats stats)? onStats;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: ThemeData.dark(),
-    home: Scaffold(body: _Measured(this)),
+    home: Scaffold(body: _Measured<T>(this)),
   );
 }
 
-class _Measured extends StatefulWidget {
+class _Measured<T extends GameObject> extends StatefulWidget {
   const _Measured(this.app);
 
-  final MeasuredApp app;
+  final MeasuredApp<T> app;
 
   @override
-  State<_Measured> createState() => _MeasuredState();
+  State<_Measured<T>> createState() => _MeasuredState<T>();
 }
 
-class _MeasuredState extends State<_Measured> {
+class _MeasuredState<T extends GameObject> extends State<_Measured<T>> {
   final _measurement = Measurement();
   final _clock = Stopwatch()..start();
-  late GameObject _root = widget.app.make();
+
+  /// The root being measured: made here, so its load is timed from the
+  /// moment it's made, and given to the [FynkelGame] as it starts.
+  late T _root = widget.app.make();
+
+  /// [FynkelGame.make]: the root made for it, or a new one when that is
+  /// in a world, or was (F5 in a debug build).
+  T _make() => _root.isAlive || _root.isDestroyed ? _root = widget.app.make() : _root;
 
   // Each view is new, with a world and an on-screen clock of its own.
   var _view = GlobalKey<FynkelViewState>();
@@ -138,7 +150,8 @@ class _MeasuredState extends State<_Measured> {
       await Measurement.mark('destroyed $i');
       if (!baseline) {
         final clock = Stopwatch()..start();
-        _root = _view.currentState!.world.add(widget.app.make());
+        final next = _view.currentState!.world.add(widget.app.make());
+        setState(() => _root = next);
         await _timeLoad('added', clock);
       }
       await Future<void>.delayed(settle);
@@ -207,25 +220,38 @@ class _MeasuredState extends State<_Measured> {
               heightFactor: _scale,
               child: MeasureSettings.baseline
                   ? const BaselineSpinner()
-                  : FynkelView(
-                      key: _view,
-                      root: _root,
+                  : FynkelGame<T>(
+                      _make,
                       source: widget.app.source,
-                      onFrame: _onFrame,
-                      onStats: (stats) {
-                        _measurement.onStats(stats);
-                        widget.app.onStats?.call(_root, stats);
+                      builder: (context, game) {
+                        final view = FynkelView(
+                          key: _view,
+                          root: _root,
+                          onFrame: _onFrame,
+                          onStats: (stats) {
+                            _measurement.onStats(stats);
+                            widget.app.onStats?.call(_root, stats);
+                          },
+                          onViewStats: onScreen.onViewStats,
+                          renderScale: MeasureSettings.renderScale,
+                        );
+                        final overlay = widget.app.overlay;
+                        if (overlay == null) return view;
+                        // As FynkelApp lays its overlay out.
+                        return Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            view,
+                            Material(
+                              type: MaterialType.transparency,
+                              child: Stack(children: [Builder(builder: (context) => overlay(context, _root))]),
+                            ),
+                          ],
+                        );
                       },
-                      onViewStats: onScreen.onViewStats,
-                      resolutionScale: MeasureSettings.resolution,
                     ),
             ),
           ),
-        if (_shown && !MeasureSettings.baseline)
-          if (widget.app.overlay case final overlay?)
-            Center(
-              child: FractionallySizedBox(widthFactor: _scale, heightFactor: _scale, child: overlay(_root)),
-            ),
         StatsLine(_measurement),
         Positioned(
           left: 12,

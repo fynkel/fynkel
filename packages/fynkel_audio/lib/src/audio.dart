@@ -136,8 +136,8 @@ final class AudioStats {
   @override
   String toString() =>
       'AudioStats(${device ? 'device' : 'no device'} $rate Hz × $channels, $voices voices, started $started, '
-      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns, starved $starved, '
-      '${frameMilliseconds.toStringAsFixed(3)} ms a frame)';
+      'stolen $stolen, refused $refused, callbacks $callbacks, underruns $underruns, reopened $reopened, '
+      'starved $starved, ${frameMilliseconds.toStringAsFixed(3)} ms a frame)';
 }
 
 /// A world's sound, as Unity's `AudioListener` and `AudioSettings` are:
@@ -338,6 +338,7 @@ final class Audio extends WorldSystem implements Finalizable {
     if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
     if (!(speed >= 0.05 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not between 0.05 and 8');
     _checkPriority(priority);
+    final index = _indexOf(group);
     _playFloats
       ..[0] = gain
       ..[1] = speed
@@ -347,7 +348,7 @@ final class Audio extends WorldSystem implements Finalizable {
       ..[13] = 500;
     _playWords[14] = 0;
     _playFrom.value = 0;
-    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: _indexOf(group));
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: index);
   }
 
   /// Plays [clip] once at [position] in the world, a 3D sound that belongs
@@ -377,6 +378,7 @@ final class Audio extends WorldSystem implements Finalizable {
       throw ArgumentError.value(maxDistance, 'maxDistance', 'is not above minDistance ($near)');
     }
     _checkPriority(priority);
+    final index = _indexOf(group);
     _playFloats
       ..[0] = gain
       ..[1] = speed
@@ -390,7 +392,7 @@ final class Audio extends WorldSystem implements Finalizable {
     _playWords[14] = rolloffMode.index;
     _playFrom.value = 0;
     _hear();
-    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: _indexOf(group));
+    _start(clip, looping: false, priority: priority, pausable: !ignorePause, owner: 0, group: index);
   }
 
   /// Stops every sound [playOneShot] and [playAt] started, with a short
@@ -650,6 +652,16 @@ final class Audio extends WorldSystem implements Finalizable {
     return _handle.value;
   }
 
+  /// [group]'s number for the mixer: 0 for none. Throws an [ArgumentError]
+  /// for another world's.
+  int _indexOf(AudioGroup? group) {
+    if (group == null) return 0;
+    if (!identical(group._audio, this)) {
+      throw ArgumentError("group is $group, of another world's audio: use this world's audio.group('${group.name}')");
+    }
+    return group._index;
+  }
+
   /// Fades [handle] to [to] over [seconds], stopping it there if [stop].
   void _fadeVoice(int handle, double to, double seconds, {required bool stop}) {
     _fadeFloats
@@ -778,9 +790,6 @@ void _checkUnit(double value, String name) {
 void _checkPitch(double value) {
   if (!(value >= 0.05 && value <= 8)) throw ArgumentError.value(value, 'pitch', 'is not between 0.05 and 8');
 }
-
-/// [group]'s number for the mixer: 0 for none.
-int _indexOf(AudioGroup? group) => group == null ? 0 : group._index;
 
 void _checkPriority(int value) {
   if (value < 0 || value > 256) throw ArgumentError.value(value, 'priority', 'is not between 0 and 256');

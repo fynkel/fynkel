@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show kDebugMode;
 import 'package:flutter/material.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject;
 
@@ -9,14 +10,17 @@ import 'fynkel_view.dart';
 /// `FynkelApp(ArenaGame.new, overlay: (context, game) => Hud(game))`. It
 /// shows the root [make] makes in a [FynkelView] full screen, with assets
 /// from the app's bundle under `assets/` unless [source] says otherwise.
+/// The view's own settings ([onStats], [onError], [errorBuilder],
+/// [showErrors], [pauseWhenCovered], [directToScreen], [renderScale]) are
+/// passed on to it.
 ///
 /// It's a [MaterialApp], with the game as its first page: the overlay can
 /// hold any Material widget (a `Slider`, a `TextField`, a dialog from
 /// `showDialog`), in the app's [theme], and push pages over the game with
-/// `Navigator.of(context)`. It's a [FynkelGame] too, so F5 starts the game
-/// over in a debug build. A game with menus around it puts a [FynkelGame]
-/// in its own app instead.
-class FynkelApp<T extends GameObject> extends StatelessWidget {
+/// `Navigator.of(context)`, which find the game with [FynkelGame.of] too.
+/// It's a [FynkelGame] too, so F5 starts the game over in a debug build.
+/// A game with menus around it puts a [FynkelGame] in its own app instead.
+class FynkelApp<T extends GameObject> extends StatefulWidget {
   /// An app that shows the root [make] makes, with [overlay] over it.
   const FynkelApp(
     this.make, {
@@ -30,6 +34,13 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
     this.themeMode = ThemeMode.system,
     this.navigatorKey,
     this.shortcuts,
+    this.onStats,
+    this.onError,
+    this.errorBuilder,
+    this.showErrors = kDebugMode,
+    this.pauseWhenCovered = true,
+    this.directToScreen = true,
+    this.renderScale = 1.0,
   });
 
   /// Makes the game's root, as `Garden.new` does: when the app starts,
@@ -37,7 +48,12 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
   final T Function() make;
 
   /// What shows over the game, such as a HUD, given its root. It's on a
-  /// transparent [Material], so Material widgets work in it.
+  /// transparent [Material], so Material widgets work in it, and in a
+  /// [Stack] the size of the screen: a [Positioned] overlay goes where it
+  /// says (`Positioned(left: 24, bottom: 24, child: Stick(...))`), and any
+  /// other is laid out loosely from the top-left corner, covering only
+  /// itself, so taps around it reach the game. Layouts that fill
+  /// ([Center], [Column], [Align]) still do.
   final Widget Function(BuildContext context, T game)? overlay;
 
   /// Where assets load from: the app's bundle under `assets/`
@@ -67,22 +83,62 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
   /// the game uses goes to the game instead, unless the world is paused.
   final Map<ShortcutActivator, VoidCallback> Function(T game)? shortcuts;
 
+  /// See [FynkelView.onStats].
+  final void Function(FynkelViewStats stats)? onStats;
+
+  /// See [FynkelView.onError].
+  final void Function(Object error, StackTrace stack)? onError;
+
+  /// See [FynkelView.errorBuilder].
+  final Widget Function(BuildContext context, Object error, VoidCallback retry)? errorBuilder;
+
+  /// See [FynkelView.showErrors].
+  final bool showErrors;
+
+  /// See [FynkelView.pauseWhenCovered].
+  final bool pauseWhenCovered;
+
+  /// See [FynkelView.directToScreen].
+  final bool directToScreen;
+
+  /// See [FynkelView.renderScale].
+  final double renderScale;
+
+  @override
+  State<FynkelApp<T>> createState() => _FynkelAppState<T>();
+}
+
+class _FynkelAppState<T extends GameObject> extends State<FynkelApp<T>> {
+  // The game, for the pages pushed over it.
+  final _game = AppGame();
+
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: title,
+    title: widget.title,
     color: const Color(0xFF000000),
-    theme: theme ?? ThemeData.dark(),
-    darkTheme: darkTheme,
-    themeMode: themeMode,
-    navigatorKey: navigatorKey,
+    theme: widget.theme ?? ThemeData.dark(),
+    darkTheme: widget.darkTheme,
+    themeMode: widget.themeMode,
+    navigatorKey: widget.navigatorKey,
     debugShowCheckedModeBanner: false,
+    // Above the navigator, so every page finds the game.
+    builder: (context, navigator) => AppGameScope(holder: _game, child: navigator!),
     home: FynkelGame(
-      make: make,
-      source: source,
-      restartOnReload: restartOnReload,
+      widget.make,
+      source: widget.source,
+      restartOnReload: widget.restartOnReload,
       builder: (context, game) {
-        final view = FynkelView(root: game);
-        final over = overlay;
+        final view = FynkelView(
+          root: game,
+          onStats: widget.onStats,
+          onError: widget.onError,
+          errorBuilder: widget.errorBuilder,
+          showErrors: widget.showErrors,
+          pauseWhenCovered: widget.pauseWhenCovered,
+          directToScreen: widget.directToScreen,
+          renderScale: widget.renderScale,
+        );
+        final over = widget.overlay;
         final page = over == null
             ? view
             : Stack(
@@ -93,16 +149,12 @@ class FynkelApp<T extends GameObject> extends StatelessWidget {
                     type: MaterialType.transparency,
                     // Loose, from the top-left corner: a HUD's text covers
                     // only itself, not the screen, so taps around it reach
-                    // the game. Layouts that fill (Center, Column, Align)
-                    // still do.
-                    child: Align(
-                      alignment: AlignmentDirectional.topStart,
-                      child: Builder(builder: (context) => over(context, game)),
-                    ),
+                    // the game. A Positioned overlay goes where it says.
+                    child: Stack(children: [Builder(builder: (context) => over(context, game))]),
                   ),
                 ],
               );
-        final keys = shortcuts;
+        final keys = widget.shortcuts;
         return keys == null ? page : CallbackShortcuts(bindings: keys(game), child: page);
       },
     ),

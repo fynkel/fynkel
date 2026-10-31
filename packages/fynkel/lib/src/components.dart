@@ -88,11 +88,18 @@ sealed class Component {
 
   /// The first component of type [T] on its object or the nearest one
   /// above: see [GameObject.getInParent].
-  T? getInParent<T extends Object>() => gameObject.getInParent<T>();
+  T? getInParent<T extends Object>({bool includeInactive = false}) =>
+      gameObject.getInParent<T>(includeInactive: includeInactive);
 
   /// The first component of type [T] on its object or below it: see
   /// [GameObject.getInChildren].
-  T? getInChildren<T extends Object>() => gameObject.getInChildren<T>();
+  T? getInChildren<T extends Object>({bool includeInactive = false}) =>
+      gameObject.getInChildren<T>(includeInactive: includeInactive);
+
+  /// Every component of type [T] on its object and below it: see
+  /// [GameObject.getAllInChildren].
+  List<T> getAllInChildren<T extends Object>({bool includeInactive = false}) =>
+      gameObject.getAllInChildren<T>(includeInactive: includeInactive);
 
   /// The live object it's on, for writing a change to the engine; null
   /// while there's nothing to write to (not added yet, or the part of a
@@ -286,8 +293,9 @@ final class AmbientOcclusion {
 /// camera of its own ([WorldView.camera]): a minimap, the other half of a
 /// split screen. Change it in place: `get<Camera>()!.fovY = 40.deg`.
 ///
-/// A value the engine refuses (out of its range, NaN) throws an
-/// [ArgumentError] from the setter and leaves the old value in place.
+/// A value out of its range, or NaN, throws an [ArgumentError] from the
+/// constructor or the setter, naming it, and a setter leaves the old value
+/// in place.
 final class Camera extends Component {
   /// A perspective camera with a 60° [fovY], [near] 0.1 m, [far] 1,000 m,
   /// a dark grey [clearColor], drawing every layer, without [bloom] or
@@ -307,6 +315,7 @@ final class Camera extends Component {
     this._pixels,
     List<ScreenEffect> effects = const [],
   }) : super._() {
+    if (_refused() case final error?) throw error;
     _useEffects(effects);
   }
 
@@ -529,7 +538,7 @@ final class Camera extends Component {
   /// as the view ignores it). Throws a [StateError] when it's on no object.
   Ray screenPointToRay(ViewPoint point) {
     if (!(point.width > 0 && point.height > 0)) {
-      throw ArgumentError.value(point, 'point', 'needs a view with an area');
+      throw ArgumentError('screenPointToRay needs a point in a view with an area; got $point', 'point');
     }
     final c = this;
     final t = gameObject.worldTransform;
@@ -565,7 +574,12 @@ final class Camera extends Component {
   ViewPoint? worldToScreenPoint(Vec3 point, {double? width, double? height}) {
     final input = gameObject.world.input;
     final w = width ?? input.width, h = height ?? input.height;
-    if (!(w > 0 && h > 0)) throw ArgumentError('worldToScreenPoint needs a view with an area; got ${w}x$h');
+    if (!(w > 0 && h > 0)) {
+      throw ArgumentError(
+        'worldToScreenPoint needs a view with an area, and the world\'s input has ${w}x$h: give the view\'s size '
+        '(width: and height:), or in a test, give the input one with world.input.simulate.resize(width, height)',
+      );
+    }
     final c = this;
     final t = gameObject.worldTransform;
     final p = t.rotation.inverse.rotate(point - t.position);
@@ -601,9 +615,11 @@ final class Camera extends Component {
   @override
   void _forget(GameObject object) => _effectsSent = false;
 
-  /// Writes it to the engine; what the engine refuses comes back, for the
-  /// setter to undo its change and throw. Off, it's only kept here.
+  /// Writes it to the engine; what it or the engine refuses comes back,
+  /// for the setter to undo its change and throw. Off, it's only kept
+  /// here.
   _Failure? _write() {
+    if (_refused() case final error?) return _Failure(error, StackTrace.current);
     if (!_enabledFlag) return null;
     try {
       _live?._writeCamera(this);
@@ -611,6 +627,37 @@ final class Camera extends Component {
     } catch (error, stack) {
       return _Failure(error, stack);
     }
+  }
+
+  /// Why it can't be as it is, if it can't: the engine's ranges.
+  ArgumentError? _refused() {
+    final on = _owner;
+    if (!(_fovY >= _degree - _slack && _fovY <= 179 * _degree + _slack)) {
+      return _rangeError('Camera.fovY', _fovY, 1, 179, radians: true, owner: on);
+    }
+    if (!(_near >= 1e-4 && _near <= 1e6)) {
+      return _rangeError('Camera.near', _near, 1e-4, 1e6, unit: ' metres', owner: on);
+    }
+    if (!(_far >= 1e-3 && _far <= 1e9)) return _rangeError('Camera.far', _far, 1e-3, 1e9, unit: ' metres', owner: on);
+    if (!(_orthographicSize >= 1e-4 && _orthographicSize <= 1e6)) {
+      return _rangeError('Camera.orthographicSize', _orthographicSize, 1e-4, 1e6, unit: ' metres', owner: on);
+    }
+    if (_notFinite(_clearColor)) return _colorError('Camera.clearColor', _clearColor, on);
+    if (_bloom case final b?) {
+      if (!(b.strength >= 0 && b.strength <= 10)) return _rangeError('Bloom.strength', b.strength, 0, 10, owner: on);
+      if (!(b.threshold >= 0 && b.threshold <= 100)) {
+        return _rangeError('Bloom.threshold', b.threshold, 0, 100, owner: on);
+      }
+    }
+    if (_ambientOcclusion case final ao?) {
+      if (!(ao.intensity >= 0 && ao.intensity <= 4)) {
+        return _rangeError('AmbientOcclusion.intensity', ao.intensity, 0, 4, owner: on);
+      }
+      if (!(ao.radius >= 0 && ao.radius <= 10)) {
+        return _rangeError('AmbientOcclusion.radius', ao.radius, 0, 10, unit: ' metres', owner: on);
+      }
+    }
+    return null;
   }
 
   @override
@@ -752,8 +799,10 @@ final class Light extends Component {
 
   /// How bright it is, 0 to 1,000,000; 1 unless set. A sun of 1 lights a
   /// white, rough surface that faces it to exactly its material's colour.
-  /// Out of range or NaN throws an [ArgumentError] and keeps the old
-  /// value.
+  ///
+  /// This and the other values out of range, or NaN, throw an
+  /// [ArgumentError] from the constructor or the setter, naming it, and a
+  /// setter keeps the old value.
   double get intensity => _intensity;
   set intensity(double value) {
     _checkChangeable();
@@ -779,7 +828,8 @@ final class Light extends Component {
     }
   }
 
-  /// A spot light's cone, edge to edge, 0 to 179°; 30° unless set. One
+  /// A spot light's cone, edge to edge, in radians, 0 to 179° (`40.deg`);
+  /// 30° unless set. One
   /// with [shadows] is at most 150°: wider is refused with an
   /// [ArgumentError].
   double get angle => _angle;
@@ -851,13 +901,27 @@ final class Light extends Component {
     }
   }
 
-  /// Why it can't be as it is, if it can't.
-  ArgumentError? _refused() => _kind == LightKind.spot && _shadows && _angle > _widestShadowedSpot + 1e-9
-      ? ArgumentError(
-          'a spot light casts shadows up to 150° across (its shadow map is at most 160°); this one is '
-          '${_angle.inDegrees.toStringAsFixed(1)}°. Narrow it, or turn its shadows off',
-        )
-      : null;
+  /// Why it can't be as it is, if it can't: the engine's ranges, then a
+  /// shadowed spot light's width.
+  ArgumentError? _refused() {
+    final on = _owner;
+    if (!(_intensity >= 0 && _intensity <= 1e6)) return _rangeError('Light.intensity', _intensity, 0, 1e6, owner: on);
+    if (!(_range >= 0 && _range <= 1e6)) return _rangeError('Light.range', _range, 0, 1e6, unit: ' metres', owner: on);
+    if (!(_angle >= -_slack && _angle <= 179 * _degree + _slack)) {
+      return _rangeError('Light.angle', _angle, 0, 179, radians: true, owner: on);
+    }
+    if (!(_softness >= 0 && _softness <= 1)) return _rangeError('Light.softness', _softness, 0, 1, owner: on);
+    if (_notFinite(_color)) return _colorError('Light.color', _color, on);
+    if (_kind == LightKind.spot && _shadows && _angle > _widestShadowedSpot + 1e-9) {
+      return ArgumentError(
+        'a spot light casts shadows up to 150° across (its shadow map is at most 160°); this one'
+            '${on == null ? '' : ' on $on'} is ${_angle.inDegrees.toStringAsFixed(1)}°. Narrow it, or turn its '
+            'shadows off',
+        'angle',
+      );
+    }
+    return null;
+  }
 
   @override
   String toString() {
@@ -1038,9 +1102,13 @@ final class MeshRenderer extends Component {
   @override
   void _forget(GameObject object) => _moreSent = false;
 
-  /// Writes it to the engine; what the engine refuses comes back, for the
-  /// setter to undo its change and throw. Off, it's only kept here.
+  /// Writes it to the engine; what it or the engine refuses comes back,
+  /// for the setter to undo its change and throw. Off, it's only kept
+  /// here.
   _Failure? _write() {
+    if (_color case final color? when _notFinite(color)) {
+      return _Failure(_colorError('MeshRenderer.color', color, _owner), StackTrace.current);
+    }
     if (!_enabledFlag) return null;
     try {
       _live?._writeMeshRenderer(this);
@@ -1260,4 +1328,64 @@ final class _Failure {
   final StackTrace stack;
 
   Never raise() => Error.throwWithStackTrace(error, stack);
+}
+
+// What the engine checks of a component, checked in Dart where the value
+// is given, in the game's names and units (stage 14, C1 and C2): the
+// engine's own check stays behind it. Each test is written out in place,
+// as a double passed to a call the JIT doesn't inline is boxed, and a
+// light or a colour set each frame allocates nothing; these make the
+// message once a test fails.
+
+/// A degree, in radians, and a little more for the last digits a value
+/// in degrees loses on its way to radians and back.
+const _degree = math.pi / 180, _slack = 1e-9;
+
+/// [v] for a message: a whole number without its `.0`, another to four
+/// significant digits.
+String _valueText(double v) {
+  if (!v.isFinite) return '$v';
+  if (v == v.roundToDouble() && v.abs() < 1e15) return '${v.round()}';
+  return '${double.parse(v.toStringAsPrecision(4))}';
+}
+
+/// The error for [value], given as [what] (`Camera.near`) to a component
+/// on [owner]: NaN, or outside [min] to [max] (in [unit]). An angle in
+/// [radians] has its range in degrees, and one that looks like degrees is
+/// asked about: `did you mean 60.deg?`.
+ArgumentError _rangeError(
+  String what,
+  double value,
+  double min,
+  double max, {
+  String unit = '',
+  bool radians = false,
+  GameObject? owner,
+}) {
+  final on = owner == null ? '' : ' on $owner';
+  final name = what.substring(what.lastIndexOf('.') + 1);
+  if (!radians) {
+    final range = '${_valueText(min)} to ${_valueText(max)}$unit';
+    final why = value.isFinite ? 'it goes from $range' : 'give a number from $range';
+    return ArgumentError('$what$on is ${_valueText(value)}: $why', name);
+  }
+  final range = '${_valueText(min)}° to ${_valueText(max)}° (${_valueText(min.deg)} to ${_valueText(max.deg)})';
+  final shown = _valueText(value);
+  final hint = !value.isFinite
+      ? ''
+      : ', and $shown radians is ${_valueText(value.inDegrees)}°'
+            '${value >= min && value <= max ? ': did you mean $shown.deg?' : ''}';
+  return ArgumentError('$what$on is $shown, in radians, from $range$hint', name);
+}
+
+/// Whether a part of [color] is NaN or infinite (as a 32-bit float, as
+/// the engine keeps it).
+bool _notFinite(Color color) =>
+    !(color.r.abs() < 3.4e38 && color.g.abs() < 3.4e38 && color.b.abs() < 3.4e38 && color.a.abs() < 3.4e38);
+
+/// The error for [color], not finite, given as [what] to a component on
+/// [owner].
+ArgumentError _colorError(String what, Color color, GameObject? owner) {
+  final on = owner == null ? '' : ' on $owner';
+  return ArgumentError('$what$on is $color: NaN or infinity', what.substring(what.lastIndexOf('.') + 1));
 }

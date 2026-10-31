@@ -66,7 +66,8 @@ pub unsafe extern "C" fn fy_mesh_new_box(
             segment_count(segments_y, 1, "segments_y")?,
             segment_count(segments_z, 1, "segments_z")?,
         ];
-        let data = MeshData::box_shape(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?);
+        let data = MeshData::box_shape(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?)
+            .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -91,7 +92,8 @@ pub unsafe extern "C" fn fy_mesh_new_grid(
     guard(|| {
         let size = Vec2::new(length(width, "width")?, length(depth, "depth")?);
         let counts = [segment_count(segments_x, 1, "segments_x")?, segment_count(segments_z, 1, "segments_z")?];
-        let data = MeshData::grid(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?);
+        let data = MeshData::grid(size, counts, at_least_0(uv_per_metre, "uv_per_metre")?)
+            .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -139,7 +141,8 @@ pub unsafe extern "C" fn fy_mesh_new_capsule(
             at_least_0(height, "height")?,
             segment_count(segments, 3, "segments")?,
             segment_count(rings, 1, "rings")?,
-        );
+        )
+        .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -193,7 +196,8 @@ pub unsafe extern "C" fn fy_mesh_new_cone(
             length(height, "height")?,
             segment_count(segments, 3, "segments")?,
             cap,
-        );
+        )
+        .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -220,7 +224,8 @@ pub unsafe extern "C" fn fy_mesh_new_torus(
             length(tube, "tube")?,
             segment_count(segments, 3, "segments")?,
             segment_count(sides, 3, "sides")?,
-        );
+        )
+        .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
     })
@@ -370,7 +375,7 @@ pub unsafe extern "C" fn fy_mesh_lathe(
                 format!("profile point {at} is left of the axis (x below 0)"),
             ));
         }
-        let data = MeshData::lathe(rings[0], segment_count(sides, 3, "sides")?)
+        let data = MeshData::lathe(rings[0], segment_count(sides, 3, "segments")?)
             .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }

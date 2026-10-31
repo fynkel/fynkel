@@ -234,9 +234,24 @@ final class _Wait {
 
 final _waitOf = Expando<_Wait>();
 
+/// Says the wait [what] was asked for outside a routine, and how to start
+/// one.
+StateError _outsideRoutine(String what) {
+  final example = switch (what) {
+    'wait' => 'wait(1)',
+    'waitUntil' => 'waitUntil(() => done)',
+    'waitWhile' => 'waitWhile(() => busy)',
+    _ => what,
+  };
+  final name = what.contains(' ') || !example.contains('(') ? what : '$what(...)';
+  return StateError(
+    '$name works only inside a routine, which waits for it: startRoutine(() async { await $example; }) on an '
+    'object or a behaviour',
+  );
+}
+
 Future<void> _addWait(_Wait Function(Routine<Object?> routine, int frame) make, String what, {bool fixed = false}) {
-  final routine =
-      _currentRoutine ?? (throw StateError('$what waits only inside a routine: start(() async { await $what; })'));
+  final routine = _currentRoutine ?? (throw _outsideRoutine(what));
   if (routine._stopped) throw RoutineStopped._();
   final world = routine._world;
   final wait = make(routine, fixed ? world.time._fixedSteps : world.time._frame);
@@ -282,7 +297,9 @@ Future<void> waitWhile(bool Function() test) =>
 /// another future, such as `wait(3).then(...)`, still ends, into nothing.
 Future<T> race<T>(Iterable<Future<T>> racers) {
   final all = racers.toList();
-  if (all.isEmpty) throw ArgumentError.value(racers, 'racers', 'is empty');
+  if (all.isEmpty) {
+    throw ArgumentError('race was given nothing to race: give it a wait or a routine at least', 'racers');
+  }
   final result = Completer<T>.sync();
   // Set before the rest are stopped, as a stopped routine ends at once.
   var settled = false;

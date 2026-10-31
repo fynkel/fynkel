@@ -84,7 +84,7 @@ final class _Group extends Motion {
     super.onComplete,
   }) : _parts = parts.toList(),
        super._() {
-    if (_parts.isEmpty) throw ArgumentError.value(parts, 'parts', 'is empty');
+    if (_parts.isEmpty) throw ArgumentError('parts is empty; a group needs at least one motion');
     for (final part in _parts) {
       if (!identical(part._world, _world)) throw ArgumentError('$part is in another world');
       if (part._group != null) throw StateError('$part is in a group already; a motion can be in one');

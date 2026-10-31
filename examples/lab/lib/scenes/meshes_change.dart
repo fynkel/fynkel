@@ -39,7 +39,7 @@ class MeshesChangeScene extends LabScene {
       'frame; tap it to drop a ripple. '
       'GROUND: tap it to dig, the dirt showing by height; its MeshCollider follows the mesh by itself, so the '
       'balls ("drop balls") roll into the holes. '
-      'The readout gives what changing them and sending them takes each frame (world.meshChangeTime).';
+      'The readout gives what changing them and sending them takes each frame (world.profile.meshes).';
 
   @override
   Vec3 get eye => Vec3(0, 3.6, 5.4);
@@ -127,7 +127,7 @@ class MeshesChangeScene extends LabScene {
     // The frame before's sending, as this frame's hasn't happened yet.
     _work.add(flag.work + water.work);
     _setting.add(flag.setting + water.setting);
-    _sending.add(world.meshChangeTime.inMicroseconds);
+    _sending.add(world.profile.meshes.inMicroseconds);
     if (_work.length == 120) {
       int median(List<int> times) => (times..sort())[60];
       _shown = (work: median(_work), setting: median(_setting), sending: median(_sending));

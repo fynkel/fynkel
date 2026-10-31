@@ -51,4 +51,4 @@ export 'src/physics.dart'
         SpringJoint,
         Triggers,
         WorldPhysics;
-export 'src/raw.dart' show PhysicsException;
+export 'src/raw.dart' show PhysicsException, PhysicsStatus;

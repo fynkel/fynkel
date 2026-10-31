@@ -159,7 +159,7 @@ impl MeshData {
                 distance += length;
             }
         }
-        Ok(s.build())
+        s.try_build()
     }
 
     /// `profile` turned around Y with `sides` slices, as on a lathe: each
@@ -216,6 +216,6 @@ impl MeshData {
         if s.indices.is_empty() {
             return Err(MeshError::NoTriangles);
         }
-        Ok(s.build())
+        s.try_build()
     }
 }

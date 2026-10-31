@@ -49,6 +49,15 @@ StateError _notInWorld(Behaviour component, String what) {
   return StateError('$type.$what: it isn\'t in the physics world: $why');
 }
 
+/// The object [component] is on, or null before it's on one.
+GameObject? _objectOf(Component component) {
+  try {
+    return component.gameObject;
+  } on StateError {
+    return null;
+  }
+}
+
 /// A world's physics, as Unity's `Physics`: the queries ([raycast] and the
 /// rest) and the settings. Every object and behaviour reaches it as
 /// `physics`, and the world as `world.physics`; it's made the first time
@@ -371,6 +380,7 @@ final class Physics extends WorldSystem implements Finalizable {
   @protected
   void afterFrame() {
     super.afterFrame();
+    if (_waiting.isNotEmpty) _tellWaiting();
     if (!_due) return;
     _due = false;
     _follow();
@@ -472,6 +482,9 @@ final class Physics extends WorldSystem implements Finalizable {
     t.scale.set(scale);
     try {
       checkPhysics(fp_object_collider_add(_world, key, _spec.ref, t, body?._id ?? 0, _id));
+    } on ArgumentError catch (e) {
+      collider._settle(false);
+      throw ArgumentError('$collider: ${e.message}');
     } catch (_) {
       collider._settle(false);
       rethrow;
@@ -534,6 +547,9 @@ final class Physics extends WorldSystem implements Finalizable {
     collider._writeSpec(_spec.ref, _listensFor(collider, collider._body));
     try {
       checkPhysics(fp_collider_spec_set(_world, collider._id, _spec.ref));
+    } on ArgumentError catch (e) {
+      collider._settle(false);
+      throw ArgumentError('$collider: ${e.message}');
     } catch (_) {
       collider._settle(false);
       rethrow;
@@ -1058,7 +1074,9 @@ final class Physics extends WorldSystem implements Finalizable {
   void _addJoint(Joint joint) {
     final key = _freeJointKeys.isNotEmpty ? _freeJointKeys.removeLast() : (_jointsByKey..add(null)).length - 1;
     _jointsByKey[key] = joint;
-    joint._key = key;
+    joint
+      .._key = key
+      .._told = false;
     joint._index = _joints.length;
     _joints.add(joint);
     _waiting.add(joint);
@@ -1087,20 +1105,22 @@ final class Physics extends WorldSystem implements Finalizable {
     checkPhysics(fp_joint_spec_set(_world, joint._id, _jointSpec));
   }
 
-  /// Joins [joint]'s bodies again, as they are now.
+  /// Joins [joint]'s bodies again, as they are now: it waits for them
+  /// again, joined or not (one the native world refused too).
   void _rejoin(Joint joint) {
     if (_disposed) return;
     if (joint._id != 0) {
       final id = joint._id;
       joint._id = 0;
       checkPhysics(fp_joint_remove(_world, id));
-      _waiting.add(joint);
     }
+    if (!_waiting.contains(joint)) _waiting.add(joint);
     _follow();
   }
 
   /// Joins the waiting joints whose rigidbodies are in the world. One the
-  /// native world refuses doesn't wait any more, and throws.
+  /// native world refuses doesn't wait any more, and throws; a change to
+  /// what it joins ([_rejoin]) has it wait again.
   void _joinWaiting() {
     final waiting = _waiting;
     for (var i = waiting.length - 1; i >= 0; i--) {
@@ -1109,10 +1129,11 @@ final class Physics extends WorldSystem implements Finalizable {
       if (body == null || body._id == 0) continue;
       final connected = joint._connectedBody;
       // One gone for good leaves it joined to the world, as in Unity;
-      // one away for now, it waits for.
+      // one away for now, it waits for. One made to its own rigidbody
+      // waits too, and _tellWaiting says why.
       if (connected != null && (connected.isRemoved || connected.gameObject.isDestroyed)) {
         joint._connectedBody = null;
-      } else if (connected != null && connected._id == 0) {
+      } else if (connected != null && (connected._id == 0 || identical(connected, body))) {
         continue;
       }
       waiting.removeAt(i);
@@ -1120,7 +1141,32 @@ final class Physics extends WorldSystem implements Finalizable {
       checkPhysics(fp_joint_add(_world, joint._key, _jointSpec, _id));
       joint
         .._id = _id.value
-        .._body = body;
+        .._body = body
+        .._told = false;
+    }
+  }
+
+  /// Tells [World.errors], once for each, of the joints still waiting at
+  /// the end of a frame for what won't come by itself: a rigidbody on
+  /// their object (Unity adds one; here the game does), or a connected
+  /// body that isn't their own.
+  void _tellWaiting() {
+    final waiting = _waiting;
+    for (var i = 0; i < waiting.length; i++) {
+      final joint = waiting[i];
+      if (joint._told || joint.isRemoved) continue;
+      final object = joint.gameObject;
+      final body = object.get<Rigidbody>();
+      // One waiting for a connected body that's away for now isn't told.
+      if (body != null && !identical(joint._connectedBody, body)) continue;
+      final name = object.name ?? '$object';
+      final why = body == null
+          ? '${joint.runtimeType} on $name: its object has no Rigidbody, so it joins nothing. '
+                'Put a Rigidbody on $name (isKinematic: true for one that stays put)'
+          : '${joint.runtimeType} on $name: its connectedBody is the Rigidbody on its own object, so it '
+                'joins nothing. Set connectedBody to another object\'s Rigidbody, or to null to join it to the world';
+      joint._told = true;
+      world.report(object, StateError(why), StackTrace.current);
     }
   }
 

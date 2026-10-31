@@ -19,6 +19,9 @@ final class JointLimits {
 
   /// How far it turns on, in radians, [min] to pi: 0 unless given.
   final double max;
+
+  /// A copy with the values given changed.
+  JointLimits copyWith({double? min, double? max}) => JointLimits(min: min ?? this.min, max: max ?? this.max);
 }
 
 /// One of a [CharacterJoint]'s limits, in radians (Unity's
@@ -31,6 +34,9 @@ final class SoftJointLimit {
   /// How far it turns, in radians: 0 unless given. Each of a
   /// [CharacterJoint]'s limits says its range.
   final double limit;
+
+  /// A copy with the limit given changed.
+  SoftJointLimit copyWith({double? limit}) => SoftJointLimit(limit: limit ?? this.limit);
 }
 
 /// A hinge's motor (Unity's `JointMotor`): it turns the hinge at
@@ -48,6 +54,12 @@ final class JointMotor {
   /// The most it turns it with, in newton metres: 0 unless given; finite
   /// and 0 or more.
   final double force;
+
+  /// A copy with the values given changed: `hinge.motor =
+  /// hinge.motor.copyWith(targetVelocity: v)` keeps its force, where a new
+  /// `JointMotor(targetVelocity: v)` would have none.
+  JointMotor copyWith({double? targetVelocity, double? force}) =>
+      JointMotor(targetVelocity: targetVelocity ?? this.targetVelocity, force: force ?? this.force);
 }
 
 /// A hinge's spring (Unity's `JointSpring`): it turns the hinge to
@@ -69,6 +81,14 @@ final class JointSpring {
   /// The angle it pulls to, in radians from where the hinge was joined: 0
   /// unless given; finite.
   final double targetPosition;
+
+  /// A copy with the values given changed: `hinge.spring =
+  /// hinge.spring.copyWith(targetPosition: a)` keeps its strength.
+  JointSpring copyWith({double? spring, double? damper, double? targetPosition}) => JointSpring(
+    spring: spring ?? this.spring,
+    damper: damper ?? this.damper,
+    targetPosition: targetPosition ?? this.targetPosition,
+  );
 }
 
 /// What joins its object's [Rigidbody] to [connectedBody], or to the world
@@ -90,28 +110,45 @@ sealed class Joint extends Behaviour {
     this._breakTorque = double.infinity,
   }) {
     _checkBreak();
+    _checkPoint('anchor', _anchor);
+    if (_connectedAnchor case final a?) _checkPoint('connectedAnchor', a);
   }
 
   /// The rigidbody it's joined to; null for the world. If that one's
   /// object is destroyed, or the rigidbody taken off, this goes null and
   /// the joint holds its body to the world where it is (as in Unity); one
-  /// disabled for a while, it waits for.
+  /// disabled for a while, it waits for. The rigidbody on its own object
+  /// throws an [ArgumentError].
   Rigidbody? get connectedBody => _connectedBody;
-  set connectedBody(Rigidbody? value) => _rejoin(() => _connectedBody = value);
+  set connectedBody(Rigidbody? value) {
+    if (value != null && _isOwn(value)) {
+      throw ArgumentError(
+        '$runtimeType.connectedBody is the Rigidbody on its own object, ${value.gameObject}: '
+        'a joint joins its object\'s rigidbody to another object\'s, or to the world with null',
+      );
+    }
+    _rejoin(() => _connectedBody = value);
+  }
+
   Rigidbody? _connectedBody;
 
   /// Where it holds, in its object's space, scale included: (0.5, 0, 0) is
   /// the +X face of a unit cube however the object is scaled. The scale is
-  /// the one its object has when it joins. (0, 0, 0) unless set.
+  /// the one its object has when it joins. (0, 0, 0) unless set; one not
+  /// finite throws an [ArgumentError].
   Vec3 get anchor => _anchor;
-  set anchor(Vec3 value) => _rejoin(() => _anchor = value);
+  set anchor(Vec3 value) {
+    _checkPoint('anchor', value);
+    _rejoin(() => _anchor = value);
+  }
+
   Vec3 _anchor;
 
   /// Where it holds on the connected body, in that body's object's space,
   /// scale included as for [anchor] (in the world's with none): as set, or
   /// where [anchor] was when it joined, while
   /// [autoConfigureConnectedAnchor]. Before it joins, one not set reads
-  /// (0, 0, 0).
+  /// (0, 0, 0). One not finite throws an [ArgumentError].
   Vec3 get connectedAnchor {
     if (_connectedAnchor case final set?) return set;
     if (_id == 0) return Vec3.zero;
@@ -120,7 +157,11 @@ sealed class Joint extends Behaviour {
     return Vec3(a.x / scale.x, a.y / scale.y, a.z / scale.z);
   }
 
-  set connectedAnchor(Vec3 value) => _rejoin(() => _connectedAnchor = value);
+  set connectedAnchor(Vec3 value) {
+    _checkPoint('connectedAnchor', value);
+    _rejoin(() => _connectedAnchor = value);
+  }
+
   Vec3? _connectedAnchor;
 
   /// Whether [connectedAnchor] is where [anchor] is when it joins (true
@@ -136,12 +177,14 @@ sealed class Joint extends Behaviour {
   set enableCollision(bool value) => _setOrUndo(_enableCollision, value, (v) => _enableCollision = v, _apply);
   bool _enableCollision;
 
-  /// The force, in newtons, it breaks at: infinity for never.
+  /// The force, in newtons, it breaks at: infinity for never. 0 or less
+  /// throws an [ArgumentError].
   double get breakForce => _breakForce;
   set breakForce(double value) => _setOrUndo(_breakForce, value, (v) => _breakForce = v, _apply);
   double _breakForce;
 
-  /// The torque, in newton metres, it breaks at: infinity for never.
+  /// The torque, in newton metres, it breaks at: infinity for never. 0 or
+  /// less throws an [ArgumentError].
   double get breakTorque => _breakTorque;
   set breakTorque(double value) => _setOrUndo(_breakTorque, value, (v) => _breakTorque = v, _apply);
   double _breakTorque;
@@ -159,13 +202,14 @@ sealed class Joint extends Behaviour {
   bool get isJoined => _id != 0;
 
   // Its world's physics while it's enabled, its id there (0 while it
-  // waits), its key, where it is in the physics' list, and the rigidbody
-  // it's on.
+  // waits), its key, where it is in the physics' list, the rigidbody it's
+  // on, and whether world.errors was told why it waits.
   Physics? _physics;
   int _id = 0;
   int _key = -1;
   int _index = 0;
   Rigidbody? _body;
+  var _told = false;
 
   int get _kind;
 
@@ -191,6 +235,25 @@ sealed class Joint extends Behaviour {
   }
 
   void _check() {}
+
+  /// Throws an [ArgumentError] for an anchor that isn't finite.
+  void _checkPoint(String name, Vec3 value) {
+    if (value.x.isFinite && value.y.isFinite && value.z.isFinite) return;
+    throw ArgumentError('$runtimeType.$name is $value: it must be finite');
+  }
+
+  /// Throws an [ArgumentError] for an axis that's (0, 0, 0) or not
+  /// finite.
+  void _checkAxis(String name, Vec3 value) {
+    _checkPoint(name, value);
+    if (value.length < 1e-6) throw ArgumentError("$runtimeType.$name is $value: it can't be (0, 0, 0)");
+  }
+
+  /// Whether [body] is the rigidbody on its own object.
+  bool _isOwn(Rigidbody body) {
+    final mine = _objectOf(this);
+    return mine != null && identical(mine, _objectOf(body));
+  }
 
   /// Checks and applies a change to what can change on the joint as it is.
   void _apply() {
@@ -283,10 +346,11 @@ final class HingeJoint extends Joint {
     _check();
   }
 
-  /// The axis it turns about, in its object's space.
+  /// The axis it turns about, in its object's space: X unless set. One
+  /// that's (0, 0, 0) or not finite throws an [ArgumentError].
   Vec3 get axis => _axis;
   set axis(Vec3 value) {
-    if (value.length < 1e-6) throw ArgumentError.value(value, 'axis', "can't be (0, 0, 0)");
+    _checkAxis('axis', value);
     _rejoin(() => _axis = value);
   }
 
@@ -338,7 +402,7 @@ final class HingeJoint extends Joint {
 
   @override
   void _check() {
-    if (_axis.length < 1e-6) throw ArgumentError.value(_axis, 'axis', "can't be (0, 0, 0)");
+    _checkAxis('axis', _axis);
     final JointLimits(:min, :max) = _limits;
     if (!(min >= -_halfTurn && max <= _halfTurn && min <= max)) {
       throw ArgumentError.value('$min to $max', 'limits', 'must be -pi to pi radians, the min no more than the max');
@@ -477,7 +541,9 @@ final class CharacterJoint extends Joint {
     _check();
   }
 
-  /// The axis it twists about, in its object's space.
+  /// The axis it twists about, in its object's space: X unless set. One
+  /// that's (0, 0, 0), not finite, or along [swingAxis] throws an
+  /// [ArgumentError].
   Vec3 get axis => _axis;
   set axis(Vec3 value) {
     _checkAxes(value, _swingAxis);
@@ -487,7 +553,8 @@ final class CharacterJoint extends Joint {
   Vec3 _axis;
 
   /// The axis it swings about by [swing1Limit], in its object's space:
-  /// made square to [axis].
+  /// made square to [axis]. Y unless set; one that's (0, 0, 0), not
+  /// finite, or along [axis] throws an [ArgumentError].
   Vec3 get swingAxis => _swingAxis;
   set swingAxis(Vec3 value) {
     _checkAxes(_axis, value);
@@ -523,10 +590,11 @@ final class CharacterJoint extends Joint {
   @override
   int get _kind => FpJointKind.FP_JOINT_KIND_CHARACTER;
 
-  static void _checkAxes(Vec3 axis, Vec3 swingAxis) {
-    if (axis.length < 1e-6) throw ArgumentError.value(axis, 'axis', "can't be (0, 0, 0)");
-    if (swingAxis.length < 1e-6 || axis.normalized.cross(swingAxis.normalized).length < 1e-3) {
-      throw ArgumentError.value(swingAxis, 'swingAxis', 'must lie across the axis');
+  void _checkAxes(Vec3 axis, Vec3 swingAxis) {
+    _checkAxis('axis', axis);
+    _checkAxis('swingAxis', swingAxis);
+    if (axis.normalized.cross(swingAxis.normalized).length < 1e-3) {
+      throw ArgumentError('CharacterJoint.swingAxis is $swingAxis, along its axis $axis: it must lie across it');
     }
   }
 

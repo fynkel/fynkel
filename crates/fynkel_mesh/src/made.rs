@@ -1,7 +1,9 @@
 //! Shapes with settings (stage 13 §3.2), and meshes joined into one. Each
 //! is wound and textured as the built-in shapes are; where a shape has flat
 //! faces (a box, a grid) its UVs are in metres, times `uv_per_metre`, so a
-//! texture tiles at the same size whatever the shape's size.
+//! texture tiles at the same size whatever the shape's size. A box, a
+//! grid, a cone and a torus are an error, not a panic, for sizes so large
+//! their numbers (a UV, a normal) aren't finite.
 
 use std::f32::consts::TAU;
 
@@ -15,7 +17,7 @@ impl MeshData {
     /// `segments` along X, Y and Z (at least 1 each), with its own flat
     /// normal. Each face shows its texture as [`MeshData::cube`]'s does,
     /// `uv_per_metre` times a metre.
-    pub fn box_shape(size: Vec3, segments: [u32; 3], uv_per_metre: f32) -> Self {
+    pub fn box_shape(size: Vec3, segments: [u32; 3], uv_per_metre: f32) -> Result<Self, MeshError> {
         let segments = segments.map(|n| n.max(1));
         let axis = |v: Vec3| {
             if v.x != 0.0 {
@@ -41,17 +43,17 @@ impl MeshData {
             let extent = Vec2::new(size[r], size[u]);
             s.face(centre, normal, right, up, extent, [segments[r], segments[u]], uv_per_metre);
         }
-        s.build()
+        s.try_build()
     }
 
     /// A flat grid of `size` (along X and Z) facing +Y, centred on the
     /// origin, cut into `segments` squares along X and Z: the ground of a
     /// game, or a mesh to bend. Seen from above, image-right is +X and
     /// image-up -Z, as [`MeshData::plane`]'s.
-    pub fn grid(size: Vec2, segments: [u32; 2], uv_per_metre: f32) -> Self {
+    pub fn grid(size: Vec2, segments: [u32; 2], uv_per_metre: f32) -> Result<Self, MeshError> {
         let mut s = Shape::default();
         s.face(Vec3::ZERO, Vec3::Y, Vec3::X, Vec3::NEG_Z, size, segments.map(|n| n.max(1)), uv_per_metre);
-        s.build()
+        s.try_build()
     }
 
     /// A sphere of `radius`, textured as [`MeshData::sphere`].
@@ -65,7 +67,7 @@ impl MeshData {
     /// the top and its base of `radius`, with `segments` slices around and
     /// a flat base unless `cap` is false. The side's texture wraps around
     /// once from +Z, its top at the point.
-    pub fn cone(radius: f32, height: f32, segments: u32, cap: bool) -> Self {
+    pub fn cone(radius: f32, height: f32, segments: u32, cap: bool) -> Result<Self, MeshError> {
         assert!(segments >= 3, "a cone needs at least 3 segments");
         let half = height * 0.5;
         let mut s = Shape::default();
@@ -93,14 +95,14 @@ impl MeshData {
         if cap {
             s.cap(Vec3::NEG_Y * half, Vec3::NEG_Y, radius, segments);
         }
-        s.build()
+        s.try_build()
     }
 
     /// A ring around Y in the XZ plane: its middle `radius` from the
     /// centre, its tube of `tube` radius; `segments` slices around Y and
     /// `sides` around the tube. The texture wraps once each way: u around
     /// Y from +Z, v around the tube from its outer edge, downwards.
-    pub fn torus(radius: f32, tube: f32, segments: u32, sides: u32) -> Self {
+    pub fn torus(radius: f32, tube: f32, segments: u32, sides: u32) -> Result<Self, MeshError> {
         assert!(segments >= 3 && sides >= 3, "a torus needs at least 3 segments and 3 sides");
         let mut s = Shape::default();
         for side in 0..=sides {
@@ -123,7 +125,7 @@ impl MeshData {
                 s.indices.extend([a, b, a + 1, a + 1, b, b + 1]);
             }
         }
-        s.build()
+        s.try_build()
     }
 
     /// A flat round disc of `radius` facing +Y, with `segments` around; a

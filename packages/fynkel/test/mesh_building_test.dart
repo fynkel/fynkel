@@ -104,7 +104,7 @@ void main() {
     });
 
     test('a profile is lathed around Y', () {
-      final cup = Mesh.lathe([const Vec2(0, 0), const Vec2(0.5, 0), const Vec2(0.5, 1)], sides: 12);
+      final cup = Mesh.lathe([const Vec2(0, 0), const Vec2(0.5, 0), const Vec2(0.5, 1)], segments: 12);
       // The base's 12 triangles to the middle, the side's 12 squares.
       expect(cup.indexCount ~/ 3, 12 + 24);
       final (lo, hi) = boundsOf(cup);

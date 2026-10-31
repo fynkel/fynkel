@@ -242,7 +242,7 @@ final class Spline {
     final (p, g) = (index * 3, index * 6);
     final (a, b, c) = (knot.position, knot.tangentIn, knot.tangentOut);
     for (final (what, v) in [('position', a), ('tangentIn', b), ('tangentOut', c)]) {
-      if (!(v.x.isFinite && v.y.isFinite && v.z.isFinite)) throw ArgumentError.value(v, what, 'must be finite');
+      if (!(v.x.isFinite && v.y.isFinite && v.z.isFinite)) throw ArgumentError('$what is $v; it must be finite');
     }
     if (!knot.roll.isFinite) throw ArgumentError.value(knot.roll, 'roll', 'must be finite');
     _positions
@@ -627,6 +627,7 @@ final class Spline {
 
   /// Finds [distance] along it: [_curve], [_t], [_entry] and [_f].
   void _at(double distance) {
+    if (!distance.isFinite) throw ArgumentError('distance is $distance; it must be finite');
     _update();
     if (_curves == 0) {
       if (_count == 0) throw StateError('a spline with no knots has no points');

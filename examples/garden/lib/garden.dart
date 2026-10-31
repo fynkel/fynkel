@@ -147,7 +147,7 @@ class Character extends GameObject {
   bool onClick(Finger finger) {
     _goal = null;
     _pickingUp = true;
-    _animator.crossFade('pick-up', duration: 0.15, loop: false);
+    _animator.crossFade('pick-up', seconds: 0.15, loop: false);
     return true;
   }
 
@@ -166,7 +166,7 @@ class Character extends GameObject {
         rotation = Quat.slerp(rotation, facing, math.min(1, 10 * time.delta));
       }
     }
-    if (!_pickingUp) _animator.crossFade(_goal == null ? 'idle' : 'walk', duration: 0.2);
+    if (!_pickingUp) _animator.crossFade(_goal == null ? 'idle' : 'walk', seconds: 0.2);
   }
 
   @override

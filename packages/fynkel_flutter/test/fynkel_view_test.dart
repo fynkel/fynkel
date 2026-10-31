@@ -224,7 +224,7 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     final dts = <double>[];
     final stats = <FynkelViewStats>[];
-    await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5, onFrame: dts.add, onStats: stats.add)));
+    await tester.pumpWidget(sized(FynkelView.world(world, renderScale: 0.5, onFrame: dts.add, onStats: stats.add)));
     await tester.pump(const Duration(milliseconds: 8));
     expect(calls, hasLength(1));
     expect(find.byType(Texture), findsOneWidget);
@@ -254,7 +254,7 @@ void main() {
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.resetDevicePixelRatio);
     final stats = <FynkelViewStats>[];
-    await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5, onStats: stats.add)));
+    await tester.pumpWidget(sized(FynkelView.world(world, renderScale: 0.5, onStats: stats.add)));
     for (var i = 0; i < 300; i++) {
       await tester.pump(const Duration(milliseconds: 8));
     }
@@ -320,7 +320,7 @@ void main() {
           Row(
             children: [
               Expanded(child: FynkelView.world(world, onFrame: left.add)),
-              Expanded(child: FynkelView.world(world, onFrame: right.add)),
+              Expanded(child: FynkelView.world(world, onFrame: right.add, input: false)),
             ],
           ),
         ),
@@ -452,7 +452,7 @@ void main() {
 
   testWidgets('a game resets the plugin as it starts, before it shows any view', (tester) async {
     forgetReset();
-    await tester.pumpWidget(FynkelGame(make: Tiny.new, builder: (context, game) => const SizedBox()));
+    await tester.pumpWidget(FynkelGame(Tiny.new, builder: (context, game) => const SizedBox()));
     await tester.pump();
     expect(resets, [0], reason: "an earlier isolate's views are freed though this game shows none yet");
     await tester.pumpWidget(sized(FynkelView.world(world)));
@@ -675,7 +675,7 @@ void main() {
         tester,
       ) async {
         // 100 × 50 in the middle of 800 × 600, 3 pixels a point.
-        await tester.pumpWidget(sized(FynkelView.world(world, resolutionScale: 0.5)));
+        await tester.pumpWidget(sized(FynkelView.world(world, renderScale: 0.5)));
         await frames(tester);
         expect(calls, ['register 150x75 at 1050,825 300x150']);
         expect(find.byType(Texture), findsNothing, reason: 'the frames are not a texture');
@@ -690,7 +690,7 @@ void main() {
               alignment: Alignment.topLeft,
               child: Padding(
                 padding: const EdgeInsets.only(left: 10, top: 20),
-                child: SizedBox(width: 100, height: 50, child: FynkelView.world(world, resolutionScale: 0.5)),
+                child: SizedBox(width: 100, height: 50, child: FynkelView.world(world, renderScale: 0.5)),
               ),
             ),
           ),
@@ -762,8 +762,8 @@ void main() {
         await tester.pump();
       });
 
-      testWidgets('onScreen: false keeps the texture', (tester) async {
-        await tester.pumpWidget(sized(FynkelView.world(world, onScreen: false)));
+      testWidgets('directToScreen: false keeps the texture', (tester) async {
+        await tester.pumpWidget(sized(FynkelView.world(world, directToScreen: false)));
         await frames(tester);
         expect(calls, ['register 300x150 at null,null nullxnull as a texture']);
         expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
@@ -859,8 +859,8 @@ void main() {
       expect(calls, ['unregister 7']);
     });
 
-    testWidgets('onScreen: false keeps the texture', (tester) async {
-      await tester.pumpWidget(sized(FynkelView.world(world, onScreen: false)));
+    testWidgets('directToScreen: false keeps the texture', (tester) async {
+      await tester.pumpWidget(sized(FynkelView.world(world, directToScreen: false)));
       await frames(tester);
       expect(calls, ['register a texture']);
       expect(tester.widget<Texture>(find.byType(Texture)).textureId, 7);
@@ -1077,14 +1077,25 @@ void main() {
       expect(game.isAlive, isFalse);
     });
 
-    testWidgets('a new root on rebuild is ignored; a world in its place starts over', (tester) async {
+    testWidgets('a new root on rebuild is reported and not shown; a world in its place starts over', (tester) async {
       final game = Tiny();
       final source = bundleSource(Bundle({'assets/grid.png': png}));
       final key = GlobalKey<FynkelViewState>();
       await tester.pumpWidget(sized(FynkelView(key: key, root: game, source: source)));
       final own = key.currentState!.world;
       await tester.pumpWidget(sized(FynkelView(key: key, root: Tiny(), source: source)));
+      expect('${tester.takeException()}', contains('give it a Key to start another'));
       expect(key.currentState!.world, same(own));
+      expect(key.currentState!.root, same(game), reason: 'the root it shows');
+      await tester.pumpWidget(sized(FynkelView(key: key, root: Tiny(), source: source)));
+      expect(tester.takeException(), isNull, reason: 'said once');
+
+      // The way to change level: the next root in the same world.
+      game.destroy();
+      final level2 = own.add(GameObject());
+      await tester.pumpWidget(sized(FynkelView(key: key, root: level2, source: source)));
+      expect(tester.takeException(), isNull);
+      expect(key.currentState!.root, same(level2));
 
       await tester.pumpWidget(sized(FynkelView.world(world, key: key)));
       expect(key.currentState!.world, same(world));
@@ -1098,6 +1109,75 @@ void main() {
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump(const Duration(milliseconds: 1));
       expect(world.isDisposed, isFalse, reason: 'a world given by hand is not the view\'s to free');
+    });
+
+    testWidgets(
+      "a view Flutter makes again for its root (now in a Stack) keeps the game; the world goes with the last",
+      (tester) async {
+        final counter = Counter();
+        final game = GameObject(components: [counter]);
+        Widget page({required bool hud}) {
+          final view = FynkelView(root: game);
+          return sized(
+            hud
+                ? Stack(
+                    children: [
+                      view,
+                      const Text('hud', textDirection: TextDirection.ltr),
+                    ],
+                  )
+                : view,
+          );
+        }
+
+        await tester.pumpWidget(page(hud: false));
+        await tester.pump(const Duration(milliseconds: 16));
+        final world = game.world;
+        await tester.pumpWidget(page(hud: true));
+        final before = counter.updates;
+        for (var i = 0; i < 3; i++) {
+          await tester.pump(const Duration(milliseconds: 16));
+        }
+        expect(tester.takeException(), isNull);
+        expect(world.isDisposed, isFalse, reason: 'the new view shows it');
+        expect(game.isAlive, isTrue);
+        expect(counter.updates, greaterThan(before), reason: 'the game goes on');
+        await tester.pumpWidget(sized(const SizedBox()));
+        expect(world.isDisposed, isTrue, reason: 'no view shows it now');
+      },
+    );
+
+    testWidgets('a source given for a root already in a world is reported: that world loads its assets', (
+      tester,
+    ) async {
+      final root = world.add(GameObject());
+      await tester.pumpWidget(sized(FynkelView(root: root, source: bundleSource(Bundle({})))));
+      expect('${tester.takeException()}', contains('give source: to the World it was added to'));
+    });
+
+    testWidgets('a hot reload reads the shaders of a world the view made again', (tester) async {
+      final asked = <String>[];
+      final game = _LoadsAShader();
+      await tester.pumpWidget(
+        sized(
+          FynkelView(
+            root: game,
+            source: (name) async {
+              asked.add(name);
+              return Uint8List.fromList(
+                'fn unlit(in: SurfaceInput) -> vec4<f32> {\n    return vec4<f32>(1.0, 0.0, 0.0, 1.0);\n}\n'.codeUnits,
+              );
+            },
+          ),
+        ),
+      );
+      await finish(tester, game.loaded);
+      expect(asked, ['flat.wgsl']);
+      await reload(tester);
+      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
+      await tester.pump();
+      expect(asked, ['flat.wgsl', 'flat.wgsl'], reason: 'read again, once');
+      await tester.pumpWidget(sized(const SizedBox()));
     });
 
     testWidgets("a failed load reaches the world's errors", (tester) async {
@@ -1248,6 +1328,130 @@ void main() {
       await tester.pump(const Duration(milliseconds: 1));
     });
 
+    testWidgets("a page pushed from FynkelApp's overlay finds the game with FynkelGame.of", (tester) async {
+      late FynkelGameState<Clickable> found;
+      await tester.pumpWidget(
+        FynkelApp(
+          Clickable.new,
+          overlay: (context, game) => TextButton(
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (context) {
+                  found = FynkelGame.of<Clickable>(context);
+                  return const Text('settings');
+                },
+              ),
+            ),
+            child: const Text('open'),
+          ),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      final game = FynkelGame.of<Clickable>(tester.element(find.byType(FynkelView))).game;
+      await tester.tap(find.text('open'));
+      for (var i = 0; i < 20; i++) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      expect(find.text('settings'), findsOneWidget);
+      expect(found.game, same(game));
+      expect(game.world.paused, isTrue, reason: 'the page covers the game');
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("a page pushed over a FynkelGame of the app's own is told how to reach the game", (tester) async {
+      late BuildContext page;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: FynkelGame(
+            Clickable.new,
+            builder: (context, game) {
+              page = context;
+              return FynkelView(root: game);
+            },
+          ),
+        ),
+      );
+      late Object error;
+      unawaited(
+        Navigator.of(page).push(
+          MaterialPageRoute<void>(
+            builder: (context) {
+              try {
+                FynkelGame.of<Clickable>(context);
+              } catch (e) {
+                error = e;
+              }
+              return const SizedBox();
+            },
+          ),
+        ),
+      );
+      await tester.pump();
+      expect('$error', contains("page pushed with Navigator"));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("FynkelApp's overlay may be Positioned; one that isn't stays loose from the top left", (tester) async {
+      await tester.pumpWidget(
+        FynkelApp(
+          Clickable.new,
+          overlay: (context, game) => const Positioned(right: 10, bottom: 20, child: Text('corner')),
+        ),
+      );
+      await tester.pump(const Duration(milliseconds: 16));
+      expect(tester.takeException(), isNull);
+      final screen = tester.getSize(find.byType(FynkelView));
+      final corner = tester.getRect(find.text('corner'));
+      expect(corner.right, screen.width - 10);
+      expect(corner.bottom, screen.height - 20);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets("FynkelApp gives its view the view's settings", (tester) async {
+      void onStats(FynkelViewStats stats) {}
+      void onError(Object error, StackTrace stack) {}
+      Widget errorBuilder(BuildContext context, Object error, VoidCallback retry) => const SizedBox();
+      await tester.pumpWidget(
+        FynkelApp(
+          Clickable.new,
+          onStats: onStats,
+          onError: onError,
+          errorBuilder: errorBuilder,
+          pauseWhenCovered: false,
+          showErrors: false,
+          directToScreen: false,
+          renderScale: 0.5,
+        ),
+      );
+      final view = tester.widget<FynkelView>(find.byType(FynkelView));
+      expect(view.onStats, same(onStats));
+      expect(view.onError, same(onError));
+      expect(view.errorBuilder, same(errorBuilder));
+      expect(view.pauseWhenCovered, isFalse);
+      expect(view.showErrors, isFalse);
+      expect(view.directToScreen, isFalse);
+      expect(view.renderScale, 0.5);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
+    testWidgets('a FynkelGame given another make is reported: it keeps the game it started with', (tester) async {
+      Widget game(GameObject Function() make) =>
+          sized(FynkelGame<GameObject>(make, builder: (context, game) => FynkelView(root: game)));
+      await tester.pumpWidget(game(Clickable.new));
+      final first = tester.state<FynkelGameState<GameObject>>(find.byType(FynkelGame<GameObject>)).game;
+      await tester.pumpWidget(game(Clickable.new));
+      expect(tester.takeException(), isNull, reason: 'the same make');
+      await tester.pumpWidget(game(LooksAtAPoint.new));
+      expect('${tester.takeException()}', contains('give it a Key to start another'));
+      expect(tester.state<FynkelGameState<GameObject>>(find.byType(FynkelGame<GameObject>)).game, same(first));
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump(const Duration(milliseconds: 1));
+    });
+
     testWidgets('F5 starts a FynkelGame over: a new root in a new world, and what was built around it again', (
       tester,
     ) async {
@@ -1256,7 +1460,7 @@ void main() {
       await tester.pumpWidget(
         sized(
           FynkelGame(
-            make: () => (made..add(Tiny())).last,
+            () => (made..add(Tiny())).last,
             source: source,
             builder: (context, game) => Stack(
               children: [
@@ -1293,7 +1497,7 @@ void main() {
             builder: (context) {
               outside = context;
               return FynkelGame(
-                make: Tiny.new,
+                Tiny.new,
                 source: source,
                 builder: (context, game) {
                   inside = context;
@@ -1332,7 +1536,7 @@ void main() {
       final source = bundleSource(Bundle({'assets/grid.png': png}));
       Widget game({required bool restart}) => sized(
         FynkelGame(
-          make: () => (made..add(Tiny())).last,
+          () => (made..add(Tiny())).last,
           restartOnReload: restart,
           source: source,
           builder: (context, game) => FynkelView(root: game),
@@ -1359,7 +1563,7 @@ void main() {
       await tester.pumpWidget(
         sized(
           FynkelGame(
-            make: Tiny.new,
+            Tiny.new,
             source: source,
             builder: (context, game) {
               taken = game.world.input;
@@ -1383,10 +1587,7 @@ void main() {
     ) async {
       await tester.pumpWidget(
         sized(
-          FynkelGame(
-            make: LooksAtAPoint.new,
-            builder: (context, game) => FynkelView(root: game),
-          ),
+          FynkelGame(LooksAtAPoint.new, builder: (context, game) => FynkelView(root: game)),
           width: 800,
           height: 600,
         ),
@@ -1397,7 +1598,7 @@ void main() {
       await tester.pumpWidget(const SizedBox());
       await tester.pump(const Duration(milliseconds: 1));
 
-      await tester.pumpWidget(sized(FynkelGame(make: LooksAtAPoint.new, builder: (context, game) => const SizedBox())));
+      await tester.pumpWidget(sized(FynkelGame(LooksAtAPoint.new, builder: (context, game) => const SizedBox())));
       expect('${tester.takeException()}', contains('give it target - eye'), reason: 'no view took it');
       await tester.pumpWidget(const SizedBox());
     });
@@ -1408,7 +1609,7 @@ void main() {
       await tester.pumpWidget(
         sized(
           FynkelGame(
-            make: Tiny.new,
+            Tiny.new,
             source: source,
             builder: (context, made) => FynkelView(root: game = made, source: source),
           ),
@@ -1426,7 +1627,7 @@ void main() {
       await tester.pumpWidget(
         sized(
           FynkelGame(
-            make: Tiny.new,
+            Tiny.new,
             source: source,
             builder: (context, made) => Stack(
               children: [
@@ -1646,6 +1847,75 @@ void main() {
       expect(find.byType(ErrorPanel), findsOneWidget);
     });
 
+    // Split screen: two halves, each taking input unless told.
+    Widget halves({bool secondInput = true, bool firstInput = true, bool firstShowsErrors = true}) => Directionality(
+      textDirection: TextDirection.ltr,
+      child: Row(
+        children: [
+          SizedBox(
+            width: 300,
+            height: 200,
+            child: FynkelView.world(world, input: firstInput, showErrors: firstShowsErrors),
+          ),
+          SizedBox(width: 100, height: 100, child: FynkelView.world(world, input: secondInput)),
+        ],
+      ),
+    );
+
+    testWidgets("two views of one world that take input: the first takes it, it's said once, errors show once", (
+      tester,
+    ) async {
+      world.add(GameObject(components: [Thrower()]));
+      final reported = <FlutterErrorDetails>[];
+      final before = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      addTearDown(() => FlutterError.onError = before);
+      await tester.pumpWidget(halves());
+      await frames(tester);
+      await frames(tester);
+      FlutterError.onError = before;
+      expect(reported.where((e) => e.exception is StateError), hasLength(1), reason: "the game's error, once");
+      expect(find.byType(ErrorPanel), findsOneWidget);
+      expect(
+        reported.where((e) => '${e.exception}'.contains('give input: false to all but one')),
+        hasLength(1),
+        reason: 'the mistake is said once',
+      );
+      expect(world.input.width, 300, reason: 'the first view sizes the input');
+      final second = tester.getRect(find.byType(FynkelView).last);
+      final on = await tester.startGesture(second.center);
+      await frames(tester);
+      expect(world.input.fingers, isEmpty, reason: 'the second takes no taps');
+      await on.up();
+      await frames(tester);
+    });
+
+    testWidgets('when the view taking input stops taking it, the next one does', (tester) async {
+      final reported = <FlutterErrorDetails>[];
+      final before = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      addTearDown(() => FlutterError.onError = before);
+      await tester.pumpWidget(halves());
+      await frames(tester);
+      await tester.pumpWidget(halves(firstInput: false));
+      await frames(tester);
+      FlutterError.onError = before;
+      expect(world.input.width, 100, reason: 'the second sizes it now');
+    });
+
+    testWidgets("a view without input still shows the game's errors, when none that takes input does", (tester) async {
+      world.add(GameObject(components: [Thrower()]));
+      final reported = <FlutterErrorDetails>[];
+      final before = FlutterError.onError;
+      FlutterError.onError = reported.add;
+      addTearDown(() => FlutterError.onError = before);
+      await tester.pumpWidget(sized(FynkelView.world(world, input: false), width: 800, height: 600));
+      await frames(tester);
+      FlutterError.onError = before;
+      expect(reported.where((e) => e.exception is StateError), hasLength(1));
+      expect(find.byType(ErrorPanel), findsOneWidget, reason: 'a background behind a title menu shows them too');
+    });
+
     testWidgets('world widgets show over the views that want them', (tester) async {
       world.add(GameObject(components: [WorldWidget((_) => const SizedBox(width: 4, height: 4))]));
       await tester.pumpWidget(both(worldWidgets: false));
@@ -1739,6 +2009,31 @@ void main() {
       Navigator.of(page).pop();
       await settle(tester);
       expect(world.paused, isTrue);
+    });
+
+    testWidgets('a game that unpauses and pauses itself again while covered stays paused once uncovered', (
+      tester,
+    ) async {
+      await tester.pumpWidget(app());
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      expect(world.paused, isTrue);
+      // The game over screen comes up under the settings page.
+      world.paused = false;
+      world.paused = true;
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isTrue, reason: 'the game paused itself: it stays paused');
+    });
+
+    testWidgets('a game that unpauses itself while covered runs on once uncovered', (tester) async {
+      await tester.pumpWidget(app());
+      unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
+      await settle(tester);
+      world.paused = false;
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isFalse);
     });
 
     testWidgets('with pauseWhenCovered off, the game runs on under a dialog', (tester) async {
@@ -1880,6 +2175,17 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  test('a renderScale or shrinkBeyond out of range says the value given', () {
+    expect(
+      () => FynkelView.world(world, renderScale: 0),
+      throwsA(isA<AssertionError>().having((e) => '${e.message}', 'message', contains('renderScale is 0'))),
+    );
+    expect(
+      () => WorldWidget((_) => const SizedBox(), shrinkBeyond: -2),
+      throwsA(isA<AssertionError>().having((e) => '${e.message}', 'message', contains('shrinkBeyond is -2'))),
+    );
+  });
+
   testWidgets('an unbounded size is a clear error', (tester) async {
     await tester.pumpWidget(
       Directionality(
@@ -1924,6 +2230,15 @@ class Counter extends Behaviour {
   void onUpdate() {
     super.onUpdate();
     updates++;
+  }
+}
+
+/// Loads a shader from its world's source.
+class _LoadsAShader extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await assets.shader('flat.wgsl');
+    await super.onLoad();
   }
 }
 
