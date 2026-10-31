@@ -10,14 +10,15 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  # package:fynkel_flutter/testing.dart, for a game's widget tests.
+  flutter_test:
+    sdk: flutter
   fynkel:
     path: ../fynkel
 
 dev_dependencies:
   # The tests check the engine view directly.
   ffi: ^2.2.0
-  flutter_test:
-    sdk: flutter
   lints: ^6.1.0
 
 flutter:
