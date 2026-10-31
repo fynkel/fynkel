@@ -373,15 +373,15 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 
 | Row | What | Size |
 |---|---|---|
-| GD2, GD14 | §19 never shows a test loading assets (`World(source: …)`) or `await game.loaded` without frames | S |
+| GD2, GD14 ✅ | §19 never shows a test loading assets (`World(source: …)`) or `await game.loaded` without frames. **Done**: §19 has one, run by `check_guide.py` | S |
 | GD9 | No way to check "no garbage" in a game's own tests, though the guide promises it; `finger.position`, `screenPointToRay`, `screenPointToPlane` make new objects each call | M |
 | GD4 ✅ | The guide names `Stick(…)` as if it shipped; it's only in the lab. Ship it in `fynkel_flutter`. **Done**: `Stick(input, axis:, floating:, size:)`, Ring Ring Deals' stick made general (`floating` appears under the thumb, taps go through); the lab's copy gone | S |
-| GD3 | `pausedListenable` needs `fynkel_flutter`'s import; §11 doesn't say | S |
-| GD6 | `audio.music.ignorePause` isn't named where pausing is | S |
-| GD7 | The "quality doesn't draw bloom" warning prints in every low test, with no way to quiet it | S |
-| GD10–12, GD15, GD16 ½ | hints: additive trails + bloom halo, `setSweep`'s message, both bodies hear a collision (and `id`), pooled trails cleared, a root game with arguments | S |
-| DC7 | `getInChildren` null before add, where `getInParent` throws | S |
-| BR9 ½ | A failed view is a grey box for good: no retry, no hook beyond `FlutterError.onError` | S |
+| GD3 ✅ | `pausedListenable` needs `fynkel_flutter`'s import; §11 doesn't say. **Done**: it says | S |
+| GD6 ✅ | `audio.music.ignorePause` isn't named where pausing is. **Done**: named in the music paragraph | S |
+| GD7 ✅ | The "quality doesn't draw bloom" warning prints in every low test, with no way to quiet it. **Done**: it says so only once a view draws the world; a test's world stays quiet | S |
+| GD10–12, GD15, GD16 ✅ | hints: additive trails + bloom halo, `setSweep`'s message, both bodies hear a collision (and `id`), pooled trails cleared, a root game with arguments. **Done**: each in its section; a sweep along knots at one point says so | S |
+| DC7 ✅ | `getInChildren` null before add, where `getInParent` throws. **Done**: both see the objects given before add | S |
+| BR9 ✅ | A failed view is a grey box for good: no retry, no hook beyond `FlutterError.onError`. **Done**: `FynkelView(onError:, errorBuilder: (context, error, retry))` | S |
 | BR8 ½ | ABI conventions drifted (`fy_world_time_set` breaks the ABI's own rule); a written rule and a check | S |
 
 **CI and tests**:
