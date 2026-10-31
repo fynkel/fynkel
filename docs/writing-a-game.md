@@ -2023,8 +2023,9 @@ it's enabled), `isPlaying` and `playTime` (Unity's `time`; here `time`
 is the game's; set it to seek, but not past the clip's end). `onEnd` is
 called when `clip` reaches its end, not when it's stopped. Disabling the
 source, or destroying its object, stops its sounds; and as in Unity, a
-source that's disabled, or whose object is inactive or still loading,
-refuses to play (a `StateError`), so no sound outlives its object.
+source that's disabled, or whose object is inactive, refuses to play (a
+`StateError`), so no sound outlives its object. What an `onLoad` asks
+for plays when the object is shown.
 
 ```dart
 // lib/dog.dart
