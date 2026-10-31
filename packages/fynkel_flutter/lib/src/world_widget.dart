@@ -338,8 +338,9 @@ class _RenderPlaced extends RenderBox
   }
 
   /// How many [WorldWidget.hideBehind] looks a frame takes, at most, beyond
-  /// a widget's first.
-  static const castsPerFrame = 24;
+  /// a widget's first: a look into 3,000 objects is about 35 µs on a Mac,
+  /// so 8 are 0.3 ms, and a hundred widgets each look again in 13 frames.
+  static const castsPerFrame = 8;
 
   /// How long [WorldWidget.hideBehind]'s fade takes.
   static const fadeSeconds = 0.15;
