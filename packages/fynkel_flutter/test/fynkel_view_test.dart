@@ -1188,6 +1188,40 @@ void main() {
       expect(place.offScreen.value, isFalse);
       expect(tester.getCenter(find.byKey(const ValueKey('on'))), offsetMoreOrLessEquals(seen(tester, Vec3.zero)));
     });
+
+    testWidgets('a WorldWidget kept on the screen with its point near the edge stays wholly inside it', (tester) async {
+      late WorldWidgetPlace place;
+      final thing = world.add(
+        GameObject(
+          components: [
+            WorldWidget((context) {
+              place = WorldWidget.of(context);
+              return const ColoredBox(
+                key: ValueKey('tag'),
+                color: Colors.green,
+                child: SizedBox(width: 40, height: 10),
+              );
+            }, keepOnScreen: true),
+          ],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      final view = tester.getRect(find.byType(FynkelView));
+      // Its point just inside the right edge: half the tag would hang over.
+      var x = 0.0;
+      while (seen(tester, Vec3(x, 0, 0)).dx < view.right - 4) {
+        x += 0.01;
+      }
+      thing.position = Vec3(x, 0, 0);
+      await frames(tester, 2);
+      final at = seen(tester, thing.position);
+      expect(at.dx, lessThan(view.right));
+      expect(place.offScreen.value, isFalse);
+      final rect = tester.getRect(find.byKey(const ValueKey('tag')));
+      expect(rect.right, moreOrLessEquals(view.right - 8));
+      expect(rect.center.dy, moreOrLessEquals(at.dy));
+    });
   });
 
   group('from a root', () {

@@ -86,7 +86,9 @@ class WorldWidget extends Behaviour {
 
   /// Off the view or behind the camera, held inside the view's edge,
   /// [edgeMargin] in, on the line from the middle toward its point, rather
-  /// than hidden: an arrow to where to go. [WorldWidget.of] tells its
+  /// than hidden: an arrow to where to go. With its point on the view, all
+  /// of it is kept inside the edge too: a speech bubble over someone at
+  /// the side of the screen doesn't hang off it. [WorldWidget.of] tells its
   /// builder when it's there and which way to point.
   bool keepOnScreen;
 
@@ -488,8 +490,13 @@ class _RenderPlaced extends RenderBox
       // A release build doesn't check it: one that isn't above 0 keeps full size.
       final scale = beyond == null || !(beyond > 0) || distance <= beyond ? 1.0 : beyond / distance;
       final width = child.size.width * scale, height = child.size.height * scale;
-      final x = at.x - (w.alignment.x + 1) / 2 * width;
-      final y = at.y - (w.alignment.y + 1) / 2 * height;
+      var x = at.x - (w.alignment.x + 1) / 2 * width;
+      var y = at.y - (w.alignment.y + 1) / 2 * height;
+      if (w.keepOnScreen) {
+        // Its point on the view: all of it inside the edge too.
+        x = x.clamp(w.edgeMargin, math.max(w.edgeMargin, size.width - w.edgeMargin - width));
+        y = y.clamp(w.edgeMargin, math.max(w.edgeMargin, size.height - w.edgeMargin - height));
+      }
       if (x > size.width || y > size.height || x + width < 0 || y + height < 0) continue;
       place
         ..shown = true
