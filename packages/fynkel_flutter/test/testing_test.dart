@@ -31,8 +31,8 @@ void main() {
     expect(game.frames, start + 3);
     await tester.run(0.5);
     expect(game.frames, start + 33);
-    await tester.run(0.05); // 3 frames, not 4: rounded as world.run
-    expect(game.frames, start + 36);
+    await tester.run(0.02); // 1.2 frames: 1, rounded as world.run rounds
+    expect(game.frames, start + 34);
   });
 
   testWidgets('game is the type asked for, whatever the FynkelGame was made for; asked wrongly, it says what it is', (
