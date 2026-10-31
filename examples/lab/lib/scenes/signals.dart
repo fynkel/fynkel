@@ -29,13 +29,15 @@ class SignalsScene extends LabScene {
   final _ghosts = <GameObject>[];
   GameObject? _lastDead;
   late final Plate _plate;
+  late final Scoreboard _scoreboard;
 
   @override
   Vec3 get eye => Vec3(0, 5, 10);
 
   @override
   void build() {
-    add(Scoreboard());
+    // Kept: while the scene loads, world.only doesn't find what it adds yet.
+    _scoreboard = add(Scoreboard());
     _plate = add(Plate());
     add(Door(_plate));
     _spawn(3);
@@ -51,7 +53,7 @@ class SignalsScene extends LabScene {
         -1.4 + (slot ~/ 3) * 1.3 + 0.3 * _random.nextDouble(),
       );
       final enemy = add(Enemy(at));
-      world.only<Scoreboard>().watch(enemy);
+      _scoreboard.watch(enemy);
     }
   }
 

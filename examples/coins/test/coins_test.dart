@@ -30,7 +30,7 @@ void main() {
   }
 
   /// The model the player carries.
-  String carried() => world.all<Prop>().singleWhere((prop) => prop.isPartOf(game.player)).asset;
+  String carried() => world.all<Prop>(includeInactive: true).singleWhere((prop) => prop.isPartOf(game.player)).asset;
 
   /// What the engine holds for drawing: [ViewStats.textureBytes] and
   /// [ViewStats.meshBytes] after a frame.
@@ -64,7 +64,7 @@ void main() {
     final player = game.player, camera = world.first<FollowCamera>();
     final meadow = world.first<Level>()!;
     pickUp(world.all<Coin>());
-    final dusk = world.all<Level>().last;
+    final dusk = world.all<Level>(includeInactive: true).last;
     expect(meadow.isDestroyed, isFalse, reason: 'on screen until the next level is');
     await dusk.loaded;
     expect(meadow.isDestroyed, isTrue);
@@ -79,7 +79,7 @@ void main() {
     expect(player.transform.position, Vec3.zero, reason: 'each level starts in the middle');
 
     pickUp(world.all<Coin>());
-    await world.all<Level>().last.loaded;
+    await world.all<Level>(includeInactive: true).last.loaded;
     world.update(0);
     expect(world.all<Level>().single.props, contains('tree_oak'), reason: 'and then the meadow again');
     expect(player.score.value, 16);
@@ -234,7 +234,7 @@ void main() {
 
     // The next level, and the flower the player carries there, load in it.
     pickUp(world.all<Coin>());
-    await world.all<Level>().last.loaded;
+    await world.all<Level>(includeInactive: true).last.loaded;
     world.run(0.5);
     expect(styled().every((r) => r.material!.shader?.hasOwnLighting ?? false), isTrue);
     shot('toon dusk');
