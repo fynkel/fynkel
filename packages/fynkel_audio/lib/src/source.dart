@@ -24,7 +24,9 @@ enum AudioRolloffMode {
 /// With [playOnAwake] (the default) it plays [clip] when it's enabled.
 /// Disabling it, or destroying its object, stops all its sounds; one
 /// that's disabled, or whose object is inactive, refuses to play, as
-/// Unity's does ("Can not play a disabled audio source"). While the
+/// Unity's does ("Can not play a disabled audio source"). What it's asked
+/// to play while its object loads (from an `onLoad`) plays when the
+/// object is shown. While the
 /// game is [World.paused] its sounds hold where they are, unless it
 /// [ignorePause]s (a pause menu's).
 ///
@@ -284,6 +286,25 @@ final class AudioSource extends Behaviour {
     }
   }
 
+  // What [play] and [playOneShot] were asked for while its object loaded,
+  // played when it's shown ([onEnable]): what an onLoad starts.
+  var _playWhenShown = false;
+  List<(AudioClip, double?, double?)>? _shotsWhenShown;
+
+  /// Whether it's enabled, on an object that's active, and not yet
+  /// [onEnable]d: its object is loading (in its own or a parent's
+  /// onLoad). What it's asked to play then waits for the object to be
+  /// shown, as Unity's plays from `Awake`.
+  bool get _loading {
+    if (_audio != null || !enabled || isRemoved) return false;
+    final object = gameObject;
+    if (!object.isAlive) return false;
+    for (GameObject? o = object; o != null; o = o.parent) {
+      if (!o.active) return false;
+    }
+    return true;
+  }
+
   /// The world's sound, while it's enabled. Throws a [StateError] while
   /// it isn't, as Unity's refuses to play: a sound started then would
   /// outlive it.
@@ -294,7 +315,7 @@ final class AudioSource extends Behaviour {
     if (isRemoved) throw StateError("$this was removed from $object, so it can't play");
     throw StateError(
       enabled
-          ? "$this can't play while its object, $object, is inactive (or not yet added, or loading): "
+          ? "$this can't play while its object, $object, is inactive (or not yet added): "
                 'play it once the object is shown'
           : '$this on $object is disabled: enable it before it plays',
     );
@@ -302,10 +323,15 @@ final class AudioSource extends Behaviour {
 
   /// Plays [clip] from the start (or from [playTime], if set while it wasn't
   /// playing), stopping what it played before. Throws a [StateError]
-  /// without a clip, or while it's disabled or its object is inactive.
+  /// without a clip, or while it's disabled or its object is inactive;
+  /// while its object loads, it plays when the object is shown.
   void play() {
     final clip = this.clip;
     if (clip == null) throw StateError('$this has no clip to play');
+    if (_loading) {
+      _playWhenShown = true;
+      return;
+    }
     final audio = _system;
     final group = audio._indexOf(_group);
     if (_voice != 0) fa_voice_stop(audio._native, _voice);
@@ -358,7 +384,8 @@ final class AudioSource extends Behaviour {
   /// at [volume] times this source's, and [pitch] times its (each 1
   /// unless given; the product is played within 0.05 to 8). It can't be
   /// paused or stopped on its own; [stop] stops it. Throws a [StateError]
-  /// while it's disabled or its object is inactive, as [play] does.
+  /// while it's disabled or its object is inactive, and waits while its
+  /// object loads, as [play] does.
   void playOneShot(AudioClip clip, {double? volume, double? pitch}) {
     // Nullable, not defaulted, and checked here, the error given the
     // value passed: the JIT boxes a double with a default, one passed to a
@@ -366,6 +393,10 @@ final class AudioSource extends Behaviour {
     final gain = volume ?? 1.0, speed = pitch ?? 1.0;
     if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
     if (!(speed >= 0.05 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not between 0.05 and 8');
+    if (_loading) {
+      (_shotsWhenShown ??= []).add((clip, volume, pitch));
+      return;
+    }
     final audio = _system;
     final group = audio._indexOf(_group);
     audio._playFloats
@@ -480,12 +511,21 @@ final class AudioSource extends Behaviour {
     _owner = audio._nextOwner++;
     audio._sources[_owner] = this;
     audio._enabled.add(this);
-    if (playOnAwake && clip != null && _voice == 0) play();
+    if ((playOnAwake || _playWhenShown) && clip != null && _voice == 0) play();
+    _playWhenShown = false;
+    if (_shotsWhenShown case final shots?) {
+      _shotsWhenShown = null;
+      for (final (clip, volume, pitch) in shots) {
+        playOneShot(clip, volume: volume, pitch: pitch);
+      }
+    }
   }
 
   @override
   void onDisable() {
     super.onDisable();
+    _playWhenShown = false;
+    _shotsWhenShown = null;
     stop();
     final audio = _audio;
     if (audio != null && !audio._disposed) {

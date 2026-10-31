@@ -3,6 +3,7 @@
 // one-shots, and the values refused. No world here is on screen, so no
 // device opens: the sound is made and timed without one.
 
+import 'dart:async';
 import 'dart:ffi';
 import 'dart:typed_data';
 
@@ -393,6 +394,23 @@ void main() {
     expect(source.isPlaying, isTrue);
   });
 
+  test('a sound asked for while its object loads plays once the object is shown, and not if it never is', () async {
+    final world = newWorld();
+    final loading = Completer<void>();
+    final shown = world.add(_Loads(loading.future));
+    final dropped = world.add(_Loads(Completer<void>().future));
+    run(world);
+    expect((shown.source.isPlaying, world.audio.stats.voices), (false, 0));
+    loading.complete();
+    await pumpEventQueue();
+    run(world);
+    expect(shown.source.isPlaying, isTrue);
+    expect(world.audio.stats.voices, 2, reason: 'its clip, and its one-shot');
+    dropped.destroy();
+    run(world, frames: 3);
+    expect(world.audio.stats.voices, 2, reason: 'what an object that never showed asked for never plays');
+  });
+
   test("a clip's bad rate or channels throw in Dart, naming them (stage 14, A10)", () {
     expect(
       () => AudioClip.fromSamples(Float32List(10), rate: -1),
@@ -453,4 +471,22 @@ void main() {
     final world = newWorld();
     expect(world.audio.stats.toString(), contains('reopened 0'));
   });
+}
+
+/// Plays its clip and a one-shot from its onLoad, then waits for [_until].
+class _Loads extends GameObject {
+  _Loads(this._until) : super(components: [AudioSource(clip: tone(0.5), loop: true, playOnAwake: false)]);
+
+  final Future<void> _until;
+
+  AudioSource get source => get<AudioSource>()!;
+
+  @override
+  Future<void> onLoad() async {
+    super.onLoad();
+    source
+      ..play()
+      ..playOneShot(tone(0.5));
+    await _until;
+  }
 }
