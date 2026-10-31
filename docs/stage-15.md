@@ -1,6 +1,7 @@
 # Stage 15 plan: UI in the world
 
-Status: proposed 2026-10-31. Scope and rules:
+Status: accepted 2026-10-31 ("ok let's do that"), with the
+recommended answer to each decision (§7). Scope and rules:
 [ADR-0001](decisions/0001-fynkel-2-code-first.md). Stage 14 is done
 ([report](stage-14-report.md)); its two phase 5 points left open there
 came in #186.
@@ -34,9 +35,13 @@ hit.addComponent(TextRenderer('-12', font: numbers, size: 0.3, facing: Facing.ca
 spot.addComponent(SpriteRenderer(arrow, size: Vec2(1, 1), facing: Facing.up));
 ```
 
-**The road after it**: stage 16, speed (the iPhone measured by cable,
+**The road after it**: a full 2D engine next, the user's ask on
+2026-10-31 (sprite sheets and their animation, tilemaps, 2D physics on
+rapier2d, a pixel-perfect camera, sorting layers), so phase 3's sprites
+are made the 2D way from the start; its place in the order is the
+user's to set. Then speed (the iPhone measured by cable,
 then RN12, RN11 and RN8, until the Sheepdog field is as fast as Unity's
-on each device); stage 17, path finding; then animation 2 and cutting
+on each device), path finding, then animation 2 and cutting
 meshes. Shipping is far off.
 
 ## 1. What there is today
@@ -139,8 +144,8 @@ meshes. Shipping is far off.
   as particles are.
 - **9-slice** (`slice: Insets(...)`), so a speech bubble or a panel
   stretches without stretching its corners.
-- **`order`** breaks ties between sprites at the same depth, as Unity's
-  sorting order.
+- **`sortingLayer` and `order`**, as Unity's, from the start: a 2D game
+  (the stage after) draws by them, not by depth.
 - **A widget onto a texture** (decision 4): `await
   Texture2D.fromWidget(widget, size:)` draws a Flutter widget once into
   a texture, for a sign or a poster that looks like the game's UI. It
@@ -184,7 +189,8 @@ Note10+ with no garbage, and text a few pixels high still reads.
 
 ### Phase 3: pictures in the scene (M)
 
-- `SpriteRenderer`, `facing`, 9-slice, `order`, instancing.
+- `SpriteRenderer`, `facing`, 9-slice, `sortingLayer` and `order`,
+  instancing.
 - `Texture2D.fromWidget` (decision 4).
 - The lab page gets a speech bubble that's a sprite, markers on the
   ground, a poster drawn from a widget.
