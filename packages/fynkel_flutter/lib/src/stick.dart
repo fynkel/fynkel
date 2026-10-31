@@ -12,9 +12,24 @@ import 'package:fynkel/fynkel.dart' show Input, Vec2;
 /// area, and appears under it (Unity's dynamic origin): give it the area
 /// (the screen's bottom half, say) rather than a spot. A tap there without
 /// a drag still reaches what's under it, a game's object or a button.
+///
+/// It takes the game's look with a [ring] and a [knob] of its own (an
+/// `Image.asset`, say), drawn at [size] and [knobSize].
 class Stick extends StatefulWidget {
   /// A stick that sets [input]'s [axis]: 'move' unless given.
-  const Stick(this.input, {super.key, this.axis = 'move', this.floating = false, this.size = 120});
+  const Stick(
+    this.input, {
+    super.key,
+    this.axis = 'move',
+    this.floating = false,
+    this.size = 120,
+    this.knobSize,
+    this.ring,
+    this.knob,
+  }) : assert(
+         knobSize == null || (knobSize > 0 && knobSize < size),
+         'Stick.knobSize is $knobSize: give one above 0 and below the size, $size',
+       );
 
   /// The input it sets: a game's is `world.input`.
   final Input input;
@@ -26,8 +41,20 @@ class Stick extends StatefulWidget {
   /// staying in one place.
   final bool floating;
 
-  /// Across its ring, in logical pixels; the knob is 13/30 of it.
+  /// Across its ring, in logical pixels.
   final double size;
+
+  /// Across its knob, in logical pixels: 13/30 of [size] unless given. The
+  /// knob's middle goes as far as the ring's rim less half the knob.
+  final double? knobSize;
+
+  /// What's drawn for the ring, [size] across: a see-through disc with a
+  /// white rim unless given.
+  final Widget? ring;
+
+  /// What's drawn for the knob, [knobSize] across: a white disc with a
+  /// shadow unless given.
+  final Widget? knob;
 
   @override
   State<Stick> createState() => _StickState();
@@ -37,7 +64,7 @@ class _StickState extends State<Stick> {
   Offset? _origin;
   var _at = Offset.zero;
 
-  double get _knob => widget.size * 13 / 30;
+  double get _knob => widget.knobSize ?? widget.size * 13 / 30;
   double get _reach => (widget.size - _knob) / 2;
 
   void _start(Offset local) {
@@ -84,28 +111,40 @@ class _StickState extends State<Stick> {
   }
 
   Widget _ring() => IgnorePointer(
-    child: Container(
+    child: SizedBox(
       key: const ValueKey('fynkel.stick'),
       width: widget.size,
       height: widget.size,
-      decoration: BoxDecoration(
-        color: const Color(0x332B2D42),
-        shape: BoxShape.circle,
-        border: Border.all(color: const Color(0x99FFFFFF), width: 2),
-      ),
-      child: Transform.translate(
-        offset: _at,
-        child: Center(
-          child: Container(
-            width: _knob,
-            height: _knob,
-            decoration: const BoxDecoration(
-              color: Color(0xFFFFFFFF),
-              shape: BoxShape.circle,
-              boxShadow: [BoxShadow(color: Color(0x552B2D42), blurRadius: 8, offset: Offset(0, 3))],
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          widget.ring ??
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: const Color(0x332B2D42),
+                  shape: BoxShape.circle,
+                  border: Border.all(color: const Color(0x99FFFFFF), width: 2),
+                ),
+              ),
+          Transform.translate(
+            offset: _at,
+            child: Center(
+              child: SizedBox(
+                width: _knob,
+                height: _knob,
+                child:
+                    widget.knob ??
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        color: Color(0xFFFFFFFF),
+                        shape: BoxShape.circle,
+                        boxShadow: [BoxShadow(color: Color(0x552B2D42), blurRadius: 8, offset: Offset(0, 3))],
+                      ),
+                    ),
+              ),
             ),
           ),
-        ),
+        ],
       ),
     ),
   );

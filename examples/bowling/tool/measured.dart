@@ -9,8 +9,8 @@ import 'package:fynkel_measure/fynkel_measure.dart';
 void main() => runApp(
   MeasuredApp(
     BowlingGame.new,
-    overlay: (game) => Hud(game as BowlingGame),
-    change: (game) async => (game as BowlingGame)
+    overlay: (context, game) => Hud(game),
+    change: (game) async => game
       ..aimX = 0.05
       ..roll(speed: 7.5, angle: 0),
   ),

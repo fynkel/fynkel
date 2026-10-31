@@ -40,8 +40,8 @@ void main() {
     child: Center(child: SizedBox(width: 200, height: 100, child: child)),
   );
 
-  FynkelView view({bool autofocus = true, double resolutionScale = 1}) =>
-      FynkelView.world(world, autofocus: autofocus, resolutionScale: resolutionScale);
+  FynkelView view({bool autofocus = true, double renderScale = 1}) =>
+      FynkelView.world(world, autofocus: autofocus, renderScale: renderScale);
 
   Input input() => world.input;
 
@@ -76,7 +76,7 @@ void main() {
     // Positions don't depend on the pixels the view draws.
     tester.view.devicePixelRatio = 3;
     addTearDown(tester.view.resetDevicePixelRatio);
-    await tester.pumpWidget(app(view(resolutionScale: 0.5)));
+    await tester.pumpWidget(app(view(renderScale: 0.5)));
     listen();
     await frame(tester);
     expect((input().width, input().height), (200, 100));

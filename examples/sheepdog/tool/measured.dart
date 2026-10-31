@@ -14,8 +14,7 @@
 
 import 'package:flutter/material.dart' show AlertDialog, ThemeData, showDialog;
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart'
-    show Blending, Color, GameObject, Light, LightKind, MeshRenderer, ParticleSystem, Quality;
+import 'package:fynkel/fynkel.dart' show Blending, Color, Light, LightKind, MeshRenderer, ParticleSystem, Quality;
 import 'package:fynkel_measure/fynkel_measure.dart';
 import 'package:sheepdog/game.dart';
 import 'package:sheepdog/hud.dart';
@@ -65,11 +64,10 @@ SheepdogGame _make() {
 
 void main() => runApp(
   _field
-      ? MeasuredApp(Field.new, onStats: (root, stats) => (root as Field).onStats(stats))
+      ? MeasuredApp(Field.new, onStats: (field, stats) => field.onStats(stats))
       : MeasuredApp(
           _make,
-          overlay: (game) {
-            game as SheepdogGame;
+          overlay: (context, game) {
             return Stack(
               fit: StackFit.expand,
               children: [
@@ -80,7 +78,7 @@ void main() => runApp(
               ],
             );
           },
-          change: (game) => (game as SheepdogGame).restart(),
+          change: (game) => game.restart(),
           onStats: _shaderProbes,
         ),
 );
@@ -88,8 +86,7 @@ void main() => runApp(
 /// The shaders' probes: `nograss` and `nopond` hide them, `noground`
 /// draws the field with the engine's own shader. Again each second, as a
 /// new round makes them again.
-void _shaderProbes(GameObject root, Object _) {
-  final game = root as SheepdogGame;
+void _shaderProbes(SheepdogGame game, Object _) {
   if (_probe.contains('noground')) game.grass.shader = null;
   if (_probe.contains('plainpond') && game.water.shader != null) {
     game.water

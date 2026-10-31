@@ -24,7 +24,10 @@ class WorldWidget extends Behaviour {
   /// [builder]'s widget, its [alignment] point at the object's position
   /// plus [offset]; shrunk beyond [shrinkBeyond], if given.
   WorldWidget(this.builder, {this.offset = Vec3.zero, this.alignment = Alignment.center, this.shrinkBeyond})
-    : assert(shrinkBeyond == null || shrinkBeyond > 0);
+    : assert(
+        shrinkBeyond == null || shrinkBeyond > 0,
+        'WorldWidget.shrinkBeyond is $shrinkBeyond: give a distance above 0, or leave it out for full size always',
+      );
 
   /// Builds the widget, once it's shown.
   final WidgetBuilder builder;
@@ -287,7 +290,8 @@ class _RenderPlaced extends RenderBox
       if (at == null) continue; // Behind the camera.
       final distance = (point - eye).length;
       final beyond = w.shrinkBeyond;
-      final scale = beyond == null || distance <= beyond ? 1.0 : beyond / distance;
+      // A release build doesn't check it: one that isn't above 0 keeps full size.
+      final scale = beyond == null || !(beyond > 0) || distance <= beyond ? 1.0 : beyond / distance;
       final width = child.size.width * scale, height = child.size.height * scale;
       final x = at.x - (w.alignment.x + 1) / 2 * width;
       final y = at.y - (w.alignment.y + 1) / 2 * height;

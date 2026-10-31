@@ -64,7 +64,7 @@ void main() {
     runApp(
       MeasuredApp(
         () => Tour(titles, _tourLevels.split(','), seconds: _tourSeconds),
-        onStats: (root, stats) => (root as Tour).onStats(stats),
+        onStats: (tour, stats) => tour.onStats(stats),
       ),
     );
     return;

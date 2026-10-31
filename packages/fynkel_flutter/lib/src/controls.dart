@@ -14,11 +14,24 @@ import 'input_feed.dart' show keyCodeOf;
 /// on(controls.changed, (_) => controls.bindTo(input));
 /// ```
 ///
-/// [toJson] and [fromJson] keep the player's keys between runs, in what
-/// the app saves its settings with.
+/// [toJson] and [Controls.fromJson] keep the player's keys between runs,
+/// in what the app saves its settings with.
 class Controls extends ChangeNotifier {
   /// Controls with these names and first keys.
   Controls(Map<String, KeyCode> defaults) : defaults = Map.unmodifiable(defaults), _keys = Map.of(defaults);
+
+  /// Controls with these names and first keys, and the keys [toJson] gave
+  /// (`Controls.fromJson(saved, defaults: {...})`); [defaults]' alone when
+  /// [json] is null, as before anything is saved. A name or key it doesn't
+  /// know (an older version's) is left out, and the rest kept as they are.
+  factory Controls.fromJson(Map<String, Object?>? json, {required Map<String, KeyCode> defaults}) {
+    final controls = Controls(defaults);
+    for (final MapEntry(key: name, value: keyName) in (json ?? const <String, Object?>{}).entries) {
+      if (!controls._keys.containsKey(name) || keyName is! String) continue;
+      if (KeyCode.values.asNameMap()[keyName] case final key?) controls._swap(name, key);
+    }
+    return controls;
+  }
 
   /// The names and their first keys, in order: what [reset] goes back to.
   final Map<String, KeyCode> defaults;
@@ -75,18 +88,6 @@ class Controls extends ChangeNotifier {
 
   /// The keys by name, as their [KeyCode] names: `{'dash': 'space'}`.
   Map<String, String> toJson() => {for (final MapEntry(:key, :value) in _keys.entries) key: value.name};
-
-  /// Takes back the keys [toJson] gave. A name or key it doesn't know (an
-  /// older version's) is left out, and the rest kept as they are.
-  void fromJson(Map<String, Object?> json) {
-    var changed = false;
-    for (final MapEntry(key: name, value: keyName) in json.entries) {
-      if (!_keys.containsKey(name) || keyName is! String) continue;
-      final key = KeyCode.values.asNameMap()[keyName];
-      if (key != null && _swap(name, key)) changed = true;
-    }
-    if (changed) notifyListeners();
-  }
 }
 
 /// A settings page's list of [controls]: a heading with a Reset button

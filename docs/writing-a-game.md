@@ -606,7 +606,7 @@ or leave it to the player's settings page.
   went from 43 fps to 55. Put it on the settings page beside the levels:
   `world.quality = Quality.high.copyWith(renderScale: 0.75)`, or
   `Quality.low.copyWith(renderScale: 1)` for low at every pixel. A view's
-  own `FynkelView(resolutionScale:)` multiplies it, for one view (a
+  own `FynkelView(renderScale:)` multiplies it, for one view (a
   minimap).
 - **Smoother edges: `antiAliasing`**, as Unity's anti-aliasing (MSAA): 4
   samples a pixel at every level, or 2, or 0 for none. On phones' GPUs the
@@ -1319,7 +1319,7 @@ class WalkPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -3457,7 +3457,10 @@ class ScoreHud extends StatelessWidget {
 ```
 
 and in `main`: `runApp(FynkelApp(Score.new, overlay: (context, game) =>
-ScoreHud(game)))`.
+ScoreHud(game)))`. The overlay lies in a `Stack` over the view: a HUD
+that isn't `Positioned` sits loose at the top-left, and a `Positioned`
+one goes where it says (`Positioned(right: 16, bottom: 16, child:
+...)`).
 
 **On a phone the view is under Flutter, not in it** (on Android with a
 `FynkelActivity`, §1). Widgets over the view draw over the game, as
@@ -3474,7 +3477,7 @@ things differ from the Mac:
 - Two views stack, no more: a minimap over the game. A view lying within
   another goes over it.
 
-Where one of those matters, give that view `onScreen: false`: it's a
+Where one of those matters, give that view `directToScreen: false`: it's a
 texture Flutter draws, as on the Mac, slower on some Android phones and
 warmer on an iPhone.
 
@@ -3493,7 +3496,8 @@ then waits for the step running between frames to finish first.
 `FynkelApp` is a `MaterialApp` with the game as its page, so the overlay
 can hold any Material widget (a `Slider`, a `TextField`, a button), open a
 dialog with `showDialog`, or push a page over the game with
-`Navigator.of(context)`. Give it a `theme:` (Material's dark one if not),
+`Navigator.of(context)`: a page pushed there finds the game with
+`FynkelGame.of(context)`, as the overlay does. Give it a `theme:` (Material's dark one if not),
 and a `navigatorKey:` to open pages from the game's code.
 
 **Keep the HUD in its own file.** Flutter and Fynkel both have a `Color`
@@ -3622,7 +3626,7 @@ class PlayPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -3647,6 +3651,12 @@ the view can take `game.world.input` while it's built, as an on-screen
 stick does (`Stick(game.world.input)`). The view shows the game's world;
 a game whose assets don't come from the app's bundle gives
 `FynkelGame(source: ...)`.
+
+A page pushed over this one with `Navigator` (or a dialog) isn't below
+its `FynkelGame`, so `FynkelGame.of` there doesn't find it: give the page
+the game (`SettingsPage(game)`). A `FynkelGame` keeps the game it
+started with when it's built again with another `make`; give it a `Key`
+to start another (`key: ValueKey(level)`).
 
 Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
@@ -3684,7 +3694,7 @@ class GamePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Score.new,
+    Score.new,
     builder: (context, game) => PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, _) {
@@ -3833,7 +3843,7 @@ class FieldPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => FynkelGame(
-    make: Field.new,
+    Field.new,
     builder: (context, game) => Stack(
       fit: StackFit.expand,
       children: [
@@ -3940,8 +3950,8 @@ class Levels extends GameObject {
 
 **Saving.** What's kept between runs is plain data, never objects: the
 level reached, the best score, the settings (`Controls` has `toJson` and
-`fromJson`, §17). Write it as JSON to a file in the app's own folder,
-which the app finds with the `path_provider` package
+`Controls.fromJson`, §17). Write it as JSON to a file in the app's own
+folder, which the app finds with the `path_provider` package
 (`getApplicationSupportDirectory()`) and hands to the game:
 
 ```dart
@@ -4243,7 +4253,7 @@ What keeps a game fast:
 - **Shaders that read what's behind cost most** (§14): the frame takes
   three passes while one is in view. On an older phone give low quality
   a material that doesn't read it.
-- **Views on screen** (`onScreen`, on unless turned off; on Android with
+- **Views on screen** (`directToScreen`, on unless turned off; on Android with
   a `FynkelActivity`, §1), so Flutter neither waits for the game's
   frames nor copies them.
 - **A cheaper quality for an older phone.** `world.quality =
