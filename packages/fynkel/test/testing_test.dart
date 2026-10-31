@@ -1,6 +1,9 @@
 // Hardening G8: package:fynkel/testing.dart, what each example's tests
 // wrote for themselves.
 
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
@@ -36,6 +39,88 @@ void main() {
     addTearDown(bare.dispose);
     expect(() => bare.tap(1, 1), throwsA(isStateError.having((e) => e.message, 'message', contains('resize'))));
     expect(() => bare.viewPoint(1, 1), throwsStateError);
+  });
+  // Stage 14's GT11: the golden check was copied into the lab; a game had none.
+  group('expectImage', () {
+    late Directory dir;
+    setUp(() => dir = Directory.systemTemp.createTempSync('fynkel_image'));
+    tearDown(() => dir.deleteSync(recursive: true));
+
+    Uint8List picture(int width, int height, int Function(int x, int y) red) {
+      final rgba = Uint8List(width * height * 4);
+      for (var y = 0; y < height; y++) {
+        for (var x = 0; x < width; x++) {
+          rgba
+            ..[(y * width + x) * 4] = red(x, y)
+            ..[(y * width + x) * 4 + 1] = (x * 7 + y * 3) & 0xFF
+            ..[(y * width + x) * 4 + 3] = 255;
+        }
+      }
+      return rgba;
+    }
+
+    test('a picture matches itself saved, and small or rare differences pass', () {
+      final rgba = picture(40, 30, (x, y) => (x * 5 + y * 11) & 0xFF);
+      final path = '${dir.path}/a.png';
+      expectImage(path, rgba, width: 40, height: 30, bless: true);
+      expectImage(path, rgba, width: 40, height: 30);
+      // 2/255 everywhere, and one pixel far off: still the same picture.
+      final near = Uint8List.fromList(rgba);
+      for (var i = 0; i < near.length; i += 4) {
+        near[i + 1] = near[i + 1] < 250 ? near[i + 1] + 2 : near[i + 1] - 2;
+      }
+      near[0] ^= 0x80;
+      expectImage(path, near, width: 40, height: 30);
+    });
+
+    test('a different picture fails, saying how much, and leaves it and the difference to look at', () {
+      final rgba = picture(40, 30, (x, y) => 100);
+      final path = '${dir.path}/b.png';
+      expectImage(path, rgba, width: 40, height: 30, bless: true);
+      final other = picture(40, 30, (x, y) => x < 20 ? 100 : 140);
+      expect(
+        () => expectImage(path, other, width: 40, height: 30, failures: '${dir.path}/failures'),
+        throwsA(
+          isA<ImageDiffers>().having((e) => e.message, 'message', allOf(contains('600 of 1200'), contains('40'))),
+        ),
+      );
+      expect(File('${dir.path}/failures/b.actual.png').existsSync(), isTrue);
+      expect(File('${dir.path}/failures/b.diff.png').existsSync(), isTrue);
+      expect(
+        () => expectImage(path, picture(20, 30, (x, y) => 100), width: 20, height: 30),
+        throwsA(isA<ImageDiffers>().having((e) => e.message, 'message', contains('40 × 30'))),
+      );
+    });
+
+    test('with no picture saved yet, it says how to save one; FYNKEL_BLESS=1 saves it', () {
+      final rgba = picture(8, 8, (x, y) => x * 30);
+      final path = '${dir.path}/new/c.png';
+      expect(
+        () => expectImage(path, rgba, width: 8, height: 8),
+        throwsA(isA<ImageDiffers>().having((e) => e.message, 'message', contains('FYNKEL_BLESS=1'))),
+      );
+      expectImage(path, rgba, width: 8, height: 8, bless: true);
+      expectImage(path, rgba, width: 8, height: 8);
+      expect(File(path).lengthSync(), lessThan(8 * 8 * 4), reason: 'saved compressed');
+    });
+
+    test("a view's frame is checked as it draws: expectFrame", () {
+      final drawn = World()..add(GameObject(components: [Camera(clearColor: const Color.rgb(0.2, 0.4, 0.6))]));
+      addTearDown(drawn.dispose);
+      final HeadlessView view;
+      try {
+        view = HeadlessView(drawn, width: 32, height: 16);
+      } on FynkelException {
+        markTestSkipped('no GPU');
+        return;
+      }
+      addTearDown(view.dispose);
+      final path = '${dir.path}/frame.png';
+      view.expectFrame(path, bless: true);
+      view.expectFrame(path);
+      drawn.camera!.clearColor = const Color.rgb(0.9, 0.1, 0.1);
+      expect(() => view.expectFrame(path, failures: dir.path), throwsA(isA<ImageDiffers>()));
+    });
   });
 }
 
