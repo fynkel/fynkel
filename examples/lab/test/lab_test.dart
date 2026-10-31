@@ -45,6 +45,7 @@ import 'package:lab/scenes/crowd.dart';
 import 'package:lab/scenes/skinned.dart';
 import 'package:lab/scenes/sound_mix.dart';
 import 'package:lab/scenes/theme_basics.dart';
+import 'package:lab/scenes/world_widgets.dart';
 import 'package:lab/scenes/world_widgets_basics.dart';
 
 /// The lab's assets, from its folder, as the app has them.
@@ -314,6 +315,32 @@ void main() {
     }
     expect(pop.isDestroyed, isTrue, reason: 'risen, and gone');
   });
+
+  test(
+    'UI in the world: the walkers\' tags hide behind pillars, the flag\'s arrow keeps on screen, the sync check spins',
+    () async {
+      final world = World(source: files);
+      addTearDown(world.dispose);
+      final scene = world.add(WorldWidgetsScene());
+      await scene.loaded;
+      world.update(1 / 60);
+      expect(scene.walkers.map((w) => w.get<WorldWidget>()!.hideBehind), everyElement(isTrue));
+      expect(scene.flag.get<WorldWidget>()!.keepOnScreen, isTrue);
+      expect(scene.marker.active, isFalse);
+      final [turn, sync] = scene.controls.whereType<Toggle>().toList();
+      final camera = scene.find('camera')!;
+      final still = camera.position;
+      turn.onChanged(true);
+      world.update(1 / 60);
+      expect(camera.position, isNot(still), reason: 'going round');
+      sync.onChanged(true);
+      expect(scene.marker.active, isTrue);
+      expect(scene.walkers.every((w) => !w.active), isTrue);
+      world.update(0.5);
+      expect((camera.position - scene.marker.position).length, moreOrLessEquals(5, epsilon: 1e-6));
+      expect(scene.readout.value, startsWith('camera at'));
+    },
+  );
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
     final world = World(source: files);
