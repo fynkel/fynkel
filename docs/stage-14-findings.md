@@ -442,6 +442,73 @@ set; `world.all` giving a copy; a page transition in a widget test
 doc comments (`Follow`'s, `Light.spot`'s), and a reused burst (one
 system moved and `emit`ted), which works and the guide doesn't show.
 
+### The pass over the public API (2026-10-31, at `bf27879a`)
+
+Five readers, one per area (the core, the features, physics, sound,
+the Flutter widgets with `fynkel_measure`), went through every public
+name, default, error message and doc. Each tested what it claimed about
+behaviour with a throwaway test. Their notes are in
+[stage-14-audit/api/](stage-14-audit/api/), each finding with its file,
+line, fix, and whether the fix breaks a game's code. 78 findings: 13
+bugs, the rest errors that don't say what to do, docs that say
+something else, and gaps. Ids: C core, F features, P physics, A sound,
+U Flutter.
+
+**Bugs**
+
+| Row | What | Size |
+|---|---|---|
+| U1 | A `FynkelView(root:)` that Flutter makes again (a view wrapped in a `Stack` only sometimes) destroys the game: the new view takes the world over, then the old one disposes it | S |
+| U2 | A game that pauses itself while a dialog covers it is unpaused when the dialog closes, against `pauseWhenCovered`'s doc | S |
+| U3 | `tester.game<T>()` gives the widget's `root`, not the one shown, for `build() => FynkelView(root: MyGame())`; a view given a new root or `make` keeps the old game, saying nothing | S |
+| A1 | A source that's off, or on an object that's off, plays; a loop then outlives its object (10 s after `destroy()`) | S |
+| A2 | Setting `music.volume` applies a waiting `loop` or `group` change to the playing track | S |
+| A3 | `music.play(clip, fadeIn: -1)` stops the track, then throws: no music | S |
+| A6 | Another world's `AudioGroup` is used as this world's group of the same number | S |
+| P1 | A joint the engine refuses (to its own body, a NaN anchor) is lost for good, even after a good value; the bad value stays | S |
+| P2 | Queries give a read-only list only when nothing was hit, so `.sort()` fails only on a miss | S |
+| C3 | `world.all`, `first` and `only` give objects whose `onLoad` hasn't finished, not yet shown; their `late` fields throw | S |
+| F1 | `Mesh.extrude(Shape2D.circle(0))` panics in the engine | S |
+| F2 | A NaN shake or a `VirtualCamera` value out of range fails every frame, and after 5 the whole camera system is off for good, naming no camera | S |
+| F3 | `SplineAnimate` throws every frame once its spline's object is destroyed | S |
+
+**Errors that should say what to do** (no game that works changes):
+- **The engine's own checks speak Rust** (C1, C2, P8): `Camera(fovY: 60)`
+  gives "Camera.fov_y: 3437.7468 is outside 1..=179", in radians
+  turned to degrees, at `world.add`, naming no object. Fix: check in
+  Dart where it's set, with the Dart name, the value as given and
+  what's allowed ("fovY is 60 radians; did you mean 60.deg?").
+- **"Instance of 'Shot'"** where the value should be (C7, F5): about a
+  dozen `ArgumentError.value` calls. Fix: one helper that names it.
+- **One-offs**: C4, C6 (`start`, renamed `startRoutine`, still in an
+  error and the guide), C8, C9, C10, C13, F6, F7, F8, F15–F18, P4, P13,
+  A4, A10–A13, U14.
+
+**Docs that say something else**: F4, F10, F11, P6, P7 (the guide's
+`body.velocity`), P11, P12, C12, U6 (a bare view doesn't reload
+shaders on hot reload; fix the view, not the doc), U7, U13, U17, A14.
+
+**Gaps a game hits**: U4 (`FynkelApp` passes on none of the view's
+settings: no stats, no error hook), U5 (a page pushed from the overlay
+can't find the game), U10 (the overlay isn't a `Stack`, so `Stick`'s
+`Positioned` fails), A5 (`AudioSource(group:)`), P3 (a joint with no
+rigidbody waits silently), P5 (`Rigidbody.position` throws before it's
+added), P10 (`copyWith` for joint motors, springs, limits and
+materials), F12 (`Color.withAlpha`, `Vec2.normalized`, a quaternion's
+angles), C11, P9, U9, U11, U12, U18, C14, C15.
+
+**Changes a game's code would see** (for the user's word):
+- **C3, C5, Unity's defaults**: `all`/`first`/`only` leave out objects
+  still loading, and `getInParent`/`getInChildren` leave out what's off
+  unless `includeInactive: true`, as Unity's do.
+- **Names**: Animator's `duration:` → `seconds:` as everywhere else
+  (F9); music's `time` → `playTime`, settable, as a source's (A7);
+  `Mesh.lathe`'s `sides` → `segments` (F14); `FynkelView.onScreen`,
+  read as a callback (U8); `Controls.fromJson` as a method (U15);
+  `resolutionScale` against `renderScale` (U16); the two `shake`s (F13).
+- **More sound**: one-shots that say when they end and stop alone (A8),
+  a source's `fade`, music's `pause` (A9). New in the mixer, so bigger.
+
 ## 6. Decisions
 
 1. **The order: phase 2's 2a first** (the app going down), then 2b with
