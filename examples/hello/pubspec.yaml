@@ -15,6 +15,8 @@ dependencies:
     path: ../../packages/fynkel_flutter
 
 dev_dependencies:
+  flutter_test:
+    sdk: flutter
   fynkel_measure:
     path: ../../packages/fynkel_measure
   lints: ^6.1.0
