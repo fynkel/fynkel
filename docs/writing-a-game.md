@@ -3609,6 +3609,58 @@ own, a button in it works, and the game doesn't see that tap. For a widget
 at a point, a damage number say, put it on an empty object there, and
 move or destroy that.
 
+It moves with the game's picture, not ahead of it: the engine's picture
+of a frame reaches the screen a frame after Flutter's on a Mac or an
+Android phone, and the widgets wait for it there. Two settings change
+where it shows. **`hideBehind: true`** hides it while something is between
+the camera and its point, a pillar or a wall (not its own object), fading
+over 0.15 s; `hideLayers` says what counts (`LayerMask.except([glass])`
+sees through glass). It looks with `world.raycast`, eight widgets a frame
+in turn, so a hundred cost eight casts, not a hundred. **`keepOnScreen:
+true`** keeps all of it inside the view's edge, `edgeMargin` in: a speech
+bubble over someone at the side doesn't hang off, and one whose point
+leaves the view, or goes behind the camera, waits at the edge toward it.
+`WorldWidget.of(context)` tells its builder when it's waiting there and
+which way the point is, for an arrow:
+
+```dart
+// lib/goal_arrow.dart
+import 'package:flutter/material.dart' show Colors, Icon, Icons;
+import 'package:flutter/widgets.dart';
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+/// The goal: "goal" over it, an arrow at the screen's edge toward it
+/// while it's off the screen.
+class Goal extends GameObject {
+  Goal() : super(name: 'goal') {
+    addComponent(WorldWidget((context) => const GoalMark(), offset: Vec3(0, 1, 0), keepOnScreen: true, hideBehind: true));
+  }
+}
+
+class GoalMark extends StatelessWidget {
+  const GoalMark({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final place = WorldWidget.of(context);
+    return ValueListenableBuilder(
+      valueListenable: place.offScreen,
+      builder: (context, off, _) => off
+          ? ValueListenableBuilder(
+              valueListenable: place.angle, // 0 to the right, pi / 2 down
+              builder: (context, angle, _) =>
+                  Transform.rotate(angle: angle, child: const Icon(Icons.arrow_forward, color: Colors.yellow)),
+            )
+          : const Text('goal'),
+    );
+  }
+}
+```
+
+(Off the screen, `hideBehind` doesn't hide it: the arrow shows whatever
+is in the way.)
+
 A game inside a bigger app (a title screen, a menu) uses the pieces
 `FynkelApp` is made of: a **`FynkelGame`**, which makes the root and can
 start it over, and a **`FynkelView`**, which shows it:

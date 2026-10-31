@@ -475,6 +475,9 @@ class _RenderPlaced extends RenderBox
           ..offset = Offset(size.width / 2 + dx * t - width / 2, size.height / 2 + dy * t - height / 2)
           ..scale = 1
           ..depth = distance;
+        // At the edge it shows whatever is in the way: an arrow is no use
+        // hidden.
+        where._opacity = 1;
         if (look) {
           where._offScreen.value = true;
           where._angle.value = math.atan2(dy, dx);

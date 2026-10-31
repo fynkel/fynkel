@@ -1189,6 +1189,32 @@ void main() {
       expect(tester.getCenter(find.byKey(const ValueKey('on'))), offsetMoreOrLessEquals(seen(tester, Vec3.zero)));
     });
 
+    testWidgets('a WorldWidget hidden behind a wall shows at the edge once its point leaves the view', (tester) async {
+      final thing = world.add(
+        GameObject(
+          components: [
+            WorldWidget(
+              (_) => const ColoredBox(key: tag, color: Colors.green, child: SizedBox(width: 20, height: 10)),
+              hideBehind: true,
+              keepOnScreen: true,
+            ),
+          ],
+        ),
+      );
+      world.add(
+        GameObject(
+          transform: Transform(position: Vec3(0, 0, 2), scale: Vec3(3, 3, 0.1)),
+          components: [MeshRenderer(Mesh.cube(), Material())],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester, 2);
+      expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'behind the wall');
+      thing.position = Vec3(30, 0, 0);
+      await frames(tester, 2);
+      expect(find.byKey(tag).hitTestable(), findsOneWidget, reason: 'waiting at the edge, wall or not');
+    });
+
     testWidgets('a WorldWidget kept on the screen with its point near the edge stays wholly inside it', (tester) async {
       late WorldWidgetPlace place;
       final thing = world.add(
