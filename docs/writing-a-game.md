@@ -215,13 +215,15 @@ class Yard extends GameObject {
 - **`active = false`** hides an object and everything below it: not drawn,
   not touched, not updated. `activeInHierarchy` says whether it and all its
   parents are on.
-- **Finding**: `parent`, `children`, `find(name)` below this one,
+- **Finding**: `parent`, `children` (or `childCount` and `childAt(i)`,
+  Unity's `GetChild`, which make no list), `find(name)` below this one,
   `ancestor<T>()` the nearest above of a type, and across the whole game
   `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws
   unless there's exactly one). These find by type, so a game rarely needs
   names or tags (the `name` checks in §16 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
-  (and the components on them) unless `includeInactive: true`.
+  (and the components on them) unless `includeInactive: true`, and so
+  objects still loading (§6), which aren't drawn or started yet.
   `all` gives a new list, so destroying or releasing what's in it while
   going through it is safe.
 
@@ -340,14 +342,17 @@ class Coin extends GameObject {
 
 From a behaviour, its object is near: `gameObject`, and the same
 shortcuts an object has (`transform`, `position`, `get<T>()`, `world`,
-`time`, `input`, `assets`, `start`, `on`).
+`time`, `input`, `assets`, `startRoutine`, `on`).
 
 - **`addComponent(b)`** puts a behaviour on at any time and returns it;
   **`removeComponent(b)`** takes it off for good.
 - **`get<T>()`** gives the first component of type `T` (or a subtype, or an
   interface it implements), or null; `getAll<T>()` all of them;
   `has<T>()`. `getInParent<T>()` and `getInChildren<T>()` look up or down
-  the tree too.
+  the tree too, and `getAllInChildren<T>()` gives every one below; as
+  Unity's, they skip objects turned off unless `includeInactive: true`.
+  They find components: `getInParent<Level>()` for a `Level` object throws
+  and points at `ancestor<Level>()`.
 - **`enabled = false`** stops its calls, its routines and its tweens
   until it's turned back on.
 - A destroyed object still has its components, to read: a dead enemy's
@@ -1544,7 +1549,7 @@ class Waves extends GameObject {
   about 1.3 ms a frame on a Note10+ and 0.2 ms on a Mac, on top of the
   game's own work out of the new shape. A few thousand vertices a frame
   is nothing; tens of thousands want a look at `world.profile` (§6):
-  its `meshes` is what sending them took, as `world.meshChangeTime` is.
+  its `meshes` is what sending them took.
   Built-in shapes and models' meshes can't be changed: copy what you
   need into a `Mesh()`.
 
@@ -4296,6 +4301,8 @@ What keeps a game fast:
 | `transform.parent = p`, `SetParent(p, false)` | `parent = p`, `setParent(p, worldPositionStays: false)` |
 | `transform.Find("name")` | `find('name')` |
 | `GetComponentInParent<T>()` | `getInParent<T>()`, or `ancestor<T>()` for an object |
+| `GetComponentInChildren<T>()`, `GetComponentsInChildren<T>()` | `getInChildren<T>()`, `getAllInChildren<T>()` (`includeInactive:` too) |
+| `transform.childCount`, `GetChild(i)` | `childCount`, `childAt(i)` |
 | C# events, `UnityEvent` | `Signal<T>` and `on(signal, ...)` |
 | `Input.GetKeyDown(KeyCode.Space)`, `Input.GetKey` | `input.wasPressed(KeyCode.space)`, `input.isPressed` |
 | `IPointerClickHandler` | `onClick` |
