@@ -406,6 +406,42 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | BR10 | `abi.rs` 5730 lines into modules; the header stays byte-identical | M |
 | DC5 | (phase 3, above) | L |
 
+### Fresh developers again (2026-10-31, at `2a0ed245`)
+
+The same two briefs, given to two new agents with the same rules (the
+guide and the packages' public code only), into `/tmp/s14b`; their logs
+are [courtyard-log-2.md](stage-14-audit/courtyard-log-2.md) and
+[marble-log-2.md](stage-14-audit/marble-log-2.md).
+
+**Both games built clean and passed every test**: Courtyard 785 lines
+and 10 tests, Marble Run 463 lines and a shader, 8 tests, in about 10
+and 6 minutes. Marble Run's first draft analyzed clean and passed its
+first 6 tests with no wrong guess at the API; Courtyard's only compile
+error was `playAt(group:)` taking an `AudioGroup`, not a name.
+
+Of phase 1's findings, these weren't raised again: assets in tests
+(GD2), `pausedListenable`'s import (GD3), `Stick` (GD4), the bloom
+warning (GD7), the trail halo, `setSweep`'s message, both bodies hearing
+a collision, pooled trails, a root with arguments, `await game.loaded`
+(GD10–16), the build race (GD1; both built at once, from a warm cache).
+Raised again:
+
+| Row | What | Now |
+|---|---|---|
+| GD9 ½ | No way to check "no garbage" in a test | as before: the helper is left for shipping; §20 says what holds |
+| GD5 | Point lights cast no shadows | decision 3 sent it to §21, which never listed it. **Done**: §21, §5 (a torch as a point light and a shadowed spotlight) and `Light.point`'s doc say so |
+| GD6 | Music plays through a pause; `ignorePause` from the next track | §13b named it, §11's pause didn't. **Done**: §11 does. Applying it to the track already playing needs a mixer command, left |
+| GD8 | A routine's `wait` ends on a frame | **Done**: §19 says `world.run` moves in whole frames |
+
+New, all small, **done** in the guide unless said: `mesh.shapeVersion`
+said to need `extend.dart` (`fynkel.dart` has it); a surface shader's
+inputs only in `fynkel.wgsl`; a sweep's u and v; `setSweep` into an
+empty mesh; when a clip from samples is freed; where `fixedDelta` is
+set; `world.all` giving a copy; a page transition in a widget test
+(`tester.run(0.5)`). Left as they are: a few parameters only in the
+doc comments (`Follow`'s, `Light.spot`'s), and a reused burst (one
+system moved and `emit`ted), which works and the guide doesn't show.
+
 ## 6. Decisions
 
 1. **The order: phase 2's 2a first** (the app going down), then 2b with
