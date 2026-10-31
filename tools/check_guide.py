@@ -98,8 +98,10 @@ def assets(files: dict[str, str], app: pathlib.Path) -> None:
     loaded = set()
     for path, text in files.items():
         if path.startswith('lib/'):
-            for name in re.findall(r"assets\.\w+\('([^']+)'", text):
-                loaded.add(re.sub(r'\$\{?\w+\}?', '1', name))
+            # A name made from a number ('level_$number', 'level_${number + 1}')
+            # stands for the first few.
+            for name in re.findall(r"assets\.\w+\(\[?'([^']+)'", text):
+                loaded.update(re.sub(r'\$(\{[^}]*\}|\w+)', str(n), name) for n in (1, 2, 3))
     for name in sorted(loaded):
         target = app / 'assets' / name
         if target.exists():
