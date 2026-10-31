@@ -10,7 +10,10 @@ The finished examples are in `examples/`: `hello` (one turning cube),
 `arena` (a small game using most of what's here), `bowling` (a game on
 physics) and `sheepdog` (a game that feels like an app: a title screen,
 settings, pause, a HUD, labels in the world, a minimap and the app's
-theme). `examples/lab` has a scene for each feature, to try by hand.
+theme), and `pocket_hole` (a whole game, as one for the store: levels,
+saved progress, pause, haptics and its own icons). `examples/lab` has a
+scene for each feature, to try by hand, and `examples/scale` measures how
+the engine copes with thousands of objects.
 
 ## 1. A new game
 

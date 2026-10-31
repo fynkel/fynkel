@@ -1,9 +1,11 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+
 import 'game.dart';
 
 Future<void> main() async {

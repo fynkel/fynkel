@@ -12,9 +12,11 @@ on:
     branches: [main]
   pull_request:
 
+# A newer push to a pull request cancels the run it replaces; on main
+# every merge's run finishes, so each one's result is known (stage 14 GT12).
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   CARGO_TERM_COLOR: always
@@ -134,8 +136,9 @@ jobs:
           flutter test
           cd ../../examples/hello
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib tool
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
+          flutter test
           flutter build macos --debug
           cd ../garden
           flutter pub get
@@ -169,7 +172,7 @@ jobs:
           flutter build macos --debug
           cd ../lab
           flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
+          dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
@@ -178,6 +181,12 @@ jobs:
           dart format -l 120 --output=none --set-exit-if-changed lib test tool
           flutter analyze --fatal-infos
           flutter test -x timing
+          flutter build macos --debug
+          cd ../pocket_hole
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
           flutter build macos --debug
       # The phones' own code, compiled (stage 14's GT4): the lab uses all
       # three packages, so building it for an iPhone and for Android

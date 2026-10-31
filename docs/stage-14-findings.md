@@ -388,13 +388,13 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 
 | Row | What | Size |
 |---|---|---|
-| GT4 | What a phone runs is never compiled in CI: Kotlin, iOS Swift branches, sound's session code, mobile Rust targets | S |
+| GT4 ✅ | What a phone runs is never compiled in CI: Kotlin, iOS Swift branches, sound's session code, mobile Rust targets. **Done**: CI builds the lab for iOS and Android (step 'phone builds') | S |
 | GT2 | The soak's memory check fails on noise (3 in 3 days, 1 on main). **Done**: the process's total wanders because the Dart VM's pages and malloc's freed ones come and go (both counted on their own already); the total was flat by category (`footprint`). It's now held only for the rest: 5.2 MB undrawn, the same every round; 21–24 MB drawn | S |
-| GT12 | One serial job, 16–19 min; `cancel-in-progress` cancels runs on main | S |
+| GT12 ½ | One serial job, 16–19 min; `cancel-in-progress` cancels runs on main. **Half done**: runs on main are never cancelled (a merge's run was, 2026-10-30). Still one job, ~56 min now: one runner, so parallel jobs wouldn't be faster | S |
 | GT8 | 70 guide blocks analyzed, 4 run | S/M |
-| GT5 | Pocket Hole outside CI; `lab/tool` not format-checked | S |
+| GT5 ✅ | Pocket Hole outside CI; `lab/tool` not format-checked. **Done**: both in CI | S |
 | GT10, GT11 | `fynkel_measure` barely tested; `wait(tester)` copied 15 times, the golden comparator twice: a `fynkel_flutter` testing library | S |
-| — | hello has no test; the guide's example list misses scale and pocket_hole | S |
+| — ✅ | hello has no test; the guide's example list misses scale and pocket_hole. **Done** | S |
 | GT13 ✅ | (2026-10-31, from Ring Ring Deals) A character stopping for a frame on open ground got past every test: only the game found it. **Done**: `fynkel_physics/test/walking_test.dart` walks the game's capsule round for a minute, frames as a phone gives them, and loses none (the old controller: 114 of 3814) | S |
 
 **Rewrites** (§6, decision 2):
