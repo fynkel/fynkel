@@ -11,7 +11,7 @@ use fynkel_world::*;
 fn world() -> (World, Vec<Ray>) {
     let mut world = World::new();
     let cube = world.add_mesh(MeshData::cube());
-    let ground = world.add_mesh(MeshData::grid(Vec2::new(100.0, 100.0), [158, 158], 1.0));
+    let ground = world.add_mesh(MeshData::grid(Vec2::new(100.0, 100.0), [158, 158], 1.0).unwrap());
     let material = world.add_material(Material::default()).unwrap();
     let renderer = |mesh| MeshRenderer { mesh: Some(mesh), material: Some(material), ..Default::default() };
     let floor = world.spawn();

@@ -14,7 +14,7 @@ use glam::{Mat4, Quat, Vec2, Vec3};
 #[test]
 fn a_box_has_its_size_its_segments_and_uvs_in_metres() {
     let size = Vec3::new(4.0, 2.0, 1.0);
-    let b = MeshData::box_shape(size, [4, 2, 1], 1.0);
+    let b = MeshData::box_shape(size, [4, 2, 1], 1.0).unwrap();
     check_winding(&b);
     check_tangents(&b);
     check_closed(&b);
@@ -27,13 +27,13 @@ fn a_box_has_its_size_its_segments_and_uvs_in_metres() {
     let max_u = front.iter().map(|v| v.uv[0]).fold(0.0, f32::max);
     let max_v = front.iter().map(|v| v.uv[1]).fold(0.0, f32::max);
     assert_eq!((max_u, max_v), (4.0, 2.0));
-    let half = MeshData::box_shape(size, [1, 1, 1], 0.5);
+    let half = MeshData::box_shape(size, [1, 1, 1], 0.5).unwrap();
     assert_eq!(half.vertices().iter().map(|v| v.uv[0]).fold(0.0, f32::max), 2.0, "half as many repeats");
 }
 
 #[test]
 fn a_grid_is_flat_facing_up_cut_into_squares() {
-    let g = MeshData::grid(Vec2::new(10.0, 6.0), [5, 3], 1.0);
+    let g = MeshData::grid(Vec2::new(10.0, 6.0), [5, 3], 1.0).unwrap();
     check_winding(&g);
     check_tangents(&g);
     assert_eq!(g.vertices().len(), 6 * 4);
@@ -52,12 +52,12 @@ fn a_sized_sphere_and_capsule_and_cylinder_have_the_sizes_asked_for() {
     check_closed(&sphere);
     bounds_are(&sphere, Vec3::splat(-2.0), Vec3::splat(2.0));
 
-    let capsule = MeshData::capsule_sized(0.25, 3.0, 16, 4);
+    let capsule = MeshData::capsule_sized(0.25, 3.0, 16, 4).unwrap();
     check_winding(&capsule);
     check_tangents(&capsule);
     check_closed(&capsule);
     bounds_are(&capsule, Vec3::new(-0.25, -1.5, -0.25), Vec3::new(0.25, 1.5, 0.25));
-    let ball = MeshData::capsule_sized(0.5, 0.5, 16, 4);
+    let ball = MeshData::capsule_sized(0.5, 0.5, 16, 4).unwrap();
     check_winding(&ball);
     bounds_are(&ball, Vec3::splat(-0.5), Vec3::splat(0.5));
 
@@ -73,9 +73,12 @@ fn a_sized_sphere_and_capsule_and_cylinder_have_the_sizes_asked_for() {
 #[test]
 fn the_shapes_made_the_old_way_are_unchanged() {
     // The default shapes are the sized ones at their default sizes.
-    assert_eq!(MeshData::capsule(24, 6), MeshData::capsule_sized(0.5, 2.0, 24, 6));
+    assert_eq!(MeshData::capsule(24, 6), MeshData::capsule_sized(0.5, 2.0, 24, 6).unwrap());
     assert_eq!(MeshData::cylinder(24), MeshData::cylinder_sized(0.5, 2.0, 24, true));
-    assert_eq!(MeshData::cube().vertices().len(), MeshData::box_shape(Vec3::ONE, [1; 3], 1.0).vertices().len());
+    assert_eq!(
+        MeshData::cube().vertices().len(),
+        MeshData::box_shape(Vec3::ONE, [1; 3], 1.0).unwrap().vertices().len()
+    );
     // The same corners, normals and tangents, listed in another order.
     let corners = |m: &MeshData| {
         let mut c: Vec<String> =
@@ -83,12 +86,12 @@ fn the_shapes_made_the_old_way_are_unchanged() {
         c.sort();
         c
     };
-    assert_eq!(corners(&MeshData::cube()), corners(&MeshData::box_shape(Vec3::ONE, [1; 3], 1.0)));
+    assert_eq!(corners(&MeshData::cube()), corners(&MeshData::box_shape(Vec3::ONE, [1; 3], 1.0).unwrap()));
 }
 
 #[test]
 fn a_cone_comes_to_a_point_with_a_flat_base() {
-    let cone = MeshData::cone(1.0, 2.0, 24, true);
+    let cone = MeshData::cone(1.0, 2.0, 24, true).unwrap();
     check_winding(&cone);
     check_tangents(&cone);
     check_closed(&cone);
@@ -96,13 +99,13 @@ fn a_cone_comes_to_a_point_with_a_flat_base() {
     // π r² h / 3, a little less with 24 sides.
     let v = volume(&cone);
     assert!(v < std::f32::consts::PI * 2.0 / 3.0 && v > 2.0, "volume {v}");
-    let open = MeshData::cone(1.0, 2.0, 24, false);
+    let open = MeshData::cone(1.0, 2.0, 24, false).unwrap();
     assert_eq!(open.indices().len(), 24 * 3);
 }
 
 #[test]
 fn a_torus_is_a_closed_ring() {
-    let torus = MeshData::torus(1.0, 0.25, 32, 12);
+    let torus = MeshData::torus(1.0, 0.25, 32, 12).unwrap();
     check_winding(&torus);
     check_tangents(&torus);
     check_closed(&torus);
@@ -469,13 +472,30 @@ fn a_lathed_sphere_profile_is_smooth() {
     assert!(MeshData::lathe(&[Vec2::ZERO], 8).is_err());
 }
 
+#[test]
+fn an_outline_or_profile_that_makes_no_mesh_is_an_error_not_a_panic() {
+    // A circle of radius 0: every point the same, so no area and no sides.
+    let dot = vec![Vec2::ZERO; 8];
+    assert_eq!(MeshData::extrude(&dot, &[], 1.0, 1.0), Err(MeshError::NoTriangles));
+    // Points so far out that their texture coordinates aren't finite.
+    let huge = square(3e38, Vec2::ZERO);
+    assert!(MeshData::extrude(&huge, &[], 1.0, 10.0).is_err());
+    assert!(MeshData::lathe(&[Vec2::new(3e38, 0.0), Vec2::new(3e38, 3e38)], 8).is_err());
+    // The same for the shapes with sizes.
+    assert!(MeshData::grid(Vec2::splat(3e38), [1, 1], 10.0).is_err());
+    assert!(MeshData::box_shape(Vec3::splat(3e38), [1; 3], 10.0).is_err());
+    assert!(MeshData::cone(3e38, 3e38, 8, true).is_err());
+    assert!(MeshData::torus(3e38, 1e38, 8, 8).is_err());
+    assert!(MeshData::capsule_sized(3e38, 3e38, 8, 8).is_err());
+}
+
 // --- Combining ---------------------------------------------------------------------
 
 #[test]
 fn combined_meshes_are_placed_and_keep_their_parts() {
     // A house: walls (submesh 0) and a roof (submesh 1).
-    let walls = MeshData::box_shape(Vec3::ONE, [1; 3], 1.0);
-    let roof = MeshData::cone(0.8, 0.6, 4, true);
+    let walls = MeshData::box_shape(Vec3::ONE, [1; 3], 1.0).unwrap();
+    let roof = MeshData::cone(0.8, 0.6, 4, true).unwrap();
     let house = MeshData::combine(&[(&walls, Mat4::IDENTITY), (&roof, Mat4::from_translation(Vec3::Y * 0.8))]).unwrap();
     assert_eq!(house.submeshes().len(), 1, "one part each: one part");
     assert_eq!(house.indices().len(), walls.indices().len() + roof.indices().len());
@@ -503,7 +523,7 @@ fn combined_meshes_are_placed_and_keep_their_parts() {
 
 #[test]
 fn a_mirrored_mesh_still_faces_out_when_combined() {
-    let cone = MeshData::cone(0.5, 1.0, 12, true);
+    let cone = MeshData::cone(0.5, 1.0, 12, true).unwrap();
     let turned = Mat4::from_rotation_translation(Quat::from_rotation_y(0.7), Vec3::new(1.0, 2.0, 3.0));
     let mirrored = Mat4::from_scale(Vec3::new(-1.0, 2.0, 1.0));
     let both = MeshData::combine(&[(&cone, turned), (&cone, mirrored)]).unwrap();
@@ -539,10 +559,10 @@ fn bench_making_meshes() {
             drop(std::hint::black_box(make()))
         });
     }
-    time("box 8 a side", 0.03, || MeshData::box_shape(Vec3::ONE, [8; 3], 1.0));
-    time("grid 100 × 100", 0.35, || MeshData::grid(Vec2::splat(10.0), [100, 100], 1.0));
+    time("box 8 a side", 0.03, || MeshData::box_shape(Vec3::ONE, [8; 3], 1.0).unwrap());
+    time("grid 100 × 100", 0.35, || MeshData::grid(Vec2::splat(10.0), [100, 100], 1.0).unwrap());
     time("sphere 48 × 24", 0.06, || MeshData::sphere_sized(1.0, 48, 24));
-    time("torus 64 × 32", 0.1, || MeshData::torus(1.0, 0.25, 64, 32));
+    time("torus 64 × 32", 0.1, || MeshData::torus(1.0, 0.25, 64, 32).unwrap());
     let gear: Vec<Vec2> = (0..96)
         .map(|i| Vec2::from_angle(std::f32::consts::TAU * i as f32 / 96.0) * if (i / 4) % 2 == 0 { 1.0 } else { 0.85 })
         .collect();
@@ -558,7 +578,7 @@ fn bench_making_meshes() {
     });
     let profile: Vec<Vec2> = (0..=40).map(|i| Vec2::new(0.3 + 0.1 * (i as f32 * 0.3).sin(), i as f32 * 0.05)).collect();
     time("a profile of 41 points, lathed 48 times round", 0.15, || MeshData::lathe(&profile, 48).unwrap());
-    let house = MeshData::box_shape(Vec3::ONE, [1; 3], 1.0);
+    let house = MeshData::box_shape(Vec3::ONE, [1; 3], 1.0).unwrap();
     let at: Vec<(&MeshData, glam::Mat4)> =
         (0..100).map(|i| (&house, Mat4::from_translation(Vec3::new(i as f32, 0.0, 0.0)))).collect();
     time("100 boxes combined", 0.17, || MeshData::combine(&at).unwrap());
