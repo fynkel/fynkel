@@ -178,19 +178,32 @@ extension PhysicsLayers on Physics {
   /// Unity. Throws a [StateError] if either isn't in the world, and an
   /// [ArgumentError] if they're the same collider.
   void ignoreCollision(Collider collider1, Collider collider2, {bool ignore = true}) {
-    final (a, b) = (collider1._inWorld('ignoreCollision'), collider2._inWorld('ignoreCollision'));
-    if (!identical(a, this) || !identical(b, this)) throw StateError('the colliders are in another world');
-    if (identical(collider1, collider2)) throw ArgumentError.value(collider1, 'collider2', 'is collider1');
+    _checkHere('ignoreCollision', collider1, collider2);
+    if (identical(collider1, collider2)) {
+      throw ArgumentError('ignoreCollision was given $collider1 twice: a collider can\'t ignore itself');
+    }
     checkPhysics(fp_collision_ignore_set(_world, collider1._id, collider2._id, ignore ? 1 : 0));
   }
 
   /// Whether [collider1] and [collider2] pass through each other, by
   /// [ignoreCollision]. Throws a [StateError] if either isn't in the world.
   bool getIgnoreCollision(Collider collider1, Collider collider2) {
-    collider1._inWorld('getIgnoreCollision');
-    collider2._inWorld('getIgnoreCollision');
+    _checkHere('getIgnoreCollision', collider1, collider2);
     checkPhysics(fp_collision_ignore_get(_world, collider1._id, collider2._id, _flag));
     return _flag.value == 1;
+  }
+
+  /// Throws a [StateError] unless [collider1] and [collider2] are both in
+  /// this world's physics.
+  void _checkHere(String what, Collider collider1, Collider collider2) {
+    for (final c in [collider1, collider2]) {
+      if (!identical(c._inWorld(what), this)) {
+        throw StateError(
+          '$what: $collider1 and $collider2 must both be in this physics\' world, and $c is in another world. '
+          'Ask the physics of the world they\'re in (a behaviour\'s own `physics`)',
+        );
+      }
+    }
   }
 
   static void _checkLayer(int layer, String name) => RangeError.checkValueInInterval(layer, 0, 31, name);

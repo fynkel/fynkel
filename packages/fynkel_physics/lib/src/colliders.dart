@@ -54,6 +54,19 @@ final class PhysicsMaterial {
   /// set.
   final PhysicsMaterialCombine bounceCombine;
 
+  /// A copy with the values given changed.
+  PhysicsMaterial copyWith({
+    double? dynamicFriction,
+    double? bounciness,
+    PhysicsMaterialCombine? frictionCombine,
+    PhysicsMaterialCombine? bounceCombine,
+  }) => PhysicsMaterial(
+    dynamicFriction: dynamicFriction ?? this.dynamicFriction,
+    bounciness: bounciness ?? this.bounciness,
+    frictionCombine: frictionCombine ?? this.frictionCombine,
+    bounceCombine: bounceCombine ?? this.bounceCombine,
+  );
+
   void _check() {
     if (!(dynamicFriction >= 0) || !dynamicFriction.isFinite) {
       throw ArgumentError.value(dynamicFriction, 'dynamicFriction', 'must be finite and 0 or more');
@@ -68,16 +81,21 @@ final class PhysicsMaterial {
 /// its object's layer.
 sealed class Collider extends Behaviour {
   /// A collider with its middle at [center], a trigger or not, of
-  /// [material]. A bad material throws an [ArgumentError].
+  /// [material]. A bad center or material throws an [ArgumentError].
   Collider({this._center = Vec3.zero, this._isTrigger = false, PhysicsMaterial material = PhysicsMaterial.standard})
     : _material = material {
+    _checkCenter(_center);
     material._check();
   }
 
   /// Its middle, in its object's space (Unity's `center`): the object's
-  /// scale multiplies it. (0, 0, 0) unless set.
+  /// scale multiplies it. (0, 0, 0) unless set; one not finite throws an
+  /// [ArgumentError].
   Vec3 get center => _center;
-  set center(Vec3 value) => _setOrUndo(_center, value, (v) => _center = v, _changed);
+  set center(Vec3 value) {
+    _checkCenter(value);
+    _setOrUndo(_center, value, (v) => _center = v, _changed);
+  }
 
   Vec3 _center;
 
@@ -172,6 +190,11 @@ sealed class Collider extends Behaviour {
 
   /// Throws an [ArgumentError] for a size it can't have.
   void _checkShape();
+
+  void _checkCenter(Vec3 value) {
+    if (value.x.isFinite && value.y.isFinite && value.z.isFinite) return;
+    throw ArgumentError('$runtimeType.center is $value: it must be finite');
+  }
 
   void _writeSpec(FpColliderSpec spec, int listens) {
     _listens = listens;
@@ -391,9 +414,16 @@ final class MeshCollider extends Collider {
 
   /// The mesh it's made of: [mesh], or its object's [MeshRenderer]'s.
   Mesh get _shapeMesh {
-    if (_mesh case final mesh?) return mesh;
-    if (gameObject.get<MeshRenderer>()?.mesh case final mesh?) return mesh;
-    throw StateError('MeshCollider on $gameObject: no mesh. Give it one, or a MeshRenderer with one');
+    final mesh = _mesh ?? gameObject.get<MeshRenderer>()?.mesh;
+    if (mesh == null) throw StateError('MeshCollider on $gameObject: no mesh. Give it one, or a MeshRenderer with one');
+    // A mesh physics has already keeps its last shape while it has none.
+    if (mesh.indexCount < 3 && !(_physics?._meshes.containsKey(mesh) ?? false)) {
+      throw ArgumentError(
+        'MeshCollider on ${gameObject.name ?? gameObject}: its mesh has no triangles. '
+        'Give it one with triangles, or add the collider once the mesh has them',
+      );
+    }
+    return mesh;
   }
 
   @override
