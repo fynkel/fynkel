@@ -395,6 +395,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | GT5 | Pocket Hole outside CI; `lab/tool` not format-checked | S |
 | GT10, GT11 | `fynkel_measure` barely tested; `wait(tester)` copied 15 times, the golden comparator twice: a `fynkel_flutter` testing library | S |
 | — | hello has no test; the guide's example list misses scale and pocket_hole | S |
+| GT13 ✅ | (2026-10-31, from Ring Ring Deals) A character stopping for a frame on open ground got past every test: only the game found it. **Done**: `fynkel_physics/test/walking_test.dart` walks the game's capsule round for a minute, frames as a phone gives them, and loses none (the old controller: 114 of 3814) | S |
 
 **Rewrites** (§6, decision 2):
 
