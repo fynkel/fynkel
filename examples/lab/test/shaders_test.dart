@@ -8,29 +8,21 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show HeadlessView, MeshRenderer, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/shaders.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: shaders: they load, an enemy flashes alone, and the sliders change them', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(ShadersScene.new)));
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as ShadersScene;
+    final scene = tester.game<ShadersScene>();
     // The files load off the frame.
     for (var i = 0; i < 50 && scene.dissolve == null; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await wait(tester, 1);
+      await tester.frames(1);
     }
     expect(scene.dissolve, isNotNull, reason: 'the shaders loaded');
     expect(scene.log.value.where((l) => l.error), isEmpty);
@@ -44,25 +36,25 @@ void main() {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     await tap('hit');
     final flashing = [for (final e in scene.enemies) e.get<MeshRenderer>()!.number('flash')];
     expect(flashing.where((f) => f > 0), hasLength(1), reason: 'one enemy flashes: $flashing');
     expect(scene.readout.value, contains('hits 1'));
-    await wait(tester, 30);
+    await tester.frames(30);
     expect([for (final e in scene.enemies) e.get<MeshRenderer>()!.number('flash')], everyElement(0.0));
 
-    await wait(tester, 20);
+    await tester.frames(20);
     final before = scene.amount;
-    await wait(tester, 20);
+    await tester.frames(20);
     expect(scene.amount, isNot(before), reason: 'it dissolves by itself');
     scene.amount = 0.3;
     expect(scene.dissolve!.value('amount'), 0.3);
     scene.flow = 1.2;
     expect(scene.lava!.value('flow'), closeTo(1.2, 1e-6));
-    await wait(tester, 1);
+    await tester.frames(1);
     expect(scene.readout.value, contains('lava flow 1.20'));
 
     final shots = Platform.environment['LAB_SHOT'];

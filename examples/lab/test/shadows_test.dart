@@ -5,19 +5,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show Light, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/shadows.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: shadows: the sun and the spotlight cast them, the switches and the levels change them', (
     tester,
   ) async {
@@ -25,20 +17,20 @@ void main() {
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(ShadowsScene.new)));
-    await wait(tester);
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as ShadowsScene;
+    await tester.frames(10);
+    final scene = tester.game<ShadowsScene>();
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     final sun = scene.find('sun')!.get<Light>()!, torch = scene.find('torch')!.get<Light>()!;
     expect((sun.shadows, torch.shadows), (true, true));
     expect(scene.readout.value, contains('shadows: sun and spotlight'));
     final from = scene.find('camera')!.position;
-    await wait(tester, 30);
+    await tester.frames(30);
     expect(scene.find('camera')!.position, isNot(from), reason: 'the camera drifts');
 
     await tap('sun shadows');

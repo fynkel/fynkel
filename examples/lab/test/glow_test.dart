@@ -8,38 +8,30 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart' show AmbientOcclusion, Bloom, Camera, HeadlessView, Quality;
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/glow.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: glow and contact: bloom and ambient occlusion on, changed, and off', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(GlowScene.new)));
-    await wait(tester);
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as GlowScene;
+    await tester.frames(10);
+    final scene = tester.game<GlowScene>();
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     final camera = scene.find('camera')!.get<Camera>()!;
     expect(camera.bloom, const Bloom());
     expect(camera.ambientOcclusion, const AmbientOcclusion());
     final turned = scene.find('block 0')!.position;
-    await wait(tester, 20);
+    await tester.frames(20);
     expect(scene.find('block 0')!.position, isNot(turned), reason: 'the ring turns');
 
     scene.strength = 2;

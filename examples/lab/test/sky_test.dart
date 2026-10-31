@@ -5,37 +5,29 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel_flutter/fynkel_flutter.dart';
-import 'package:lab/lab.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:lab/main.dart';
 import 'package:lab/scenes/sky.dart';
 
 void main() {
-  // The game's frames go on for ever, so no pumpAndSettle: a while of them.
-  Future<void> wait(WidgetTester tester, [int frames = 10]) async {
-    for (var i = 0; i < frames; i++) {
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-  }
-
   testWidgets('Look: sky and fog: the image arrives, the buttons switch skies, fog comes and goes', (tester) async {
     tester.view.physicalSize = const Size(1000, 900);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
     await tester.pumpWidget(MaterialApp(home: ScenePage(SkyScene.new)));
-    await wait(tester);
-    final scene = FynkelGame.of<LabScene>(tester.element(find.byType(FynkelView).first)).game as SkyScene;
+    await tester.frames(10);
+    final scene = tester.game<SkyScene>();
     Future<void> tap(String label) async {
       await tester.ensureVisible(find.text(label));
       await tester.pump();
       await tester.tap(find.text(label));
-      await wait(tester, 2);
+      await tester.frames(2);
     }
 
     // The .hdr decodes on a helper isolate: real time, not the test's.
     for (var i = 0; i < 100 && scene.sky != 'image'; i++) {
       await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await wait(tester, 1);
+      await tester.frames(1);
     }
     expect(scene.sky, 'image');
     final image = scene.world.sky as ImageSky;
