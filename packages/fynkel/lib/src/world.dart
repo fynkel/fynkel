@@ -1142,7 +1142,7 @@ final class Quality {
   /// fewer pixels, which is faster and keeps a phone cooler, and the
   /// picture is a little softer: at 0.75, about half the pixels (a Galaxy
   /// Note10+ draws Sheepdog at 55 fps, against 43 at 1). Each view's own
-  /// `resolutionScale` multiplies it.
+  /// `renderScale` multiplies it.
   final double renderScale;
 
   /// How many samples each pixel is drawn with, which smooths the edges of

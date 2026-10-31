@@ -207,7 +207,7 @@ extension _Loop on World {
     _report(
       null,
       StateError(
-        '${system.runtimeType} threw in ${WorldSystem.turnOffAfter} frames in a row, so it was turned off: '
+        '${system.name} threw in ${WorldSystem.turnOffAfter} frames in a row, so it was turned off: '
         'its hooks no longer run. The last error: $error',
       ),
       stack,
