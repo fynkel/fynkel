@@ -78,9 +78,12 @@ final class AudioClip implements Finalizable {
 
   /// A sound made in code: [samples] from -1 to 1, interleaved in
   /// [channels] (1 or 2), at [rate] frames a second. Throws an
-  /// [ArgumentError] for samples that aren't whole frames, or aren't
-  /// numbers; one past 8 times full scale is taken as that.
+  /// [ArgumentError] for a rate that isn't above 0, or samples that aren't
+  /// whole frames, or aren't numbers; one past 8 times full scale is taken
+  /// as that.
   factory AudioClip.fromSamples(Float32List samples, {int rate = 48000, int channels = 1, String name = ''}) {
+    if (rate <= 0) throw ArgumentError.value(rate, 'rate', 'is not above 0 (frames a second, such as 48000)');
+    if (channels != 1 && channels != 2) throw ArgumentError.value(channels, 'channels', 'is not 1 or 2');
     _library;
     final copy = malloc<Float>(samples.isEmpty ? 1 : samples.length);
     final out = calloc<Pointer<FaClip>>();
@@ -154,7 +157,12 @@ final class AudioClip implements Finalizable {
   bool get isDisposed => _clip == nullptr;
 
   Pointer<FaClip> get _native {
-    if (isDisposed) throw StateError('the clip $name was freed');
+    if (isDisposed) {
+      throw StateError(
+        '$this was freed (by dispose(), or by assets when the last object that loaded it was destroyed): '
+        'load it again, or load it from an object that stays',
+      );
+    }
     return _clip;
   }
 

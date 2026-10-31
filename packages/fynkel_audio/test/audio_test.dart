@@ -360,4 +360,97 @@ void main() {
     }
     expect(written, 0, reason: 'playOneShot wrote its volume and pitch into freed memory');
   });
+
+  test("a source that's off, or on an object that's off, refuses to play, so no sound outlives it (stage 14, A1)", () {
+    final world = newWorld();
+    final hidden = world.add(GameObject()..active = false);
+    final quiet = hidden.addComponent(AudioSource(clip: tone(0.2), loop: true));
+    expect(
+      () => quiet.play(),
+      throwsA(
+        isA<StateError>().having((e) => e.message, 'message', contains('while its object, $hidden, is inactive')),
+      ),
+    );
+    expect(() => quiet.playOneShot(tone(0.1)), throwsStateError);
+    final shown = world.add(GameObject());
+    final off = shown.addComponent(AudioSource(clip: tone(0.2), loop: true, playOnAwake: false))..enabled = false;
+    expect(
+      () => off.play(),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', contains('is disabled: enable it'))),
+    );
+    expect(() => off.playOneShot(tone(0.1)), throwsStateError);
+    run(world);
+    expect((quiet.isPlaying, off.isPlaying, world.audio.stats.voices), (false, false, 0));
+    hidden.destroy();
+    shown.destroy();
+    run(world, frames: 3);
+    expect(world.audio.stats.voices, 0);
+    // Turned on again, it plays: on awake, and when asked.
+    final again = world.add(GameObject());
+    final source = again.addComponent(AudioSource(clip: tone(0.2), playOnAwake: false))..enabled = false;
+    source.enabled = true;
+    source.play();
+    expect(source.isPlaying, isTrue);
+  });
+
+  test("a clip's bad rate or channels throw in Dart, naming them (stage 14, A10)", () {
+    expect(
+      () => AudioClip.fromSamples(Float32List(10), rate: -1),
+      throwsA(isA<ArgumentError>().having((e) => e.toString(), 'toString', contains('rate'))),
+    );
+    expect(() => AudioClip.fromSamples(Float32List(10), rate: 0), throwsArgumentError);
+    expect(
+      () => AudioClip.fromSamples(Float32List(10), channels: -1),
+      throwsA(
+        isA<ArgumentError>().having((e) => e.toString(), 'toString', allOf(contains('(channels)'), contains('-1'))),
+      ),
+    );
+  });
+
+  test('playing a freed clip says which, and why it may have been freed (stage 14, A11)', () {
+    final world = newWorld();
+    final clip = AudioClip.fromSamples(Float32List(10))..dispose();
+    expect(
+      () => world.audio.playOneShot(clip),
+      throwsA(
+        isA<StateError>().having(
+          (e) => e.message,
+          'message',
+          allOf(contains('AudioClip(0.00 s, 48000 Hz × 1) was freed'), contains('assets')),
+        ),
+      ),
+    );
+  });
+
+  test("a source's one-shot pitch is checked as the world's (stage 14, A12)", () {
+    final world = newWorld();
+    final source = AudioSource();
+    world.add(GameObject(components: [source]));
+    expect(() => source.playOneShot(tone(0.1), pitch: 0.01), throwsArgumentError);
+    expect(() => world.audio.playOneShot(tone(0.1), pitch: 0.01), throwsArgumentError);
+    source.playOneShot(tone(0.1), pitch: 0.05);
+  });
+
+  test("playTime past the clip's end throws, rather than ending at once (stage 14, A13)", () {
+    final world = newWorld();
+    final source = AudioSource(clip: tone(1), playOnAwake: false);
+    world.add(GameObject(components: [source]));
+    expect(
+      () => source.playTime = 5,
+      throwsA(
+        isA<ArgumentError>().having(
+          (e) => e.toString(),
+          'toString',
+          contains('is past the end of AudioClip(tone, 1.00 s'),
+        ),
+      ),
+    );
+    expect(source.playTime, 0);
+    source.playTime = 1;
+  });
+
+  test('AudioStats says how often the output was opened again (stage 14, A14)', () {
+    final world = newWorld();
+    expect(world.audio.stats.toString(), contains('reopened 0'));
+  });
 }

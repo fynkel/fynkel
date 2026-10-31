@@ -103,16 +103,16 @@ void main() {
     }
     expect(music.isPlaying, isTrue, reason: 'it loops');
     expect(music.clip, same(song));
-    expect(music.time, closeTo(0.2, 0.02));
+    expect(music.playTime, closeTo(0.2, 0.02));
     world.audio.group('music').volume = 0.5;
     expect(heard(world), closeTo(0.25, 0.005));
     world.paused = true;
     world.update(0.1);
     expect(heard(world), closeTo(0.25, 0.005), reason: 'it ignores the pause');
     world.paused = false;
-    final time = music.time;
+    final time = music.playTime;
     music.play(song);
-    expect(music.time, time, reason: 'not started again');
+    expect(music.playTime, time, reason: 'not started again');
   });
 
   test('music crossfades from one track to the next', () {
@@ -232,5 +232,82 @@ void main() {
     await pumpEventQueue();
     expect(errors.single.error, isA<FormatException>());
     expect(beep.length, 0.5);
+  });
+
+  test('setting the music volume leaves loop and group to the next track (stage 14, A2)', () {
+    final world = newWorld();
+    final music = world.audio.music;
+    final ended = <AudioClip>[];
+    music.onEnd = ended.add;
+    music.play(level(0.5, seconds: 0.2));
+    world.update(0.05);
+    music.loop = false;
+    final quiet = world.audio.group('quiet')..volume = 0;
+    music.group = quiet;
+    music.volume = 0.8;
+    expect(heard(world), closeTo(0.4, 0.005), reason: 'still in the music group');
+    for (var i = 0; i < 6; i++) {
+      world.update(0.1);
+    }
+    expect(ended, isEmpty, reason: 'still looping');
+    expect(music.isPlaying, isTrue);
+  });
+
+  test('music.play with a bad fadeIn throws before stopping the track (stage 14, A3)', () {
+    final world = newWorld();
+    final music = world.audio.music;
+    final first = level(0.4, seconds: 2);
+    music.play(first);
+    expect(() => music.play(level(0.2, seconds: 2), fadeIn: -1), throwsArgumentError);
+    expect((music.isPlaying, music.clip), (true, first));
+    expect(heard(world), closeTo(0.4, 0.005));
+  });
+
+  test("AudioSource takes its group as it's made (stage 14, A5)", () {
+    final world = newWorld();
+    final effects = world.audio.group('effects')..volume = 0.5;
+    final source = AudioSource(clip: level(0.5), loop: true, group: effects);
+    expect(source.group, same(effects));
+    world.add(GameObject(components: [source]));
+    world.update(0);
+    expect(heard(world), closeTo(0.25, 0.005));
+  });
+
+  test("a group from another world's audio throws, naming it (stage 14, A6)", () {
+    final (a, b) = (newWorld(), newWorld());
+    final effects = a.audio.group('effects')..volume = 0;
+    final named = throwsA(
+      isA<ArgumentError>().having((e) => e.toString(), 'toString', contains("use this world's audio.group('effects')")),
+    );
+    expect(() => b.audio.playOneShot(level(0.5), group: effects), named);
+    expect(() => b.audio.playAt(level(0.5), Vec3.zero, group: effects), named);
+    expect(() => b.audio.music.group = effects, named);
+    final source = AudioSource(clip: level(0.5), playOnAwake: false);
+    b.add(GameObject(components: [source]));
+    expect(() => source.group = effects, named);
+    expect(source.group, isNull);
+    final made = AudioSource(clip: level(0.5), playOnAwake: false, group: effects);
+    b.add(GameObject(components: [made]));
+    expect(() => made.play(), named);
+    expect(() => made.playOneShot(level(0.5)), named);
+    b.update(0);
+    expect(b.audio.stats.voices, 0);
+  });
+
+  test("music's playTime, as a source's: read, and set to seek or to start there (stage 14, A7)", () {
+    final world = newWorld();
+    final music = world.audio.music;
+    final song = level(0.5, seconds: 2);
+    music.playTime = 1.5;
+    music.play(song);
+    world.update(0.1);
+    expect(music.playTime, closeTo(1.6, 0.02));
+    music.playTime = 0.5;
+    world.update(0.1);
+    expect(music.playTime, closeTo(0.6, 0.02));
+    expect(music.isPlaying, isTrue);
+    expect(heard(world), closeTo(0.5, 0.005));
+    expect(() => music.playTime = 3, throwsArgumentError);
+    expect(() => music.playTime = -1, throwsArgumentError);
   });
 }

@@ -219,4 +219,36 @@ void main() {
     expect(world.audio.isTurnedOff, isFalse);
     expect(ended, [short]);
   });
+
+  test('a min distance past the max names what was set, and says which to set first (stage 14, A4)', () {
+    final world = newWorld();
+    final source = sound(world, Vec3.zero);
+    String error(void Function() f) {
+      try {
+        f();
+      } on ArgumentError catch (e) {
+        return e.toString();
+      }
+      return 'no error';
+    }
+
+    expect(
+      error(() => source.minDistance = 600),
+      allOf(
+        contains('minDistance'),
+        contains('600'),
+        contains('maxDistance (50.0)'),
+        contains('raise maxDistance first'),
+      ),
+    );
+    expect(error(() => source.maxDistance = 0.5), allOf(contains('maxDistance'), contains('lower minDistance first')));
+    expect(
+      error(() => AudioSource(minDistance: 600)),
+      allOf(contains('minDistance: 600.0'), contains('maxDistance: 500.0')),
+    );
+    source
+      ..maxDistance = 1000
+      ..minDistance = 600;
+    expect((source.minDistance, source.maxDistance), (600, 1000));
+  });
 }
