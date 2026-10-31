@@ -393,7 +393,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | GT12 ½ | One serial job, 16–19 min; `cancel-in-progress` cancels runs on main. **Half done**: runs on main are never cancelled (a merge's run was, 2026-10-30). Still one job, ~56 min now: one runner, so parallel jobs wouldn't be faster | S |
 | GT8 | 70 guide blocks analyzed, 4 run | S/M |
 | GT5 ✅ | Pocket Hole outside CI; `lab/tool` not format-checked. **Done**: both in CI | S |
-| GT10, GT11 | `fynkel_measure` barely tested; `wait(tester)` copied 15 times, the golden comparator twice: a `fynkel_flutter` testing library | S |
+| GT10, GT11 ✅ | `fynkel_measure` barely tested; `wait(tester)` copied 15 times, the golden comparator twice: a `fynkel_flutter` testing library. **Done**: `package:fynkel_flutter/testing.dart` (`tester.frames(n)`, `tester.run(seconds)`, `tester.game<T>()`) in every example's widget tests; the golden check is `package:fynkel/testing.dart`'s `expectImage` / `view.expectFrame(path)` for any game, with its own PNG reader (no `package:image`), and the repository's and the lab's goldens go through it; `fynkel_measure` tests its footprint, thermal state, stats line and `MeasuredApp` | S |
 | — ✅ | hello has no test; the guide's example list misses scale and pocket_hole. **Done** | S |
 | GT13 ✅ | (2026-10-31, from Ring Ring Deals) A character stopping for a frame on open ground got past every test: only the game found it. **Done**: `fynkel_physics/test/walking_test.dart` walks the game's capsule round for a minute, frames as a phone gives them, and loses none (the old controller: 114 of 3814) | S |
 

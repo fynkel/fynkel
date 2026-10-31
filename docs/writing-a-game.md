@@ -3988,8 +3988,15 @@ List<int> pixel(HeadlessView view, int x, int y) {
 }
 ```
 
- `examples/arena/test` tests a whole game this
-way.
+**To check the whole picture**, save it once and compare each run
+against it: `view.expectFrame('test/frames/start.png')` (package:fynkel's
+`testing.dart`) draws a frame and fails if it differs from the saved
+picture by more than one GPU differs from another. The first time, or
+after a change to the look that's meant, run `FYNKEL_BLESS=1 flutter test`
+to save it, and look at it before keeping it. A failure leaves the picture
+and the difference in `build/fynkel_failures/`.
+
+`examples/arena/test` tests a whole game this way.
 
 **A game that loads assets** needs to be told where they are: a test has
 no app bundle. `World(source: ...)` takes a function from an asset's name
@@ -4076,13 +4083,16 @@ reading the code hadn't.
 **The whole app works in a widget test too**: the real `FynkelApp`, its
 view and its overlay, real taps. With no GPU plugin in a test, the game
 runs unseen, frame by frame as `tester.pump` moves the clock, and the view
-is the test window's size. Reach the game with `FynkelGame.of`:
+is the test window's size. `package:fynkel_flutter/testing.dart` moves it
+on, `tester.frames(2)` two frames and `tester.run(0.5)` half a second, and
+finds it, `tester.game<MyGame>()`:
 
 ```dart
 // test/app_test.dart
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
+import 'package:fynkel_flutter/testing.dart';
 import 'package:my_game/game.dart';
 import 'package:my_game/hud.dart';
 
@@ -4109,12 +4119,12 @@ class Target extends GameObject {
 void main() {
   testWidgets('a tap on the cube scores, and the HUD shows it', (tester) async {
     await tester.pumpWidget(FynkelApp(TapToScore.new, overlay: (context, game) => ScoreHud(game)));
-    await tester.pump(const Duration(milliseconds: 16)); // a frame: the game loads and starts
-    final game = FynkelGame.of<TapToScore>(tester.element(find.byType(FynkelView))).game;
+    await tester.frames(); // a frame: the game loads and starts
+    final game = tester.game<TapToScore>();
     final input = game.world.input;
     final cube = game.world.camera!.worldToScreenPoint(Vec3.zero, width: input.width, height: input.height)!;
     await tester.tapAt(Offset(cube.x, cube.y));
-    await tester.pump(const Duration(milliseconds: 16)); // the frame that hears it
+    await tester.frames(); // the frame that hears it
     expect(game.points.value, 1);
     await tester.pump();
     expect(find.text('★ 1'), findsOneWidget);
@@ -4124,9 +4134,9 @@ void main() {
 
 Two things differ from other widget tests. **`pumpAndSettle` never
 settles** while a view is on screen, since the game asks for every frame:
-pump a duration instead, `tester.pump(const Duration(milliseconds: 16))`
-for a frame. And input waits for the next frame, as on a device: a tap
-reaches the game in the `pump` after it.
+`tester.frames()` or `tester.run(seconds)` instead. And input waits for
+the next frame, as on a device: a tap reaches the game in the frame after
+it.
 
 ## 20. Speed
 
