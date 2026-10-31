@@ -375,7 +375,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 |---|---|---|
 | GD2, GD14 | §19 never shows a test loading assets (`World(source: …)`) or `await game.loaded` without frames | S |
 | GD9 | No way to check "no garbage" in a game's own tests, though the guide promises it; `finger.position`, `screenPointToRay`, `screenPointToPlane` make new objects each call | M |
-| GD4 | The guide names `Stick(…)` as if it shipped; it's only in the lab. Ship it in `fynkel_flutter` | S |
+| GD4 ✅ | The guide names `Stick(…)` as if it shipped; it's only in the lab. Ship it in `fynkel_flutter`. **Done**: `Stick(input, axis:, floating:, size:)`, Ring Ring Deals' stick made general (`floating` appears under the thumb, taps go through); the lab's copy gone | S |
 | GD3 | `pausedListenable` needs `fynkel_flutter`'s import; §11 doesn't say | S |
 | GD6 | `audio.music.ignorePause` isn't named where pausing is | S |
 | GD7 | The "quality doesn't draw bloom" warning prints in every low test, with no way to quiet it | S |

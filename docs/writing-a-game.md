@@ -1266,11 +1266,42 @@ class Button3D extends GameObject {
   don't reach the game.
 
 **Flutter controls** feed the same axes and actions as the keys, as
-Unity's on-screen controls do, so the game reads one path: a joystick
-widget calls `input.setAxis2('move', Vec2(x, y))` (it adds to the keys,
+Unity's on-screen controls do, so the game reads one path. The on-screen
+stick is `Stick(world.input)` (from `package:fynkel_flutter`, Unity's
+`OnScreenStick`): placed where it goes, its knob sets the 'move' axis
+(`axis:` names another), up the screen being +y, and letting go zeroes
+it. `Stick(input, floating: true)` isn't drawn till a thumb comes down
+in its area, and appears under it: give it the area (the screen's bottom
+half), and a tap there with no drag still reaches the game. A widget of
+your own calls `input.setAxis2('move', Vec2(x, y))` (it adds to the keys,
 and stays until set again), and a button calls `input.action('jump')
 .press()` when it goes down and `.release()` when it comes up (or both at
 once for a tap).
+
+```dart
+// lib/walk_page.dart
+import 'package:flutter/widgets.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+import 'game.dart';
+
+class WalkPage extends StatelessWidget {
+  const WalkPage({super.key});
+
+  @override
+  Widget build(BuildContext context) => FynkelGame(
+    make: Score.new,
+    builder: (context, game) => Stack(
+      fit: StackFit.expand,
+      children: [
+        FynkelView(root: game),
+        // The bottom half: a thumb anywhere there walks.
+        Positioned(left: 0, right: 0, bottom: 0, height: 300, child: Stick(game.world.input, floating: true)),
+      ],
+    ),
+  );
+}
+```
 
 **In `onFixedUpdate`**, `wasPressed` and `wasReleased` (an action's too)
 mean since the last fixed step, so each press is seen once there: a frame
@@ -4148,7 +4179,7 @@ What keeps a game fast:
 | `Application.targetFrameRate` | `world.targetFrameRate` (60 unless set) |
 | The render scale (URP), `QualitySettings` | `Quality.renderScale`, `world.quality` |
 | Anti Aliasing (MSAA) | `Quality.antiAliasing`: 0, 2 or 4 |
-| On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | a Flutter widget calling `input.setAxis2` and `action.press()`/`release()` |
+| On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | `Stick(input)`; a button is a Flutter widget calling `action.press()`/`release()` |
 | `yield return new WaitForFixedUpdate()` | `await fixedStep` |
 | `StartCoroutine`, `StopAllCoroutines`, `yield return new WaitForSeconds(1)` | `startRoutine(() async {...})`, `stopAllRoutines()`, `await wait(1)` |
 | `WaitUntil`, `WaitWhile` | `await waitUntil(...)`, `await waitWhile(...)` |
