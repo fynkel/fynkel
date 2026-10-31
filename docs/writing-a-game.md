@@ -3025,7 +3025,7 @@ shows a frame later, and `await fixedStep` resumes before that step has
 run. `physics.stepBetweenFrames = false` steps
 within the frame instead, as Unity does.
 
-A Flutter widget that reads a body as it builds (`body.velocity` for a
+A Flutter widget that reads a body as it builds (`body.linearVelocity` for a
 speedometer) waits for the step running then, giving back the time the
 thread saved. So read it in the game, in `onUpdate`, and hand the
 widget the number through a `ValueNotifier`. The views and world widgets
@@ -3077,7 +3077,9 @@ GameObject wall(Vec3 at) => GameObject(
 
 A hit is a `RaycastHit`, as Unity's: `point`, `normal`, `distance`,
 `collider`, `gameObject` and `rigidbody`. As Unity's, a ray doesn't hit what it starts inside, and a
-query that misses allocates nothing. `collider.raycast(ray)` and
+query that misses allocates nothing. The lists the `…All` casts and the
+overlaps give are read-only, hit or miss: `.toList()` to sort or change
+one. `collider.raycast(ray)` and
 `collider.closestPoint(point)` ask one collider. `world.raycast` still
 finds what's drawn, with no colliders; taps find both (§11).
 `physics.drawColliders = true` draws every collider with the debug lines.
@@ -3210,6 +3212,10 @@ other body's object is destroyed, `connectedBody` goes null and the
 joint holds its body to the world where it is, as in Unity. With a `breakForce` or
 `breakTorque`, a joint that holds harder than that breaks: `with
 JointBreaks` hears of it in `onJointBreak`, and the joint is taken off.
+A joint on an object with no `Rigidbody` joins nothing, and says so once
+in `world.errors` (Unity adds the rigidbody; here the game does). A value
+a joint refuses (an anchor that isn't finite, its own rigidbody as
+`connectedBody`) throws and leaves the joint as it was.
 
 ```dart
 // lib/door.dart
@@ -3243,6 +3249,12 @@ class Door extends GameObject with JointBreaks {
   void onJointBreak(Joint joint, double breakForce) => print('the door came off');
 }
 ```
+
+`JointLimits`, `JointMotor`, `JointSpring`, `SoftJointLimit` and
+`PhysicsMaterial` are values, as Unity's structs are; to change one part,
+copy it with `copyWith`: `hinge.motor = hinge.motor.copyWith(targetVelocity:
+3)` turns a wheel faster with the same force, where `JointMotor(targetVelocity:
+3)` would have none.
 
 **Bullets** can be done two ways. A bullet that's an object, with a
 small trigger collider and a kinematic rigidbody moved with
@@ -4263,8 +4275,10 @@ What keeps a game fast:
 - **Input:** gamepads.
 - **The game:** navmeshes and path finding; scene files and saving, which
   a game does itself for now (§18 shows how); an editor.
-- **Physics:** 2D physics, `ConfigurableJoint`, and chains of joints that
-  don't stretch (Rapier's multibody joints).
+- **Physics:** 2D physics, `ConfigurableJoint`, chains of joints that
+  don't stretch (Rapier's multibody joints), and stepping physics by hand
+  (Unity's `Physics.Simulate` with the Simulation Mode set to Script), for
+  a throw's arc worked out ahead or a replay.
 
 ## 22. From Unity
 
@@ -4369,7 +4383,7 @@ What keeps a game fast:
 | A sound slowed with `Time.timeScale` (by setting its `pitch`) | `followTimeScale: true` |
 | Animation events, `StateMachineBehaviour.OnStateExit` | `animator.at(clip, time, callback)`, `removeMark`, `removeMarks`, `animator.onEnd` |
 | A character on a moving platform (parenting it, by hand) | done for you: `moveWithGround`, `ground`, `groundVelocity` |
-| `Physics.gravity`, `Physics.autoSimulation` | `physics.gravity`, `physics.stepBetweenFrames` |
+| `Physics.gravity` | `physics.gravity` |
 | `Physics.Raycast`, `SphereCast`, `OverlapSphere`, … | `physics.raycast`, `sphereCast`, `overlapSphere`, … |
 | `Physics.Raycast` against what's drawn (no colliders) | `world.raycast` |
 | `OnTriggerEnter(Collider)`, `OnCollisionEnter(Collision)` | `with Triggers`, `with Collisions`, then `onTriggerEnter`, `onCollisionEnter` |
@@ -4409,6 +4423,8 @@ What keeps a game fast:
   hidden or moved to a layer that doesn't meet; Unity skips some.
 - **A `CharacterController` turns with its object**; Unity's stays
   upright. Keep its object upright and turn a child for the model.
+- **`ControllerColliderHit.moveLength` is the move asked for**, the length
+  given to `move`; Unity's is how far the controller went before the hit.
 - **A HUD is Flutter**: widgets over the view, not a Canvas in the scene.
 
 ## 23. What changed
