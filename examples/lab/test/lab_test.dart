@@ -335,9 +335,9 @@ void main() {
       expect(camera.position, isNot(still), reason: 'going round');
       sync.onChanged(true);
       expect(scene.marker.active, isTrue);
-      expect(scene.walkers.every((w) => !w.active), isTrue);
+      expect([...scene.walkers, ...scene.pillars, scene.flag].every((o) => !o.active), isTrue);
       world.update(0.5);
-      expect((camera.position - scene.marker.position).length, moreOrLessEquals(5, epsilon: 1e-6));
+      expect((camera.position - Vec3(0, 3.2, 0)).length, moreOrLessEquals(5, epsilon: 1e-6));
       expect(scene.readout.value, startsWith('camera at'));
     },
   );
