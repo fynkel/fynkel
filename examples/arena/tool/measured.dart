@@ -7,10 +7,5 @@ import 'package:arena/hud.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel_measure/fynkel_measure.dart';
 
-void main() => runApp(
-  MeasuredApp(
-    ArenaGame.new,
-    overlay: (game) => Hud(game as ArenaGame),
-    change: (game) => (game as ArenaGame).restart(),
-  ),
-);
+void main() =>
+    runApp(MeasuredApp(ArenaGame.new, overlay: (context, game) => Hud(game), change: (game) => game.restart()));
