@@ -682,7 +682,8 @@ final class Light extends Component {
   /// A lamp at the object's position, reaching [range] metres. Light falls
   /// off with the square of the distance: a lamp of [intensity] 1 lights a
   /// surface 1 m away as a sun of 1 does, and a quarter as much at 2 m. A
-  /// room lamp 2–3 m from what it lights wants 5 to 20.
+  /// room lamp 2–3 m from what it lights wants 5 to 20. It casts no
+  /// shadows yet: a spotlight does.
   Light.point({Color color = Color.white, double intensity = 1, double range = 10})
     : this._(LightKind.point, color, intensity, range);
 
