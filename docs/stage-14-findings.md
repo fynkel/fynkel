@@ -509,6 +509,32 @@ angles), C11, P9, U9, U11, U12, U18, C14, C15.
 - **More sound**: one-shots that say when they end and stop alone (A8),
   a source's `fade`, music's `pause` (A9). New in the mixer, so bigger.
 
+**What became of them** (2026-10-31, branch `stage-14-api`; the user
+chose: all of them, Unity's defaults, the renames with no old names
+kept, the sound features later). Each bug has a test that failed first
+and fails again with its fix taken out; the changes a game sees are in
+the guide's §23.
+- **Fixed**: all 13 bugs except the rest of U2, and every other row
+  except those below.
+- **C3, changed back**: `all`/`first`/`only` find an object still
+  loading, as before. Unity's `FindObjectsByType` finds one before its
+  `Awake` too, so leaving them out was not Unity's default; it broke
+  the lab's signals scene and the coins test. The doc and the guide
+  say to `await object.loaded` before reading what its `onLoad` sets.
+- **A1, as the guide's code needs it**: a source that's off, or on an
+  object that's off, throws on `play`; one asked for while its object
+  loads (from `onLoad`) plays when the object is shown.
+- **U2, partly**: a game that unpauses and pauses itself under a cover
+  stays paused, but one that sets `paused = true` while the cover holds
+  the pause can't be told apart. That needs `World` to keep the two
+  pauses apart; `pauseWhenCovered`'s doc says so.
+- **P11, documented**: `ControllerColliderHit.moveLength` is the length
+  asked for, unlike Unity's (the distance before the hit would need a
+  physics ABI change); §22 lists it.
+- **A8, A9**: in §21, with what to do for now.
+- **F11, mostly**: the docs point at the guide's sections; internal
+  `//` comments still name stage documents.
+
 ## 6. Decisions
 
 1. **The order: phase 2's 2a first** (the app going down), then 2b with

@@ -4633,6 +4633,83 @@ yet (§21).
 
 For code written before: each change that breaks it, newest first.
 
+- **Stage 14's pass over the public API** (2026-10-31): names,
+  defaults and messages, made alike across the packages.
+  - Renamed, with no old names kept:
+    - `FynkelGame(make: X, …)` is `FynkelGame(X, …)`.
+    - `FynkelView(resolutionScale:)` is `renderScale:`, and
+      `FynkelView(onScreen:)` is `directToScreen:`.
+    - `MeasureSettings.resolution` is `renderScale`, and
+      `FYNKEL_RESOLUTION` is `FYNKEL_RENDER_SCALE`.
+    - `MeasuredApp`'s `overlay: (root)` is `overlay: (context, game)`;
+      `MeasuredApp<T>` is typed, so `change`, `timings` and `onStats`
+      take the game without a cast.
+    - `controls.fromJson(json)` is `Controls.fromJson(json, defaults:)`,
+      which makes new controls.
+    - `Animator.crossFade`, `blend` and `stop` take `seconds:`, not
+      `duration:`.
+    - `Mesh.lathe(profile, sides:)` is `segments:`.
+    - `ColorGradient.fadeInOut` takes the colour, then `fadeIn:` and
+      `fadeOut:` (0.2 and 0.4 unless given).
+    - `audio.music.time` is `audio.music.playTime`, and can be set: to
+      seek, or before `play` to start the next track partway in.
+    - `world.meshChangeTime` is gone: `world.profile.meshes` has it.
+    - `childCount` and `childAt` are on `GameObject` itself, not from
+      `package:fynkel/extend.dart`.
+  - Unity's defaults:
+    - `getInParent` and `getInChildren` skip objects turned off, as
+      Unity's do; `includeInactive: true` finds them.
+      `getAllInChildren` is new.
+    - `GameObject.shake` lasts 0.4 s unless told, as `Cameras.shake`
+      does.
+  - Refused where it's given, rather than later or not at all: a
+    camera's, light's, fog's or quality's value out of range, a
+    `Transform` that isn't finite, a `VirtualCamera`'s `fovY` (1–179°)
+    or `orthographicSize`, a particle range whose min is above its max,
+    a `Shape2D` of no size, a spline distance that isn't a number, a
+    joint joined to its own body or given an axis that isn't finite, a
+    collider `center` that isn't finite, a clip's `rate` or `channels`,
+    a `playTime` past the clip's end, a one-shot `pitch` below 0.05,
+    and a sound group from another world's `audio`. Each says what was
+    given and what it may be.
+  - `get`, `getAll`, `has`, `getInParent` and `getInChildren` given a
+    `GameObject` type throw, pointing at `ancestor`, `find` or `all`;
+    they found nothing before.
+  - Physics:
+    - The lists from `raycastAll`, the other `…CastAll` and the
+      `overlap…` queries are read-only even when they hit: `.toList()`
+      to sort one.
+    - `Rigidbody.position` and `rotation`, before the add or while the
+      body is turned off, read and set the object's; they threw.
+    - A joint whose object has no `Rigidbody` is reported once to
+      `world.errors` (a test with no listener there fails on it).
+  - Sound:
+    - `AudioSource.play()` and `playOneShot()` throw while the source
+      is turned off or its object is; a looping sound could outlive its
+      object. Asked for while the object loads (from its `onLoad`), the
+      sound plays when it's shown.
+    - Setting `music.volume` leaves a changed `loop` or `group` to the
+      next track; it put them on the playing one.
+  - Flutter:
+    - A world a view made goes with the last view showing it, not with
+      the view that made it. A view keeps its first root: a new one (or
+      a `FynkelGame` given another type to make) is reported in debug
+      builds; give it a `Key` to start another.
+    - Of several views taking one world's input, the first takes it;
+      the others are reported once.
+    - `FynkelApp` passes its view's settings on, its overlay may be
+      `Positioned`, and pages pushed over it find the game with
+      `FynkelGame.of`.
+    - A game that changes `paused` while the app is covered keeps what
+      it set.
+  - A `WorldSystem` turned off for throwing is named by its `name` in
+    the error.
+  - Many messages say more, and an object prints its name
+    (`GameObject#4 'player'`): a test that matched a message's words
+    may need new ones.
+  - Rust only: `fynkel_mesh`'s box, grid, cone, torus and sized capsule
+    return a `Result`.
+
 - **Stage 14's frame timing** (2026-10-27): `WorldSystem` has a `name`
   (its type's, unless overridden) and a `frameTime`, for
   `world.profile`. A package's system with a `name` of its own now
