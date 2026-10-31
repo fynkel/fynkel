@@ -1,7 +1,10 @@
+import 'dart:math' as math;
+
+import 'package:flutter/foundation.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/widgets.dart';
-import 'package:fynkel/fynkel.dart' show Behaviour, Camera, Vec3, World;
+import 'package:fynkel/fynkel.dart' show Behaviour, Camera, GameObject, LayerMask, Ray, Vec3, World;
 import 'package:fynkel/platform.dart' show cameraObjectId;
 
 /// A Flutter widget at its object's place in the world: a health bar over
@@ -16,18 +19,43 @@ import 'package:fynkel/platform.dart' show cameraObjectId;
 /// The widget is built once (and again when it rebuilds itself, from a
 /// `ValueListenableBuilder` say) and only moved after that, so a hundred
 /// cost little. It's hidden while its object is inactive, behind the
-/// camera or off the view; nearer ones are drawn over farther ones. It
+/// camera or off the view; nearer ones are drawn over farther ones. With
+/// [hideBehind] it's hidden while something is in front of it too, and
+/// with [keepOnScreen] it waits at the view's edge rather than leave. It
 /// takes taps on itself from the game: a button in it works, and the game
 /// doesn't see that tap. For a widget at a point rather than an object,
 /// put it on an empty object there.
 class WorldWidget extends Behaviour {
   /// [builder]'s widget, its [alignment] point at the object's position
   /// plus [offset]; shrunk beyond [shrinkBeyond], if given.
-  WorldWidget(this.builder, {this.offset = Vec3.zero, this.alignment = Alignment.center, this.shrinkBeyond})
-    : assert(
-        shrinkBeyond == null || shrinkBeyond > 0,
-        'WorldWidget.shrinkBeyond is $shrinkBeyond: give a distance above 0, or leave it out for full size always',
+  WorldWidget(
+    this.builder, {
+    this.offset = Vec3.zero,
+    this.alignment = Alignment.center,
+    this.shrinkBeyond,
+    this.hideBehind = false,
+    this.hideLayers = LayerMask.all,
+    this.keepOnScreen = false,
+    this.edgeMargin = 8,
+  }) : assert(
+         shrinkBeyond == null || shrinkBeyond > 0,
+         'WorldWidget.shrinkBeyond is $shrinkBeyond: give a distance above 0, or leave it out for full size always',
+       ),
+       assert(edgeMargin >= 0, 'WorldWidget.edgeMargin is $edgeMargin: give 0 or more logical pixels');
+
+  /// Where the world widget whose builder [context] is in is, in its view:
+  /// whether it's held at the edge ([keepOnScreen]) and which way its
+  /// point is. Only from a [builder]'s context.
+  static WorldWidgetPlace of(BuildContext context) {
+    final scope = context.getInheritedWidgetOfExactType<_Scope>();
+    if (scope == null) {
+      throw FlutterError(
+        'WorldWidget.of() was given a context that isn\'t in a WorldWidget\'s builder: call it from the builder, '
+        'or from a widget the builder made.',
       );
+    }
+    return scope.place;
+  }
 
   /// Builds the widget, once it's shown.
   final WidgetBuilder builder;
@@ -45,6 +73,27 @@ class WorldWidget extends Behaviour {
   /// Null: always full size.
   final double? shrinkBeyond;
 
+  /// Hidden while something is between the camera and its point: a wall,
+  /// a tree, anything [World.raycast] hits (the meshes as drawn), but its
+  /// own object and what's under it. It fades out and in over 0.15 s.
+  /// Each frame looks again for a share of these, so a hundred cost a few
+  /// casts a frame, not a hundred.
+  bool hideBehind;
+
+  /// What [hideBehind] hides it behind: [LayerMask.all], or the layers
+  /// given (`LayerMask.except([glass])` sees through glass).
+  LayerMask hideLayers;
+
+  /// Off the view or behind the camera, held inside the view's edge,
+  /// [edgeMargin] in, on the line from the middle toward its point, rather
+  /// than hidden: an arrow to where to go. [WorldWidget.of] tells its
+  /// builder when it's there and which way to point.
+  bool keepOnScreen;
+
+  /// How far in from the view's edge [keepOnScreen] holds it, in logical
+  /// pixels.
+  double edgeMargin;
+
   /// The world point it's at.
   Vec3 get point => gameObject.worldTransform.position + offset;
 
@@ -59,6 +108,43 @@ class WorldWidget extends Behaviour {
     _shownIn(world).remove(this);
     super.onDisable();
   }
+}
+
+/// Where a [WorldWidget] is in one view, for its builder:
+/// `WorldWidget.of(context)`.
+final class WorldWidgetPlace {
+  WorldWidgetPlace._();
+
+  /// True while it's held at the view's edge ([WorldWidget.keepOnScreen])
+  /// because its point is off the view or behind the camera.
+  ValueListenable<bool> get offScreen => _offScreen;
+  final _offScreen = ValueNotifier(false);
+
+  /// While [offScreen], which way its point is from the view's middle, in
+  /// radians: 0 to the right, pi / 2 down, as `Transform.rotate` turns. An
+  /// arrow drawn pointing right, turned by it, points there.
+  ValueListenable<double> get angle => _angle;
+  final _angle = ValueNotifier(0.0);
+
+  // [WorldWidget.hideBehind]: whether something was in front at the last
+  // look (null before the first), and how much of it is painted.
+  bool? _behind;
+  double _opacity = 1;
+
+  void _dispose() {
+    _offScreen.dispose();
+    _angle.dispose();
+  }
+}
+
+/// Gives a world widget's builder its place.
+class _Scope extends InheritedWidget {
+  const _Scope({super.key, required this.place, required super.child});
+
+  final WorldWidgetPlace place;
+
+  @override
+  bool updateShouldNotify(_Scope old) => !identical(old.place, place);
 }
 
 /// A world's world widgets that are on, in the order they came.
@@ -112,6 +198,8 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
   late _Shown _of;
   // What's built, as it was at the last build: the placer reads the same.
   var _built = const <WorldWidget>[];
+  var _builtPlaces = const <WorldWidgetPlace>[];
+  final _places = <WorldWidget, WorldWidgetPlace>{};
 
   @override
   void initState() {
@@ -131,6 +219,9 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
   @override
   void dispose() {
     _of.removeListener(_changed);
+    for (final place in _places.values) {
+      place._dispose();
+    }
     super.dispose();
   }
 
@@ -150,18 +241,34 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
   @override
   Widget build(BuildContext context) {
     _built = List.of(_of.widgets);
+    // Places of widgets gone go once their builders are gone.
+    final gone = [
+      for (final w in _places.keys)
+        if (!_built.contains(w)) w,
+    ];
+    if (gone.isNotEmpty) {
+      final places = [for (final w in gone) _places.remove(w)!];
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        for (final place in places) {
+          place._dispose();
+        }
+      });
+    }
+    _builtPlaces = [for (final w in _built) _places[w] ??= WorldWidgetPlace._()];
     if (_built.isEmpty) return const SizedBox.shrink();
     return _Placed(
       world: widget.world,
       widgets: _built,
+      places: _builtPlaces,
       frames: widget.frames,
       camera: widget.camera,
       children: [
         // Each painted once, and only moved after.
-        for (final w in _built)
-          RepaintBoundary(
-            key: ObjectKey(w),
-            child: Builder(builder: w.builder),
+        for (var i = 0; i < _built.length; i++)
+          _Scope(
+            key: ObjectKey(_built[i]),
+            place: _builtPlaces[i],
+            child: RepaintBoundary(child: Builder(builder: _built[i].builder)),
           ),
       ],
     );
@@ -175,6 +282,7 @@ class _Placed extends MultiChildRenderObjectWidget {
   const _Placed({
     required this.world,
     required this.widgets,
+    required this.places,
     required this.frames,
     required this.camera,
     required super.children,
@@ -184,10 +292,12 @@ class _Placed extends MultiChildRenderObjectWidget {
   final Camera? camera;
   // One for each child, in order.
   final List<WorldWidget> widgets;
+  final List<WorldWidgetPlace> places;
   final Listenable frames;
 
   @override
-  _RenderPlaced createRenderObject(BuildContext context) => _RenderPlaced(world, widgets, frames)..camera = camera;
+  _RenderPlaced createRenderObject(BuildContext context) =>
+      _RenderPlaced(world, widgets, places, frames)..camera = camera;
 
   @override
   void updateRenderObject(BuildContext context, _RenderPlaced placed) {
@@ -195,6 +305,7 @@ class _Placed extends MultiChildRenderObjectWidget {
       ..world = world
       ..camera = camera
       ..widgets = widgets
+      ..places = places
       ..frames = frames;
     placed.markNeedsPaint();
   }
@@ -203,24 +314,43 @@ class _Placed extends MultiChildRenderObjectWidget {
 /// Where a child was painted, last time.
 class _Place extends ContainerBoxParentData<RenderBox> {
   bool shown = false;
+  // Its widget's, in [_RenderPlaced.widgets] and `places`.
+  int index = 0;
   double scale = 1;
   double depth = 0;
 }
 
 class _RenderPlaced extends RenderBox
     with ContainerRenderObjectMixin<RenderBox, _Place>, RenderBoxContainerDefaultsMixin<RenderBox, _Place> {
-  _RenderPlaced(this.world, this.widgets, this._frames);
+  _RenderPlaced(this.world, this.widgets, this.places, this._frames);
 
   World world;
   Camera? camera;
   List<WorldWidget> widgets;
+  // One for each widget.
+  List<WorldWidgetPlace> places;
   Listenable _frames;
   set frames(Listenable value) {
     if (identical(value, _frames)) return;
-    if (attached) _frames.removeListener(markNeedsPaint);
+    if (attached) _frames.removeListener(_frame);
     _frames = value;
-    if (attached) _frames.addListener(markNeedsPaint);
+    if (attached) _frames.addListener(_frame);
   }
+
+  /// How many [WorldWidget.hideBehind] looks a frame takes, at most, beyond
+  /// a widget's first.
+  static const castsPerFrame = 24;
+
+  /// How long [WorldWidget.hideBehind]'s fade takes.
+  static const fadeSeconds = 0.15;
+
+  // Where the next frame's looks start, among the widgets that look.
+  var _castFrom = 0;
+  // The widgets that look this frame; reused.
+  final _looking = <int>[];
+  Duration? _lastFrame;
+  // Laid out since the last placing: paint places them, without looking.
+  var _stale = true;
 
   // The children shown, farthest first; reused.
   final _order = <RenderBox>[];
@@ -234,12 +364,12 @@ class _RenderPlaced extends RenderBox
   @override
   void attach(PipelineOwner owner) {
     super.attach(owner);
-    _frames.addListener(markNeedsPaint);
+    _frames.addListener(_frame);
   }
 
   @override
   void detach() {
-    _frames.removeListener(markNeedsPaint);
+    _frames.removeListener(_frame);
     super.detach();
   }
 
@@ -262,11 +392,29 @@ class _RenderPlaced extends RenderBox
     for (var child = firstChild; child != null; child = childAfter(child)) {
       child.layout(loose, parentUsesSize: true);
     }
+    _stale = true;
+  }
+
+  /// After each update of the world: places them, looks, fades, and tells
+  /// the builders where they are, before this frame builds.
+  void _frame() {
+    if (!hasSize) return;
+    final now = SchedulerBinding.instance.currentFrameTimeStamp;
+    final last = _lastFrame;
+    _lastFrame = now;
+    final dt = last == null ? 0.0 : ((now - last).inMicroseconds / 1e6).clamp(0.0, 0.1);
+    _place(dt: dt, look: true);
+    markNeedsPaint();
   }
 
   /// Works out where each child goes, and the order to paint them in.
-  void _place() {
+  /// Looking ([WorldWidget.hideBehind]), fading by [dt] seconds and
+  /// telling the builders ([WorldWidgetPlace]) only when [look]: from the
+  /// frame, not from paint.
+  void _place({required double dt, required bool look}) {
+    _stale = false;
     _order.clear();
+    _looking.clear();
     for (var child = firstChild; child != null; child = childAfter(child)) {
       (child.parentData! as _Place).shown = false;
     }
@@ -276,6 +424,7 @@ class _RenderPlaced extends RenderBox
     final camera = own ?? world.camera;
     if (camera == null || !camera.gameObject.activeInHierarchy) return;
     if (!(size.width > 0 && size.height > 0)) return;
+    final turn = camera.gameObject.worldTransform.rotation;
     final eye = camera.gameObject.worldTransform.position;
     // The camera draws moved by its shake: moving each point back instead
     // keeps the widgets on what they mark.
@@ -284,11 +433,40 @@ class _RenderPlaced extends RenderBox
     for (var child = firstChild; child != null; child = childAfter(child), i++) {
       final place = child.parentData! as _Place;
       final w = i < widgets.length ? widgets[i] : null;
-      if (w == null || w.isRemoved) continue;
+      final where = i < places.length ? places[i] : null;
+      if (w == null || where == null || w.isRemoved) continue;
       final point = w.point - shake;
       final at = camera.worldToScreenPoint(point, width: size.width, height: size.height);
-      if (at == null) continue; // Behind the camera.
       final distance = (point - eye).length;
+      final onView = at != null && at.x >= 0 && at.x <= size.width && at.y >= 0 && at.y <= size.height;
+      if (w.keepOnScreen && !onView) {
+        // Held at the edge, on the line from the middle toward the point:
+        // which way it is from the camera, across and up, holds behind it
+        // too.
+        final to = point - eye;
+        var dx = to.dot(turn.rotate(Vec3.right)), dy = -to.dot(turn.rotate(Vec3.up));
+        if (dx.abs() < 1e-9 && dy.abs() < 1e-9) dy = 1; // Straight behind: below.
+        final width = child.size.width, height = child.size.height;
+        final roomX = math.max(0.0, size.width / 2 - w.edgeMargin - width / 2);
+        final roomY = math.max(0.0, size.height / 2 - w.edgeMargin - height / 2);
+        final t = math.min(dx == 0 ? double.infinity : roomX / dx.abs(), dy == 0 ? double.infinity : roomY / dy.abs());
+        place
+          ..shown = true
+          ..index = i
+          ..offset = Offset(size.width / 2 + dx * t - width / 2, size.height / 2 + dy * t - height / 2)
+          ..scale = 1
+          ..depth = distance;
+        if (look) {
+          where._offScreen.value = true;
+          where._angle.value = math.atan2(dy, dx);
+          // Back on the view, it looks again before it shows.
+          where._behind = null;
+        }
+        _order.add(child);
+        continue;
+      }
+      if (look && w.keepOnScreen) where._offScreen.value = false;
+      if (at == null) continue; // Behind the camera.
       final beyond = w.shrinkBeyond;
       // A release build doesn't check it: one that isn't above 0 keeps full size.
       final scale = beyond == null || !(beyond > 0) || distance <= beyond ? 1.0 : beyond / distance;
@@ -298,13 +476,102 @@ class _RenderPlaced extends RenderBox
       if (x > size.width || y > size.height || x + width < 0 || y + height < 0) continue;
       place
         ..shown = true
+        ..index = i
         ..offset = Offset(x, y)
         ..scale = scale
         ..depth = distance;
+      if (!w.hideBehind) {
+        where
+          .._behind = null
+          .._opacity = 1;
+      } else if (look) {
+        if (where._behind == null) {
+          // Its first look is now, whatever the share, and it shows as it
+          // is: no fade in from nothing.
+          where._behind = _isBehind(w, eye, point);
+          where._opacity = where._behind! ? 0 : 1;
+        } else {
+          _looking.add(i);
+        }
+      }
       _order.add(child);
     }
+    if (look) _lookAndFade(eye, shake, dt);
+    // Faded out: not painted, and not tapped.
+    _order.removeWhere((child) {
+      final place = child.parentData! as _Place;
+      final hidden = _opacityOf(place) <= 0;
+      if (hidden) place.shown = false;
+      return hidden;
+    });
     // Farthest first, so the nearest is over the rest.
     _order.sort(_farFirst);
+  }
+
+  /// Looks for a share of the widgets that look, from where the last frame
+  /// stopped, and fades each toward what it saw.
+  void _lookAndFade(Vec3 eye, Vec3 shake, double dt) {
+    final n = _looking.length;
+    if (n > 0) {
+      final from = _castFrom % n;
+      final count = math.min(n, castsPerFrame);
+      for (var k = 0; k < count; k++) {
+        final i = _looking[(from + k) % n];
+        places[i]._behind = _isBehind(widgets[i], eye, widgets[i].point - shake);
+      }
+      _castFrom = from + count;
+    }
+    final step = dt / fadeSeconds;
+    for (final i in _looking) {
+      final where = places[i];
+      final to = where._behind! ? 0.0 : 1.0;
+      where._opacity = where._opacity < to ? math.min(to, where._opacity + step) : math.max(to, where._opacity - step);
+    }
+  }
+
+  // Not past the point: what's at it, or just behind, doesn't hide it.
+  static const _margin = 0.05;
+
+  /// Whether something on [w]'s layers is between [eye] and [point], other
+  /// than [w]'s own object and what's under it.
+  bool _isBehind(WorldWidget w, Vec3 eye, Vec3 point) {
+    final to = point - eye;
+    final distance = to.length;
+    if (!(distance > _margin)) return false;
+    final direction = to / distance;
+    var from = eye;
+    var left = distance - _margin;
+    // Through its own object's faces, a few at most.
+    for (var tries = 0; tries < 4 && left > 0; tries++) {
+      final hit = world.raycast(Ray(from, direction), maxDistance: left, layers: w.hideLayers);
+      if (hit == null) return false;
+      if (!_under(hit.gameObject, w.gameObject)) return true;
+      final step = hit.distance + 1e-3;
+      from = from + direction * step;
+      left -= step;
+    }
+    return false;
+  }
+
+  static bool _under(GameObject? object, GameObject root) {
+    for (var o = object; o != null; o = o.parent) {
+      if (identical(o, root)) return true;
+    }
+    return false;
+  }
+
+  /// How much of it is painted: less while [WorldWidget.hideBehind] fades it.
+  double _opacityOf(_Place place) {
+    final i = place.index;
+    if (i >= widgets.length || i >= places.length || !widgets[i].hideBehind) return 1;
+    return places[i]._opacity;
+  }
+
+  /// Whether it takes taps: not while hidden, or fading out.
+  bool _tappable(_Place place) {
+    final i = place.index;
+    if (i >= widgets.length || i >= places.length || !widgets[i].hideBehind) return true;
+    return places[i]._behind != true;
   }
 
   static int _farFirst(RenderBox a, RenderBox b) =>
@@ -312,7 +579,7 @@ class _RenderPlaced extends RenderBox
 
   @override
   void paint(PaintingContext context, Offset offset) {
-    _place();
+    if (_stale) _place(dt: 0, look: false);
     if (_order.isEmpty) {
       _clip.layer = null;
       return;
@@ -329,17 +596,26 @@ class _RenderPlaced extends RenderBox
   void _paintShown(PaintingContext context, Offset offset) {
     for (final child in _order) {
       final place = child.parentData! as _Place;
-      final s = place.scale;
-      if (s == 1) {
-        context.paintChild(child, offset + place.offset);
+      final opacity = _opacityOf(place);
+      if (opacity < 1) {
+        context.pushOpacity(offset, (opacity * 255).round(), (context, at) => _paintOne(context, at, child, place));
       } else {
-        context.pushTransform(
-          needsCompositing,
-          offset + place.offset,
-          Matrix4.diagonal3Values(s, s, 1),
-          (context, at) => context.paintChild(child, at),
-        );
+        _paintOne(context, offset, child, place);
       }
+    }
+  }
+
+  void _paintOne(PaintingContext context, Offset offset, RenderBox child, _Place place) {
+    final s = place.scale;
+    if (s == 1) {
+      context.paintChild(child, offset + place.offset);
+    } else {
+      context.pushTransform(
+        needsCompositing,
+        offset + place.offset,
+        Matrix4.diagonal3Values(s, s, 1),
+        (context, at) => context.paintChild(child, at),
+      );
     }
   }
 
@@ -349,7 +625,7 @@ class _RenderPlaced extends RenderBox
     for (var i = _order.length - 1; i >= 0; i--) {
       final child = _order[i];
       final place = child.parentData! as _Place;
-      if (!place.shown) continue;
+      if (!place.shown || !_tappable(place)) continue;
       final hit = result.addWithPaintTransform(
         transform: _transformOf(place),
         position: position,

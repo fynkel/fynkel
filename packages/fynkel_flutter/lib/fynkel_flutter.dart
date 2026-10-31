@@ -27,4 +27,4 @@ export 'src/input_feed.dart' show keyCodeOf;
 export 'src/listenable_signal.dart' show ListenableSignal;
 export 'src/stick.dart' show Stick;
 export 'src/world_listenables.dart' show WorldListenables, WorldTheme;
-export 'src/world_widget.dart' show WorldWidget;
+export 'src/world_widget.dart' show WorldWidget, WorldWidgetPlace;

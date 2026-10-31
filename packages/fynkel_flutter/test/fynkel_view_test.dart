@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:ffi' show AllocatorAlloc, Pointer;
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/services.dart';
@@ -1043,6 +1044,122 @@ void main() {
       expect(rect.width, moreOrLessEquals(20));
       expect(rect.height, moreOrLessEquals(10));
       expect(rect.center, offsetMoreOrLessEquals(seen(tester, far.position)));
+    });
+    testWidgets(
+      'a WorldWidget that hides behind things fades out while something is in front of it, not its own object',
+      (tester) async {
+        // Its point is inside its own cube, behind the cube's front: that
+        // doesn't hide it.
+        world.add(
+          GameObject(
+            components: [
+              MeshRenderer(Mesh.cube(), Material()),
+              WorldWidget(
+                (_) => const ColoredBox(key: tag, color: Colors.green, child: SizedBox(width: 20, height: 10)),
+                hideBehind: true,
+              ),
+            ],
+          ),
+        );
+        await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+        await frames(tester, 2);
+        expect(find.byKey(tag).hitTestable(), findsOneWidget, reason: 'its own cube');
+        final wall = world.add(
+          GameObject(
+            transform: Transform(position: Vec3(0, 0, 2), scale: Vec3(3, 3, 0.1)),
+            components: [MeshRenderer(Mesh.cube(), Material())],
+          ),
+        );
+        await frames(tester);
+        expect(find.byKey(tag), findsOneWidget, reason: 'fading, still there');
+        await frames(tester, 12);
+        expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'behind the wall');
+        wall.destroy();
+        await frames(tester, 12);
+        expect(find.byKey(tag).hitTestable(), findsOneWidget, reason: 'the wall is gone');
+        // A wall on a layer it doesn't hide behind.
+        const glass = 3;
+        world.add(
+          GameObject(
+            layer: glass,
+            transform: Transform(position: Vec3(0, 0, 2), scale: Vec3(3, 3, 0.1)),
+            components: [MeshRenderer(Mesh.cube(), Material())],
+          ),
+        );
+        final through = world.add(
+          GameObject(
+            transform: Transform(position: Vec3(0, 0.8, 0)),
+            components: [
+              WorldWidget(
+                (_) => const ColoredBox(
+                  key: ValueKey('through'),
+                  color: Colors.green,
+                  child: SizedBox(width: 20, height: 10),
+                ),
+                hideBehind: true,
+                hideLayers: LayerMask.except([glass]),
+              ),
+            ],
+          ),
+        );
+        await frames(tester, 12);
+        expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'behind the glass, on every layer');
+        expect(find.byKey(const ValueKey('through')).hitTestable(), findsOneWidget, reason: 'not behind glass');
+        expect(through.get<WorldWidget>()!.hideLayers, LayerMask.except([glass]));
+      },
+    );
+
+    testWidgets('a WorldWidget kept on the screen waits at its edge, toward its point, and says so', (tester) async {
+      late WorldWidgetPlace place;
+      final thing = world.add(
+        GameObject(
+          components: [
+            WorldWidget((context) {
+              place = WorldWidget.of(context);
+              return ValueListenableBuilder(
+                valueListenable: place.offScreen,
+                builder: (_, off, _) => ColoredBox(
+                  key: ValueKey(off ? 'off' : 'on'),
+                  color: Colors.green,
+                  child: const SizedBox(width: 20, height: 10),
+                ),
+              );
+            }, keepOnScreen: true),
+          ],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester);
+      final view = tester.getRect(find.byType(FynkelView));
+      expect(tester.getCenter(find.byKey(const ValueKey('on'))), offsetMoreOrLessEquals(seen(tester, Vec3.zero)));
+      expect(place.offScreen.value, isFalse);
+
+      Future<Rect> kept(Vec3 at) async {
+        thing.position = at;
+        await frames(tester, 2);
+        expect(place.offScreen.value, isTrue, reason: 'at $at');
+        return tester.getRect(find.byKey(const ValueKey('off')).hitTestable());
+      }
+
+      // Right of the view: inside its right edge, the default margin in,
+      // level with the point.
+      var rect = await kept(Vec3(30, 0, 0));
+      expect(rect.right, moreOrLessEquals(view.right - 8));
+      expect(rect.center.dy, moreOrLessEquals(view.center.dy));
+      expect(place.angle.value, moreOrLessEquals(0));
+      rect = await kept(Vec3(-30, 0, 0));
+      expect(rect.left, moreOrLessEquals(view.left + 8));
+      expect(place.angle.value.abs(), moreOrLessEquals(math.pi));
+      rect = await kept(Vec3(0, 30, 0));
+      expect(rect.top, moreOrLessEquals(view.top + 8));
+      expect(place.angle.value, moreOrLessEquals(-math.pi / 2));
+      // Behind the camera and to its right: the right edge still.
+      rect = await kept(Vec3(2, 0, 10));
+      expect(rect.right, moreOrLessEquals(view.right - 8));
+      thing.position = Vec3.zero;
+      await frames(tester);
+      expect(place.offScreen.value, isFalse);
+      expect(tester.getCenter(find.byKey(const ValueKey('on'))), offsetMoreOrLessEquals(seen(tester, Vec3.zero)));
     });
   });
 
