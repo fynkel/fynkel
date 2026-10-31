@@ -464,14 +464,16 @@ void main() {
     expect(log, ['load a', 'load b', 'start a', 'start b', 'update a', 'destroy b']);
   });
 
-  test('a component the engine refuses on a live object is not put on, and can go elsewhere', () {
+  test('a component refused on a live object is not put on, and can go elsewhere', () {
     final object = world.add(GameObject());
-    final camera = Camera(fovY: 500.deg);
-    expect(() => object.addComponent(camera), throwsRefusal(FynkelStatus.invalidValue));
-    expect(object.has<Camera>(), isFalse);
-    camera.fovY = 60.deg;
-    world.add(GameObject(components: [camera]));
-    expect(world.first<Camera>(), same(camera));
+    // Its values are checked where they're set (stage 14, C2): what's left
+    // to refuse at the add is what it uses, such as a disposed material.
+    final renderer = MeshRenderer(Mesh.cube(), Material()..dispose());
+    expect(() => object.addComponent(renderer), throwsStateError);
+    expect(object.has<MeshRenderer>(), isFalse);
+    renderer.material = Material();
+    world.add(GameObject(components: [renderer]));
+    expect(world.first<MeshRenderer>(), same(renderer));
   });
 
   test('getInParent and getInChildren look at the object, then up or down', () {

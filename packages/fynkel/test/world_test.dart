@@ -46,10 +46,7 @@ void main() {
       () => cube.transform = Transform(),
       throwsBadState('GameObject#${cube.id} was destroyed, so its transform can\'t be set'),
     );
-    expect(
-      () => cube.find('x'),
-      throwsBadState('GameObject#${cube.id} was destroyed, so nothing can be found below it'),
-    );
+    expect(() => cube.find('x'), throwsBadState('GameObject#${cube.id} was destroyed, so find can\'t look below it'));
   });
 
   test('components come back as they went in', () {
@@ -88,7 +85,7 @@ void main() {
     expect(lamp.range, 8, reason: 'the old value stays');
     expect(
       () => spot.angle = 200.deg,
-      throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('spot_angle'))),
+      throwsA(isA<ArgumentError>().having((e) => '$e', 'message', contains('Light.angle'))),
     );
     expect(spot.angle, 50.deg);
     expect(() => spot.softness = 2, throwsArgumentError);
@@ -130,13 +127,9 @@ void main() {
     expect(() => GameObject(components: [Light.sun(), Light.ambient()]), throwsArgumentError);
     final before = world.add(GameObject());
     expect(
-      () => world.add(
-        GameObject(
-          transform: Transform(),
-          components: [Camera(fovY: 500.deg)],
-        ),
-      ),
-      throwsRefusal(FynkelStatus.invalidValue, 'fov_y'),
+      () =>
+          world.add(GameObject(transform: Transform(), components: [MeshRenderer(Mesh.cube(), Material()..dispose())])),
+      throwsA(isA<StateError>().having((e) => e.message, 'message', contains('was disposed'))),
     );
     final after = world.add(GameObject());
     for (var id = before.id + 1; id < after.id; id++) {
@@ -149,7 +142,7 @@ void main() {
     final said = <String>[];
     runZoned(() {
       final before = world.add(GameObject());
-      final bad = Camera(fovY: 500.deg);
+      final bad = MeshRenderer(Mesh.cube(), Material()..dispose());
       final good = GameObject(name: 'good', components: [Light.sun()]);
       final under = GameObject(name: 'under');
       final root = GameObject(
@@ -162,7 +155,10 @@ void main() {
         ],
       );
       for (var i = 0; i < 3; i++) {
-        expect(() => world.add(root), throwsRefusal(FynkelStatus.invalidValue, 'fov_y'));
+        expect(
+          () => world.add(root),
+          throwsA(isA<StateError>().having((e) => e.message, 'message', contains('was disposed'))),
+        );
       }
       expect([root.isAlive, good.isAlive, under.isAlive], [false, false, false]);
       expect(world.all<GameObject>(), [before]);
@@ -171,7 +167,7 @@ void main() {
         expect(fy_exists(world.pointer, id), isFalse, reason: 'object#$id was despawned again');
       }
       // Each part can still be added, and its lights are counted once.
-      bad.fovY = 60.deg;
+      bad.material = Material();
       world.add(root);
       expect([root.isAlive, good.isAlive, under.isAlive], [true, true, true]);
       expect(good.parent, root);
@@ -183,7 +179,10 @@ void main() {
   test('the engine refuses values that are not finite or not unit rotations', () {
     final o = world.add(GameObject());
     expect(() => o.transform = Transform(position: Vec3(double.nan, 0, 0)), throwsRefusal(FynkelStatus.invalidValue));
-    expect(() => o.transform = Transform(rotation: Quat(0, 0, 0, 2)), throwsRefusal(FynkelStatus.invalidValue, 'unit'));
+    expect(
+      () => o.transform = Transform(rotation: Quat(0, 0, 0, 2)),
+      throwsRefusal(FynkelStatus.invalidValue, '.normalized'),
+    );
     expect(() => Material(roughness: 1.5), throwsRangeError);
     expect(() => Material().metallic = double.nan, throwsRangeError);
   });

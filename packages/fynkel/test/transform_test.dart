@@ -114,7 +114,7 @@ void main() {
     expect(engine(o).$1.x, (Float32List(1)..[0] = 0.1)[0]);
   });
 
-  test('a value the engine would refuse throws when set, with the engine\'s own words, and changes nothing', () {
+  test('a value the engine would refuse throws when set, naming the field as the engine does, and changes nothing', () {
     final o = world.add(GameObject(transform: Transform(position: Vec3(1, 2, 3))));
     final bad = <Transform>[
       Transform(position: Vec3(double.nan, 0, 0)),
@@ -128,7 +128,9 @@ void main() {
       Transform(rotation: const Quat(0, 0, 0, 2), scale: Vec3(double.nan, 1, 1)),
     ];
     for (final value in bad) {
-      expect(() => o.transform = value, throwsRefusal(FynkelStatus.invalidValue, engineRefusal(world, value)));
+      // The engine's field (`Transform.rotation`), and the object.
+      final field = engineRefusal(world, value).split(':').first;
+      expect(() => o.transform = value, throwsRefusal(FynkelStatus.invalidValue, '$field of $o is '));
     }
     expect(o.transform.position, Vec3(1, 2, 3));
     expect(() => world.add(GameObject(transform: bad.first)), throwsRefusal(FynkelStatus.invalidValue));

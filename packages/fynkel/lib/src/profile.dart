@@ -61,7 +61,11 @@ final class FrameProfile {
   /// The [GameObject.onLateUpdate]s and [Behaviour.onLateUpdate]s.
   Duration get lateUpdates => _part(_Part.lateUpdates);
 
-  /// Sending the meshes changed this frame ([World.meshChangeTime]).
+  /// Sending the meshes the game changed this frame to the worlds that
+  /// have them: their normals and tangents worked out, and each handed to
+  /// the engine (the GPU's copy is written as it draws). With several
+  /// worlds, the first to update sends them all. Zero when no mesh
+  /// changed.
   Duration get meshes => _part(_Part.meshes);
 
   /// Sending what was drawn with [World.debug].
