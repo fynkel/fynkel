@@ -222,6 +222,8 @@ class Yard extends GameObject {
   names or tags (the `name` checks in §16 are there to keep the examples
   short; a subclass or a component is the sturdier test). As Unity's, they leave out objects that are turned off
   (and the components on them) unless `includeInactive: true`.
+  `all` gives a new list, so destroying or releasing what's in it while
+  going through it is safe.
 
 **Pooling.** A game that makes and destroys many short-lived objects
 (shots, sparks, enemies of a wave) can reuse them instead, with a
@@ -694,7 +696,9 @@ MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..cas
   2 at medium, 4 at high. The others still light, without shadows. A
   spotlight with shadows is at most 150° across: a wider one is refused
   with an `ArgumentError`, since its shadow map can't cover the rim.
-- **Point lights don't cast shadows** yet.
+- **Point lights don't cast shadows** yet. A torch that should throw
+  shadows is a point light for its glow and a spotlight with shadows
+  above it, aimed down.
 - **`castShadows: false`** is for what shouldn't darken the ground (a
   glow, water, a ghost) and for what can't shadow anything (a flat
   floor), which also saves drawing it into the maps.
@@ -1334,7 +1338,9 @@ fingers and actions let go, and input that comes while paused is dropped.
 The view claims no keys then, so the pause menu's shortcuts get every one.
 When it ends, the keys still down on the keyboard are held again (and
 `wasPressed` that frame). The first frame after it counts no time, however
-long the pause was:
+long the pause was. Sounds hold too, all but the music, which plays on
+for the pause menu unless `audio.music.ignorePause = false` is set before
+its first track (§13b):
 
 ```dart
 // lib/paused_app.dart
@@ -1528,7 +1534,7 @@ class Waves extends GameObject {
 - **A `MeshCollider` follows its mesh** (§16): after a change to its
   positions or triangles it's made again on the next physics step, and
   what lies on it wakes. Colours, UVs, normals and tangents leave it as
-  it is (`mesh.shapeVersion`, from `package:fynkel/extend.dart`, counts
+  it is (`mesh.shapeVersion` counts
   the changes it follows). Making it
   again takes time (about 0.2 ms for 1,000 triangles and 3 ms for 10,000
   on a Mac), so it suits ground dug where it's tapped, not water that
@@ -1709,7 +1715,9 @@ final halfway = river.positionAt(river.length / 2);
 final facing = river.rotationAt(3); // -Z along it, up as upAt
 final closest = river.nearest(Vec3(5, 0, 5)); // (distance:, position:)
 
-// A road: a profile swept along it, caps on its ends, UVs in metres.
+// A road: a profile swept along it, caps on its ends, UVs in metres:
+// u around the profile, v along the path. setSweep sweeps again into the
+// same mesh, or into an empty Mesh() the first time.
 final road = Mesh.sweep(river, Shape2D.rect(4, 0.3), segmentsPerMetre: 2);
 ```
 
@@ -2003,7 +2011,8 @@ the pubspec, next to `fynkel`, and a game without it ships none of it:
 any asset is (§12): `await assets.audio('bark.ogg')`. It's decoded once,
 off the UI thread, shared, and freed when the last object that asked for
 it is destroyed. `AudioClip.fromSamples(samples, rate:, channels:)`
-makes one from numbers, freed with `dispose()`.
+makes one from numbers, freed when nothing reaches it, or at once with
+`dispose()`; sounds already playing it play to their end either way.
 
 **An `AudioSource`** plays sounds from its object, as Unity's: its `clip`
 with `play()`, `pause()`, `unPause()` and `stop()`, and any clip over it
@@ -2523,7 +2532,9 @@ what's different goes in the shader. Screen effects are shaders too,
 run over the camera's whole picture.
 
 `packages/fynkel/wgsl/fynkel.wgsl` lists every name the engine gives a
-shader, with what it does: read it beside your own. The lab's
+shader, with what it does: read it beside your own. A surface reads
+`in.uv`, `in.position` (in the world), `in.normal`, `in.view` (towards
+the camera), `in.screen` and `in.color` (the material's). The lab's
 `examples/lab/assets/shaders/` has a dozen to copy from (lava, water,
 grass in the wind, a hologram, a dissolve, a hit flash, toon light, an
 old TV), and `dart run fynkel:shader lava` writes a new one to start from,
@@ -4136,7 +4147,13 @@ Two things differ from other widget tests. **`pumpAndSettle` never
 settles** while a view is on screen, since the game asks for every frame:
 `tester.frames()` or `tester.run(seconds)` instead. And input waits for
 the next frame, as on a device: a tap reaches the game in the frame after
-it.
+it. A page that slides in or out (a settings page, a dialog) takes about
+a third of a second, so `tester.run(0.5)` after opening or closing one,
+not a few frames.
+
+`world.run(seconds)` moves on in whole frames of 1/60 s, so a routine's
+`wait(0.5)` ends on the first frame at or past half a second: test what
+it did after a little more than its waits, not exactly at them.
 
 ## 20. Speed
 
@@ -4179,7 +4196,7 @@ What keeps a game fast:
 - **More steps for fast spins and chains.** Physics turns a body at most
   a quarter turn a step, and a chain of joints pulls apart more the
   longer a step is: `time.fixedDelta = 1 / 100` (or 1 / 120) where a
-  game needs it. Keep a joint's two bodies within 10 times each other's
+  game needs it, in its root's `onLoad`. Keep a joint's two bodies within 10 times each other's
   mass, as Unity advises.
 - **Short-reaching lamps.** A lamp costs something for each object it
   reaches, and the pixels it lights; one that reaches no further than it
@@ -4224,7 +4241,8 @@ What keeps a game fast:
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
   alone), sprites and 2D, flat text in the scene (TextMeshPro's; solid
   3D text is there, §12b), a model's own vertex colours (a
-  mesh made in code has them, §12b);
+  mesh made in code has them, §12b), shadows from point lights (a
+  spotlight's are there, §5);
   see-through objects don't cast shadows.
 - **Shaders** (§14): no matrices in `Values`; a shader can't use
   another's code; no node graph (Shader Graph): shaders are written in
