@@ -374,7 +374,7 @@ Sheepdog on the iPhone at 120/high (80), the iPhone runs owed by stages
 | Row | What | Size |
 |---|---|---|
 | GD2, GD14 ✅ | §19 never shows a test loading assets (`World(source: …)`) or `await game.loaded` without frames. **Done**: §19 has one, run by `check_guide.py` | S |
-| GD9 | No way to check "no garbage" in a game's own tests, though the guide promises it; `finger.position`, `screenPointToRay`, `screenPointToPlane` make new objects each call | M |
+| GD9 ½ | No way to check "no garbage" in a game's own tests, though the guide promises it; `finger.position`, `screenPointToRay`, `screenPointToPlane` make new objects each call. **Half done**: measured, a drag frame makes 9 objects (6 `Vec3`, 2 `Ray`, a `ViewPoint`), from the math types being immutable classes (inlining doesn't remove them; Dart has no structs); the guide's speed section now says which "no garbage" claims hold (the bulk paths) and that a few value objects a frame are fine. Open: a test helper. `flutter test` has no VM service unless run with `--enable-vmservice`, and can't spawn the counter's isolate (`Isolate.packageConfig`/`spawnUri` unsupported), so it needs a separate `dart` process counting through the service | M |
 | GD4 ✅ | The guide names `Stick(…)` as if it shipped; it's only in the lab. Ship it in `fynkel_flutter`. **Done**: `Stick(input, axis:, floating:, size:)`, Ring Ring Deals' stick made general (`floating` appears under the thumb, taps go through); the lab's copy gone | S |
 | GD3 ✅ | `pausedListenable` needs `fynkel_flutter`'s import; §11 doesn't say. **Done**: it says | S |
 | GD6 ✅ | `audio.music.ignorePause` isn't named where pausing is. **Done**: named in the music paragraph | S |

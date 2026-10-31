@@ -4149,6 +4149,16 @@ What keeps a game fast:
   10 minutes, not one: a phone slows itself down when it's hot.
 - **Many alike things, one manager.** coins moves its 300 motes from one
   object's `onUpdate` (`Swarm`): one call a frame, not 300.
+- **A little garbage is fine; a lot is not.** `Vec3`, `Ray`,
+  `ViewPoint` and `Transform` are small objects that never change, so
+  working out a new one makes one: a drag frame that reads
+  `finger.position` and asks `camera.screenPointToPlane` makes about 9,
+  some 300 bytes, which Dart frees for almost nothing. What would cost is
+  thousands a frame, and that's where the engine says "no garbage":
+  `setPositions` and the other mesh channels, `setSweep`, `MeshBuilder`,
+  pools, particles, queries that miss. Keep a list and change it in place
+  for those. To see what a game allocates, run it with `flutter run
+  --profile` and open DevTools' Memory view.
 - **What the camera can't see costs the GPU nothing.** An object wholly
   out of view isn't drawn; it still costs its update and its copy to the
   renderer, so hide or destroy what's far away for good.
