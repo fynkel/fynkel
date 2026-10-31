@@ -209,7 +209,7 @@ final class SplineInstantiate extends Behaviour {
     if (!(_spacing > 0 && _spacing.isFinite)) throw ArgumentError.value(_spacing, 'spacing', 'must be more than 0');
     if (_count case final n? when n < 0) throw ArgumentError.value(n, 'count', 'can\'t be less than 0');
     if (!(_offset.x.isFinite && _offset.y.isFinite && _offset.z.isFinite)) {
-      throw ArgumentError.value(_offset, 'offset', 'must be finite');
+      throw ArgumentError('offset is $_offset; it must be finite');
     }
   }
 
@@ -305,7 +305,9 @@ enum SplineLoop {
 /// Moves its object along a spline, as Unity's SplineAnimate: a cart on
 /// its track, a boat down a river, a camera on a dolly. It goes at
 /// [speed] metres a second, or takes [seconds] for the whole spline (give
-/// one), turned to face along it when [align].
+/// one), turned to face along it when [align]. When its container goes
+/// (its object destroyed, as a level unloads), it holds still where it
+/// is, as [Follow] does; give it another [container] to go on.
 ///
 /// ```dart
 /// cart.addComponent(SplineAnimate(track, speed: 4, loop: SplineLoop.loop));
@@ -353,6 +355,10 @@ final class SplineAnimate extends Behaviour {
 
   /// Called each time it reaches the end with [SplineLoop.once].
   void Function()? onComplete;
+
+  // Whether its container is still there: when it was taken away, or its
+  // object destroyed, it holds still where it is, as [Follow] does.
+  bool get _hasTrack => !container.isRemoved && container._owner != null && _present(container._owner!);
 
   double _speed;
   double? _seconds;
@@ -442,7 +448,7 @@ final class SplineAnimate extends Behaviour {
   @override
   void onUpdate() {
     super.onUpdate();
-    if (!_playing) return;
+    if (!_playing || !_hasTrack) return;
     final length = container.length(index: index);
     final step = speed * world.time.delta;
     var d = _distance + (_back ? -step : step);

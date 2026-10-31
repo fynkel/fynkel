@@ -5,7 +5,7 @@
 
 use glam::Vec3;
 
-use crate::{MeshData, MeshParts};
+use crate::{MeshData, MeshError, MeshParts};
 
 impl MeshData {
     /// A 1×1×1 cube centred on the origin, with 24 vertices so each face
@@ -80,13 +80,14 @@ impl MeshData {
     /// once from +Z, its top at the top end; each part takes the share of
     /// its height that its length is of the outline.
     pub fn capsule(segments: u32, rings: u32) -> Self {
-        Self::capsule_sized(0.5, 2.0, segments, rings)
+        Self::capsule_sized(0.5, 2.0, segments, rings).expect("the built-in shapes are valid")
     }
 
     /// A capsule along Y centred on the origin, `height` from end to end
     /// (at least twice the radius; less is a sphere) and of `radius`,
-    /// textured as [`MeshData::capsule`].
-    pub fn capsule_sized(radius: f32, height: f32, segments: u32, rings: u32) -> Self {
+    /// textured as [`MeshData::capsule`]. An error for sizes so large its
+    /// numbers aren't finite.
+    pub fn capsule_sized(radius: f32, height: f32, segments: u32, rings: u32) -> Result<Self, MeshError> {
         assert!(segments >= 3 && rings >= 1, "a capsule needs at least 3 segments and 1 ring");
         let half = (height * 0.5 - radius).max(0.0);
         // From the top pole down: each row's angle from +Y on its
@@ -135,7 +136,7 @@ impl MeshData {
                 }
             }
         }
-        s.build()
+        s.try_build()
     }
 
     /// A cylinder along Y centred on the origin, 2 high and of radius 0.5,
@@ -250,6 +251,16 @@ impl Shape {
     }
 
     pub(crate) fn build(&self) -> MeshData {
+        self.try_build().expect("the built-in shapes are valid")
+    }
+
+    /// [`Shape::build`] for a shape made from the caller's points (an
+    /// outline, a profile) or sizes, which may make no triangles, or
+    /// numbers that aren't finite: an error, not a panic.
+    pub(crate) fn try_build(&self) -> Result<MeshData, MeshError> {
+        if self.indices.is_empty() {
+            return Err(MeshError::NoTriangles);
+        }
         MeshData::new(MeshParts {
             positions: &self.positions,
             normals: Some(&self.normals),
@@ -258,6 +269,5 @@ impl Shape {
             indices: &self.indices,
             ..MeshParts::default()
         })
-        .expect("the built-in shapes are valid")
     }
 }

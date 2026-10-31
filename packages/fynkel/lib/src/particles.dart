@@ -1142,8 +1142,8 @@ final class ParticleSystem extends Component {
   }
 
   /// Lit by the scene's lights as a surface facing the camera, rather
-  /// than shown as it is: smoke and dust in the sun. Each particle (or a
-  /// trail's point) is lit once, at its middle, as a matte surface, so a
+  /// than shown as it is: smoke and dust in the sun. Each particle is lit
+  /// once, at its middle, as a matte surface, so a
   /// cloud of them costs little more than unlit; [ParticleRenderMode.mesh]
   /// ones are lit pixel by pixel, with the material's metal and roughness.
   bool get lit => _lit;
@@ -1329,7 +1329,21 @@ final class ParticleSystem extends Component {
     }
     // No list or closure here: a system changed every frame checks it all
     // each time (stage 14's DF2).
-    if (_rangeNotFinite() case final r?) return ArgumentError('a ParticleSystem\'s ranges must be finite; got $r');
+    if (_startRangeRefused() case final error?) return error;
+    if (!(_startDelay >= 0)) return ArgumentError('startDelay is $_startDelay; it can\'t be below 0');
+    if (!(_simulationSpeed >= 0)) return ArgumentError('simulationSpeed is $_simulationSpeed; it can\'t be below 0');
+    if (!(_emission.rateOverTime >= 0)) {
+      return ArgumentError('emission\'s rateOverTime is ${_emission.rateOverTime}; it can\'t be below 0');
+    }
+    for (var i = 0; i < _emission.bursts.length; i++) {
+      if (_burstRefused(i, _emission.bursts[i]) case final error?) return error;
+    }
+    if (!(_shape.angle >= 0 && _shape.angle < math.pi / 2)) {
+      final a = _shape.angle;
+      // 25 is 25 degrees, given as radians by habit.
+      final hint = a >= 1 && a < 90 ? ': did you mean ${_plain(a)}.deg? It' : '; it';
+      return ArgumentError('ParticleShape.cone\'s angle is ${_plain(a)}, in radians$hint is 0 to under 90.deg');
+    }
     if (_sizeTable case final t? when !_allFinite(t)) {
       return ArgumentError('sizeOverLifetime must give finite numbers from 0 to 1');
     }
@@ -1378,15 +1392,37 @@ final class ParticleSystem extends Component {
     return null;
   }
 
-  Range? _rangeNotFinite() => !_startLifetime._finite
-      ? _startLifetime
-      : !_startSpeed._finite
-      ? _startSpeed
-      : !_startSize._finite
-      ? _startSize
-      : !_startRotation._finite
-      ? _startRotation
-      : null;
+  ArgumentError? _startRangeRefused() =>
+      _rangeRefused('startLifetime', _startLifetime, least: 0) ??
+      _rangeRefused('startSpeed', _startSpeed) ??
+      _rangeRefused('startSize', _startSize, least: 0) ??
+      _rangeRefused('startRotation', _startRotation);
+
+  /// Why range [name] can't be [r]: not finite, its min above its max, or
+  /// below [least].
+  static ArgumentError? _rangeRefused(String name, Range r, {double least = double.negativeInfinity}) {
+    if (!r._finite) return ArgumentError('$name is $r; it must be finite');
+    if (r.min > r.max) {
+      return ArgumentError('$name is $r: its min is above its max. Did you mean ${Range(r.max, r.min)}?');
+    }
+    if (r.min < least) return ArgumentError('$name is $r; it can\'t be below ${_plain(least)}');
+    return null;
+  }
+
+  /// Why burst [i], [b], can't be as it is.
+  static ArgumentError? _burstRefused(int i, Burst b) {
+    if (!(b.time >= 0 && b.time.isFinite)) return ArgumentError('burst $i\'s time is ${b.time}; it can\'t be below 0');
+    if (!b.count._finite || b.count.min < 0 || b.count.max < 0) {
+      return ArgumentError('burst $i\'s count is ${b.count}; it can\'t be below 0');
+    }
+    if (!(b.interval >= 0.01 && b.interval.isFinite)) {
+      return ArgumentError('burst $i\'s interval is ${b.interval}; it\'s at least 0.01 s');
+    }
+    if (!(b.probability >= 0 && b.probability <= 1)) {
+      return ArgumentError('burst $i\'s probability is ${b.probability}; it\'s 0 to 1');
+    }
+    return null;
+  }
 
   static bool _allFinite(Float32List table) {
     for (var i = 0; i < table.length; i++) {

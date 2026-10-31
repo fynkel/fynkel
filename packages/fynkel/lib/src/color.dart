@@ -48,13 +48,20 @@ final class ColorGradient {
   }
 
   /// [color] fading from opaque to nothing: smoke, dust, sparks.
-  factory ColorGradient.fadeOut([Color color = Color.white]) =>
-      ColorGradient([(0, color), (1, Color.rgb(color.r, color.g, color.b, 0))]);
+  factory ColorGradient.fadeOut([Color color = Color.white]) => ColorGradient([(0, color), (1, color.withAlpha(0))]);
 
   /// [color] fading in over the first [fadeIn] of a life and out over the
-  /// last [fadeOut], so particles neither pop in nor out.
-  factory ColorGradient.fadeInOut([Color color = Color.white, double fadeIn = 0.2, double fadeOut = 0.4]) {
-    final clear = Color.rgb(color.r, color.g, color.b, 0);
+  /// last [fadeOut], so particles neither pop in nor out:
+  /// `ColorGradient.fadeInOut(Color.white, fadeIn: 0.1)`. Each is a share
+  /// of the life, 0 to 1, and the two together at most 1.
+  factory ColorGradient.fadeInOut(Color color, {double fadeIn = 0.2, double fadeOut = 0.4}) {
+    for (final (name, value) in [('fadeIn', fadeIn), ('fadeOut', fadeOut)]) {
+      if (!(value >= 0 && value <= 1)) throw ArgumentError('$name is $value; it\'s a share of the life, 0 to 1');
+    }
+    if (fadeIn + fadeOut > 1) {
+      throw ArgumentError('fadeIn + fadeOut is $fadeIn + $fadeOut; together they\'re at most 1, the whole life');
+    }
+    final clear = color.withAlpha(0);
     return ColorGradient([(0, clear), (fadeIn, color), (1 - fadeOut, color), (1, clear)]);
   }
 
@@ -103,6 +110,10 @@ final class Color extends ParticleColor {
 
   /// Alpha, 0–1: 1 is opaque, 0 is fully see-through.
   final double a;
+
+  /// It with alpha [a] in place of its own: `color.withAlpha(0.5)` is
+  /// half see-through (Unity's `color.a = 0.5`).
+  Color withAlpha(double a) => Color.rgb(r, g, b, a);
 
   /// Writes it as four bytes at [offset] in [into]: red, green, blue and
   /// alpha, 0–255, for a mesh's `setColors`.

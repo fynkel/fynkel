@@ -39,6 +39,24 @@ final class Vec2 {
   /// How long it is (Unity's `magnitude`).
   double get length => math.sqrt(x * x + y * y);
 
+  /// This direction with length 1. Throws for a zero vector, as
+  /// [Vec3.normalized] does; [normalizedOrZero] gives zero for one.
+  Vec2 get normalized {
+    final l = length;
+    if (l < 1e-12 || !l.isFinite) throw ArgumentError('$this has no direction');
+    return this / l;
+  }
+
+  /// This direction with length 1, or [zero] for a zero vector (as Unity's
+  /// `normalized`).
+  Vec2 get normalizedOrZero {
+    final l = length;
+    return l < 1e-12 || !l.isFinite ? zero : this / l;
+  }
+
+  /// Whether each component is within [tolerance] of [o]'s.
+  bool closeTo(Vec2 o, [double tolerance = 1e-6]) => (x - o.x).abs() <= tolerance && (y - o.y).abs() <= tolerance;
+
   /// The point [t] of the way from [a] to [b]: [a] at 0, [b] at 1, and
   /// beyond them outside 0–1.
   static Vec2 lerp(Vec2 a, Vec2 b, double t) => Vec2(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t);
@@ -215,7 +233,7 @@ final class Quat {
   /// Turns [angle] radians around [axis] (counter-clockwise looking down
   /// the axis, so a positive turn around [Vec3.up] goes from -Z towards -X).
   factory Quat.axisAngle(Vec3 axis, double angle) {
-    final n = axis.normalized;
+    final n = _direction(axis, 'Quat.axisAngle: axis');
     final s = math.sin(angle / 2);
     return Quat(n.x * s, n.y * s, n.z * s, math.cos(angle / 2));
   }
@@ -227,6 +245,34 @@ final class Quat {
   /// takes degrees: write `Quat.euler(0, 90.deg, 0)`.
   factory Quat.euler(double pitch, double yaw, double roll) =>
       (Quat.axisAngle(Vec3.up, yaw) * Quat.axisAngle(Vec3.right, pitch) * Quat.axisAngle(Vec3.back, roll)).normalized;
+
+  /// The rotation that turns direction [from] to direction [to] the
+  /// shortest way (Unity's `Quaternion.FromToRotation`): `Quat.fromTo(
+  /// Vec3.up, groundNormal) * rotation` stands a thing on a slope. Neither
+  /// need be unit length; throws for a zero one.
+  factory Quat.fromTo(Vec3 from, Vec3 to) {
+    final a = _direction(from, 'Quat.fromTo: from'), b = _direction(to, 'Quat.fromTo: to');
+    final d = a.dot(b);
+    if (d >= 1 - 1e-12) return identity;
+    if (d <= -1 + 1e-12) {
+      // Opposite: half a turn around any axis at right angles to both.
+      var axis = a.cross(Vec3.right);
+      if (axis.length < 1e-6) axis = a.cross(Vec3.up);
+      final n = axis.normalized;
+      return Quat(n.x, n.y, n.z, 0);
+    }
+    final c = a.cross(b);
+    return Quat(c.x, c.y, c.z, 1 + d).normalized;
+  }
+
+  /// [from] turned towards [to] by at most [maxRadians], never past it
+  /// (Unity's `Quaternion.RotateTowards`): `rotation =
+  /// Quat.rotateTowards(rotation, goal, turnSpeed * time.delta)`.
+  static Quat rotateTowards(Quat from, Quat to, double maxRadians) {
+    final angle = from.angleTo(to);
+    if (angle <= maxRadians || angle == 0) return to;
+    return slerp(from, to, maxRadians / angle);
+  }
 
   /// The rotation that makes an object look along [forward] (its -Z turns
   /// to [forward]) with its +Y as close to [up] as possible. If [forward]
@@ -290,6 +336,26 @@ final class Quat {
 
   /// The opposite rotation.
   Quat get inverse => Quat(-x, -y, -z, w);
+
+  /// Its angles, in radians, as [Quat.euler] takes them (Unity's
+  /// `eulerAngles`): x the pitch, y the yaw and z the roll, so
+  /// `Quat.euler(e.x, e.y, e.z)` with `e = q.eulerAngles` is `q` again.
+  /// The pitch is -90.deg to 90.deg, the yaw and roll -180.deg to
+  /// 180.deg. `rotation.eulerAngles.y` is the way an object faces round
+  /// the up axis. Straight up or down, yaw and roll turn about the same
+  /// axis: the roll is 0 and the yaw has it all.
+  Vec3 get eulerAngles {
+    // The rotation matrix's entries that say it: Ry(yaw) Rx(pitch) Rz(roll).
+    final m12 = 2 * (y * z - w * x);
+    final m10 = 2 * (x * y + w * z), m11 = 1 - 2 * (x * x + z * z);
+    final pitch = math.asin((-m12).clamp(-1.0, 1.0));
+    if (math.sqrt(m10 * m10 + m11 * m11) < 1e-6) {
+      final m00 = 1 - 2 * (y * y + z * z), m20 = 2 * (x * z - w * y);
+      return Vec3(pitch, math.atan2(-m20, m00), 0);
+    }
+    final m02 = 2 * (x * z + w * y), m22 = 1 - 2 * (x * x + y * y);
+    return Vec3(pitch, math.atan2(m02, m22), math.atan2(m10, m11));
+  }
 
   /// The dot product with [o], component by component: near 1 or -1 when
   /// the rotations are nearly the same.
@@ -358,7 +424,7 @@ final class Quat {
 /// cast it with [World.raycast].
 final class Ray {
   /// [direction] is made unit length; throws for a zero one.
-  factory Ray(Vec3 origin, Vec3 direction) => Ray._(origin, direction.normalized);
+  factory Ray(Vec3 origin, Vec3 direction) => Ray._(origin, _direction(direction, 'Ray: direction'));
 
   const Ray._(this.origin, this.direction);
 
@@ -386,7 +452,7 @@ final class Ray {
 final class Plane {
   /// The plane through [point] facing [normal] (made unit length).
   factory Plane(Vec3 normal, Vec3 point) {
-    final n = normal.normalized;
+    final n = _direction(normal, 'Plane: normal');
     return Plane._(n, -n.dot(point));
   }
 
@@ -457,6 +523,14 @@ final class ViewPoint {
 
   @override
   String toString() => 'ViewPoint($x, $y in ${width}x$height)';
+}
+
+/// [v] with length 1; an [ArgumentError] that names it as [what] for a
+/// zero vector, which has no direction.
+Vec3 _direction(Vec3 v, String what) {
+  final l = v.length;
+  if (l < 1e-12 || !l.isFinite) throw ArgumentError('$what is $v; it needs a direction, which a zero vector hasn\'t');
+  return v / l;
 }
 
 /// Angles are radians everywhere in Fynkel, as in Dart's `math`: `90.deg`

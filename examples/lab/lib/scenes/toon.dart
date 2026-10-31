@@ -58,8 +58,8 @@ class ToonScene extends LabScene {
     for (final extra in ['1H_Sword_Offhand', 'Badge_Shield', 'Rectangle_Shield', 'Spike_Shield', '2H_Sword']) {
       k.find(extra)?.active = false;
     }
-    k.animator?.crossFade('Idle', duration: 0);
-    r.animator?.crossFade('Idle', duration: 0);
+    k.animator?.crossFade('Idle', seconds: 0);
+    r.animator?.crossFade('Idle', seconds: 0);
 
     // One toon copy of each material, shared as the plain ones are.
     final copies = <Material, Material>{};

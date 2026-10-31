@@ -34,17 +34,17 @@ mixin AnimatorPlays {
     check(fy_animator_play(_world, _root, _layer, _animator._clip(name), scratch.number, loop));
   }
 
-  /// Fades from what plays here to clip [name] over [duration] seconds,
+  /// Fades from what plays here to clip [name] over [seconds],
   /// [name] from its start. The fade starts from the pose shown, however
   /// it got there (mid-fade, mid-blend, held after a stop). Fading to the
   /// [current] clip changes nothing (a fade to it that runs goes on), so
   /// an update can ask each frame; to one still fading out, it fades back
   /// in from where it is. [loop] as [play].
-  void crossFade(String name, {double duration = 0.25, bool loop = true}) {
-    _duration(duration);
+  void crossFade(String name, {double seconds = 0.25, bool loop = true}) {
+    _seconds(seconds);
     // The numbers through native memory: one passed to a call is boxed,
     // each frame, in the JIT.
-    scratch.number.value = duration;
+    scratch.number.value = seconds;
     check(fy_animator_play(_world, _root, _layer, _animator._clip(name), scratch.number, loop));
   }
 
@@ -61,25 +61,25 @@ mixin AnimatorPlays {
   /// ```
   ///
   /// Call it each frame with the number: the blend is made the first time
-  /// (it always loops), and a fade of [duration] seconds runs only when
+  /// (it always loops), and a fade of [seconds] runs only when
   /// something else was playing, as [crossFade]. A blend's name is its
   /// own: it can't be one of the model's clips, and it's made once, with
   /// the same clips each time.
-  void blend(String name, List<String> clips, {required double at, List<double>? thresholds, double duration = 0.25}) {
-    _duration(duration);
+  void blend(String name, List<String> clips, {required double at, List<double>? thresholds, double seconds = 0.25}) {
+    _seconds(seconds);
     if (!at.isFinite) throw ArgumentError.value(at, 'at', 'must be finite');
     final blend = _animator._blend(name, clips, thresholds);
     scratch.numbers[0] = at;
-    scratch.numbers[1] = duration;
+    scratch.numbers[1] = seconds;
     check(fy_animator_blend(_world, _root, _layer, blend, scratch.numbers));
   }
 
   /// Stops what plays here: at once, the parts keeping the pose they're
-  /// in, or fading out over [duration] seconds to what's underneath (on
+  /// in, or fading out over [seconds] to what's underneath (on
   /// the base layer, the pose the fade began from).
-  void stop({double duration = 0}) {
-    _duration(duration);
-    scratch.number.value = duration;
+  void stop({double seconds = 0}) {
+    _seconds(seconds);
+    scratch.number.value = seconds;
     check(fy_animator_stop(_world, _root, _layer, scratch.number));
   }
 
@@ -89,21 +89,34 @@ mixin AnimatorPlays {
   }
 
   /// The clip or blend last played or faded to here, or null when none
-  /// plays.
+  /// plays. [isPlaying] and [weight] take a blend's name too; to play a
+  /// blend again, call [blend].
   String? get current {
     final state = _state();
     if (state.blend >= 0) return _animator._blendNames[state.blend];
     return state.clip < 0 ? null : _animator.clips[state.clip].name;
   }
 
-  /// Whether clip [name] is in this layer's pose: playing, fading in or
-  /// out, or in a blend's mix.
+  /// Whether clip or blend [name] is in this layer's pose: playing,
+  /// fading in or out, or (a clip) in a blend's mix.
   bool isPlaying(String name) => weight(name) > 0;
 
   /// How much clip [name] is in this layer's pose: 1 alone, 0 not
-  /// playing, between while a crossfade runs or a blend mixes it.
+  /// playing, between while a crossfade runs or a blend mixes it. For a
+  /// blend's name, how much its clips are in it together, at most 1.
   double weight(String name) {
-    check(fy_animator_weight(_world, _root, _layer, _animator._clip(name), scratch.number));
+    if (_animator._blends[name] case (_, final clips, _)) {
+      var sum = 0.0;
+      for (var i = 0; i < clips.length; i++) {
+        if (clips.indexOf(clips[i]) == i) sum += _weight(_animator._clip(clips[i]));
+      }
+      return math.min(sum, 1);
+    }
+    return _weight(_animator._clip(name));
+  }
+
+  double _weight(int clip) {
+    check(fy_animator_weight(_world, _root, _layer, clip, scratch.number));
     return scratch.number.value;
   }
 
@@ -121,8 +134,10 @@ mixin AnimatorPlays {
   double get length => _state().length;
 }
 
-void _duration(double duration) {
-  if (duration.isNaN || duration < 0) throw ArgumentError.value(duration, 'duration', 'must be 0 or more');
+void _seconds(double seconds) {
+  if (seconds.isNaN || seconds < 0 || seconds == double.infinity) {
+    throw ArgumentError('seconds is $seconds; a fade takes 0 or more, and ends');
+  }
 }
 
 /// One of an [Animator]'s layers above the base: it plays its own clips
@@ -134,7 +149,7 @@ void _duration(double duration) {
 /// // Wave with the right arm while the legs walk.
 /// animator.layer(1, mask: 'upperarm.r').crossFade('wave');
 /// // Stop waving: the arm goes back to the walk.
-/// animator.layer(1).stop(duration: 0.3);
+/// animator.layer(1).stop(seconds: 0.3);
 /// ```
 ///
 /// Layers are drawn up in order, each over the ones below it.
@@ -198,7 +213,7 @@ final class AnimatorLayer with AnimatorPlays {
 /// final animator = hero.animator!;
 /// animator.play('idle');
 /// // later, in onUpdate:
-/// animator.crossFade(speed > 0.1 ? 'walk' : 'idle', duration: 0.2);
+/// animator.crossFade(speed > 0.1 ? 'walk' : 'idle', seconds: 0.2);
 /// ```
 ///
 /// The clips run in the engine, once a frame after the updates (after
@@ -261,10 +276,13 @@ final class Animator with AnimatorPlays {
   int _clip(String name) {
     final index = _index[name];
     if (index != null) return index;
-    throw ArgumentError.value(
-      name,
-      'clip',
-      clips.isEmpty ? 'the model has no clips' : 'not one of the model\'s clips (${clipNames.join(', ')})',
+    if (_blends.containsKey(name)) {
+      throw ArgumentError("'$name' is a blend, not one of the model's clips: call blend('$name', ...) to play it");
+    }
+    throw ArgumentError(
+      clips.isEmpty
+          ? "'$name' is no clip: the model has none"
+          : "'$name' is not one of the model's clips (${clipNames.join(', ')})",
     );
   }
 
@@ -272,15 +290,20 @@ final class Animator with AnimatorPlays {
     if (_blends[name] case (final number, final made, final at)) {
       if (!identical(made, clips) || !identical(at, thresholds)) {
         if (!_same(made, clips) || !_sameNumbers(at, thresholds)) {
-          throw ArgumentError.value(name, 'name', 'the blend was made with other clips or thresholds: $made at $at');
+          throw ArgumentError(
+            "blend '$name' was made with clips $made at ${at ?? 'their places'}; it's given $clips at "
+            "${thresholds ?? 'their places'}: a blend is made once, so give this one another name",
+          );
         }
       }
       return number;
     }
-    if (_index.containsKey(name)) throw ArgumentError.value(name, 'name', 'is one of the model\'s clips');
-    if (clips.isEmpty) throw ArgumentError.value(clips, 'clips', 'a blend needs a clip');
+    if (_index.containsKey(name)) {
+      throw ArgumentError("'$name' is one of the model's clips; a blend needs a name of its own");
+    }
+    if (clips.isEmpty) throw ArgumentError("blend '$name' is given no clips; it needs at least one");
     if (thresholds != null && thresholds.length != clips.length) {
-      throw ArgumentError.value(thresholds, 'thresholds', 'one for each clip (${clips.length})');
+      throw ArgumentError('thresholds is $thresholds; it needs one for each of the ${clips.length} clips');
     }
     final count = clips.length;
     final indices = malloc<Uint32>(count);
@@ -289,7 +312,7 @@ final class Animator with AnimatorPlays {
       for (var i = 0; i < count; i++) {
         indices[i] = _clip(clips[i]);
         final t = thresholds?[i] ?? i.toDouble();
-        if (!t.isFinite) throw ArgumentError.value(thresholds, 'thresholds', 'must be finite');
+        if (!t.isFinite) throw ArgumentError('thresholds is $thresholds; each must be finite');
         points[i] = t;
       }
       final out = malloc<Uint32>();
@@ -331,10 +354,10 @@ final class Animator with AnimatorPlays {
   }
 
   /// Stops every clip on the base layer: at once, the parts keeping the
-  /// pose they're in, or fading out over [duration] seconds. The layers
+  /// pose they're in, or fading out over [seconds]. The layers
   /// over it play on.
   @override
-  void stop({double duration = 0}) => super.stop(duration: duration);
+  void stop({double seconds = 0}) => super.stop(seconds: seconds);
 
   /// How fast the clips play, on every layer: 1 as made, 2 twice as fast,
   /// 0 paused, negative backwards. Crossfades go at the same pace (forwards
