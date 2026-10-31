@@ -17,8 +17,10 @@ final class Shape2D {
     }
   }
 
-  /// A rectangle [width] by [height] around [centre].
+  /// A rectangle [width] by [height] around [centre]: each more than 0.
   factory Shape2D.rect(double width, double height, {Vec2 centre = Vec2.zero}) {
+    _size('Shape2D.rect', 'width', width);
+    _size('Shape2D.rect', 'height', height);
     final (w, h) = (width / 2, height / 2);
     return Shape2D([
       Vec2(centre.x - w, centre.y - h),
@@ -29,7 +31,9 @@ final class Shape2D {
   }
 
   /// A circle of [radius] around [centre], as [segments] straight sides.
+  /// [radius] is more than 0.
   factory Shape2D.circle(double radius, {int segments = 32, Vec2 centre = Vec2.zero}) {
+    _size('Shape2D.circle', 'radius', radius);
     if (segments < 3) throw ArgumentError.value(segments, 'segments', 'must be at least 3');
     return Shape2D([
       for (var i = 0; i < segments; i++)
@@ -41,8 +45,14 @@ final class Shape2D {
   }
 
   /// A rectangle [width] by [height] around [centre] with its corners
-  /// rounded to [radius], each corner [segments] straight pieces.
+  /// rounded to [radius] (0 for square ones), each corner [segments]
+  /// straight pieces.
   factory Shape2D.rounded(double width, double height, double radius, {int segments = 6, Vec2 centre = Vec2.zero}) {
+    _size('Shape2D.rounded', 'width', width);
+    _size('Shape2D.rounded', 'height', height);
+    if (!(radius >= 0 && radius.isFinite)) {
+      throw ArgumentError('Shape2D.rounded: radius is $radius; it must be 0 or more, and finite');
+    }
     if (segments < 1) throw ArgumentError.value(segments, 'segments', 'must be at least 1');
     final r = math.min(radius, math.min(width, height) / 2);
     final (w, h) = (width / 2 - r, height / 2 - r);
@@ -59,6 +69,22 @@ final class Shape2D {
 
   /// An outline through [points]: [Shape2D()] without holes.
   factory Shape2D.polygon(List<Vec2> points) => Shape2D(points);
+
+  /// Throws unless [value], the size [name] given to [factory], is more
+  /// than 0 and finite: a shape of no size makes no mesh.
+  static void _size(String factory, String name, double value) {
+    if (!(value > 0 && value.isFinite)) throw ArgumentError('$factory: $name is $value; it must be more than 0');
+  }
+
+  /// Throws for a shape whose outline's points are all in one place, which
+  /// [caller] can make nothing of.
+  void _checkSize(String caller) {
+    if (!_hasSize) {
+      throw ArgumentError('$caller: the shape has no size, its outline\'s points all at ${outline.first}');
+    }
+  }
+
+  late final bool _hasSize = outline.any((p) => p != outline.first);
 
   /// Its outline's points.
   final List<Vec2> outline;
@@ -249,6 +275,9 @@ final class MeshBuilder {
   /// times [color]. Reads the mesh back, so it's for building, not for
   /// each frame.
   void addMesh(Mesh mesh, {Vec3 position = Vec3.zero, Quat rotation = Quat.identity, Vec3 scale = Vec3.one}) {
+    if (scale.x == 0 || scale.y == 0 || scale.z == 0) {
+      throw ArgumentError('addMesh: scale is $scale; a copy flattened to nothing along an axis has no normals');
+    }
     final (p, n, uv, colors, indices) = (mesh.positions, mesh.normals, mesh.uvs, mesh.colors, mesh.indices);
     final base = _count;
     final tint = color;

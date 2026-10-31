@@ -30,13 +30,13 @@ final class Restless extends Behaviour {
     super.onUpdate();
     final animator = gameObject.animator!;
     _frame++;
-    animator.blend('roll', _clips, thresholds: _thresholds, at: _ats[_frame % 30], duration: 0.2);
+    animator.blend('roll', _clips, thresholds: _thresholds, at: _ats[_frame % 30], seconds: 0.2);
     final layer = animator.layer(1);
     switch (_frame % 3) {
       case 0:
-        layer.crossFade('Wheels', duration: 0.2);
+        layer.crossFade('Wheels', seconds: 0.2);
       case 1:
-        layer.stop(duration: 0.2);
+        layer.stop(seconds: 0.2);
     }
   }
 }

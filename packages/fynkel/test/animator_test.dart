@@ -137,13 +137,13 @@ void main() {
     final animator = copy.animator!;
     animator.play('Wheels');
     world.update(second);
-    animator.crossFade('Wheels', duration: 0.5);
+    animator.crossFade('Wheels', seconds: 0.5);
     expect(animator.weight('Wheels'), 1, reason: 'the clip already playing goes on');
     animator.speed = 0.5;
     world.update(second * 2);
     expect(animator.time, closeTo(second * 2, 1e-6));
     expect(animator.isPlaying('Wheels'), isTrue);
-    expect(() => animator.crossFade('Wheels', duration: -1), throwsArgumentError);
+    expect(() => animator.crossFade('Wheels', seconds: -1), throwsArgumentError);
     expect(() => animator.speed = double.nan, throwsArgumentError);
     animator.time = 9;
     expect(animator.time, 1.25);
@@ -272,7 +272,7 @@ void main() {
     expect(moved.length, greaterThan(0), reason: 'shown again');
 
     // Faded out, it's done.
-    animator.stop(duration: second);
+    animator.stop(seconds: second);
     for (var i = 0; i < 3; i++) {
       world.update(second);
     }
