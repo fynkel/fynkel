@@ -375,7 +375,7 @@ pub unsafe extern "C" fn fy_mesh_lathe(
                 format!("profile point {at} is left of the axis (x below 0)"),
             ));
         }
-        let data = MeshData::lathe(rings[0], segment_count(sides, 3, "sides")?)
+        let data = MeshData::lathe(rings[0], segment_count(sides, 3, "segments")?)
             .map_err(|e| Error::new(FyStatus::InvalidValue, e.to_string()))?;
         // SAFETY: per this function's contract.
         unsafe { new_mesh(data, out) }
