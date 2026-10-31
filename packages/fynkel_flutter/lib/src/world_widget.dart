@@ -179,7 +179,7 @@ class FrameTicks extends ChangeNotifier {
 class WorldWidgetLayer extends StatefulWidget {
   /// The layer of [world]'s widgets, moved at each of [frames], placed by
   /// [camera] (the world's main one when null).
-  const WorldWidgetLayer({super.key, required this.world, required this.frames, this.camera});
+  const WorldWidgetLayer({super.key, required this.world, required this.frames, this.camera, this.framesBehind});
 
   /// The world whose widgets it shows.
   final World world;
@@ -189,6 +189,11 @@ class WorldWidgetLayer extends StatefulWidget {
 
   /// The view's own camera, or null for the world's main one.
   final Camera? camera;
+
+  /// How many frames after Flutter's picture of an update the engine's
+  /// picture of it reaches the screen: the widgets are placed as that many
+  /// updates ago, so they're on what they mark. Null: none.
+  final int Function()? framesBehind;
 
   @override
   State<WorldWidgetLayer> createState() => _WorldWidgetLayerState();
@@ -262,6 +267,7 @@ class _WorldWidgetLayerState extends State<WorldWidgetLayer> {
       places: _builtPlaces,
       frames: widget.frames,
       camera: widget.camera,
+      framesBehind: widget.framesBehind,
       children: [
         // Each painted once, and only moved after.
         for (var i = 0; i < _built.length; i++)
@@ -285,6 +291,7 @@ class _Placed extends MultiChildRenderObjectWidget {
     required this.places,
     required this.frames,
     required this.camera,
+    required this.framesBehind,
     required super.children,
   });
 
@@ -294,10 +301,12 @@ class _Placed extends MultiChildRenderObjectWidget {
   final List<WorldWidget> widgets;
   final List<WorldWidgetPlace> places;
   final Listenable frames;
+  final int Function()? framesBehind;
 
   @override
-  _RenderPlaced createRenderObject(BuildContext context) =>
-      _RenderPlaced(world, widgets, places, frames)..camera = camera;
+  _RenderPlaced createRenderObject(BuildContext context) => _RenderPlaced(world, widgets, places, frames)
+    ..camera = camera
+    ..framesBehind = framesBehind;
 
   @override
   void updateRenderObject(BuildContext context, _RenderPlaced placed) {
@@ -306,7 +315,8 @@ class _Placed extends MultiChildRenderObjectWidget {
       ..camera = camera
       ..widgets = widgets
       ..places = places
-      ..frames = frames;
+      ..frames = frames
+      ..framesBehind = framesBehind;
     placed.markNeedsPaint();
   }
 }
@@ -326,6 +336,7 @@ class _RenderPlaced extends RenderBox
 
   World world;
   Camera? camera;
+  int Function()? framesBehind;
   List<WorldWidget> widgets;
   // One for each widget.
   List<WorldWidgetPlace> places;
@@ -352,6 +363,11 @@ class _RenderPlaced extends RenderBox
   Duration? _lastFrame;
   // Laid out since the last placing: paint places them, without looking.
   var _stale = true;
+  // The last [framesBehind] placings, oldest at [_next]: for each child,
+  // shown (1 or 0), x, y, scale and depth.
+  final _ring = <Float64List>[];
+  var _next = 0;
+  static const _stride = 5;
 
   // The children shown, farthest first; reused.
   final _order = <RenderBox>[];
@@ -432,7 +448,7 @@ class _RenderPlaced extends RenderBox
     final shake = world.cameras.shakeOf(camera);
     var i = 0;
     for (var child = firstChild; child != null; child = childAfter(child), i++) {
-      final place = child.parentData! as _Place;
+      final place = child.parentData! as _Place..index = i;
       final w = i < widgets.length ? widgets[i] : null;
       final where = i < places.length ? places[i] : null;
       if (w == null || where == null || w.isRemoved) continue;
@@ -497,7 +513,10 @@ class _RenderPlaced extends RenderBox
       }
       _order.add(child);
     }
-    if (look) _lookAndFade(eye, shake, dt);
+    if (look) {
+      _lookAndFade(eye, shake, dt);
+      _delay(framesBehind?.call() ?? 0);
+    }
     // Faded out: not painted, and not tapped.
     _order.removeWhere((child) {
       final place = child.parentData! as _Place;
@@ -507,6 +526,67 @@ class _RenderPlaced extends RenderBox
     });
     // Farthest first, so the nearest is over the rest.
     _order.sort(_farFirst);
+  }
+
+  /// Shows the placing of [behind] updates ago, and keeps this one for
+  /// later: the engine's picture of this update isn't on screen yet.
+  void _delay(int behind) {
+    if (behind <= 0) {
+      _ring.clear();
+      return;
+    }
+    if (_ring.length != behind) {
+      _ring.clear();
+      _next = 0;
+    }
+    final count = childCount * _stride;
+    if (_ring.length < behind) {
+      // Until there are enough, each placing is shown as it is.
+      _ring.add(_record(Float64List(count)));
+      return;
+    }
+    var kept = _ring[_next];
+    // Widgets came or went: what was kept is of other children.
+    if (kept.length != count) {
+      _ring[_next] = _record(Float64List(count));
+      _next = (_next + 1) % behind;
+      return;
+    }
+    var k = 0;
+    for (var child = firstChild; child != null; child = childAfter(child), k += _stride) {
+      final place = child.parentData! as _Place;
+      final shown = kept[k] != 0, x = kept[k + 1], y = kept[k + 2], scale = kept[k + 3], depth = kept[k + 4];
+      kept
+        ..[k] = place.shown ? 1 : 0
+        ..[k + 1] = place.offset.dx
+        ..[k + 2] = place.offset.dy
+        ..[k + 3] = place.scale
+        ..[k + 4] = place.depth;
+      place
+        ..shown = shown
+        ..offset = Offset(x, y)
+        ..scale = scale
+        ..depth = depth;
+    }
+    _next = (_next + 1) % behind;
+    _order.clear();
+    for (var child = firstChild; child != null; child = childAfter(child)) {
+      if ((child.parentData! as _Place).shown) _order.add(child);
+    }
+  }
+
+  Float64List _record(Float64List into) {
+    var k = 0;
+    for (var child = firstChild; child != null; child = childAfter(child), k += _stride) {
+      final place = child.parentData! as _Place;
+      into
+        ..[k] = place.shown ? 1 : 0
+        ..[k + 1] = place.offset.dx
+        ..[k + 2] = place.offset.dy
+        ..[k + 3] = place.scale
+        ..[k + 4] = place.depth;
+    }
+    return into;
   }
 
   /// Looks for a share of the widgets that look, from where the last frame

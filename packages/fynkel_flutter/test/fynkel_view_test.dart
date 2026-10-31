@@ -940,37 +940,64 @@ void main() {
         ),
       );
       await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(
         tester.getBottomLeft(find.byKey(tag)) + const Offset(10, 0),
         offsetMoreOrLessEquals(seen(tester, Vec3(0, 0.5, 0))),
       );
       thing.position = Vec3(1, -0.5, 0);
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(
         tester.getBottomLeft(find.byKey(tag)) + const Offset(10, 0),
         offsetMoreOrLessEquals(seen(tester, Vec3(1, 0, 0))),
       );
       thing.position = Vec3(0, 0, 10);
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'behind the camera');
       thing.position = Vec3(30, 0, 0);
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag).hitTestable(), findsNothing, reason: 'off the view');
       thing.position = Vec3.zero;
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag).hitTestable(), findsOneWidget);
       thing.active = false;
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag), findsNothing, reason: 'its object is inactive');
       expect(worldWidgetsOf(world), isEmpty);
       thing.active = true;
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag), findsOneWidget);
       thing.destroy();
-      await frames(tester);
+      await frames(tester, 2); // the picture is a frame behind
       expect(find.byKey(tag), findsNothing);
       expect(worldWidgetsOf(world), isEmpty);
+    });
+
+    testWidgets('a WorldWidget moves with the engine\'s picture, which shows an update a frame later on a texture', (
+      tester,
+    ) async {
+      // Measured on a Mac (the lab's sync check, filmed at 120 fps): the
+      // engine's picture of an update is on screen a frame after Flutter's
+      // of the same update.
+      final thing = world.add(
+        GameObject(
+          components: [
+            WorldWidget((_) => const ColoredBox(key: tag, color: Colors.green, child: SizedBox(width: 20, height: 10))),
+          ],
+        ),
+      );
+      await tester.pumpWidget(sized(FynkelView.world(world), width: 200, height: 100));
+      await frames(tester, 2);
+      expect(tester.getCenter(find.byKey(tag)), offsetMoreOrLessEquals(seen(tester, Vec3.zero)));
+      thing.position = Vec3(1, 0, 0);
+      await frames(tester);
+      expect(
+        tester.getCenter(find.byKey(tag)),
+        offsetMoreOrLessEquals(seen(tester, Vec3.zero)),
+        reason: 'the picture on screen is still the last update\'s',
+      );
+      await frames(tester);
+      expect(tester.getCenter(find.byKey(tag)), offsetMoreOrLessEquals(seen(tester, Vec3(1, 0, 0))));
     });
 
     testWidgets('a WorldWidget shakes with the camera, though the camera itself never moves', (tester) async {
