@@ -157,7 +157,8 @@ final class Rigidbody extends Behaviour {
   /// no more than a quarter turn a step, 39 radians a second at 50 steps a
   /// second, where Unity doesn't: a small ball rolling fast (a bowling ball
   /// past 4 m/s) skids and slows. Take more steps ([Time.fixedDelta]) for
-  /// such a game.
+  /// such a game. 50 unless set; finite and 0 or more, or it throws an
+  /// [ArgumentError].
   double get maxAngularVelocity => _maxAngularVelocity;
   set maxAngularVelocity(double value) =>
       _setOrUndo(_maxAngularVelocity, value, (v) => _maxAngularVelocity = v, _apply);
@@ -233,20 +234,33 @@ final class Rigidbody extends Behaviour {
   /// the last step left it. Its object is there too, unless the body is
   /// interpolated or extrapolated: then the object's position (as
   /// `gameObject.position`) is drawn between steps. Setting it puts the
-  /// body and its object there at once. Throws a [StateError] while it
-  /// isn't in the world.
+  /// body and its object there at once. While it isn't in the world
+  /// (before its object is added, or disabled), it's its object's
+  /// position, as a [Behaviour]'s is, and the body starts there.
   @override
-  Vec3 get position => _readState('position').pose.position.get();
+  Vec3 get position => _id == 0 ? super.position : _readState('position').pose.position.get();
   @override
-  set position(Vec3 value) => _teleport(value, _moved ? gameObject.worldTransform.rotation : rotation);
+  set position(Vec3 value) {
+    if (_id == 0) {
+      super.position = value;
+    } else {
+      _teleport(value, _moved ? gameObject.worldTransform.rotation : rotation, 'position');
+    }
+  }
 
   /// How the body is turned, in the world: where the last step left it, as
-  /// [position]. Setting it turns the body and its object at once. Throws
-  /// a [StateError] while it isn't in the world.
+  /// [position]. Setting it turns the body and its object at once. While
+  /// it isn't in the world, it's its object's rotation.
   @override
-  Quat get rotation => _readState('rotation').pose.rotation.get();
+  Quat get rotation => _id == 0 ? super.rotation : _readState('rotation').pose.rotation.get();
   @override
-  set rotation(Quat value) => _teleport(_moved ? gameObject.worldTransform.position : position, value);
+  set rotation(Quat value) {
+    if (_id == 0) {
+      super.rotation = value;
+    } else {
+      _teleport(_moved ? gameObject.worldTransform.position : position, value, 'rotation');
+    }
+  }
 
   /// Whether the game moved its object since physics last looked: then the
   /// object, not the body, says where the rest of it is.
@@ -281,15 +295,20 @@ final class Rigidbody extends Behaviour {
       _pushWith('addForce', FpPushKind.FP_PUSH_KIND_FORCE, force, Vec3.zero, mode);
 
   /// Pushes it with [force] in its own space.
-  void addRelativeForce(Vec3 force, {ForceMode mode = ForceMode.force}) => addForce(rotation.rotate(force), mode: mode);
+  void addRelativeForce(Vec3 force, {ForceMode mode = ForceMode.force}) {
+    _inWorld('addRelativeForce');
+    addForce(rotation.rotate(force), mode: mode);
+  }
 
   /// Turns it with [torque] about the world's axes.
   void addTorque(Vec3 torque, {ForceMode mode = ForceMode.force}) =>
       _pushWith('addTorque', FpPushKind.FP_PUSH_KIND_TORQUE, torque, Vec3.zero, mode);
 
   /// Turns it with [torque] about its own axes.
-  void addRelativeTorque(Vec3 torque, {ForceMode mode = ForceMode.force}) =>
-      addTorque(rotation.rotate(torque), mode: mode);
+  void addRelativeTorque(Vec3 torque, {ForceMode mode = ForceMode.force}) {
+    _inWorld('addRelativeTorque');
+    addTorque(rotation.rotate(torque), mode: mode);
+  }
 
   /// Pushes it with [force] at [position], in the world: off its center of
   /// mass, it turns it too.
@@ -444,8 +463,8 @@ final class Rigidbody extends Behaviour {
     _moveAskedAt = physics._steps;
   }
 
-  void _teleport(Vec3 position, Quat rotation) {
-    final physics = _inWorld('position');
+  void _teleport(Vec3 position, Quat rotation, String what) {
+    final physics = _inWorld(what);
     physics._writePose(position, rotation);
     checkPhysics(fp_body_pose_set(physics._world, _id, physics._pose.ref));
     _reset(position, rotation);
