@@ -835,11 +835,11 @@ final class World implements Finalizable {
   ///
   /// As Unity's `FindObjectsByType`, objects turned off ([GameObject.active]
   /// false, theirs or a parent's), and the components on them, are left
-  /// out unless [includeInactive]: a pool's waiting objects aren't found. So
-  /// are objects still loading, theirs or a parent's ([GameObject.onLoad]):
-  /// they aren't drawn, started or updated yet, and a field their load
-  /// sets may not be set. A disabled behaviour on an active object is
-  /// found.
+  /// out unless [includeInactive]: a pool's waiting objects aren't found. A
+  /// disabled behaviour on an active object is found. So is an object still
+  /// loading, as Unity finds one before its `Awake`: it isn't drawn,
+  /// started or updated yet, and what its [GameObject.onLoad] sets may not
+  /// be set; `await object.loaded` before reading that.
   List<T> all<T extends Object>({bool includeInactive = false}) => [
     for (final objects in _byClass.values)
       if (objects.first is T)
@@ -883,10 +883,10 @@ final class World implements Finalizable {
   }
 
   // Whether [o], an object or a component the game added, is on an object
-  // that's active and has appeared, and every one above it too.
+  // that's active, and every one above it too.
   bool _isActive(Object o) {
     for (GameObject? x = o is Component ? o._owner : o as GameObject; x != null; x = x._parent) {
-      if (!x._activeSelf || !x._appeared) return false;
+      if (!x._activeSelf) return false;
     }
     return true;
   }

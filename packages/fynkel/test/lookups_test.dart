@@ -30,19 +30,18 @@ void main() {
   setUp(() => world = World());
   tearDown(() => world.dispose());
 
-  test('world.all, only and first leave out objects still loading, unless includeInactive (C3)', () async {
+  test('world.all, only and first find an object still loading, as Unity finds one before Awake (C3)', () async {
     final done = Completer<void>();
     final enemy = world.add(Enemy(done));
     final health = enemy.add(GameObject(components: [Health()])).get<Health>()!;
-    expect(world.all<Enemy>(), isEmpty);
-    expect(world.first<Enemy>(), isNull);
-    expect(() => world.only<Enemy>(), throwsStateError);
-    expect(world.all<Health>(), isEmpty, reason: 'a component below it too');
-    expect(world.all<Enemy>(includeInactive: true), [enemy]);
+    expect(world.all<Enemy>(), [enemy]);
+    expect(world.only<Enemy>(), same(enemy));
+    expect(world.first<Enemy>(), same(enemy));
+    expect(world.all<Health>(), [health], reason: 'a component below it too');
+    expect(() => world.only<Enemy>().hp, throwsA(isA<Error>()), reason: 'what its onLoad sets waits for it');
     done.complete();
-    await enemy.loaded;
+    await world.only<Enemy>().loaded;
     expect(world.only<Enemy>().hp, 10);
-    expect(world.all<Health>(), [health]);
   });
 
   test("get, has and the walks with a GameObject's type say so, rather than finding nothing (C4)", () {
