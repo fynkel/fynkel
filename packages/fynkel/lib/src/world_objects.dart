@@ -65,7 +65,16 @@ extension _Objects on World {
   /// changes after it's added.
   void _setParent(GameObject child, GameObject? parent) {
     if (parent != null && !identical(parent._world, this)) {
-      throw ArgumentError.value(parent, 'parent', 'in another world, so it can\'t be the parent of $child');
+      throw ArgumentError('$parent is in another world, so it can\'t be the parent of $child', 'parent');
+    }
+    for (GameObject? o = parent; o != null; o = o._parent) {
+      if (!identical(o, child)) continue;
+      throw ArgumentError(
+        identical(parent, child)
+            ? '$child can\'t be its own parent'
+            : '$parent can\'t be the parent of $child: it is below $child',
+        'parent',
+      );
     }
     // As Unity's "can't change the hierarchy while deactivating": what's
     // being destroyed goes with everything below it, and takes nothing in.
@@ -631,7 +640,6 @@ extension _Objects on World {
     final what = count == _LightCount.sun
         ? 'suns: the first four made light the scene, the others are left out'
         : 'point and spot lights: at most 64 in view light a frame, the ones nearest the camera';
-    final named = object.name == null ? '$object' : '$object (${object.name})';
-    print('Fynkel: with $named, the world has $now $what.');
+    print('Fynkel: with $object, the world has $now $what.');
   }
 }

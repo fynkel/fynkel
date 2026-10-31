@@ -489,10 +489,7 @@ void main() {
         (() => ear.parent, 'its parent can\'t be read'),
         (() => ear.worldTransform, 'its worldTransform can\'t be read'),
       ]) {
-        expect(
-          use,
-          throwsA(isA<StateError>().having((e) => e.message, 'message', 'Ear#${ear.id} was destroyed, so $what')),
-        );
+        expect(use, throwsA(isA<StateError>().having((e) => e.message, 'message', '$ear was destroyed, so $what')));
       }
     });
 

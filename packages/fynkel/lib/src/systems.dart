@@ -13,7 +13,8 @@ part of 'world.dart';
 /// off ([isTurnedOff]), and that's reported once.
 abstract class WorldSystem {
   /// A system for [world]. Make it in the function given to
-  /// [World.system] (`world.system(Fog.new)`), which adds it; one made
+  /// [World.system] (`world.system(Wind.new)`, for a `Wind` system of
+  /// the game's or a package's), which adds it; one made
   /// any other way is never run.
   WorldSystem(this.world);
 
@@ -168,12 +169,8 @@ extension GameObjectSystems on GameObject {
   /// [Component.isRemoved].
   Component componentAt(int index) => _components![index];
 
-  /// How many children it has: read them with [childAt], which, unlike
-  /// [GameObject.children], makes no list.
-  int get childCount => _children?.length ?? 0;
-
-  /// Its child at [index], below [childCount].
-  GameObject childAt(int index) => _children![index];
+  // Its children are read with GameObject.childCount and childAt, a
+  // game's too.
 }
 
 /// Finding and making a world's systems.
@@ -205,7 +202,7 @@ extension WorldSystems on World {
       if (identical(known, kind)) return;
       for (final extension in kind.extensions) {
         if (known.extensions.contains(extension.toLowerCase())) {
-          throw ArgumentError.value(kind, 'kind', 'loads $extension, which ${known.name}s already do');
+          throw ArgumentError('the ${kind.name} kind loads $extension, which ${known.name}s already do', 'kind');
         }
       }
     }
@@ -268,7 +265,7 @@ extension WorldSystems on World {
     }
     final status = fy_world_transform_get_many(pointer, ids, count, cast);
     if (status == FyStatus.FY_STATUS_NO_OBJECT) {
-      throw ArgumentError.value(ids, 'ids', fy_last_error().cast<Utf8>().toDartString());
+      throw ArgumentError(fy_last_error().cast<Utf8>().toDartString(), 'ids');
     }
     check(status);
   }

@@ -354,7 +354,9 @@ final class World implements Finalizable {
 
   /// How long the engine took to move every particle system on, in the
   /// last frame: what Unity's Profiler shows as ParticleSystem.Update.
-  /// Zero in a world without particle systems.
+  /// Zero in a world without particle systems. The `Particles` system in
+  /// [profile] holds it, with the rest of their frame: the moved objects
+  /// sent first, and their events.
   Duration get particleStepTime =>
       Duration(microseconds: maybeSystem<_ParticleWorld>()?._watch.elapsedMicroseconds ?? 0);
 
@@ -363,13 +365,6 @@ final class World implements Finalizable {
   /// rest, as Unity's Profiler shows them. `print(world.profile)` lists
   /// them.
   late final FrameProfile profile = FrameProfile._(this);
-
-  /// How long the last frame took to send the meshes the game changed to
-  /// the worlds that have them: their normals and tangents worked out, and
-  /// each handed to the engine (the GPU's copy is written as it draws).
-  /// With several worlds, the first to update sends them all. Zero when no
-  /// mesh changed.
-  Duration get meshChangeTime => profile.meshes;
 
   // Goes up whenever an object is added, destroyed, shown, hidden or
   // given a new parent (systems.dart).
@@ -498,12 +493,7 @@ final class World implements Finalizable {
   /// drawn. Throws an ArgumentError for settings out of range.
   Quality? get quality => _quality;
   set quality(Quality? value) {
-    if (value != null && !(value.renderScale > 0 && value.renderScale <= 2)) {
-      throw ArgumentError.value(value.renderScale, 'renderScale', 'is not above 0 and at most 2');
-    }
-    if (value != null && ![0, 2, 4].contains(value.antiAliasing)) {
-      throw ArgumentError.value(value.antiAliasing, 'antiAliasing', 'is not 0, 2 or 4');
-    }
+    if (value?._refused() case final error?) throw error;
     using((arena) {
       Pointer<FyQuality> q = nullptr;
       if (value != null) value._write((q = arena<FyQuality>()).ref);
@@ -568,15 +558,27 @@ final class World implements Finalizable {
   /// leaving it as it was.
   Fog? get fog => _fog;
   set fog(Fog? value) {
+    if (value != null) {
+      final Fog(:start, :end) = value;
+      if (!(start >= 0 && start < 3.4e38)) {
+        throw ArgumentError('Fog.start is ${_valueText(start)}: it must be 0 metres or more, in $value', 'start');
+      }
+      if (!(end > start && end < 3.4e38)) {
+        throw ArgumentError(
+          'Fog.end is ${_valueText(end)}: it must be beyond its start, ${_valueText(start)} metres, in $value',
+          'end',
+        );
+      }
+      if (value.height case final height? when !(height > 0 && height < 3.4e38)) {
+        throw ArgumentError('Fog.height is ${_valueText(height)}: it must be above 0 metres, in $value', 'height');
+      }
+    }
     using((arena) {
       Pointer<FyFog> f = nullptr;
       if (value != null) {
         f = arena<FyFog>();
         final color = value.color;
         if (color != null) f.ref.color.write(color);
-        if (value.height case final height? when !(height > 0)) {
-          throw ArgumentError.value(value, 'fog', 'height must be above 0');
-        }
         f.ref
           ..use_color = color != null
           ..start = value.start
@@ -642,7 +644,7 @@ final class World implements Finalizable {
   ///    counts from the next frame.
   /// 5. **Motions and routines.** Each running [Motion] moves on
   ///    ([GameObject.tween], [GameObject.moveTo]...), in the order they
-  ///    were made, then the routines' waits end ([GameObject.start]),
+  ///    were made, then the routines' waits end ([GameObject.startRoutine]),
   ///    then the objects whose `destroy(after:)` or `release(after:)` is
   ///    due go.
   ///    Then the models' clips pose their parts ([Animator]), and the
@@ -833,8 +835,11 @@ final class World implements Finalizable {
   ///
   /// As Unity's `FindObjectsByType`, objects turned off ([GameObject.active]
   /// false, theirs or a parent's), and the components on them, are left
-  /// out unless [includeInactive]: a pool's waiting objects aren't found. A
-  /// disabled behaviour on an active object is found.
+  /// out unless [includeInactive]: a pool's waiting objects aren't found. So
+  /// are objects still loading, theirs or a parent's ([GameObject.onLoad]):
+  /// they aren't drawn, started or updated yet, and a field their load
+  /// sets may not be set. A disabled behaviour on an active object is
+  /// found.
   List<T> all<T extends Object>({bool includeInactive = false}) => [
     for (final objects in _byClass.values)
       if (objects.first is T)
@@ -878,10 +883,10 @@ final class World implements Finalizable {
   }
 
   // Whether [o], an object or a component the game added, is on an object
-  // that's active, and every one above it too.
+  // that's active and has appeared, and every one above it too.
   bool _isActive(Object o) {
     for (GameObject? x = o is Component ? o._owner : o as GameObject; x != null; x = x._parent) {
-      if (!x._activeSelf) return false;
+      if (!x._activeSelf || !x._appeared) return false;
     }
     return true;
   }
@@ -1188,6 +1193,27 @@ final class Quality {
     antiAliasing: antiAliasing ?? this.antiAliasing,
     softParticles: softParticles ?? this.softParticles,
   );
+
+  /// Why a world can't have it, if it can't: what each field's doc says.
+  /// The shadow settings count only with [shadows].
+  ArgumentError? _refused() {
+    ArgumentError no(String field, Object value, String why) =>
+        ArgumentError('Quality.$field of $name is $value: $why', field);
+    bool size(int n) => n >= 256 && n <= 4096 && n & (n - 1) == 0;
+    if (!(renderScale > 0 && renderScale <= 2)) return no('renderScale', renderScale, 'above 0 and at most 2');
+    if (![0, 2, 4].contains(antiAliasing)) return no('antiAliasing', antiAliasing, '0, 2 or 4');
+    if (!shadows) return null;
+    if (shadowCascades < 1 || shadowCascades > 3) return no('shadowCascades', shadowCascades, 'from 1 to 3');
+    if (!size(shadowResolution)) return no('shadowResolution', shadowResolution, 'a power of two, 256 to 4096');
+    if (!size(spotShadowResolution)) {
+      return no('spotShadowResolution', spotShadowResolution, 'a power of two, 256 to 4096');
+    }
+    if (spotShadows < 0 || spotShadows > 4) return no('spotShadows', spotShadows, 'from 0 to 4');
+    if (!(shadowDistance > 0 && shadowDistance < 3.4e38)) {
+      return no('shadowDistance', shadowDistance, 'more than 0 metres');
+    }
+    return null;
+  }
 
   void _write(FyQuality q) {
     q

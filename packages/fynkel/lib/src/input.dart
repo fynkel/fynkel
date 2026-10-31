@@ -124,7 +124,9 @@ final class Input {
   bool _paused = false;
   bool _pausing = false;
 
-  /// What feeds this input: the view's events, or a test's.
+  /// What feeds this input: the view's real touches and keys, or a
+  /// test's. Named for the test, the one a game writes; the view goes the
+  /// same way, so a test's taps are a player's.
   late final InputSimulation simulate = InputSimulation._(this);
 
   // --- Signals ---
@@ -1292,10 +1294,12 @@ final class _Raw {
   final double? at;
 }
 
-/// What feeds an [Input] ([Input.simulate]): package:fynkel_flutter's view
-/// gives it Flutter's events, and a test its own, as a player would:
-/// `world.input.simulate.fingerDown(1, 50, 50)`. Each is queued, and the
-/// next frame's input step handles them in order.
+/// What feeds an [Input] ([Input.simulate]), the real input as well as a
+/// test's: package:fynkel_flutter's view gives it Flutter's events, and a
+/// test its own, as a player would: `world.input.simulate.fingerDown(1,
+/// 50, 50)`. Each is queued, and the next frame's input step handles them
+/// in order. It's named for the test, as only a test calls it; nothing
+/// tells the two apart.
 ///
 /// Positions are in the view's logical pixels from its top-left corner
 /// ([resize] gives its size). Times are the frames' (`world.update`'s

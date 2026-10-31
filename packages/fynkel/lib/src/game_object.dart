@@ -41,6 +41,7 @@ class GameObject with _Moving {
     Iterable<GameObject> children = const [],
     int layer = 0,
   }) : _described = _Description(name, transform ?? Transform()) {
+    if (transform != null) _check(transform, this);
     _layer = _checkLayer(layer);
     components.forEach(addComponent);
     children.forEach(add);
@@ -161,11 +162,11 @@ class GameObject with _Moving {
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
-  World get world => _world ?? (throw _notAdded('world'));
+  World get world => _world ?? (throw _notAdded('it has no world'));
 
   /// The engine's id: never 0, and never reused. Throws a [StateError]
   /// before the object is added.
-  int get id => _world == null ? throw _notAdded('id') : _id;
+  int get id => _world == null ? throw _notAdded('it has no id') : _id;
 
   /// Whether the object is live: added to a world, not destroyed, and the
   /// world not disposed.
@@ -175,14 +176,16 @@ class GameObject with _Moving {
   bool get isDestroyed => _destroyed;
 
   /// The engine's world, for what needs this object there; a
-  /// [StateError] saying [what] can't be done once it's destroyed.
+  /// [StateError] saying [what] can't be done before it's added or once
+  /// it's destroyed.
   Pointer<FyWorld> _engine(String what) {
     if (_gone) throw StateError('$this was destroyed, so $what');
-    return world.pointer;
+    return (_world ?? (throw _notAdded(what))).pointer;
   }
 
+  /// Says [what] can't be done before the object is added, and what to do.
   StateError _notAdded(String what) => StateError(
-    '$this has no $what yet: it isn\'t added to a world. Add it first (world.add, or add to an object '
+    '$this isn\'t added to a world yet, so $what. Add it first (world.add, or add to an object '
     'that is), and touch the world from its onLoad on.',
   );
 
@@ -225,7 +228,7 @@ class GameObject with _Moving {
 
   /// The world's assets, loaded for this object: each one it asks for is
   /// held until it's destroyed, and freed then if no one else holds it.
-  Assets get assets => _assets ??= Assets._(_world ?? (throw _notAdded('assets')), this);
+  Assets get assets => _assets ??= Assets._(_world ?? (throw _notAdded('it has no assets')), this);
 
   // --- The loop ---
 
@@ -256,7 +259,8 @@ class GameObject with _Moving {
   ///
   /// It stops when this object is destroyed, and is paused while it's
   /// hidden, though not during its own load. Throws a [StateError] before the object is added.
-  Routine<T> startRoutine<T>(Future<T> Function() body) => world._start(this, this, body);
+  Routine<T> startRoutine<T>(Future<T> Function() body) =>
+      (_world ?? (throw _notAdded('it can\'t start a routine')))._start(this, this, body);
 
   /// Stops every routine this object started ([startRoutine]), not those
   /// its behaviours did (Unity's `StopAllCoroutines`).
@@ -561,22 +565,29 @@ class GameObject with _Moving {
   }
 
   /// Whether this object is [other] or below it (Unity's
-  /// `Transform.IsChildOf`, which is also true for itself).
+  /// `Transform.IsChildOf`, which is also true for itself). Before it's
+  /// added, the objects it's been given to count as above it.
   bool isPartOf(GameObject other) {
-    _engine('isPartOf can\'t tell');
-    for (GameObject? o = this; o != null; o = o._parent) {
+    if (_described == null) _engine('isPartOf can\'t tell');
+    for (GameObject? o = this; o != null; o = o._up) {
       if (identical(o, other)) return true;
     }
     return false;
   }
 
-  /// The nearest object above this one that is a [T], or null.
+  /// The nearest object above this one that is a [T], or null. Before
+  /// it's added, the objects it's been given to count as above it.
   T? ancestor<T extends GameObject>() {
-    for (var above = parent; above != null; above = above.parent) {
+    if (_described == null) _engine('its parent can\'t be read');
+    for (var above = _up; above != null; above = above._up) {
       if (above is T) return above;
     }
     return null;
   }
+
+  // The object above it: its parent, or before it's added, what it was
+  // added to.
+  GameObject? get _up => _world == null ? _queuedIn : _parent;
 
   /// Whether this object is on. One that is off hides itself and
   /// everything below it: they aren't drawn, don't light the scene or show
@@ -668,7 +679,7 @@ class GameObject with _Moving {
   /// once (in onLoad or onStart) and keep what it gives, rather than each
   /// frame.
   GameObject? find(String name) {
-    final w = _engine('nothing can be found below it');
+    final w = _engine('find can\'t look below it');
     final length = scratch.utf8(name);
     check(fy_find(w, id, scratch.bytes(), length, scratch.id));
     final found = scratch.id.value;
@@ -705,7 +716,7 @@ class GameObject with _Moving {
   /// for a model's parts.
   Animator? get animator {
     if (_animator case final a?) return a;
-    if (_described != null) throw _notAdded('animator');
+    if (_described != null) throw _notAdded('it has no animator');
     _engine('its animator can\'t be used');
     final model = _model;
     if (model == null || model.clips.isEmpty) return null;
@@ -720,13 +731,18 @@ class GameObject with _Moving {
   /// at once and a behaviour loads ([Behaviour.onLoad]) and starts the next
   /// frame.
   ///
-  /// Throws a [StateError] if [component] is on an object already (each
-  /// belongs to one, for its life) or this object was destroyed, an
-  /// [ArgumentError] for a second engine component of a kind, and the
-  /// engine's error if it refuses the component's values.
+  /// Throws a [StateError] if [component] is on an object already, or was
+  /// on one (each belongs to one, for its life), or this object was
+  /// destroyed, an [ArgumentError] for a second engine component of a
+  /// kind, and the engine's error if it refuses what the component uses.
   T addComponent<T extends Component>(T component) {
     if (component._owner case final owner?) {
-      throw StateError('$component is on $owner already; a component belongs to one object');
+      // A behaviour's own text says where it is.
+      final it = component is Behaviour ? '${component.runtimeType}' : '$component';
+      if (component._takenOff) {
+        throw StateError('$it was taken off $owner, and a component taken off can\'t be put on again: make a new one');
+      }
+      throw StateError('$it is on $owner already; a component belongs to one object');
     }
     if (_destroyed) throw StateError('$this was destroyed, so nothing can be put on it');
     if (component is! Behaviour) {
@@ -763,7 +779,7 @@ class GameObject with _Moving {
   /// [ArgumentError] if it isn't on this object.
   void removeComponent(Component component) {
     if (!identical(component._owner, this) || component._removed) {
-      throw ArgumentError.value(component, 'component', 'is not on $this');
+      throw ArgumentError('$component is not on $this', 'component');
     }
     final world = _world;
     if (world == null) {
@@ -803,7 +819,18 @@ class GameObject with _Moving {
   /// A destroyed object still has the components it had, to read (an
   /// enemy's `Health` after it died): they're [Component.isRemoved], so
   /// they can't be changed. One taken off with [removeComponent] is gone.
+  ///
+  /// [T] is a component's type: one that is a [GameObject]'s (`Level`)
+  /// throws an [ArgumentError], as no component is one; [ancestor],
+  /// [find] and [World.all] find objects.
   T? get<T extends Object>() {
+    if (_component<T>() case final found?) return found;
+    _checkComponentType<T>('get');
+    return null;
+  }
+
+  // [get], without the check of [T], for the walks that check it once.
+  T? _component<T extends Object>() {
     _probe();
     // By index: an iterator would be made each call.
     final components = _components;
@@ -814,40 +841,147 @@ class GameObject with _Moving {
     return null;
   }
 
+  // A function of a GameObject, which is a function of a T only when T is
+  // a GameObject's type: the test makes nothing, unlike a list of T.
+  static void _takesObject(GameObject _) {}
+
+  /// Throws when [T] is a [GameObject]'s type, so [what] can never find a
+  /// component of it. Run only once nothing is found.
+  static void _checkComponentType<T>(String what) {
+    if (_takesObject is! void Function(T)) return;
+    throw ArgumentError(
+      '$T is a GameObject, not a component, so $what<$T>() finds nothing: use ancestor<$T>() for one above, '
+          'find(name) for one below, or world.all<$T>()',
+      'T',
+    );
+  }
+
   /// Every component on this object of type [T], in the order they were
-  /// put on. A new list each time.
+  /// put on. A new list each time. [T] is a component's type, as for
+  /// [get].
   List<T> getAll<T extends Object>() {
     _probe();
-    return [
+    final all = [
       for (final c in _components ?? const <Component>[])
         if (c is T && !c._takenOff) c as T,
     ];
+    if (all.isEmpty) _checkComponentType<T>('getAll');
+    return all;
   }
 
-  /// Whether this object has a component of type [T].
-  bool has<T extends Object>() => get<T>() != null;
+  /// Whether this object has a component of type [T], a component's type
+  /// as for [get].
+  bool has<T extends Object>() {
+    if (_component<T>() != null) return true;
+    _checkComponentType<T>('has');
+    return false;
+  }
 
   /// The first component of type [T] on this object, or else on the
-  /// nearest object above it that has one, or null. Before it's added, the
-  /// objects it's been given to count as above it.
-  T? getInParent<T extends Object>() {
-    for (GameObject? o = this; o != null; o = o._world == null ? o._queuedIn : o.parent) {
-      if (o.get<T>() case final found?) return found;
+  /// nearest object above it that has one, or null (Unity's
+  /// `GetComponentInParent`). Before it's added, the objects it's been
+  /// given to count as above it.
+  ///
+  /// As Unity's, objects turned off ([active] false, theirs or one's above)
+  /// are skipped unless [includeInactive]: one turned off has no component
+  /// found, nor do those below it. [T] is a component's type, as for
+  /// [get]; [ancestor] finds an object above.
+  T? getInParent<T extends Object>({bool includeInactive = false}) {
+    // Skipped: the objects up to the highest one turned off.
+    var skip = 0;
+    if (!includeInactive) {
+      var depth = 0;
+      for (GameObject? o = this; o != null; o = o._up) {
+        depth++;
+        if (!o._selfActive) skip = depth;
+      }
     }
+    for (GameObject? o = this; o != null; o = o._up) {
+      if (skip-- > 0) continue;
+      if (o._component<T>() case final found?) return found;
+    }
+    _checkComponentType<T>('getInParent');
     return null;
   }
 
   /// The first component of type [T] on this object, or else below it,
-  /// depth first in [children] order, or null. Before it's added, the
-  /// children it's been given count (a model's parts come once it is).
-  T? getInChildren<T extends Object>() {
-    if (get<T>() case final found?) return found;
+  /// depth first in [children] order, or null (Unity's
+  /// `GetComponentInChildren`). Before it's added, the children it's been
+  /// given count (a model's parts come once it is).
+  ///
+  /// As Unity's, objects turned off ([active] false, theirs or one's above,
+  /// this object's too) are skipped unless [includeInactive]. [T] is a
+  /// component's type, as for [get].
+  T? getInChildren<T extends Object>({bool includeInactive = false}) {
+    if (!includeInactive && !_shownSoFar) return null;
+    if (_inChildren<T>(includeInactive) case final found?) return found;
+    _checkComponentType<T>('getInChildren');
+    return null;
+  }
+
+  T? _inChildren<T extends Object>(bool includeInactive) {
+    if (_component<T>() case final found?) return found;
     // By index, as [children] makes a list.
-    final children = _world == null ? _described?.children : _children;
+    final children = _below;
     for (var i = 0; children != null && i < children.length; i++) {
-      if (children[i].getInChildren<T>() case final found?) return found;
+      final child = children[i];
+      if (!includeInactive && !child._selfActive) continue;
+      if (child._inChildren<T>(includeInactive) case final found?) return found;
     }
     return null;
+  }
+
+  /// Every component of type [T] on this object and below it, depth first
+  /// in [children] order (Unity's `GetComponentsInChildren`): to tint every
+  /// renderer of a model's copy, or stop every particle system under an
+  /// effect. A new list each time. Objects turned off are skipped unless
+  /// [includeInactive], as for [getInChildren].
+  List<T> getAllInChildren<T extends Object>({bool includeInactive = false}) {
+    final all = <T>[];
+    if (includeInactive || _shownSoFar) _allInChildren(all, includeInactive);
+    if (all.isEmpty) _checkComponentType<T>('getAllInChildren');
+    return all;
+  }
+
+  void _allInChildren<T extends Object>(List<T> into, bool includeInactive) {
+    _probe();
+    for (final c in _components ?? const <Component>[]) {
+      if (c is T && !c._takenOff) into.add(c as T);
+    }
+    final children = _below;
+    for (var i = 0; children != null && i < children.length; i++) {
+      final child = children[i];
+      if (includeInactive || child._selfActive) child._allInChildren(into, includeInactive);
+    }
+  }
+
+  /// How many [children] it has, read with no list made (Unity's
+  /// `Transform.childCount`): with [childAt], to walk them each frame.
+  /// Before it's added, the children it's been given.
+  int get childCount => _below?.length ?? 0;
+
+  /// Its child at [index], from 0 to below [childCount] (Unity's
+  /// `Transform.GetChild`), in [children] order.
+  GameObject childAt(int index) {
+    final children = _below;
+    if (children == null || index < 0 || index >= children.length) {
+      throw RangeError.index(index, children ?? const <GameObject>[], 'index', null, childCount);
+    }
+    return children[index];
+  }
+
+  // Its children: before it's added, the ones it's been given.
+  List<GameObject>? get _below => _world == null ? _described?.children : _children;
+
+  // Its own active flag, before it's added too.
+  bool get _selfActive => _described?.active ?? _activeSelf;
+
+  // Whether it and every object above it are on, before it's added too.
+  bool get _shownSoFar {
+    for (GameObject? o = this; o != null; o = o._up) {
+      if (!o._selfActive) return false;
+    }
+    return true;
   }
 
   /// Reads the engine components of an object the engine made, the first
@@ -934,6 +1068,7 @@ class GameObject with _Moving {
 
   set transform(Transform value) {
     if (_described case final d?) {
+      _check(value, this);
       d.transform = value;
       return;
     }
@@ -941,7 +1076,7 @@ class GameObject with _Moving {
     if (_transform == null && !fy_exists(w, _id)) {
       throw StateError('$this was destroyed, or never added');
     }
-    _check(value);
+    _check(value, this);
     _setTransform(value);
   }
 
@@ -954,18 +1089,20 @@ class GameObject with _Moving {
     world._unsent.add(this);
   }
 
-  /// Throws an [ArgumentError] when the engine would refuse [value]: checked here, so the error comes from the line
-  /// that set it, not from the frame that sends it.
-  static void _check(Transform value) {
+  /// Throws an [ArgumentError] when the engine would refuse [value], set
+  /// on [object]: checked here, so the error comes from the line that set
+  /// it, not from the add or the frame that sends it.
+  static void _check(Transform value, [GameObject? object]) {
     // In the engine's order: each field's finiteness as 32-bit floats,
     // and the rotation's length after its finiteness.
     final Transform(position: p, rotation: r, scale: s) = value;
-    if (!_fits(p)) _refuse('position: NaN or infinity');
-    if (!_fits4(r)) _refuse('rotation: NaN or infinity');
-    if ((math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w) - 1).abs() > 1e-3) {
-      _refuse('rotation: rotation is not a unit quaternion (use .normalized)');
+    if (!_fits(p)) _refuse('position', object, 'is $p: NaN or infinity');
+    if (!_fits4(r)) _refuse('rotation', object, 'is $r: NaN or infinity');
+    final length = math.sqrt(r.x * r.x + r.y * r.y + r.z * r.z + r.w * r.w);
+    if ((length - 1).abs() > 1e-3) {
+      _refuse('rotation', object, 'is $r, of length ${_valueText(length)}, not 1: use .normalized');
     }
-    if (!_fits(s)) _refuse('scale: NaN or infinity');
+    if (!_fits(s)) _refuse('scale', object, 'is $s: NaN or infinity');
   }
 
   static final _f32 = Float32List(4);
@@ -991,7 +1128,8 @@ class GameObject with _Moving {
             ..[3] = q.w)
           .every((x) => x.isFinite));
 
-  static Never _refuse(String what) => throw ArgumentError('Transform.$what');
+  static Never _refuse(String field, GameObject? object, String why) =>
+      throw ArgumentError('Transform.$field${object == null ? '' : ' of $object'} $why', field);
 
   void _writeCamera(Camera value) {
     final c = scratch.camera.ref;
@@ -1334,8 +1472,23 @@ class GameObject with _Moving {
     world.system(_ParticleWorld.new)._written(this, value, waiting: waiting);
   }
 
+  /// Its class and id, and its name if it has one: `Player#7`,
+  /// `GameObject#5 'door'`, `GameObject 'door' (not added)`.
   @override
-  String toString() => _world == null ? '$runtimeType (not added)' : '$runtimeType#$_id';
+  String toString() {
+    final name = _described != null ? _described!.name : _nameForMessages();
+    final named = name == null ? '' : " '$name'";
+    return _world == null ? '$runtimeType$named (not added)' : '$runtimeType#$_id$named';
+  }
+
+  // Its name as last known, or read from the engine while it's there (a
+  // model's part): a message never throws for want of one.
+  String? _nameForMessages() {
+    if (_nameKnown) return _name;
+    final world = _world;
+    if (world == null || _gone || world.isDisposed || !fy_exists(world._pointer, _id)) return null;
+    return name;
+  }
 }
 
 /// What an object is to be, until it's added: what its constructor and
