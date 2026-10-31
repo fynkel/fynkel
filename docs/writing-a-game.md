@@ -1023,7 +1023,12 @@ class Pilot extends GameObject {}
 - **A rotation is a `Quat`**, as in Unity: `Quat.lookRotation(direction)`
   to face a way, `Quat.euler(pitch, yaw, roll)` by angles (radians), and
   `Quat.axisAngle(axis, angle)`. A camera at `eye` looking at `target` is
-  `Transform.lookAt(eye, target)`.
+  `Transform.lookAt(eye, target)`. `rotation.eulerAngles` reads the
+  angles back (x the pitch, y the yaw, z the roll, in radians), so
+  `rotation.eulerAngles.y` is the way an object faces;
+  `Quat.fromTo(Vec3.up, normal)` turns one direction to another, and
+  `Quat.rotateTowards(rotation, goal, turnSpeed * time.delta)` turns by
+  steps, never past.
 - `v.withY(0.5)` (and `withX`, `withZ`) changes one part, `v.flat` puts
   it on the ground (y = 0) for walking, and `Vec3.all(2)` is a uniform
   scale.
@@ -1032,7 +1037,10 @@ class Pilot extends GameObject {}
   as the way to a target the object may have reached, write
   `normalizedOrZero`, which gives zero (as Unity's `normalized`):
   `position += (target - position).normalizedOrZero * speed * time.delta`.
-  `lookAt` the point the object is at leaves it as it is.
+  `lookAt` the point the object is at leaves it as it is. A `Vec2` has
+  `normalized` and `normalizedOrZero` too.
+- `color.withAlpha(0.5)` is the colour half see-through (Unity's
+  `color.a = 0.5`).
 - Unity's Mathf: `lerp`, `inverseLerp`, `clamp01`, `moveTowards`,
   `repeat`, `pingPong`, `randomInSphere`, `randomOnCircle`, and
   `Vec3.lerp`, `Vec3.moveTowards`, `Quat.slerp`, `Color.lerp`.
@@ -1574,6 +1582,7 @@ final window = Mesh.extrude(frame, depth: 0.1);
 
 // A profile turned around Y: (distance from the axis, height), with
 // the outside on the right of the way it goes.
+// 24 slices around unless `segments:` says, as the round meshes.
 final bowl = Mesh.lathe([Vec2(0, 0), Vec2(0.3, 0), Vec2(0.5, 0.3), Vec2(0.46, 0.3), Vec2(0.27, 0.04), Vec2(0, 0.04)]);
 ```
 
@@ -1765,7 +1774,8 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
   along the spline unless `align` is false, `offset` from it.
 - **`SplineAnimate`** moves its object along at a `speed` or over
   `seconds`, `once`, `loop` or `pingPong`, turned to face the way it goes;
-  `play`, `pause`, `restart`, `distance` and `normalizedTime`.
+  `play`, `pause`, `restart`, `distance` and `normalizedTime`. When its
+  container's object is destroyed it holds still, as `Follow` does.
 - **`world.debug.drawSplines = true`** draws every container's splines
   and knots.
 
@@ -1797,7 +1807,7 @@ class Hero extends GameObject {
 
   void jump() {
     _animator
-      ..crossFade('jump', duration: 0.1, loop: false)
+      ..crossFade('jump', seconds: 0.1, loop: false)
       ..onEnd = (clip) => _animator.crossFade('idle');
   }
 
@@ -1806,19 +1816,20 @@ class Hero extends GameObject {
     super.onUpdate();
     position += _velocity * time.delta;
     if (_animator.current != 'jump') {
-      _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', duration: 0.2);
+      _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', seconds: 0.2);
     }
   }
 }
 ```
 
-- `play(name)` starts a clip at once; `crossFade(name, duration:)` fades
+- `play(name)` starts a clip at once; `crossFade(name, seconds:)` fades
   to it from what plays. Asking for the clip that's already playing
   changes nothing, so an update can say what it wants every frame.
 - `loop: false` holds a clip's last pose at its end (a jump, a fall) and
   calls `onEnd`; clips loop unless told not to.
 - `speed` (1 as made, 0 paused, negative backwards), `time`, `length`,
-  `current`, `isPlaying(name)` and `weight(name)` are there too, and
+  `current` (a clip's name or a blend's), `isPlaying(name)` and
+  `weight(name)` (each taking a blend's name too) are there, and
   `stop()` keeps the pose it's in. Game time scales it: a paused world
   pauses its clips.
 - `at(clip, seconds, callback)` calls back each time a clip passes that
@@ -1887,7 +1898,7 @@ class Runner extends GameObject {
 
   void wave(bool on) {
     final arm = _animator.layer(1);
-    on ? arm.crossFade('Cheer', duration: 0.3) : arm.stop(duration: 0.3);
+    on ? arm.crossFade('Cheer', seconds: 0.3) : arm.stop(seconds: 0.3);
   }
 
   @override
@@ -1905,7 +1916,7 @@ class Runner extends GameObject {
   mixes the two around it. The clips keep one pace, each as far through
   itself, so the feet land together at any mix; with thresholds at the
   speeds the clips' feet go, they don't slide. Call it every frame with
-  the number: it's made the first time, and fades in (`duration:`) only
+  the number: it's made the first time, and fades in (`seconds:`) only
   when something else was playing.
 - `layer(1…7, mask:, additive:, strength:)` plays over the layers below
   it: on the whole model, or from a part down (`mask`, a name as
@@ -1916,7 +1927,7 @@ class Runner extends GameObject {
   `current`, `time` and `weight`; the animator itself is the base layer.
 - Every fade starts from the pose shown, however it got there: mid-fade,
   mid-blend, or held after a `stop()`. A game can change its mind every
-  frame and the character never jumps. `stop(duration:)` fades a layer
+  frame and the character never jumps. `stop(seconds:)` fades a layer
   out to what's underneath.
 - A layer's clips call `onEnd` and `at(…)` callbacks as the base's do.
 
@@ -1941,15 +1952,15 @@ class Farmer extends GameObject {
     await super.onLoad();
     final model = add(await assets.instantiate('character.glb'));
     _animator = model.animator!
-      ..blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: 0, duration: 0)
+      ..blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: 0, seconds: 0)
       // A gesture is played once; then the layer fades out.
-      ..onEnd = (_) => _animator.layer(1).stop(duration: 0.15);
+      ..onEnd = (_) => _animator.layer(1).stop(seconds: 0.15);
     _animator.layer(1, mask: 'torso'); // the legs stay the blend's
   }
 
   void walkTo(Vec3 point) => _goal = point.flat;
 
-  void wave() => _animator.layer(1).crossFade('wave', duration: 0.1, loop: false);
+  void wave() => _animator.layer(1).crossFade('wave', seconds: 0.1, loop: false);
 
   @override
   void onUpdate() {
@@ -2300,7 +2311,7 @@ class Fountain extends GameObject {
   function, an `Ease` or your own, times `startSize`;
   `colorOverLifetime` is a `ColorGradient` of stops, times `startColor`,
   its alpha fading as the colour does (`ColorGradient.fadeOut()`,
-  `fadeInOut()`). Both are read 64 times along the life when set, so
+  `fadeInOut(color, fadeIn:, fadeOut:)`). Both are read 64 times along the life when set, so
   they cost nothing a frame.
 - **Shapes** face +Y, as Unity's do, turned with their object:
   `ParticleShape.point()`, `sphere(radius:)`, `hemisphere`,
@@ -2853,7 +2864,8 @@ class CameraRig extends GameObject {
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
   target turns left and right.
-- `world.cameras.shake(strength, frequency:)`, `setBlend(blend, from:, to:)`, `live`.
+- `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
+  told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
   the game or the virtual camera put it, so moving it during a shake
   never drifts. `world.cameras.shakeOf(camera)` says how far it's moved
@@ -4289,6 +4301,8 @@ What keeps a game fast:
 | `WaitUntil`, `WaitWhile` | `await waitUntil(...)`, `await waitWhile(...)` |
 | `FindObjectOfType<T>()`, `FindObjectsByType<T>()` | `world.first<T>()`, `world.all<T>()` (`includeInactive:` too) |
 | Degrees (`Quaternion.Euler(0, 90, 0)`, joint limits, `fieldOfView`) | radians, with `90.deg`: `Quat.euler(0, 90.deg, 0)` |
+| `transform.eulerAngles`, `Quaternion.FromToRotation`, `Quaternion.RotateTowards` | `rotation.eulerAngles` (radians), `Quat.fromTo`, `Quat.rotateTowards` |
+| `color.a = 0.5`, `Vector2.normalized` | `color.withAlpha(0.5)`, `v.normalized` (or `normalizedOrZero`, as Unity's) |
 | `Camera.main`, `ScreenPointToRay`, `WorldToScreenPoint` | `world.camera`, `screenPointToRay`, `worldToScreenPoint` |
 | `RaycastHit` | `RaycastHit` (physics) and `RayHit` (`world.raycast`), each with `gameObject` |
 | `transform.position`, `rotation`, `localPosition`, `localRotation`, `localScale`, `lossyScale` | the same, on the object or a behaviour |
