@@ -2037,9 +2037,12 @@ with `playOneShot(clip, volume:, pitch:)`, for footsteps and hits. It has
 Unity's `volume`, `pitch` (2 is an octave up and twice as fast), `loop`,
 `mute`, `priority`, `playOnAwake` (on unless set: it plays `clip` when
 it's enabled), `isPlaying` and `playTime` (Unity's `time`; here `time`
-is the game's). `onEnd` is called when `clip` reaches its end, not when
-it's stopped. Disabling the source, or destroying its object, stops its
-sounds.
+is the game's; set it to seek, but not past the clip's end). `onEnd` is
+called when `clip` reaches its end, not when it's stopped. Disabling the
+source, or destroying its object, stops its sounds; and as in Unity, a
+source that's disabled, or whose object is inactive, refuses to play (a
+`StateError`), so no sound outlives its object. What an `onLoad` asks
+for plays when the object is shown.
 
 ```dart
 // lib/dog.dart
@@ -2188,24 +2191,29 @@ track it plays), and
 never given up for other sounds. `play(clip, fadeIn:)` starts a track
 (the one already playing plays on, so a level that starts its music
 again doesn't restart it), `crossFade(clip, seconds)` fades the next in
-as the last fades out, and `stop(fadeOut:)` ends it. Its `onEnd` is
-called when a track that doesn't `loop` reaches its end.
+as the last fades out, and `stop(fadeOut:)` ends it. `playTime` is where
+the track is, as a source's: set it to seek, or, before `play`, to start
+partway in (say, where a track was left before a scene change). Its
+`onEnd` is called when a track that doesn't `loop` reaches its end.
 
 **A long clip streams.** A file over 10 seconds is decoded as it plays,
 a second ahead, on a thread of its own, so a three-minute song takes its
 file's memory rather than 30 MB of samples. `AudioClip.streamed` says
 which; `AudioClip.decode(bytes, stream: true)` streams a short one, and
 `stream: false` decodes a long one whole. It plays as it would decoded,
-from any `time`, looping without a gap; `audio.stats.starved` counts the
-times a stream wasn't ready (it should stay 0).
+from any `playTime`, looping without a gap; `audio.stats.starved` counts
+the times a stream wasn't ready (it should stay 0).
 
 **Groups** are a settings screen's "music" and "effects" (a group of
 Unity's `AudioMixer`): `audio.group('effects')` is made the first time
 it's asked for, and up to 15 can be. Each has a `volume` and `mute`
 under `audio.volume`, and `fade(to, seconds)`, all heard within a few
-milliseconds, without a click. A source joins one with `group`, a
-one-shot with `playOneShot(clip, group:)` or `playAt(..., group:)`, and
-the music plays in `audio.group('music')`.
+milliseconds, without a click. A group is passed as itself, never by
+name: a source joins one as it's made, `AudioSource(clip: hit, group:
+audio.group('effects'))` (or later, with its `group`), a one-shot with
+`playOneShot(clip, group: audio.group('effects'))` or `playAt(...,
+group:)`, and the music plays in `audio.group('music')`. A group belongs
+to its world's `audio`: another world's throws.
 
 ```dart
 // lib/sound_settings.dart
@@ -4439,8 +4447,13 @@ yet (§21).
 - **Sound** (§13b): effects on the sound (reverb, echo, a low-pass for
   under water), Doppler, 3D over headphones (HRTF), a custom rolloff
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
-  it by hand), the microphone, and sound made in code as it plays. On
-  Android, another app taking the sound doesn't pause the game's.
+  it by hand), the microphone, and sound made in code as it plays. A
+  one-shot gives nothing back to stop it alone or hear of its end (a
+  source of its own, with `onEnd`, does); a source can't fade (set its
+  `volume` each frame, or put it in a group and `fade` that), and music
+  can't pause (keep its `playTime`, `stop` it, and set `playTime` again
+  before the next `play`). On Android, another app taking the sound
+  doesn't pause the game's.
 - **Particles** (§13c): particles on the GPU (Unity's VFX Graph), lights
   on particles, collision with the physics world's colliders (only
   planes), triggers, wind zones, a mesh's surface as a shape, shadows

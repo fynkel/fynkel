@@ -22,7 +22,11 @@ enum AudioRolloffMode {
 /// ```
 ///
 /// With [playOnAwake] (the default) it plays [clip] when it's enabled.
-/// Disabling it, or destroying its object, stops all its sounds. While the
+/// Disabling it, or destroying its object, stops all its sounds; one
+/// that's disabled, or whose object is inactive, refuses to play, as
+/// Unity's does ("Can not play a disabled audio source"). What it's asked
+/// to play while its object loads (from an `onLoad`) plays when the
+/// object is shown. While the
 /// game is [World.paused] its sounds hold where they are, unless it
 /// [ignorePause]s (a pause menu's).
 ///
@@ -33,8 +37,8 @@ enum AudioRolloffMode {
 /// [rolloffMode]), a little quieter and duller behind, as the
 /// [AudioListener] (or the camera) hears it, as it moves.
 final class AudioSource extends Behaviour {
-  /// A source of [clip], with Unity's defaults. A bad value throws an
-  /// [ArgumentError].
+  /// A source of [clip], with Unity's defaults, in [group] if given. A bad
+  /// value throws an [ArgumentError].
   AudioSource({
     this.clip,
     double volume = 1,
@@ -50,6 +54,7 @@ final class AudioSource extends Behaviour {
     double minDistance = 1,
     double maxDistance = 500,
     this._rolloffMode = AudioRolloffMode.logarithmic,
+    this._group,
   }) : _volume = volume,
        _pitch = pitch,
        _priority = priority,
@@ -62,7 +67,13 @@ final class AudioSource extends Behaviour {
     _checkPriority(priority);
     _checkUnit(spatialBlend, 'spatialBlend');
     _checkPan(panStereo);
-    _checkDistances(minDistance, maxDistance);
+    _checkMinDistance(minDistance);
+    _checkMaxDistance(maxDistance);
+    if (!(maxDistance > minDistance)) {
+      throw ArgumentError(
+        'AudioSource(minDistance: $minDistance, maxDistance: $maxDistance): maxDistance is to be above minDistance',
+      );
+    }
   }
 
   /// What [play] plays. Setting it doesn't change what's playing: the next
@@ -164,10 +175,17 @@ final class AudioSource extends Behaviour {
   double _panStereo;
 
   /// Within this many metres a 3D sound is at full volume; 1 unless set.
-  /// Above 0, and below [maxDistance].
+  /// Above 0, and below [maxDistance]: to set both lower, set this first.
   double get minDistance => _minDistance;
   set minDistance(double value) {
-    _checkDistances(value, _maxDistance);
+    _checkMinDistance(value);
+    if (!(value < _maxDistance)) {
+      throw ArgumentError.value(
+        value,
+        'minDistance',
+        'is not below maxDistance ($_maxDistance): raise maxDistance first',
+      );
+    }
     _minDistance = value;
     _sendSpatial();
   }
@@ -175,10 +193,18 @@ final class AudioSource extends Behaviour {
   double _minDistance;
 
   /// Where a 3D sound stops fading ([AudioRolloffMode.logarithmic]) or
-  /// falls silent ([AudioRolloffMode.linear]); 500 unless set.
+  /// falls silent ([AudioRolloffMode.linear]); 500 unless set. Above
+  /// [minDistance]: to set both higher, set this first.
   double get maxDistance => _maxDistance;
   set maxDistance(double value) {
-    _checkDistances(_minDistance, value);
+    _checkMaxDistance(value);
+    if (!(value > _minDistance)) {
+      throw ArgumentError.value(
+        value,
+        'maxDistance',
+        'is not above minDistance ($_minDistance): lower minDistance first',
+      );
+    }
     _maxDistance = value;
     _sendSpatial();
   }
@@ -196,9 +222,11 @@ final class AudioSource extends Behaviour {
 
   /// The group whose volume its sounds are under ([AudioGroup]), such as
   /// `audio.group('effects')`, or none: [Audio.volume]'s alone (Unity's
-  /// `outputAudioMixerGroup`). Its sounds follow it at once.
+  /// `outputAudioMixerGroup`). Its sounds follow it at once. Another
+  /// world's group throws an [ArgumentError].
   AudioGroup? get group => _group;
   set group(AudioGroup? value) {
+    _audio?._indexOf(value);
     _group = value;
     _sendSettings();
   }
@@ -209,7 +237,7 @@ final class AudioSource extends Behaviour {
   /// stopped, or gives way to a more important sound.
   void Function(AudioClip clip)? onEnd;
 
-  // The world's sound and this source's id there while it has one; its
+  // The world's sound and this source's id there while it's enabled; its
   // clip's voice, and what it plays; whether that's paused; and its
   // one-shots, with their own volume and pitch.
   Audio? _audio;
@@ -236,7 +264,8 @@ final class AudioSource extends Behaviour {
 
   /// Where [clip] is, in seconds, while it plays or is paused (Unity's
   /// `AudioSource.time`; `time` is the game's here); set it to play on
-  /// from there, or, when it isn't playing, to start there next.
+  /// from there, or, when it isn't playing, to start there next. Past
+  /// [clip]'s end throws an [ArgumentError].
   double get playTime {
     final audio = _audio;
     if (audio == null || _voice == 0) return _from;
@@ -245,6 +274,10 @@ final class AudioSource extends Behaviour {
 
   set playTime(double value) {
     if (!(value >= 0 && value.isFinite)) throw ArgumentError.value(value, 'playTime', 'is not 0 or more');
+    final clip = this.clip;
+    if (clip != null && value > clip.length) {
+      throw ArgumentError.value(value, 'playTime', 'is past the end of $clip');
+    }
     _from = value;
     if (_voice != 0 && _playing != null) {
       final paused = _paused;
@@ -253,23 +286,54 @@ final class AudioSource extends Behaviour {
     }
   }
 
+  // What [play] and [playOneShot] were asked for while its object loaded,
+  // played when it's shown ([onEnable]): what an onLoad starts.
+  var _playWhenShown = false;
+  List<(AudioClip, double?, double?)>? _shotsWhenShown;
+
+  /// Whether it's enabled, on an object that's active, and not yet
+  /// [onEnable]d: its object is loading (in its own or a parent's
+  /// onLoad). What it's asked to play then waits for the object to be
+  /// shown, as Unity's plays from `Awake`.
+  bool get _loading {
+    if (_audio != null || !enabled || isRemoved) return false;
+    final object = gameObject;
+    if (!object.isAlive) return false;
+    for (GameObject? o = object; o != null; o = o.parent) {
+      if (!o.active) return false;
+    }
+    return true;
+  }
+
+  /// The world's sound, while it's enabled. Throws a [StateError] while
+  /// it isn't, as Unity's refuses to play: a sound started then would
+  /// outlive it.
   Audio get _system {
     final audio = _audio;
     if (audio != null) return audio;
-    final made = gameObject.audio;
-    _audio = made;
-    _owner = made._nextOwner++;
-    made._sources[_owner] = this;
-    return made;
+    final object = gameObject;
+    if (isRemoved) throw StateError("$this was removed from $object, so it can't play");
+    throw StateError(
+      enabled
+          ? "$this can't play while its object, $object, is inactive (or not yet added): "
+                'play it once the object is shown'
+          : '$this on $object is disabled: enable it before it plays',
+    );
   }
 
   /// Plays [clip] from the start (or from [playTime], if set while it wasn't
   /// playing), stopping what it played before. Throws a [StateError]
-  /// without a clip.
+  /// without a clip, or while it's disabled or its object is inactive;
+  /// while its object loads, it plays when the object is shown.
   void play() {
     final clip = this.clip;
     if (clip == null) throw StateError('$this has no clip to play');
+    if (_loading) {
+      _playWhenShown = true;
+      return;
+    }
     final audio = _system;
+    final group = audio._indexOf(_group);
     if (_voice != 0) fa_voice_stop(audio._native, _voice);
     audio._playFloats
       ..[0] = _effectiveVolume
@@ -282,7 +346,7 @@ final class AudioSource extends Behaviour {
       priority: _priority,
       pausable: !ignorePause,
       owner: _owner,
-      group: _indexOf(_group),
+      group: group,
     );
     _from = 0;
     _playing = _voice == 0 ? null : clip;
@@ -318,16 +382,23 @@ final class AudioSource extends Behaviour {
 
   /// Plays [clip] once, over whatever else plays (Unity's `PlayOneShot`):
   /// at [volume] times this source's, and [pitch] times its (each 1
-  /// unless given). It can't be paused or stopped on its own; [stop] stops
-  /// it.
+  /// unless given; the product is played within 0.05 to 8). It can't be
+  /// paused or stopped on its own; [stop] stops it. Throws a [StateError]
+  /// while it's disabled or its object is inactive, and waits while its
+  /// object loads, as [play] does.
   void playOneShot(AudioClip clip, {double? volume, double? pitch}) {
     // Nullable, not defaulted, and checked here, the error given the
     // value passed: the JIT boxes a double with a default, one passed to a
     // call it doesn't inline, or one an error is made with, at every call.
     final gain = volume ?? 1.0, speed = pitch ?? 1.0;
     if (!(gain >= 0 && gain <= 1)) throw ArgumentError.value(volume, 'volume', 'is not between 0 and 1');
-    if (!(speed > 0 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not above 0 and up to 8');
+    if (!(speed >= 0.05 && speed <= 8)) throw ArgumentError.value(pitch, 'pitch', 'is not between 0.05 and 8');
+    if (_loading) {
+      (_shotsWhenShown ??= []).add((clip, volume, pitch));
+      return;
+    }
     final audio = _system;
+    final group = audio._indexOf(_group);
     audio._playFloats
       ..[0] = _effectiveVolume * gain
       ..[1] = _clampPitch(_effectivePitch * speed);
@@ -339,7 +410,7 @@ final class AudioSource extends Behaviour {
       priority: _priority,
       pausable: !ignorePause,
       owner: _owner,
-      group: _indexOf(_group),
+      group: group,
     );
     if (handle == 0) return;
     // Full only when it took a voice of its own whose loss it hears of
@@ -379,7 +450,7 @@ final class AudioSource extends Behaviour {
     if (audio == null) return;
     final volume = _effectiveVolume, pitch = _effectivePitch;
     final settings = audio._settingsFloats;
-    final group = _indexOf(_group);
+    final group = audio._indexOf(_group);
     if (_voice != 0) {
       settings
         ..[0] = volume
@@ -436,13 +507,25 @@ final class AudioSource extends Behaviour {
   @override
   void onEnable() {
     super.onEnable();
-    _system._enabled.add(this);
-    if (playOnAwake && clip != null && _voice == 0) play();
+    final audio = _audio = gameObject.audio;
+    _owner = audio._nextOwner++;
+    audio._sources[_owner] = this;
+    audio._enabled.add(this);
+    if ((playOnAwake || _playWhenShown) && clip != null && _voice == 0) play();
+    _playWhenShown = false;
+    if (_shotsWhenShown case final shots?) {
+      _shotsWhenShown = null;
+      for (final (clip, volume, pitch) in shots) {
+        playOneShot(clip, volume: volume, pitch: pitch);
+      }
+    }
   }
 
   @override
   void onDisable() {
     super.onDisable();
+    _playWhenShown = false;
+    _shotsWhenShown = null;
     stop();
     final audio = _audio;
     if (audio != null && !audio._disposed) {
@@ -464,7 +547,10 @@ void _checkPan(double value) {
   if (!(value >= -1 && value <= 1)) throw ArgumentError.value(value, 'panStereo', 'is not between -1 and 1');
 }
 
-void _checkDistances(double min, double max) {
-  if (!(min > 0 && min.isFinite)) throw ArgumentError.value(min, 'minDistance', 'is not above 0');
-  if (!(max > min && max.isFinite)) throw ArgumentError.value(max, 'maxDistance', 'is not above minDistance ($min)');
+void _checkMinDistance(double value) {
+  if (!(value > 0 && value.isFinite)) throw ArgumentError.value(value, 'minDistance', 'is not above 0');
+}
+
+void _checkMaxDistance(double value) {
+  if (!value.isFinite) throw ArgumentError.value(value, 'maxDistance', 'is not a number of metres');
 }
