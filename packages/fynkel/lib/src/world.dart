@@ -38,6 +38,7 @@ part 'signals.dart';
 part 'sky.dart';
 part 'spline_objects.dart';
 part 'splines.dart';
+part 'sprites.dart';
 part 'systems.dart';
 part 'text.dart';
 part 'time.dart';
