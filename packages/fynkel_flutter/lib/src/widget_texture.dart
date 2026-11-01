@@ -1,3 +1,4 @@
+import 'dart:io' show Platform;
 import 'dart:ui' as ui;
 
 import 'package:flutter/rendering.dart';
@@ -14,7 +15,8 @@ extension WidgetTexture on Widget {
   /// [Text] needs no app. It isn't live and takes no taps: to change it,
   /// draw it again (a scoreboard once a second, not every frame). Images
   /// in it must be loaded first (`precacheImage`), as nothing waits for
-  /// them.
+  /// them. On Android it waits for the app's first frame to be drawn:
+  /// before then there's no GL context to draw it in.
   Future<Texture2D> toTexture({required Size size, double pixelRatio = 1}) async {
     if (!(size.width > 0 && size.height > 0 && size.isFinite)) {
       throw ArgumentError.value(size, 'size', 'must be more than 0 each way');
@@ -22,7 +24,13 @@ extension WidgetTexture on Widget {
     if (!(pixelRatio > 0 && pixelRatio.isFinite)) {
       throw ArgumentError.value(pixelRatio, 'pixelRatio', 'must be more than 0');
     }
-    final dispatcher = WidgetsBinding.instance.platformDispatcher;
+    final binding = WidgetsBinding.instance;
+    // Impeller's GL backend has no context before the window's surface is
+    // made, and drawing then crashes the raster thread (Note10+, a lab page
+    // making its textures as the app opens). Tests never rasterize a
+    // frame, so it's waited for only where it's needed.
+    if (Platform.isAndroid && !binding.firstFrameRasterized) await binding.waitUntilFirstFrameRasterized;
+    final dispatcher = binding.platformDispatcher;
     final flutterView = dispatcher.implicitView ?? dispatcher.views.first;
     final boundary = RenderRepaintBoundary();
     final renderView = RenderView(
