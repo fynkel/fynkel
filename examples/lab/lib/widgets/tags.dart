@@ -2,6 +2,7 @@
 // Flutter, which the scene puts over its cubes.
 
 import 'package:flutter/material.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldWidget;
 
 /// A name over a cube.
 class NameTag extends StatelessWidget {
@@ -60,6 +61,61 @@ class PopText extends StatelessWidget {
       fontSize: 22,
       fontWeight: FontWeight.bold,
       shadows: [Shadow(blurRadius: 4)],
+    ),
+  );
+}
+
+/// A name while its point is on the screen; an arrow toward it at the
+/// screen's edge while it isn't (`WorldWidget(keepOnScreen: true)`).
+class EdgeArrow extends StatelessWidget {
+  const EdgeArrow(this.name, {super.key});
+
+  final String name;
+
+  @override
+  Widget build(BuildContext context) {
+    final place = WorldWidget.of(context);
+    return ValueListenableBuilder(
+      valueListenable: place.offScreen,
+      builder: (context, off, _) => off
+          ? ValueListenableBuilder(
+              valueListenable: place.angle,
+              builder: (context, angle, _) => DecoratedBox(
+                decoration: const BoxDecoration(color: Color(0xCCFFD040), shape: BoxShape.circle),
+                child: Padding(
+                  padding: const EdgeInsets.all(6),
+                  child: Transform.rotate(angle: angle, child: const Icon(Icons.arrow_forward, size: 20)),
+                ),
+              ),
+            )
+          : NameTag(name),
+    );
+  }
+}
+
+/// A red cross, to see whether a widget stays on what it marks.
+class Crosshair extends StatelessWidget {
+  const Crosshair({super.key});
+
+  @override
+  Widget build(BuildContext context) => const SizedBox(
+    width: 40,
+    height: 40,
+    child: Stack(
+      children: [
+        Positioned(
+          left: 19,
+          top: 0,
+          bottom: 0,
+          child: ColoredBox(color: Colors.red, child: SizedBox(width: 2)),
+        ),
+        Positioned(
+          top: 19,
+          left: 0,
+          right: 0,
+          child: ColoredBox(color: Colors.red, child: SizedBox(height: 2)),
+        ),
+      ],
     ),
   );
 }

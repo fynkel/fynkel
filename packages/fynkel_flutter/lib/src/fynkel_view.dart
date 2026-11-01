@@ -1280,7 +1280,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
           Positioned.fill(
             child: Material(
               type: MaterialType.transparency,
-              child: WorldWidgetLayer(world: world, frames: _ticks, camera: widget.camera),
+              child: WorldWidgetLayer(
+                world: world,
+                frames: _ticks,
+                camera: widget.camera,
+                framesBehind: () => _host?.framesBehind ?? 0,
+              ),
             ),
           ),
         if (_gameErrors.isNotEmpty)
@@ -1318,6 +1323,11 @@ sealed class _Host {
 
   /// What the plugin is sent to register it, at [place] when on screen.
   Map<String, Object> arguments(Rect? place);
+
+  /// How many frames after Flutter's picture of an update the engine's
+  /// picture of it is on screen, so world widgets are placed as that many
+  /// updates ago (lab: "UI in the world", its sync check, filmed).
+  int get framesBehind;
 }
 
 /// macOS, and iOS when not on screen or with no layer to have: a texture
@@ -1327,6 +1337,10 @@ final class _AppleTexture extends _Host {
 
   @override
   bool get asksOnScreen => false;
+
+  // Measured on a Mac at 120 Hz, 2026-10-31: a whole frame, every frame.
+  @override
+  int get framesBehind => 1;
 
   @override
   Map<String, Object> arguments(Rect? place) => {
@@ -1354,6 +1368,12 @@ final class _AppleLayer extends _Surfaced {
   @override
   bool get asksOnScreen => true;
 
+  // Measured on an iPhone 16 Pro Max at 120 Hz, 2026-10-31: the layer
+  // shows the engine's picture with Flutter's; placing a frame back left
+  // the widgets a whole frame behind it.
+  @override
+  int get framesBehind => 0;
+
   @override
   Map<String, Object> arguments(Rect? place) => {
     'view': view.address,
@@ -1378,6 +1398,10 @@ final class _AndroidSurface extends _Surfaced {
 
   @override
   final bool asksOnScreen;
+
+  // Measured on a Note10+ at 60 Hz, 2026-10-31: a whole frame.
+  @override
+  int get framesBehind => 1;
 
   @override
   Map<String, Object> arguments(Rect? place) => {
