@@ -496,7 +496,7 @@ fn a_frame_takes_its_budget_of_uploads_and_leaves_the_rest_in_order() {
     let names = |ops: &[ResourceOp]| -> Vec<String> {
         ops.iter()
             .map(|op| match op {
-                ResourceOp::UploadTexture(k, ..) => format!("t{}", k.0),
+                ResourceOp::UploadTexture(k, ..) | ResourceOp::UploadAtlas(k, _) => format!("t{}", k.0),
                 ResourceOp::RemoveTexture(k) => format!("-t{}", k.0),
                 ResourceOp::UploadMesh(k, _) => format!("m{}", k.0),
                 ResourceOp::RemoveMesh(k) => format!("-m{}", k.0),

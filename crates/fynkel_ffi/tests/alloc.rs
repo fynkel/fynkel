@@ -533,3 +533,81 @@ fn acquiring_the_surface_to_show_allocates_nothing() {
     unsafe { fy_view_free(view) };
     assert_eq!(allocations, 0, "allocations in 1,000 acquires");
 }
+
+/// 200 numbers each changed every frame, as hit numbers are, facing the
+/// camera, and drawn: once their letters are in the atlas, nothing is
+/// allocated.
+#[test]
+fn a_steady_frame_with_200_numbers_changed_every_frame_allocates_nothing_on_the_calling_thread() {
+    let world = World::new();
+    stage1(&world);
+    let bytes =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/assets/fonts/Roboto-Regular.ttf")).unwrap();
+    let mut font = 0;
+    // SAFETY: a live world and pointers to locals.
+    ok(unsafe { fy_font_add(world.0, bytes.as_ptr(), bytes.len(), &mut font) });
+    let settings = FyTextSettings {
+        font,
+        size: 0.2,
+        align: FY_TEXT_CENTER,
+        line_spacing: 1.0,
+        color: FyColor { r: 1.0, g: 0.9, b: 0.2, a: 1.0 },
+        outline: 0.3,
+        outline_color: FyColor { r: 0.0, g: 0.0, b: 0.0, a: 1.0 },
+        softness: 0.0,
+        facing: FY_FACING_CAMERA,
+        on_top: true,
+        lit: false,
+    };
+    let numbers: Vec<u64> = (0..200)
+        .map(|i| {
+            let id = world.spawn();
+            let at =
+                transform(Transform::from_position(Vec3::new((i % 20) as f32 * 0.3 - 3.0, (i / 20) as f32 * 0.3, 0.0)));
+            let text = b"-1234567890";
+            // SAFETY: a live world and pointers to locals.
+            ok(unsafe { fy_transform_set(world.0, id, &at) });
+            ok(unsafe { fy_text_renderer_set(world.0, id, &settings, text.as_ptr(), text.len()) });
+            id
+        })
+        .collect();
+    let view = View::headless(&world, 64, 64);
+    // Each number's text written into the same bytes each frame, as Dart
+    // writes it into memory it keeps.
+    let mut text = [0u8; 8];
+    let mut frame = |n: usize| {
+        for (i, &id) in numbers.iter().enumerate() {
+            let value = (i * 37 + n * 13) % 1000;
+            let mut len = 0;
+            text[len] = b'-';
+            len += 1;
+            for d in [value / 100, value / 10 % 10, value % 10] {
+                text[len] = b'0' + d as u8;
+                len += 1;
+            }
+            // SAFETY: a live world and a pointer to a local.
+            ok(unsafe { fy_text_renderer_set_text(world.0, id, text.as_ptr(), len) });
+        }
+        view.frame()
+    };
+    let (mut warmed, mut last) = (0, 0);
+    for _ in 0..1000 {
+        warmed += 1;
+        last = frame(warmed);
+        let mut stats = FyViewStats::default();
+        // SAFETY: a live view and a pointer to a local.
+        ok(unsafe { fy_view_stats(view.0, &mut stats) });
+        if warmed >= 120 && stats.coalesced >= 3 {
+            break;
+        }
+    }
+    view.read(last, 64, 64);
+    let mut drawn = Vec::with_capacity(100);
+    let allocations = count(|| {
+        for n in 0..100 {
+            drawn.push(frame(warmed + 1 + n));
+        }
+    });
+    view.read(*drawn.last().unwrap(), 64, 64);
+    assert_eq!(allocations, 0, "allocations in 100 frames of 200 numbers changed and drawn");
+}

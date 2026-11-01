@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 48
+#define FY_ABI_VERSION 49
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -212,6 +212,18 @@
 
 // Makes `count` particles now, playing or not.
 #define FY_PARTICLES_EMIT 5
+
+// As the object turns: its front along the object's +Z.
+#define FY_FACING_NONE 0
+
+// Square to the camera, its top the camera's up.
+#define FY_FACING_CAMERA 1
+
+// Turned round up to face the camera, standing upright.
+#define FY_FACING_UPRIGHT 2
+
+// Flat, facing up, its top away along -Z.
+#define FY_FACING_UP 3
 
 // `fy_apple_acquire`: a surface was written to `out_surface`.
 #define FY_APPLE_SHOWN 1
@@ -873,6 +885,30 @@ typedef struct FyTrailSettings {
   // What it's drawn with, or 0 for nothing drawn.
   uint64_t material;
 } FyTrailSettings;
+
+// A text renderer's settings (TextMeshPro's), as
+// `fynkel_world::TextSettings`: metres, colours sRGB.
+typedef struct FyTextSettings {
+  // A font from `fy_font_add`.
+  uint64_t font;
+  // The font's em, in metres.
+  float size;
+  // `FY_TEXT_LEFT`, `FY_TEXT_CENTER` or `FY_TEXT_RIGHT`.
+  uint32_t align;
+  float line_spacing;
+  struct FyColor color;
+  // The outline's width, 0 to 1 of the atlas's reach round a letter.
+  float outline;
+  struct FyColor outline_color;
+  // How soft the edges are, 0 to 1.
+  float softness;
+  // One of the `FY_FACING_*`.
+  uint32_t facing;
+  // Drawn over everything.
+  bool on_top;
+  // Lit as the scene is.
+  bool lit;
+} FyTextSettings;
 
 // What a view did since it was made.
 typedef struct FyViewStats {
@@ -2421,6 +2457,56 @@ FyStatus fy_trail_clear(const struct FyWorld *world, uint64_t id);
 //
 // `world` is null or live; `out` is null or writable.
 FyStatus fy_trail_count(const struct FyWorld *world, uint64_t id, size_t *out);
+
+// Keeps the TrueType (.ttf) or OpenType (.otf) font in `len` bytes for
+// flat text, copying them, and writes its id to `out`.
+// `FY_STATUS_INVALID_VALUE` for bytes that aren't one.
+//
+// # Safety
+//
+// `world` is null or live; `bytes` is valid for `len` bytes (it may be
+// null when `len` is 0); `out` is null or writable.
+FyStatus fy_font_add(const struct FyWorld *world, const uint8_t *bytes, size_t len, uint64_t *out);
+
+// Frees a font; `FY_STATUS_IN_USE` while a text uses it.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_font_remove(const struct FyWorld *world, uint64_t font);
+
+// Gives the object a text renderer with `settings` showing `text`
+// (UTF-8), or changes the one it has. Settings that can't be are
+// `FY_STATUS_INVALID_VALUE` and change nothing.
+//
+// # Safety
+//
+// `world` is null or live; `settings` is null or readable; `text` is
+// valid for `text_len` bytes (it may be null when `text_len` is 0).
+FyStatus fy_text_renderer_set(const struct FyWorld *world,
+                              uint64_t id,
+                              const struct FyTextSettings *settings,
+                              const uint8_t *text,
+                              size_t text_len);
+
+// Changes only what the object's text renderer shows, to `text` (UTF-8):
+// the same text again does nothing.
+//
+// # Safety
+//
+// `world` is null or live; `text` is valid for `text_len` bytes (it may
+// be null when `text_len` is 0).
+FyStatus fy_text_renderer_set_text(const struct FyWorld *world,
+                                   uint64_t id,
+                                   const uint8_t *text,
+                                   size_t text_len);
+
+// Takes the object's text renderer away.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_text_renderer_remove(const struct FyWorld *world, uint64_t id);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

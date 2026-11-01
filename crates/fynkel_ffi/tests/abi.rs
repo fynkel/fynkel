@@ -1454,3 +1454,50 @@ fn a_mesh_changed_through_the_c_interface_draws_each_change() {
     // SAFETY: a live world; the material is in use.
     assert_eq!(unsafe { fy_material_remove(w, blue) }, FyStatus::InUse);
 }
+
+#[test]
+fn flat_text_takes_a_font_and_refuses_what_cant_be() {
+    let world = World::new();
+    let id = world.spawn();
+    let bytes =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/assets/fonts/Roboto-Regular.ttf")).unwrap();
+    let (mut font, mut none) = (0, 0);
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        assert_eq!(fy_font_add(world.0, b"nope".as_ptr(), 4, &mut none), FyStatus::InvalidValue);
+        assert!(last_error().contains("font"), "{}", last_error());
+        assert_eq!(fy_font_add(world.0, bytes.as_ptr(), bytes.len(), &mut font), FyStatus::Ok);
+        let settings = FyTextSettings {
+            font,
+            size: 0.5,
+            align: FY_TEXT_LEFT,
+            line_spacing: 1.0,
+            color: srgb(1.0, 1.0, 1.0),
+            outline: 0.0,
+            outline_color: srgb(0.0, 0.0, 0.0),
+            softness: 0.0,
+            facing: FY_FACING_UPRIGHT,
+            on_top: false,
+            lit: true,
+        };
+        let text = "Ünïcode ok";
+        assert_eq!(fy_text_renderer_set_text(world.0, id, text.as_ptr(), text.len()), FyStatus::NoComponent);
+        for bad in [
+            FyTextSettings { align: 9, ..settings },
+            FyTextSettings { facing: 9, ..settings },
+            FyTextSettings { font: 0, ..settings },
+            FyTextSettings { font: font + 1, ..settings },
+            FyTextSettings { outline: 1.5, ..settings },
+        ] {
+            assert_eq!(fy_text_renderer_set(world.0, id, &bad, text.as_ptr(), text.len()), FyStatus::InvalidValue);
+        }
+        let not_utf8 = [0xFFu8, 0xFE];
+        assert_eq!(fy_text_renderer_set(world.0, id, &settings, not_utf8.as_ptr(), 2), FyStatus::InvalidValue);
+        assert_eq!(fy_text_renderer_set(world.0, id, &settings, text.as_ptr(), text.len()), FyStatus::Ok);
+        assert_eq!(fy_text_renderer_set_text(world.0, id, b"12".as_ptr(), 2), FyStatus::Ok);
+        assert_eq!(fy_font_remove(world.0, font), FyStatus::InUse);
+        assert_eq!(fy_text_renderer_remove(world.0, id), FyStatus::Ok);
+        assert_eq!(fy_text_renderer_remove(world.0, id), FyStatus::NoComponent);
+        assert_eq!(fy_font_remove(world.0, font), FyStatus::Ok);
+    }
+}
