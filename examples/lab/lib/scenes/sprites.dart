@@ -13,6 +13,11 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../lab.dart';
 
+/// `--dart-define=LAB_QUALITY=low` (or medium, high) starts the scene at
+/// that level; with `LAB_RATES`, its load starts on and its update times
+/// print.
+const _startQuality = String.fromEnvironment('LAB_QUALITY');
+
 /// [size] × [size] pixels of [rgba] for each pixel's distance from the
 /// middle, 0 there to 1 at the edge's middle.
 Texture2D round(int size, List<int> Function(double distance) rgba) {
@@ -195,6 +200,8 @@ class SpritesScene extends LabScene {
         ),
       );
     }
+    if (_startQuality.isNotEmpty) world.quality = Quality.levels.firstWhere((q) => q.name == _startQuality);
+    if (printRates) swarmRoot.active = true;
     _ready = true;
   }
 
@@ -219,10 +226,13 @@ class SpritesScene extends LabScene {
     cards[2].order = on ? 3 : -1;
   }
 
+  final _times = UpdateTimes('1,000 sprites');
+
   @override
   void onUpdate() {
     super.onUpdate();
     if (!_ready) return;
+    _times.add(world);
     _time += time.delta;
     _sinceSaid += time.delta;
     if (_sinceSaid > 2.5) {
