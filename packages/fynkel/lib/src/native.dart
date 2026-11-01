@@ -108,6 +108,7 @@ final class Scratch {
   final particleSettings = malloc<FyParticleSettings>();
   final particleState = malloc<FyParticleState>();
   final trailSettings = malloc<FyTrailSettings>();
+  final textSettings = malloc<FyTextSettings>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -125,7 +126,7 @@ final class Scratch {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
     all.addAll([number, numbers, animatorState, _events, shader, particleSettings, particleState, _particleEvents]);
-    all.add(trailSettings);
+    all.addAll([trailSettings, textSettings]);
     all.forEach(malloc.free);
   }
 
@@ -208,6 +209,43 @@ final class Scratch {
     final encoded = const Utf8Encoder().convert(s);
     bytes(encoded.length).asTypedList(encoded.length).setAll(0, encoded);
     return encoded.length;
+  }
+
+  /// Copies [s] as UTF-8 into [bytes] and returns its length in bytes, as
+  /// [utf8] does but making nothing: a number changed every frame. A lone
+  /// surrogate goes as U+FFFD.
+  int utf8Quiet(String s) {
+    final to = bytes(s.length * 3);
+    var n = 0;
+    for (var i = 0; i < s.length; i++) {
+      var c = s.codeUnitAt(i);
+      if (c < 0x80) {
+        to[n++] = c;
+        continue;
+      }
+      if (c < 0x800) {
+        to[n++] = 0xC0 | (c >> 6);
+        to[n++] = 0x80 | (c & 0x3F);
+        continue;
+      }
+      if (c >= 0xD800 && c < 0xDC00 && i + 1 < s.length) {
+        final low = s.codeUnitAt(i + 1);
+        if (low >= 0xDC00 && low < 0xE000) {
+          i++;
+          c = 0x10000 + ((c - 0xD800) << 10) + (low - 0xDC00);
+          to[n++] = 0xF0 | (c >> 18);
+          to[n++] = 0x80 | ((c >> 12) & 0x3F);
+          to[n++] = 0x80 | ((c >> 6) & 0x3F);
+          to[n++] = 0x80 | (c & 0x3F);
+          continue;
+        }
+      }
+      if (c >= 0xD800 && c < 0xE000) c = 0xFFFD;
+      to[n++] = 0xE0 | (c >> 12);
+      to[n++] = 0x80 | ((c >> 6) & 0x3F);
+      to[n++] = 0x80 | (c & 0x3F);
+    }
+    return n;
   }
 }
 

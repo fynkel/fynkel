@@ -72,3 +72,196 @@ final class _FontKind extends AssetKind<Font> {
 }
 
 const _font = _FontKind();
+
+/// Which way a [TextRenderer] faces.
+enum Facing {
+  /// As its object turns: its front along the object's +Z, read from
+  /// there; from behind, nothing shows.
+  none(FY_FACING_NONE),
+
+  /// Square to the camera, its top the camera's up: a hit number.
+  camera(FY_FACING_CAMERA),
+
+  /// Turned round up to face the camera, standing upright: a name over a
+  /// head.
+  upright(FY_FACING_UPRIGHT),
+
+  /// Flat, facing up, its top away along -Z: words painted on the ground.
+  up(FY_FACING_UP);
+
+  const Facing(this._native);
+
+  final int _native;
+}
+
+/// Flat text in the scene, as TextMeshPro's: a sign, a name over a head, a
+/// number popping from a hit. Each letter is drawn from its [font]'s atlas
+/// of distances, so it stays crisp close up and still reads a few pixels
+/// high, an [outline] round it if asked. Its first line sits on its
+/// object's X axis, [align]ed across its origin, [size] metres to the em.
+///
+/// Changing [text] lays it out again in the engine, making nothing once
+/// its letters were seen: 200 numbers changed every frame are fine.
+/// Unlit by default, shown as its [color] says in the dark too; hidden
+/// behind what's solid unless it's [onTop].
+///
+/// Each setter sends the change at once, and throws an [ArgumentError] for
+/// one that can't be, keeping the old value.
+final class TextRenderer extends Component {
+  /// White, centred, unlit, turned as its object is.
+  TextRenderer(
+    this._text, {
+    required this._font,
+    this._size = 1,
+    this._color = Color.white,
+    this._outline = 0,
+    this._outlineColor = Color.black,
+    this._softness = 0,
+    this._align = TextAlignment.center,
+    this._lineSpacing = 1,
+    this._facing = Facing.none,
+    this._onTop = false,
+    this._lit = false,
+  }) : super._() {
+    if (_refused() case final error?) throw error;
+  }
+
+  String _text;
+  Font _font;
+  double _size, _outline, _softness, _lineSpacing;
+  Color _color, _outlineColor;
+  TextAlignment _align;
+  Facing _facing;
+  bool _onTop, _lit;
+
+  /// What it shows; `\n` starts a line. The same again does nothing.
+  String get text => _text;
+  set text(String value) {
+    _checkChangeable();
+    if (value == _text) return;
+    _text = value;
+    final object = _live;
+    if (object == null || !_enabledFlag) return;
+    final length = scratch.utf8Quiet(value);
+    check(fy_text_renderer_set_text(object._engine('its text can\'t be changed'), object.id, scratch.bytes(), length));
+  }
+
+  /// What its letters are drawn from.
+  Font get font => _font;
+  set font(Font value) => _set(() => _font, (v) => _font = v, value);
+
+  /// Its em, in metres: a capital is about 0.7 of it.
+  double get size => _size;
+  set size(double value) => _set(() => _size, (v) => _size = v, value);
+
+  /// Its letters' colour.
+  Color get color => _color;
+  set color(Color value) => _set(() => _color, (v) => _color = v, value);
+
+  /// How wide the outline round each letter is: 0 none, 1 as far as the
+  /// atlas reaches, about a ninth of [size].
+  double get outline => _outline;
+  set outline(double value) => _set(() => _outline, (v) => _outline = v, value);
+
+  /// The outline's colour.
+  Color get outlineColor => _outlineColor;
+  set outlineColor(Color value) => _set(() => _outlineColor, (v) => _outlineColor = v, value);
+
+  /// How soft its edges are: 0 crisp, 1 blurred: a glow, with an outline.
+  double get softness => _softness;
+  set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
+
+  /// Where each line goes across its object's origin.
+  TextAlignment get align => _align;
+  set align(TextAlignment value) => _set(() => _align, (v) => _align = v, value);
+
+  /// Lines are this many times the font's own line height apart.
+  double get lineSpacing => _lineSpacing;
+  set lineSpacing(double value) => _set(() => _lineSpacing, (v) => _lineSpacing = v, value);
+
+  /// Which way it faces: see [Facing].
+  Facing get facing => _facing;
+  set facing(Facing value) => _set(() => _facing, (v) => _facing = v, value);
+
+  /// Drawn over everything, walls and all.
+  bool get onTop => _onTop;
+  set onTop(bool value) => _set(() => _onTop, (v) => _onTop = v, value);
+
+  /// Lit as the scene is, else shown as [color] says.
+  bool get lit => _lit;
+  set lit(bool value) => _set(() => _lit, (v) => _lit = v, value);
+
+  void _set<T>(T Function() read, void Function(T) write, T value) {
+    _checkChangeable();
+    final old = read();
+    write(value);
+    if (_refused() case final error?) {
+      write(old);
+      throw error;
+    }
+    if (!_enabledFlag) return;
+    final object = _live;
+    if (object == null) return;
+    try {
+      _put(object);
+    } catch (_) {
+      write(old);
+      rethrow;
+    }
+  }
+
+  @override
+  void _put(GameObject object) {
+    final w = object._engine('its TextRenderer can\'t be changed');
+    final world = object.world;
+    _textViews.settings
+      ..font = world._fontId(_font)
+      ..size = _size
+      ..align = _align._native
+      ..line_spacing = _lineSpacing
+      ..outline = _outline
+      ..softness = _softness
+      ..facing = _facing._native
+      ..on_top = _onTop
+      ..lit = _lit;
+    _textViews.color.write(_color);
+    _textViews.outlineColor.write(_outlineColor);
+    final length = scratch.utf8Quiet(_text);
+    check(fy_text_renderer_set(w, object.id, scratch.textSettings, scratch.bytes(), length));
+  }
+
+  @override
+  void _takeOut(GameObject object) => check(fy_text_renderer_remove(object.world.pointer, object.id));
+
+  ArgumentError? _refused() {
+    if (!_size.isFinite || _size < 0) return ArgumentError.value(_size, 'size', 'must be 0 or more');
+    if (!(_outline >= 0 && _outline <= 1)) return ArgumentError.value(_outline, 'outline', 'must be 0 to 1');
+    if (!(_softness >= 0 && _softness <= 1)) return ArgumentError.value(_softness, 'softness', 'must be 0 to 1');
+    if (!_lineSpacing.isFinite) return ArgumentError.value(_lineSpacing, 'lineSpacing', 'must be finite');
+    return null;
+  }
+
+  @override
+  String toString() => 'TextRenderer(${_text.length > 20 ? '${_text.substring(0, 20)}…' : _text})';
+}
+
+/// [scratch]'s text settings' views, made once: a struct's field read
+/// makes a view each time.
+final class _TextViews {
+  _TextViews(this.settings) : color = settings.color, outlineColor = settings.outline_color;
+
+  final FyTextSettings settings;
+  final FyColor color, outlineColor;
+}
+
+final _textViews = _TextViews(scratch.textSettings.ref);
+
+extension on World {
+  /// [font]'s id in this world, kept here the first time a text uses it.
+  int _fontId(Font font) {
+    final known = _fontIds[font];
+    if (known != null) return known;
+    check(fy_font_add(pointer, font._bytes, font._length, scratch.id));
+    return _fontIds[font] = scratch.id.value;
+  }
+}

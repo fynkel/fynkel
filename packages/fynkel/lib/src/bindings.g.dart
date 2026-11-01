@@ -197,8 +197,21 @@ external int fy_find(
   ffi.Pointer<ffi.Uint64> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Uint64>)>(
+  isLeaf: true,
+)
+external int fy_font_add(
+  ffi.Pointer<FyWorld> world,
+  ffi.Pointer<ffi.Uint8> bytes,
+  int len,
+  ffi.Pointer<ffi.Uint64> out,
+);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
 external int fy_font_check(ffi.Pointer<ffi.Uint8> font_bytes, int len);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_font_remove(ffi.Pointer<FyWorld> world, int font);
 
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<ffi.Uint8>, ffi.Size, ffi.Pointer<ffi.Size>)>(isLeaf: true)
 external int fy_gpu_describe(ffi.Pointer<ffi.Uint8> buf, int cap, ffi.Pointer<ffi.Size> out_len);
@@ -775,6 +788,23 @@ external int fy_text_measure(
   ffi.Pointer<FyVec2> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_text_renderer_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<
+  ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FyTextSettings>, ffi.Pointer<ffi.Uint8>, ffi.Size)
+>(isLeaf: true)
+external int fy_text_renderer_set(
+  ffi.Pointer<FyWorld> world,
+  int id,
+  ffi.Pointer<FyTextSettings> settings,
+  ffi.Pointer<ffi.Uint8> text,
+  int text_len,
+);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint8>, ffi.Size)>(isLeaf: true)
+external int fy_text_renderer_set_text(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<ffi.Uint8> text, int text_len);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyTexture>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_texture_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyTexture> texture, ffi.Pointer<ffi.Uint64> out);
 
@@ -957,7 +987,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 48;
+const int FY_ABI_VERSION = 49;
 
 const int FY_APPLE_MORE = 2;
 
@@ -972,6 +1002,14 @@ const int FY_BLEND_TRANSPARENT = 1;
 const int FY_CURVE_CONSTANT = 0;
 
 const int FY_CURVE_CURVES = 1;
+
+const int FY_FACING_CAMERA = 1;
+
+const int FY_FACING_NONE = 0;
+
+const int FY_FACING_UP = 3;
+
+const int FY_FACING_UPRIGHT = 2;
 
 const int FY_LIGHT_AMBIENT = 1;
 
@@ -2012,6 +2050,39 @@ sealed class FyStatus {
   static const FY_STATUS_NO_TEXTURE = 15;
   static const FY_STATUS_DEVICE_LOST = 16;
   static const FY_STATUS_NO_SHADER = 17;
+}
+
+final class FyTextSettings extends ffi.Struct {
+  @ffi.Uint64()
+  external int font;
+
+  @ffi.Float()
+  external double size;
+
+  @ffi.Uint32()
+  external int align;
+
+  @ffi.Float()
+  external double line_spacing;
+
+  external FyColor color;
+
+  @ffi.Float()
+  external double outline;
+
+  external FyColor outline_color;
+
+  @ffi.Float()
+  external double softness;
+
+  @ffi.Uint32()
+  external int facing;
+
+  @ffi.Bool()
+  external bool on_top;
+
+  @ffi.Bool()
+  external bool lit;
 }
 
 final class FyTexture extends ffi.Opaque {}
