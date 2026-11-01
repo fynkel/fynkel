@@ -1,6 +1,7 @@
 # Stage 16 plan: speed
 
-Status: proposed 2026-11-01, for the user's word on each decision (§7).
+Status: accepted 2026-11-01 ("yes to all"), with the recommended
+answer to each decision (§7).
 Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 Stage 15 is done ([report](stage-15-report.md)).
 
