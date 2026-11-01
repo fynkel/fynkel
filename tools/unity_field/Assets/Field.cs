@@ -31,7 +31,13 @@ public class Field : MonoBehaviour
     float t;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
-    static void Boot() => new GameObject("field").AddComponent<Field>();
+    static void Boot()
+    {
+        // Build.CrowdIOS / CrowdAndroid build the lab's crowd (Crowd.cs) instead.
+        var scene = Resources.Load<TextAsset>("scene");
+        if (scene != null && scene.text.Trim() == "crowd") new GameObject("crowd").AddComponent<Crowd>();
+        else new GameObject("field").AddComponent<Field>();
+    }
 
     static Color Hex(int rgb) => new Color32((byte)(rgb >> 16), (byte)(rgb >> 8), (byte)rgb, 255);
 
