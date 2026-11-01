@@ -25,7 +25,7 @@ pub use gpu::{Gpu, GpuError, instance_flags};
 pub use gpu_time::GpuTimes;
 pub use renderer::{FrameStats, Renderer};
 pub use scene::{
-    AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Light, LightKind, Line, MaterialTextures,
+    AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Glyph, Light, LightKind, Line, MaterialTextures,
     MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality, QualityLevel, RenderScene,
     ScreenEffect, ShaderKey, ShaderUse, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
 };

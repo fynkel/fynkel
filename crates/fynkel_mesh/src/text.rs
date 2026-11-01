@@ -13,6 +13,10 @@ use crate::{MeshData, MeshError};
 /// a part of the font's size: 1 mm on a letter a metre tall.
 const CURVE_TOLERANCE: f32 = 0.001;
 
+/// [`CURVE_TOLERANCE`] for a letter drawn into an atlas: finer than
+/// its pixels.
+const SDF_CURVE_TOLERANCE: f32 = 0.002;
+
 /// The most edges one curve is cut into.
 const MOST_EDGES_PER_CURVE: u32 = 32;
 
@@ -56,6 +60,15 @@ impl Default for TextStyle {
     fn default() -> Self {
         TextStyle { size: 1.0, align: TextAlign::Center, line_spacing: 1.0 }
     }
+}
+
+/// A letter laid out: which of the font's, and its pen's point.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlacedGlyph {
+    pub glyph: u16,
+    /// In metres: the first line stands on y = 0, each line below the last.
+    pub x: f32,
+    pub y: f32,
 }
 
 /// One piece of a letter: an outline and the holes inside it, in metres,
@@ -105,9 +118,33 @@ impl<'a> Font<'a> {
     pub fn shapes(&self, text: &str, style: &TextStyle) -> Vec<TextShape> {
         let face = &self.face;
         let scale = style.size / face.units_per_em() as f32;
-        let step = self.line_height() * style.line_spacing * style.size;
         let mut contours = Contours::new(face.units_per_em() as f32 * CURVE_TOLERANCE);
+        let mut placed = Vec::new();
+        self.layout(text, style, &mut placed);
         let mut shapes = Vec::new();
+        for p in placed {
+            contours.all.clear();
+            if face.outline_glyph(GlyphId(p.glyph), &mut contours).is_some() {
+                let at = Vec2::new(p.x, p.y);
+                for contour in &mut contours.all {
+                    for q in contour.iter_mut() {
+                        *q = *q * scale + at;
+                    }
+                }
+                shapes.extend(nest(&contours.all));
+            }
+        }
+        shapes
+    }
+
+    /// Where each of `text`'s letters goes, in place of what `out` had: its
+    /// pen's point, in metres, laid out as [`Font::shapes`] lays them out.
+    /// Allocates nothing once `out` has room.
+    pub fn layout(&self, text: &str, style: &TextStyle, out: &mut Vec<PlacedGlyph>) {
+        out.clear();
+        let face = &self.face;
+        let scale = style.size / face.units_per_em() as f32;
+        let step = self.line_height() * style.line_spacing * style.size;
         for (row, line) in text.split('\n').enumerate() {
             let width = self.advance(line) * scale;
             let start = match style.align {
@@ -122,21 +159,46 @@ impl<'a> Font<'a> {
                 if let Some(left) = before {
                     pen += self.kerning(left, glyph);
                 }
-                contours.all.clear();
-                if face.outline_glyph(glyph, &mut contours).is_some() {
-                    let at = Vec2::new(start + pen * scale, -(row as f32) * step);
-                    for contour in &mut contours.all {
-                        for p in contour.iter_mut() {
-                            *p = *p * scale + at;
-                        }
-                    }
-                    shapes.extend(nest(&contours.all));
-                }
+                out.push(PlacedGlyph { glyph: glyph.0, x: start + pen * scale, y: -(row as f32) * step });
                 pen += face.glyph_hor_advance(glyph).unwrap_or(0) as f32;
                 before = Some(glyph);
             }
         }
-        shapes
+    }
+
+    /// The font's letter for `c`, or `None` when it hasn't one.
+    pub fn glyph_id(&self, c: char) -> Option<u16> {
+        self.face.glyph_index(c).map(|g| g.0)
+    }
+
+    /// How far `glyph` takes the pen, as a part of the font's size.
+    pub fn advance_of(&self, glyph: u16) -> f32 {
+        self.face.glyph_hor_advance(GlyphId(glyph)).unwrap_or(0) as f32 / self.face.units_per_em() as f32
+    }
+
+    /// `glyph`'s loops, in the font's units, its curves cut into edges, into
+    /// `out`; false when it has none (a space).
+    pub(crate) fn outline_into(&self, glyph: u16, out: &mut Vec<Vec<Vec2>>) -> bool {
+        let mut contours = Contours::new(self.face.units_per_em() as f32 * SDF_CURVE_TOLERANCE);
+        let drawn = self.face.outline_glyph(GlyphId(glyph), &mut contours).is_some();
+        *out = contours.all;
+        drawn && !out.is_empty()
+    }
+
+    /// Whether `glyph` has an outline to draw: a space hasn't.
+    pub fn has_outline(&self, glyph: u16) -> bool {
+        let mut loops = Vec::new();
+        self.outline_into(glyph, &mut loops)
+    }
+
+    /// [`Font::kerning`] between two of its letters, in its units.
+    pub(crate) fn kerning_of(&self, left: u16, right: u16) -> f32 {
+        self.kerning(GlyphId(left), GlyphId(right))
+    }
+
+    /// The font's units in its em.
+    pub(crate) fn units_per_em(&self) -> f32 {
+        self.face.units_per_em() as f32
     }
 
     /// How far `line` takes the pen, in the font's units, kerning

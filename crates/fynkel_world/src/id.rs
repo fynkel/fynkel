@@ -71,6 +71,12 @@ id_type!(
     "shader"
 );
 
+id_type!(
+    /// A font kept for flat text (stage 15).
+    FontId,
+    "font"
+);
+
 /// Hands out ids from 1 upwards and never repeats one.
 #[derive(Debug)]
 pub(crate) struct IdCounter(u64);
@@ -113,6 +119,12 @@ impl TextureId {
 }
 
 impl ShaderId {
+    pub(crate) const fn new(n: NonZeroU64) -> Self {
+        Self(n)
+    }
+}
+
+impl FontId {
     pub(crate) const fn new(n: NonZeroU64) -> Self {
         Self(n)
     }

@@ -290,6 +290,13 @@ impl Kit {
         MadeTexture { space, texture: GpuTexture::new(&self.gpu, &self.textures, space, width, height, rgba) }
     }
 
+    /// A font's atlas of distances, one byte a pixel, row by row from the
+    /// top, as [`ParticleMode::Glyphs`](crate::ParticleMode::Glyphs) draws
+    /// read it from the base colour slot.
+    pub fn make_distances(&self, width: u32, height: u32, pixels: &[u8]) -> MadeTexture {
+        MadeTexture { space: ColorSpace::Srgb, texture: GpuTexture::distances(&self.gpu, width, height, pixels) }
+    }
+
     /// GPU memory of the shadow maps its renderers hold.
     pub fn shadow_bytes(&self) -> u64 {
         self.shadows.bytes.load(Ordering::Relaxed)

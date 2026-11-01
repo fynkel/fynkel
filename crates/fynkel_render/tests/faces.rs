@@ -37,6 +37,7 @@ fn scene(draws: Vec<Draw>) -> RenderScene {
         lines: Vec::new(),
         particles: Vec::new(),
         particle_draws: Vec::new(),
+        glyphs: Vec::new(),
         sky: None,
         fog: None,
         draws,

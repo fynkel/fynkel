@@ -23,13 +23,15 @@ use glam::{Vec3, Vec4};
 mod ears;
 mod made;
 mod outline;
+mod sdf;
 mod shapes;
 mod sweep;
 mod text;
 
 pub use outline::fill;
+pub use sdf::{AtlasGlyph, GlyphQuad, SdfAtlas, SdfFont};
 pub use sweep::{PathPoint, Sweep};
-pub use text::{Font, TextAlign, TextShape, TextStyle};
+pub use text::{Font, PlacedGlyph, TextAlign, TextShape, TextStyle};
 
 /// One vertex, as the GPU reads it: 52 bytes.
 #[repr(C)]

@@ -391,6 +391,7 @@ fn take_within(waiting: &mut Vec<ResourceOp>, frame: &mut Vec<ResourceOp>, budge
                 (std::mem::size_of_val(mesh.vertices()) + std::mem::size_of_val(mesh.indices())) as u64
             }
             ResourceOp::UploadTexture(_, _, image) => image.pixels().len() as u64,
+            ResourceOp::UploadAtlas(_, atlas) => atlas.pixels.len() as u64,
             ResourceOp::RemoveMesh(_)
             | ResourceOp::RemoveTexture(_)
             | ResourceOp::UploadShader(..)
@@ -504,6 +505,9 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                         ResourceOp::RemoveMesh(key) => Made::RemoveMesh(key),
                         ResourceOp::UploadTexture(key, space, image) => {
                             Made::Texture(key, kit.make_texture(space, image.width(), image.height(), image.pixels()))
+                        }
+                        ResourceOp::UploadAtlas(key, atlas) => {
+                            Made::Texture(key, kit.make_distances(atlas.width, atlas.height, &atlas.pixels))
                         }
                         ResourceOp::RemoveTexture(key) => Made::RemoveTexture(key),
                         // Its pipelines are made when it's first drawn.

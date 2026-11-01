@@ -1,4 +1,4 @@
-use fynkel_world::{Blend, ImageData, Material, Quat, Vec2};
+use fynkel_world::{Blend, ImageData, Material, Quat, TextSettings, Vec2};
 
 use super::*;
 
@@ -663,4 +663,157 @@ fn a_camera_without_bloom_or_ambient_occlusion_has_neither() {
     let view = extract(&world).0.camera.unwrap();
     assert_eq!(view.bloom, Some(fynkel_render::Bloom { strength: 0.3, threshold: 2.0 }));
     assert_eq!(view.ambient_occlusion, Some(fynkel_render::AmbientOcclusion { intensity: 2.0, radius: 1.5 }));
+}
+
+fn roboto() -> std::sync::Arc<[u8]> {
+    std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/assets/fonts/Roboto-Regular.ttf")).unwrap().into()
+}
+
+/// The stage 1 world with a font and an object showing `text` with
+/// `settings` at `at`, turned by `turn`.
+fn with_text(
+    text: &str,
+    at: Vec3,
+    turn: Quat,
+    settings: impl Fn(FontId) -> fynkel_world::TextSettings,
+) -> (World, ObjectId, FontId) {
+    let (mut world, _) = stage1_world();
+    let font = world.add_font(roboto()).unwrap();
+    let id = world.spawn();
+    world.insert(id, Transform { position: at, rotation: turn, ..Transform::default() }).unwrap();
+    world.set_text_renderer(id, settings(font), text).unwrap();
+    (world, id, font)
+}
+
+fn atlas_uploads(ops: &[ResourceOp]) -> Vec<TextureKey> {
+    ops.iter().filter_map(|op| if let ResourceOp::UploadAtlas(key, _) = op { Some(*key) } else { None }).collect()
+}
+
+#[test]
+fn a_text_is_its_letters_from_its_fonts_atlas_one_draw_a_font() {
+    let (mut world, id, font) =
+        with_text("AB", Vec3::new(1.0, 2.0, 0.0), Quat::IDENTITY, |f| TextSettings::new(f, 0.5));
+    // A second text in the same font joins its draw.
+    let other = world.spawn();
+    world.insert(other, Transform::default()).unwrap();
+    world.set_text_renderer(other, TextSettings::new(font, 0.5), "C").unwrap();
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(scene.glyphs.len(), 3);
+    let draws: Vec<_> = scene.particle_draws.iter().filter(|d| matches!(d.mode, ParticleMode::Glyphs { .. })).collect();
+    assert_eq!(draws.len(), 1, "one draw a font");
+    let draw = draws[0];
+    assert_eq!((draw.first, draw.count, draw.lit), (0, 3, false));
+    assert_eq!(draw.material.textures.base_color, Some(atlas_key(font)));
+    assert_eq!(draw.material.blend, fynkel_render::Blend::Transparent);
+    assert_eq!(atlas_uploads(&ops), [atlas_key(font)], "its atlas goes up");
+
+    // Placed where the object is, as the world laid them out.
+    let quads = world.text_renderer(id).unwrap().quads();
+    let mine: Vec<&Glyph> = scene.glyphs.iter().filter(|g| g.center.y > 1.0).collect();
+    assert_eq!(mine.len(), 2);
+    let [l, b, r, t] = quads[0].rect;
+    let first = mine.iter().min_by(|a, b| a.center.x.total_cmp(&b.center.x)).unwrap();
+    assert!(close(first.center, Vec3::new(1.0 + (l + r) * 0.5, 2.0 + (b + t) * 0.5, 0.0)));
+    assert!(close(first.right, Vec3::new((r - l) * 0.5, 0.0, 0.0)));
+    assert!(close(first.up, Vec3::new(0.0, (t - b) * 0.5, 0.0)));
+    let atlas = world.font(font).unwrap().pixels();
+    let [x, y, w, h] = quads[0].pixels.map(f32::from);
+    let (aw, ah) = (atlas.width as f32, atlas.height as f32);
+    assert_eq!(first.uv, [w / aw, h / ah, x / aw, y / ah]);
+    assert_eq!(first.color, Color::WHITE.to_linear());
+
+    // The same atlas isn't sent again; a new letter grows it, and it is.
+    ops.clear();
+    extract.run(&world, &mut scene, &mut ops);
+    assert!(atlas_uploads(&ops).is_empty());
+    world.set_text(other, "Q").unwrap();
+    extract.run(&world, &mut scene, &mut ops);
+    assert_eq!(atlas_uploads(&ops), [atlas_key(font)]);
+}
+
+#[test]
+fn texts_on_top_and_lit_ones_are_their_own_draws_and_hidden_ones_are_left_out() {
+    let (mut world, id, font) = with_text("A", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings::new(f, 0.5));
+    for (on_top, lit) in [(true, false), (false, true)] {
+        let o = world.spawn();
+        world.insert(o, Transform::default()).unwrap();
+        world.set_text_renderer(o, TextSettings { on_top, lit, ..TextSettings::new(font, 0.5) }, "B").unwrap();
+    }
+    let (scene, _) = extract(&world);
+    let mut looks: Vec<_> = scene
+        .particle_draws
+        .iter()
+        .filter_map(|d| match d.mode {
+            ParticleMode::Glyphs { on_top } => Some((on_top, d.lit, d.count)),
+            _ => None,
+        })
+        .collect();
+    looks.sort_by_key(|l| (l.0, l.1));
+    assert_eq!(looks, [(false, false, 1), (false, true, 1), (true, false, 1)]);
+    world.set_active(id, false).unwrap();
+    assert_eq!(extract(&world).0.glyphs.len(), 2, "a hidden text isn't drawn");
+}
+
+#[test]
+fn a_text_facing_the_camera_turns_with_it_and_an_upright_one_only_round_up() {
+    let camera_at = Vec3::new(0.0, 1.5, 4.0);
+    let turned = Quat::from_rotation_y(1.0);
+    let letter = |facing: fynkel_world::Facing| {
+        let (world, ..) =
+            with_text("I", Vec3::new(0.0, 0.0, 0.0), turned, |f| TextSettings { facing, ..TextSettings::new(f, 1.0) });
+        extract(&world).0.glyphs[0]
+    };
+    let normal = |g: &Glyph| g.right.cross(g.up).normalize();
+
+    let own = letter(fynkel_world::Facing::None);
+    assert!(close(normal(&own), turned * Vec3::Z), "as the object turns");
+
+    let facing = letter(fynkel_world::Facing::Camera);
+    let camera = Transform::from_position(camera_at).looking_at(Vec3::ZERO).rotation;
+    assert!(close(normal(&facing), camera * Vec3::Z), "square to the camera");
+    assert!(close(facing.up.normalize(), camera * Vec3::Y), "its top the camera's up");
+
+    let upright = letter(fynkel_world::Facing::Upright);
+    assert!(upright.up.normalize().abs_diff_eq(Vec3::Y, 1e-5), "standing up");
+    // Turned about its object's place, as a whole: level towards the
+    // camera from there.
+    let level = Vec3::new(camera_at.x, 0.0, camera_at.z).normalize();
+    assert!(close(normal(&upright), level), "turned round up to the camera");
+
+    let flat = letter(fynkel_world::Facing::Up);
+    assert!(close(normal(&flat), Vec3::Y), "flat, facing up");
+    assert!(close(flat.up.normalize(), turned * Vec3::NEG_Z), "its top where the object faces");
+}
+
+#[test]
+fn a_text_with_a_shadow_draws_each_letter_twice_the_shadow_offset_behind_and_first() {
+    let shadow = Color::rgba(0.0, 0.0, 0.0, 0.6);
+    let (world, ..) = with_text("I", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings {
+        outline: 0.3,
+        shadow_color: shadow,
+        shadow_offset: Vec2::new(0.1, -0.2),
+        shadow_softness: 0.5,
+        ..TextSettings::new(f, 2.0)
+    });
+    let scene = extract(&world).0;
+    let [a, b] = scene.glyphs[..] else { panic!("a letter and its shadow: {:?}", scene.glyphs) };
+    let (letter, under) = if a.color == shadow.to_linear() { (b, a) } else { (a, b) };
+    assert_eq!(under.color, shadow.to_linear());
+    assert_eq!(under.outline_color, shadow.to_linear(), "the outline's shadow too");
+    assert_eq!((under.outline, under.softness), (0.3, 0.5));
+    assert_eq!((letter.right, letter.up), (under.right, under.up));
+    // The offset is of the em: 0.1 and -0.2 of 2 m (and a few mm back).
+    let moved = under.center - letter.center;
+    assert!((moved.x - 0.2).abs() < 0.005 && (moved.y + 0.4).abs() < 0.005, "{moved}");
+    // Behind as the camera sees it, so it's drawn first.
+    let camera = Transform::from_position(Vec3::new(0.0, 1.5, 4.0)).looking_at(Vec3::ZERO).rotation;
+    let forward = camera * Vec3::NEG_Z;
+    assert!(under.center.dot(forward) > letter.center.dot(forward));
+    let [draw] = &scene.particle_draws[..] else { panic!() };
+    assert_eq!(draw.count, 2);
+
+    let (plain, ..) = with_text("I", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings::new(f, 2.0));
+    assert_eq!(extract(&plain).0.glyphs.len(), 1, "no shadow unless its colour shows");
 }

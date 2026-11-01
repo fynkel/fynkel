@@ -45,6 +45,7 @@ import 'package:lab/scenes/crowd.dart';
 import 'package:lab/scenes/skinned.dart';
 import 'package:lab/scenes/sound_mix.dart';
 import 'package:lab/scenes/theme_basics.dart';
+import 'package:lab/scenes/flat_text.dart';
 import 'package:lab/scenes/world_widgets.dart';
 import 'package:lab/scenes/world_widgets_basics.dart';
 
@@ -341,6 +342,49 @@ void main() {
       expect(scene.readout.value, startsWith('camera at'));
     },
   );
+
+  test('Text in the world: signs, names, numbers popping from hits, and 200 changed every frame', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(FlatTextScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    final texts = scene.find('exit sign')!.get<TextRenderer>()!;
+    expect((texts.text, texts.outline), ('EXIT', 0.5));
+    expect(scene.find('ground')!.get<TextRenderer>()!.facing, Facing.up);
+    expect(scene.find('shop sign')!.get<TextRenderer>()!.lit, isTrue);
+    final [hitting, grid] = scene.controls.cast<Toggle>();
+    hitting.onChanged(false);
+    scene.hit();
+    final [pop] = scene.children.whereType<PopNumber>().toList();
+    expect(pop.get<TextRenderer>()!.onTop, isTrue);
+    for (var i = 0; i < 70; i++) {
+      world.update(1 / 60);
+    }
+    expect(pop.isDestroyed, isTrue, reason: 'risen, faded and gone');
+    grid.onChanged(true);
+    world.update(1 / 60);
+    final before = scene.grid.map((t) => t.text).toList();
+    world.update(1 / 60);
+    expect(scene.grid.map((t) => t.text), isNot(before), reason: 'changed every frame');
+    expect(scene.readout.value, contains('200 changed every frame'));
+    // And drawn: the EXIT sign's red shows.
+    final view = HeadlessView(world, width: 480, height: 360);
+    addTearDown(view.dispose);
+    final image = view.read(view.frame());
+    if (Platform.environment['LAB_SHOT'] case final path?) {
+      File(path).writeAsBytesSync([
+        ...'P6 480 360 255\n'.codeUnits,
+        for (var i = 0; i < image.rgba.length; i++)
+          if (i % 4 != 3) image.rgba[i],
+      ]);
+    }
+    var red = 0;
+    for (var i = 0; i < image.rgba.length; i += 4) {
+      if (image.rgba[i] > 180 && image.rgba[i + 1] < 80 && image.rgba[i + 2] < 80) red++;
+    }
+    expect(red, greaterThan(20));
+  });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
     final world = World(source: files);

@@ -46,13 +46,14 @@ use std::sync::Arc;
 
 use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
-    AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Light as RenderLight, Line, MAX_TEXTURES,
-    MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality, RenderScene,
-    ScreenEffect, ShaderKey, ShaderUse, Sky, TextureKey,
+    AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Glyph, Light as RenderLight, Line,
+    MAX_TEXTURES, MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality,
+    RenderScene, ScreenEffect, ShaderKey, ShaderUse, Sky, TextureKey,
 };
 use fynkel_world::{
-    Camera, Color, DrawnParticle, ImageData, Light, LightKind, MAX_TRAIL_POINTS, Material, MaterialId, MeshData,
-    MeshId, MeshRenderer, ObjectId, Quat, RenderMode, ShaderId, TextureId, Transform, World, WorldMatrices,
+    AtlasPixels, Camera, Color, DrawnParticle, Facing, FontId, ImageData, Light, LightKind, MAX_TRAIL_POINTS, Material,
+    MaterialId, MeshData, MeshId, MeshRenderer, ObjectId, Quat, RenderMode, ShaderId, TextureId, Transform, World,
+    WorldMatrices,
 };
 
 /// A change to the meshes and textures the renderer holds. An upload
@@ -65,6 +66,8 @@ pub(crate) enum ResourceOp {
     /// In every colour space. Sent once for each space the texture was
     /// uploaded in; removing again does nothing.
     RemoveTexture(TextureKey),
+    /// A font's atlas of distances, new or grown.
+    UploadAtlas(TextureKey, Arc<AtlasPixels>),
     /// A material's own shader, new or set again.
     UploadShader(ShaderKey, Arc<CustomShader>),
     RemoveShader(ShaderKey),
@@ -79,6 +82,8 @@ pub(crate) struct Uploaded {
     textures: HashSet<(TextureId, ColorSpace)>,
     /// Each shader's version uploaded.
     shaders: HashMap<ShaderId, u64>,
+    /// Each font's atlas version uploaded.
+    atlases: HashMap<FontId, u64>,
 }
 
 /// A world's [`Uploaded`], shared by its views, and the changes still to
@@ -118,6 +123,9 @@ pub(crate) struct Extract {
     /// A particle system's particles as it gives them, before they go to
     /// the scene. Kept so a frame allocates nothing.
     drawn: Vec<DrawnParticle>,
+    /// Flat text's draws this frame: each font's texts over everything or
+    /// not, lit or not. Kept so a frame allocates nothing.
+    text_groups: Vec<(FontId, bool, bool)>,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -126,6 +134,11 @@ pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
 
 pub(crate) fn texture_key(id: TextureId) -> TextureKey {
     TextureKey(id.raw())
+}
+
+/// A font's atlas's key among the textures: apart from the world's own.
+pub(crate) fn atlas_key(id: FontId) -> TextureKey {
+    TextureKey(1 << 62 | id.raw())
 }
 
 pub(crate) fn shader_key(id: ShaderId) -> ShaderKey {
@@ -229,6 +242,19 @@ impl Extract {
             }
             kept
         });
+        uploaded.atlases.retain(|&id, _| {
+            let kept = world.font(id).is_ok();
+            if !kept {
+                ops.push(ResourceOp::RemoveTexture(atlas_key(id)));
+            }
+            kept
+        });
+        for (id, font) in world.fonts() {
+            let pixels = font.pixels();
+            if uploaded.atlases.insert(id, pixels.version) != Some(pixels.version) {
+                ops.push(ResourceOp::UploadAtlas(atlas_key(id), Arc::clone(pixels)));
+            }
+        }
         for (id, _, version) in world.shaders() {
             if uploaded.shaders.insert(id, version) != Some(version)
                 && let Some(shader) = compiled(world, id)
@@ -557,9 +583,134 @@ impl Extract {
             }
         }
 
+        // Flat text: each font's letters one draw, over everything or not,
+        // lit or not, each text placed as it faces.
+        if world.has_texts()
+            && let Some((_, _, rotation, eye)) = camera
+        {
+            let forward = rotation * Vec3::NEG_Z;
+            let groups = &mut self.text_groups;
+            groups.clear();
+            let mut letters = 0;
+            for (id, text) in world.text_renderers() {
+                let s = text.settings();
+                groups.push((s.font, s.on_top, s.lit));
+                if matrices.shown(world, id) && world.in_mask(id, mask) {
+                    letters += text.quads().len() << usize::from(text.shadowed());
+                }
+            }
+            groups.sort_unstable();
+            groups.dedup();
+            scene.glyphs.reserve(letters);
+            for &(font, on_top, lit) in groups.iter() {
+                let Ok(world_font) = world.font(font) else { continue };
+                let (width, height) = (world_font.pixels().width as f32, world_font.pixels().height as f32);
+                let first = scene.glyphs.len() as u32;
+                let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+                for (id, text) in world.text_renderers() {
+                    let s = text.settings();
+                    if (s.font, s.on_top, s.lit) != (font, on_top, lit) || text.quads().is_empty() {
+                        continue;
+                    }
+                    if !matrices.shown(world, id) || !world.in_mask(id, mask) {
+                        continue;
+                    }
+                    let Some(model) = matrices.matrix(world, id) else { continue };
+                    let basis = facing(model, s.facing, rotation, eye);
+                    let (color, outline_color) = (s.color.to_linear(), s.outline_color.to_linear());
+                    // A shadow, under each letter: moved by its offset, and
+                    // a hair further from the camera, so it's drawn first.
+                    let shadow = text.shadowed().then(|| {
+                        let moved = basis.transform_vector3((s.shadow_offset * s.size).extend(0.0));
+                        (moved + forward * (s.size * 0.002).max(1e-4), s.shadow_color.to_linear())
+                    });
+                    for q in text.quads() {
+                        let [l, b, r, t] = q.rect;
+                        let [x, y, w, h] = q.pixels.map(f32::from);
+                        let center = basis.transform_point3(Vec3::new((l + r) * 0.5, (b + t) * 0.5, 0.0));
+                        let right = basis.transform_vector3(Vec3::new((r - l) * 0.5, 0.0, 0.0));
+                        let up = basis.transform_vector3(Vec3::new(0.0, (t - b) * 0.5, 0.0));
+                        let reach = right.abs() + up.abs();
+                        lo = lo.min(center - reach);
+                        hi = hi.max(center + reach);
+                        let uv = [w / width, h / height, x / width, y / height];
+                        if let Some((moved, shadow)) = shadow {
+                            scene.glyphs.push(Glyph {
+                                center: center + moved,
+                                right,
+                                up,
+                                uv,
+                                color: shadow,
+                                outline_color: shadow,
+                                outline: s.outline,
+                                softness: s.shadow_softness,
+                            });
+                            lo = lo.min(center + moved - reach);
+                            hi = hi.max(center + moved + reach);
+                        }
+                        scene.glyphs.push(Glyph {
+                            center,
+                            right,
+                            up,
+                            uv,
+                            color,
+                            outline_color,
+                            outline: s.outline,
+                            softness: s.softness,
+                        });
+                    }
+                }
+                let count = scene.glyphs.len() as u32 - first;
+                if count == 0 {
+                    continue;
+                }
+                let material = PbrMaterial {
+                    blend: fynkel_render::Blend::Transparent,
+                    textures: MaterialTextures { base_color: Some(atlas_key(font)), ..MaterialTextures::NONE },
+                    ..PbrMaterial::DEFAULT
+                };
+                scene.particle_draws.push(ParticleDraw {
+                    material,
+                    mode: ParticleMode::Glyphs { on_top },
+                    sheet: [1, 1],
+                    lit,
+                    softness: 0.0,
+                    largest: 0.0,
+                    first,
+                    count,
+                    center: (lo + hi) * 0.5,
+                    radius: (hi - lo).length() * 0.5,
+                });
+            }
+        }
+
         scene.lines.extend(world.debug_lines().iter().map(|l| Line { a: l.a, b: l.b, color: l.color.to_linear() }));
         Ok(())
     }
+}
+
+/// Where a text's letters go, from its object's world matrix `model`: as
+/// the object turns, or turned to the camera (at `eye`, turned by
+/// `camera`) as `facing` says, keeping the object's place and scale.
+fn facing(model: Mat4, facing: Facing, camera: Quat, eye: Vec3) -> Mat4 {
+    if facing == Facing::None {
+        return model;
+    }
+    let (scale, own, at) = model.to_scale_rotation_translation();
+    let turn = match facing {
+        Facing::None | Facing::Camera => camera,
+        Facing::Upright => {
+            let to = eye - at;
+            Quat::from_rotation_y(if to.x == 0.0 && to.z == 0.0 { 0.0 } else { to.x.atan2(to.z) })
+        }
+        // Flat on the ground, its top where the object's forward points.
+        Facing::Up => {
+            let forward = own * Vec3::NEG_Z;
+            let yaw = if forward.x == 0.0 && forward.z == 0.0 { 0.0 } else { (-forward.x).atan2(-forward.z) };
+            Quat::from_rotation_y(yaw) * Quat::from_rotation_x(-std::f32::consts::FRAC_PI_2)
+        }
+    };
+    Mat4::from_scale_rotation_translation(scale, turn, at)
 }
 
 /// A material as the renderer takes it: linear colours, emission times its

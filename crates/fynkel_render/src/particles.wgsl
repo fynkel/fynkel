@@ -21,7 +21,8 @@ struct FyParticleIn {
     @location(7) uv_transform: vec4<f32>,
     // x: metallic, y: roughness, z: softness in metres, w: how it's drawn
     // (0 facing the camera, 1 stretched, 2 flat, 3 upright, 4 a mesh, 5 a
-    // trail's point).
+    // trail's point, 6 a letter: then x is its outline's width and y its
+    // edges' softness, 0 to 1).
     @location(8) params: vec4<f32>,
     // rgb: the material's emission. w: 1, shadows fall on it.
     @location(9) emissive: vec4<f32>,
@@ -197,12 +198,24 @@ fn vs_fy_particle(@builtin(vertex_index) corner: u32, in: FyParticleIn) -> FyPar
             let level = vec3<f32>(to_camera.x, 0.0, to_camera.z);
             right = select(vec3<f32>(1.0, 0.0, 0.0), normalize(cross(up, level)), dot(level, level) > 1e-10);
         }
+        // A letter of flat text: its square's half width and height,
+        // across and up, in `velocity_turn.xyz` and `particle.xyz`.
+        case 6u: {
+            right = in.velocity_turn.xyz;
+            up = in.particle.xyz;
+            half = vec2<f32>(1.0);
+            at = c;
+        }
         default: {}
     }
     let p = center + right * at.x * half.x + up * at.y * half.y;
     let uv = vec2<f32>(c.x * 0.5 + 0.5, 0.5 - c.y * 0.5);
-    let normal = cross(right, up);
-    var out = fy_particle_out(in, p, normal, vec4<f32>(right, 1.0), uv);
+    let normal = normalize(cross(right, up));
+    var out = fy_particle_out(in, p, normal, vec4<f32>(normalize(right), 1.0), uv);
+    if u32(in.params.w) == 6u {
+        // Its outline's alpha; the outline's colour is in `emissive`.
+        out.own = vec4<f32>(in.particle.w, 0.0, 0.0, 0.0);
+    }
     if particle_lit_once {
         out.light = fy_particle_light(center, normal, in.emissive.w > 0.5);
     }
@@ -310,4 +323,27 @@ fn fs_fy_particle_soft_transparent(in: FyParticleOut, @builtin(front_facing) fro
 fn fs_fy_particle_soft_additive(in: FyParticleOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
     let color = fy_particle_shaded(in, front);
     return fy_particle_additive(in, color, fy_soft(in));
+}
+
+// A letter of flat text (stage 15), as TextMeshPro's distance field
+// shader: the atlas gives how far each pixel is from the letter's edge,
+// 0.5 on it; the letter is in its colour inside, its outline round it out
+// to `params.x` of the atlas's reach, both edges smoothed over a pixel
+// (and `params.y` softer).
+@fragment
+fn fs_fy_glyph(in: FyParticleOut) -> @location(0) vec4<f32> {
+    let d = textureSample(base_color_texture, material_sampler, in.uv).r;
+    let blur = max(fwidth(d) * 0.75, 1e-4) + in.params.y * 0.5;
+    let face = smoothstep(0.5 - blur, 0.5 + blur, d);
+    let edge = 0.5 - in.params.x * 0.5;
+    let outer = smoothstep(edge - blur, edge + blur, d);
+    // Without an outline its edge is the letter's own colour, not a dark
+    // fringe.
+    let outline = select(vec4<f32>(in.emissive.rgb, in.own.x), in.base_color, in.params.x <= 0.0);
+    var color = mix(outline, in.base_color, face);
+    color.a *= outer;
+    if particle_lit_once {
+        color = vec4<f32>(color.rgb * in.light, color.a);
+    }
+    return fy_particle_transparent(in, color, 1.0);
 }

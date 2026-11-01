@@ -12,7 +12,7 @@ use fynkel_load::ImageData;
 use fynkel_mesh::MeshData;
 
 use crate::resources::{Material, ScreenEffect, Shader};
-use crate::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
+use crate::{FontId, MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 
 /// Why a world operation was refused. On error, the world is unchanged.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -100,6 +100,16 @@ pub enum WorldError {
     Animator(&'static str),
     /// A particle system's settings that can't be, or a call it can't take.
     Particles(&'static str),
+    NoFont(FontId),
+    /// The font can't be removed while an object's text uses it.
+    FontInUse {
+        font: FontId,
+        object: ObjectId,
+    },
+    /// Bytes that aren't a font the engine reads.
+    Font,
+    /// A text renderer's settings that can't be.
+    Text(&'static str),
 }
 
 impl std::fmt::Display for WorldError {
@@ -145,6 +155,10 @@ impl std::fmt::Display for WorldError {
                 write!(f, "{object}'s model has {count} clips; there's no clip {clip}")
             }
             WorldError::Particles(why) => f.write_str(why),
+            WorldError::NoFont(id) => write!(f, "{id} does not exist"),
+            WorldError::FontInUse { font, object } => write!(f, "{font} is still used by {object}'s text"),
+            WorldError::Font => f.write_str("not a TrueType or OpenType font the engine can read"),
+            WorldError::Text(why) => f.write_str(why),
             WorldError::Animator(message) => f.write_str(message),
         }
     }
@@ -212,6 +226,11 @@ pub struct World {
     pub(crate) particle_links: Vec<(ObjectId, usize, ObjectId)>,
     /// Each object's trail.
     pub(crate) trails: IdMap<ObjectId, crate::trails::Trail>,
+    /// The fonts kept for flat text.
+    pub(crate) fonts: IdMap<FontId, crate::texts::WorldFont>,
+    pub(crate) font_ids: IdCounter,
+    /// Each object's text renderer.
+    pub(crate) texts: IdMap<ObjectId, crate::texts::TextRenderer>,
 }
 
 impl std::fmt::Debug for World {
@@ -262,6 +281,9 @@ impl World {
             particle_seeds: 1,
             particle_links: Vec::new(),
             trails: IdMap::default(),
+            fonts: IdMap::default(),
+            font_ids: IdCounter::new(),
+            texts: IdMap::default(),
         }
     }
 
@@ -309,6 +331,9 @@ impl World {
             }
             if !self.trails.is_empty() {
                 self.trails.remove(&id);
+            }
+            if !self.texts.is_empty() {
+                self.texts.remove(&id);
             }
             if !self.particles.is_empty() && self.particles.remove(&id).is_some() {
                 unlinked = true;

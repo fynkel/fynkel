@@ -13,5 +13,7 @@
   `kaykit/LICENSE.txt` is the pack's licence file.
 - `music/calm.ogg`, `music/chase.ogg`: made for the lab by `tool/music.py` from sines and
   noise, CC0.
+- `fonts/Roboto-Regular.ttf`: Roboto (version 1.100141, 2013) by Google, unchanged, under the
+  [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0), as its own name table says.
 
 CC0: https://creativecommons.org/publicdomain/zero/1.0/

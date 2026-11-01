@@ -17,6 +17,7 @@ mod particles;
 pub mod raycast;
 mod resources;
 mod skin;
+mod texts;
 mod trails;
 mod world;
 
@@ -27,11 +28,11 @@ pub use debug::DebugLine;
 pub use describe::{Describe, Field, FieldError, FieldKind, Range, Value};
 pub use fynkel_load::{ClipData, HdrData, ImageData, ImageError, MaterialData, ModelData, ModelError};
 pub use fynkel_mesh::{
-    Font, MeshChange, MeshData, MeshError, MeshParts, PathPoint, Sweep, TextAlign, TextStyle, Vertex,
+    Font, GlyphQuad, MeshChange, MeshData, MeshError, MeshParts, PathPoint, Sweep, TextAlign, TextStyle, Vertex,
 };
 pub use glam::{Mat4, Quat, Vec2, Vec3};
 pub use hierarchy::WorldMatrices;
-pub use id::{MaterialId, MeshId, ObjectId, ShaderId, TextureId};
+pub use id::{FontId, MaterialId, MeshId, ObjectId, ShaderId, TextureId};
 pub use model::ModelIds;
 pub use particles::{
     Burst, BySpeed, Collision as ParticleCollision, Curve as ParticleCurve, DrawnParticle, GRAVITY, INHERIT_COLOR,
@@ -43,5 +44,6 @@ pub use particles::{
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, ScreenEffect, Shader};
 pub use skin::Skin;
+pub use texts::{AtlasPixels, Facing, TextRenderer, TextSettings, WorldFont};
 pub use trails::{MAX_TRAIL_POINTS, Trail, TrailSettings};
 pub use world::{Result, World, WorldError};

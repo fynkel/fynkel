@@ -78,6 +78,9 @@ final class World implements Finalizable {
   final _materials = <int, WeakReference<Material>>{};
   var _textureIds = Expando<int>();
   var _shaderIds = Expando<int>();
+  // Fonts kept for [TextRenderer]s, by their id here: kept till the world
+  // is disposed, as a game has few.
+  var _fontIds = Expando<int>();
   final _shaders = <int, WeakReference<Shader>>{};
 
   // Garbage-collected resources to take out, at the end of the next update.
@@ -162,6 +165,7 @@ final class World implements Finalizable {
     _materials.clear();
     _textureIds = Expando();
     _shaderIds = Expando();
+    _fontIds = Expando();
     _shaders.clear();
     _collected.clear();
     _objects.clear();

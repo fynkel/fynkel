@@ -118,3 +118,21 @@ fn a_mesh_changed_with_its_tangents_worked_out_again_allocates_nothing() {
         assert_eq!(allocations, 0, "a change");
     }
 }
+
+#[test]
+fn flat_text_laid_out_again_allocates_nothing() {
+    let data =
+        std::fs::read(concat!(env!("CARGO_MANIFEST_DIR"), "/../../tests/assets/fonts/Roboto-Regular.ttf")).unwrap();
+    let mut font = SdfFont::new(data.into()).unwrap();
+    let style = TextStyle::default();
+    let mut quads = Vec::new();
+    let texts = ["-12", "305", "-9987", "42\n7"];
+    for text in texts {
+        font.quads(text, &style, &mut quads);
+    }
+    for n in 0..200 {
+        let text = texts[n % 4];
+        let (_, allocations) = count(|| font.quads(text, &style, &mut quads));
+        assert_eq!(allocations, 0, "laying out {text:?} again");
+    }
+}
