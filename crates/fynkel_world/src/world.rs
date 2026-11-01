@@ -110,6 +110,13 @@ pub enum WorldError {
     Font,
     /// A text renderer's settings that can't be.
     Text(&'static str),
+    /// A sprite renderer's settings that can't be.
+    Sprite(&'static str),
+    /// The texture can't be removed while an object's sprite shows it.
+    SpriteTextureInUse {
+        texture: TextureId,
+        object: ObjectId,
+    },
 }
 
 impl std::fmt::Display for WorldError {
@@ -159,6 +166,10 @@ impl std::fmt::Display for WorldError {
             WorldError::FontInUse { font, object } => write!(f, "{font} is still used by {object}'s text"),
             WorldError::Font => f.write_str("not a TrueType or OpenType font the engine can read"),
             WorldError::Text(why) => f.write_str(why),
+            WorldError::Sprite(why) => f.write_str(why),
+            WorldError::SpriteTextureInUse { texture, object } => {
+                write!(f, "{texture} is still shown by {object}'s sprite")
+            }
             WorldError::Animator(message) => f.write_str(message),
         }
     }
@@ -231,6 +242,8 @@ pub struct World {
     pub(crate) font_ids: IdCounter,
     /// Each object's text renderer.
     pub(crate) texts: IdMap<ObjectId, crate::texts::TextRenderer>,
+    /// Each object's sprite renderer.
+    pub(crate) sprites: IdMap<ObjectId, crate::sprites::SpriteRenderer>,
 }
 
 impl std::fmt::Debug for World {
@@ -284,6 +297,7 @@ impl World {
             fonts: IdMap::default(),
             font_ids: IdCounter::new(),
             texts: IdMap::default(),
+            sprites: IdMap::default(),
         }
     }
 
@@ -334,6 +348,9 @@ impl World {
             }
             if !self.texts.is_empty() {
                 self.texts.remove(&id);
+            }
+            if !self.sprites.is_empty() {
+                self.sprites.remove(&id);
             }
             if !self.particles.is_empty() && self.particles.remove(&id).is_some() {
                 unlinked = true;
@@ -709,6 +726,9 @@ impl World {
             self.camera_effects.iter().find(|(_, e)| e.iter().any(|e| e.textures.contains(&Some(id))))
         {
             return Err(WorldError::EffectTextureInUse { texture: id, object });
+        }
+        if let Some((&object, _)) = self.sprites.iter().find(|(_, s)| s.settings().texture == id) {
+            return Err(WorldError::SpriteTextureInUse { texture: id, object });
         }
         self.textures.remove(&id);
         Ok(())

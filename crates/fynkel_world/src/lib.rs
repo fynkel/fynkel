@@ -17,6 +17,7 @@ mod particles;
 pub mod raycast;
 mod resources;
 mod skin;
+mod sprites;
 mod texts;
 mod trails;
 mod world;
@@ -44,6 +45,7 @@ pub use particles::{
 pub use raycast::{Ray, RayHit, Raycaster};
 pub use resources::{Blend, MAX_SHADER_TEXTURES, Material, ScreenEffect, Shader};
 pub use skin::Skin;
+pub use sprites::{SpriteQuad, SpriteRenderer, SpriteSettings};
 pub use texts::{AtlasPixels, Facing, TextRenderer, TextSettings, WorldFont};
 pub use trails::{MAX_TRAIL_POINTS, Trail, TrailSettings};
 pub use world::{Result, World, WorldError};
