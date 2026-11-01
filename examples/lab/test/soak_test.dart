@@ -33,6 +33,8 @@ final rounds = int.tryParse(Platform.environment['FYNKEL_SOAK_ROUNDS'] ?? '') ??
 final drawing = Platform.environment['FYNKEL_SOAK_DRAW'] != '0';
 
 void main() {
+  // Pictures in the world draws widgets into textures, as the app does.
+  TestWidgetsFlutterBinding.ensureInitialized();
   test(
     'every scene, again and again, in one world each round: memory stays flat',
     () async {

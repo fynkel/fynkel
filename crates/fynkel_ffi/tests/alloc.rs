@@ -614,3 +614,73 @@ fn a_steady_frame_with_200_numbers_changed_every_frame_allocates_nothing_on_the_
     view.read(*drawn.last().unwrap(), 64, 64);
     assert_eq!(allocations, 0, "allocations in 100 frames of 200 numbers changed and drawn");
 }
+
+/// A frame with 1,000 sprites of one texture, each moved every frame and
+/// drawn: nothing is allocated on the calling thread.
+#[test]
+fn a_steady_frame_with_1000_moving_sprites_allocates_nothing_on_the_calling_thread() {
+    let world = World::new();
+    stage1(&world);
+    let pixels = [255u8; 4 * 4 * 4];
+    let (mut image, mut texture) = (std::ptr::null_mut(), 0);
+    // SAFETY: a slice and pointers to locals; the image is freed once added.
+    unsafe {
+        ok(fy_texture_new_rgba(4, 4, pixels.as_ptr(), pixels.len(), &mut image));
+        ok(fy_texture_add(world.0, image, &mut texture));
+        fy_texture_free(image);
+    }
+    let settings = FySpriteSettings {
+        texture,
+        size: FyVec2 { x: 0.1, y: 0.1 },
+        color: FyColor { r: 1.0, g: 1.0, b: 1.0, a: 1.0 },
+        flip_x: false,
+        flip_y: false,
+        pivot: FyVec2 { x: 0.5, y: 0.5 },
+        slice: [0.0; 4],
+        pixels_per_metre: 100.0,
+        alpha_cutoff: 0.0,
+        facing: FY_FACING_CAMERA,
+        sorting_layer: 0,
+        order: 0,
+        lit: false,
+    };
+    let sprites: Vec<u64> = (0..1000)
+        .map(|_| {
+            let id = world.spawn();
+            // SAFETY: a live world and a pointer to a local.
+            ok(unsafe { fy_sprite_renderer_set(world.0, id, &settings) });
+            id
+        })
+        .collect();
+    let view = View::headless(&world, 64, 64);
+    let frame = |n: usize| {
+        for (i, &id) in sprites.iter().enumerate() {
+            let a = (i + n) as f32 * 0.01;
+            let at =
+                transform(Transform::from_position(Vec3::new(a.sin() * 3.0, a.cos() * 2.0, (i % 7) as f32 * -0.1)));
+            // SAFETY: a live world and a pointer to a local.
+            ok(unsafe { fy_transform_set(world.0, id, &at) });
+        }
+        view.frame()
+    };
+    let (mut warmed, mut last) = (0, 0);
+    for _ in 0..1000 {
+        warmed += 1;
+        last = frame(warmed);
+        let mut stats = FyViewStats::default();
+        // SAFETY: a live view and a pointer to a local.
+        ok(unsafe { fy_view_stats(view.0, &mut stats) });
+        if warmed >= 120 && stats.coalesced >= 3 {
+            break;
+        }
+    }
+    view.read(last, 64, 64);
+    let mut drawn = Vec::with_capacity(100);
+    let allocations = count(|| {
+        for n in 0..100 {
+            drawn.push(frame(warmed + 1 + n));
+        }
+    });
+    view.read(*drawn.last().unwrap(), 64, 64);
+    assert_eq!(allocations, 0, "allocations in 100 frames of 1,000 sprites moved and drawn");
+}

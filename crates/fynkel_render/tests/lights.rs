@@ -26,6 +26,7 @@ fn wall(size: f32, lights: Vec<Light>, quality: QualityLevel) -> RenderScene {
         particles: Vec::new(),
         particle_draws: Vec::new(),
         glyphs: Vec::new(),
+        sprites: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {

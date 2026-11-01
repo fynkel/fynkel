@@ -109,6 +109,7 @@ final class Scratch {
   final particleState = malloc<FyParticleState>();
   final trailSettings = malloc<FyTrailSettings>();
   final textSettings = malloc<FyTextSettings>();
+  final spriteSettings = malloc<FySpriteSettings>();
 
   // Room for lists of ids and for strings, grown when a call needs more.
   var _ids = malloc<Uint64>(_initial);
@@ -126,7 +127,7 @@ final class Scratch {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
     all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
     all.addAll([number, numbers, animatorState, _events, shader, particleSettings, particleState, _particleEvents]);
-    all.addAll([trailSettings, textSettings]);
+    all.addAll([trailSettings, textSettings, spriteSettings]);
     all.forEach(malloc.free);
   }
 

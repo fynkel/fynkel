@@ -10,6 +10,11 @@ import 'package:fynkel/fynkel.dart';
 
 import '../lab.dart';
 
+/// `--dart-define=LAB_QUALITY=low` (or medium, high) starts the scene at
+/// that level; with `LAB_RATES`, its load starts on and its update times
+/// print.
+const _startQuality = String.fromEnvironment('LAB_QUALITY');
+
 /// A number that pops up from a hit, rises and fades.
 class PopNumber extends GameObject {
   PopNumber(String text, Font font, Vec3 at, {bool critical = false})
@@ -219,6 +224,8 @@ class FlatTextScene extends LabScene {
         ),
       );
     }
+    if (_startQuality.isNotEmpty) world.quality = Quality.levels.firstWhere((q) => q.name == _startQuality);
+    if (printRates) numbers.active = true;
     _ready = true;
   }
 
@@ -231,10 +238,13 @@ class FlatTextScene extends LabScene {
     log.add('hit for $damage${critical ? ', critical' : ''}');
   }
 
+  final _times = UpdateTimes('200 numbers');
+
   @override
   void onUpdate() {
     super.onUpdate();
     if (!_ready) return;
+    _times.add(world);
     if (hitting) {
       _sinceHit += time.delta;
       if (_sinceHit > 0.35) {

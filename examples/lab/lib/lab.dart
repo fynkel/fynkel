@@ -30,7 +30,8 @@ abstract class LabScene extends GameObject {
 
   /// The game's view: one [FynkelView] of the scene, unless the scene shows
   /// it some other way (a split screen).
-  Widget view(BuildContext context) => FynkelView(root: this);
+  Widget view(BuildContext context) =>
+      FynkelView(root: this, onStats: printRates ? (stats) => fps(title, stats) : null);
 
   /// What happened, newest last: the scene's own events, and what goes to
   /// [World.errors].
@@ -199,6 +200,27 @@ String secs(double s) => '${s.toStringAsFixed(2)} s';
 /// them out, to read from `flutter run`.
 const printRates = bool.fromEnvironment('LAB_RATES');
 
+/// The world's update times collected over 120 frames: printed, with
+/// [printRates], as their median and slowest.
+class UpdateTimes {
+  UpdateTimes(this.label);
+  final String label;
+  final _window = <int>[];
+
+  void add(World world) {
+    if (!printRates) return;
+    _window.add(world.profile.total.inMicroseconds);
+    if (_window.length < 120) return;
+    _window.sort();
+    // ignore: avoid_print
+    print(
+      '[update] $label: median ${(_window[60] / 1000).toStringAsFixed(3)} ms, '
+      'slowest ${(_window.last / 1000).toStringAsFixed(3)} ms',
+    );
+    _window.clear();
+  }
+}
+
 /// Frames shown per second in [stats]' window (drawn, for a view with
 /// nowhere to show them), as a whole number; printed with [label] when
 /// [printRates].
@@ -210,7 +232,9 @@ String fps(String label, FynkelViewStats stats) {
     print(
       '[rate] $label shown ${(shown / seconds).toStringAsFixed(1)} drawn '
       '${(stats.view.rendered / seconds).toStringAsFixed(1)} ticks ${(stats.ticks / seconds).toStringAsFixed(1)} '
-      'size ${stats.size.width.round()}x${stats.size.height.round()}',
+      'size ${stats.size.width.round()}x${stats.size.height.round()} '
+      'busy ${(stats.view.rendered > 0 ? stats.view.busy.inMicroseconds / 1000 / stats.view.rendered : 0).toStringAsFixed(2)} '
+      'ms a frame',
     );
   }
   return (shown / seconds).round().toString();

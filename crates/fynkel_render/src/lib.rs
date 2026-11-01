@@ -27,7 +27,7 @@ pub use renderer::{FrameStats, Renderer};
 pub use scene::{
     AmbientOcclusion, Blend, Bloom, CameraView, ColorSpace, Draw, Fog, Glyph, Light, LightKind, Line, MaterialTextures,
     MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality, QualityLevel, RenderScene,
-    ScreenEffect, ShaderKey, ShaderUse, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, TextureKey,
+    ScreenEffect, ShaderKey, ShaderUse, ShadowFilter, ShadowLevel, Sky, SkyImage, SkyKind, Sprite, TextureKey,
 };
 pub use shader::{
     CustomShader, Lighting, MAX_OWN, MAX_TEXTURES, MAX_VALUES_BYTES, ShaderError, ShaderTexture, ShaderValue, ValueKind,

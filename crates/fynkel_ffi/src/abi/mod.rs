@@ -71,11 +71,14 @@ pub use trails::*;
 mod texts;
 pub use texts::*;
 
+mod sprites;
+pub use sprites::*;
+
 mod views;
 pub use views::*;
 
 /// Bumped on any change to the functions or types in this file.
-pub const FY_ABI_VERSION: u32 = 50;
+pub const FY_ABI_VERSION: u32 = 51;
 
 // --- Library -----------------------------------------------------------------
 

@@ -9,7 +9,8 @@
 /// [bundleSource] loads assets from the app's bundle.
 ///
 /// [WorldWidget] puts a widget at a place in the world, and [Stick] is an
-/// on-screen stick. [ListenableSignal] lets game code listen to Flutter
+/// on-screen stick. [WidgetTexture.toTexture] draws a widget once into a
+/// texture, for a sign in the scene. [ListenableSignal] lets game code listen to Flutter
 /// notifiers, and [WorldListenables] lets widgets listen to the world.
 /// [WorldTheme] gives the game the app's theme, and [FlutterColorToFynkel]
 /// and [FynkelColorToFlutter] turn one's colours into the other's.
@@ -26,5 +27,6 @@ export 'src/fynkel_view.dart' show FynkelView, FynkelViewState, FynkelViewStats,
 export 'src/input_feed.dart' show keyCodeOf;
 export 'src/listenable_signal.dart' show ListenableSignal;
 export 'src/stick.dart' show Stick;
+export 'src/widget_texture.dart' show WidgetTexture;
 export 'src/world_listenables.dart' show WorldListenables, WorldTheme;
 export 'src/world_widget.dart' show WorldWidget, WorldWidgetPlace;

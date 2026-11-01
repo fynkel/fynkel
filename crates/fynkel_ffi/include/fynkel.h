@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 50
+#define FY_ABI_VERSION 51
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -915,6 +915,34 @@ typedef struct FyTextSettings {
   // Lit as the scene is.
   bool lit;
 } FyTextSettings;
+
+// A sprite renderer's settings (Unity's), as
+// `fynkel_world::SpriteSettings`: metres, the colour sRGB.
+typedef struct FySpriteSettings {
+  // A texture from `fy_texture_add`.
+  uint64_t texture;
+  // Its width and height, in metres.
+  struct FyVec2 size;
+  struct FyColor color;
+  bool flip_x;
+  bool flip_y;
+  // The point of it its object's origin is, 0 to 1 from its bottom left.
+  struct FyVec2 pivot;
+  // 9-slice: its left, bottom, right and top borders, in the texture's
+  // pixels; all 0 for none.
+  float slice[4];
+  // The texture's pixels a metre, for the slice's corners.
+  float pixels_per_metre;
+  // 0: see-through by alpha; above 0, cut out below it.
+  float alpha_cutoff;
+  // One of the `FY_FACING_*`.
+  uint32_t facing;
+  // Drawn by these first, lower first, then by distance.
+  int32_t sorting_layer;
+  int32_t order;
+  // Lit as the scene is.
+  bool lit;
+} FySpriteSettings;
 
 // What a view did since it was made.
 typedef struct FyViewStats {
@@ -2513,6 +2541,25 @@ FyStatus fy_text_renderer_set_text(const struct FyWorld *world,
 //
 // `world` is null or live.
 FyStatus fy_text_renderer_remove(const struct FyWorld *world, uint64_t id);
+
+// Gives the object a sprite renderer with `settings`, or changes the one
+// it has. Settings that can't be are `FY_STATUS_INVALID_VALUE`, and a
+// texture the world doesn't have `FY_STATUS_NO_TEXTURE`; both change
+// nothing.
+//
+// # Safety
+//
+// `world` is null or live; `settings` is null or readable.
+FyStatus fy_sprite_renderer_set(const struct FyWorld *world,
+                                uint64_t id,
+                                const struct FySpriteSettings *settings);
+
+// Takes the object's sprite renderer away.
+//
+// # Safety
+//
+// `world` is null or live.
+FyStatus fy_sprite_renderer_remove(const struct FyWorld *world, uint64_t id);
 
 // A view of `world` that draws `width` × `height` frames offscreen and
 // reads them back (`fy_view_read`). Starts its render worker. Free it with

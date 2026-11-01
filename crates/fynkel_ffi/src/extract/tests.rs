@@ -1,4 +1,4 @@
-use fynkel_world::{Blend, ImageData, Material, Quat, TextSettings, Vec2};
+use fynkel_world::{Blend, ImageData, Material, Quat, SpriteSettings, TextSettings, Vec2};
 
 use super::*;
 
@@ -816,4 +816,85 @@ fn a_text_with_a_shadow_draws_each_letter_twice_the_shadow_offset_behind_and_fir
 
     let (plain, ..) = with_text("I", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings::new(f, 2.0));
     assert_eq!(extract(&plain).0.glyphs.len(), 1, "no shadow unless its colour shows");
+}
+
+/// `world` with objects at `at` showing sprites with `settings`.
+fn with_sprites_in(mut world: World, settings: &[SpriteSettings], at: &[Vec3]) -> (World, Vec<ObjectId>) {
+    let mut ids = Vec::new();
+    for (s, &position) in settings.iter().zip(at) {
+        let id = world.spawn();
+        world.insert(id, Transform { position, ..Transform::default() }).unwrap();
+        world.set_sprite_renderer(id, s.clone()).unwrap();
+        ids.push(id);
+    }
+    (world, ids)
+}
+
+#[test]
+fn sprites_of_one_texture_layer_and_order_are_one_draw_and_their_texture_goes_up() {
+    let (mut world, _) = stage1_world();
+    let (a, b) = (world.add_texture(image()), world.add_texture(image()));
+    let plain = |t| SpriteSettings { size: Vec2::new(2.0, 1.0), ..SpriteSettings::new(t) };
+    for (settings, x) in [
+        (plain(a), 0.0),
+        (plain(a), 1.0),
+        (plain(b), 2.0),
+        (SpriteSettings { sorting_layer: 1, ..plain(a) }, 3.0),
+        (SpriteSettings { order: -2, ..plain(a) }, 4.0),
+        (SpriteSettings { alpha_cutoff: 0.5, ..plain(a) }, 5.0),
+        (SpriteSettings { lit: true, ..plain(a) }, 6.0),
+    ] {
+        let id = world.spawn();
+        world.insert(id, Transform::from_position(Vec3::new(x, 0.0, 0.0))).unwrap();
+        world.set_sprite_renderer(id, settings).unwrap();
+    }
+    let (scene, ops) = extract(&world);
+    assert_eq!(scene.sprites.len(), 7);
+    let mut draws: Vec<_> = scene
+        .particle_draws
+        .iter()
+        .filter_map(|d| match d.mode {
+            ParticleMode::Sprites { cutoff } => {
+                Some((d.material.textures.base_color.unwrap(), d.sorting, cutoff, d.lit, d.count))
+            }
+            _ => None,
+        })
+        .collect();
+    draws.sort_by_key(|d| (d.0, d.1, d.2.to_bits(), d.3));
+    let (ka, kb) = (texture_key(a), texture_key(b));
+    assert_eq!(
+        draws,
+        [
+            (ka, [0, -2], 0.0, false, 1),
+            (ka, [0, 0], 0.0, false, 2),
+            (ka, [0, 0], 0.0, true, 1),
+            (ka, [0, 0], 0.5, false, 1),
+            (ka, [1, 0], 0.0, false, 1),
+            (kb, [0, 0], 0.0, false, 1),
+        ]
+    );
+    let ops: Vec<_> = ops.into_iter().filter(|o| matches!(o, ResourceOp::UploadTexture(..))).collect();
+    let mut up = texture_uploads(&ops);
+    up.sort_by_key(|u| u.0);
+    assert_eq!(up, [(ka, ColorSpace::Srgb), (kb, ColorSpace::Srgb)], "each texture once, in sRGB");
+}
+
+#[test]
+fn a_sprite_is_placed_as_its_object_and_its_quads_say() {
+    let (mut world, _) = stage1_world();
+    let texture = world.add_texture(image());
+    let settings = SpriteSettings {
+        size: Vec2::new(2.0, 1.0),
+        pivot: Vec2::new(0.5, 0.0),
+        color: Color::rgb(1.0, 0.0, 0.0),
+        flip_x: true,
+        ..SpriteSettings::new(texture)
+    };
+    let (world, _) = with_sprites_in(world, &[settings], &[Vec3::new(1.0, 2.0, 0.0)]);
+    let scene = extract(&world).0;
+    let [s] = scene.sprites[..] else { panic!("{:?}", scene.sprites) };
+    assert!(close(s.center, Vec3::new(1.0, 2.5, 0.0)), "standing on its pivot: {}", s.center);
+    assert!(close(s.right, Vec3::new(1.0, 0.0, 0.0)) && close(s.up, Vec3::new(0.0, 0.5, 0.0)));
+    assert_eq!(s.uv, [-1.0, 1.0, 1.0, 0.0], "mirrored across: u from 1 back to 0");
+    assert_eq!(s.color, Color::rgb(1.0, 0.0, 0.0).to_linear());
 }

@@ -68,6 +68,7 @@ fn add_as(
         count: particles.len() as u32,
         center,
         radius,
+        sorting: [0, 0],
     }));
 }
 

@@ -759,6 +759,12 @@ external int fy_sky_image_size(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_spawn(ffi.Pointer<FyWorld> world, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64)>(isLeaf: true)
+external int fy_sprite_renderer_remove(ffi.Pointer<FyWorld> world, int id);
+
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<FySpriteSettings>)>(isLeaf: true)
+external int fy_sprite_renderer_set(ffi.Pointer<FyWorld> world, int id, ffi.Pointer<FySpriteSettings> settings);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Uint64, ffi.Pointer<ffi.Uint64>, ffi.Size)>(isLeaf: true)
 external int fy_submesh_materials_set(
   ffi.Pointer<FyWorld> world,
@@ -987,7 +993,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 50;
+const int FY_ABI_VERSION = 51;
 
 const int FY_APPLE_MORE = 2;
 
@@ -2030,6 +2036,44 @@ final class FySky extends ffi.Struct {
 }
 
 final class FySkyImage extends ffi.Opaque {}
+
+final class FySpriteSettings extends ffi.Struct {
+  @ffi.Uint64()
+  external int texture;
+
+  external FyVec2 size;
+
+  external FyColor color;
+
+  @ffi.Bool()
+  external bool flip_x;
+
+  @ffi.Bool()
+  external bool flip_y;
+
+  external FyVec2 pivot;
+
+  @ffi.Array.multi([4])
+  external ffi.Array<ffi.Float> slice;
+
+  @ffi.Float()
+  external double pixels_per_metre;
+
+  @ffi.Float()
+  external double alpha_cutoff;
+
+  @ffi.Uint32()
+  external int facing;
+
+  @ffi.Int32()
+  external int sorting_layer;
+
+  @ffi.Int32()
+  external int order;
+
+  @ffi.Bool()
+  external bool lit;
+}
 
 sealed class FyStatus {
   static const FY_STATUS_OK = 0;

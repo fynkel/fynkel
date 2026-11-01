@@ -293,6 +293,7 @@ struct ParticleLook {
     soft: bool,
     glyphs: bool,
     on_top: bool,
+    sprites: bool,
 }
 
 /// A particle pipeline's key: its shader's hash (`None`, the built-in
@@ -307,7 +308,8 @@ struct ParticleKey {
     sky_lit: bool,
 }
 
-/// particles.wgsl's `params.w` for a letter of flat text.
+/// particles.wgsl's `params.w` for a quad from its own axes: a letter of
+/// flat text, or a sprite's.
 const GLYPH_MODE: f32 = 6.0;
 
 /// Marks a particle draw's index among the blended draws'.
@@ -757,7 +759,7 @@ pub struct Renderer {
     order: Vec<(SortKey, u32)>,
     /// Its blended ones, each with how far it is ahead of the camera,
     /// sorted furthest first.
-    blended: Vec<(f32, SortKey, u32)>,
+    blended: Vec<([i32; 2], f32, SortKey, u32)>,
     /// Point and spot lights in view: how far each is from the camera
     /// (squared) and its index in the scene.
     in_view_lights: Vec<(f32, u32)>,
@@ -1339,7 +1341,7 @@ impl Renderer {
             );
             if cover.blended() {
                 self.behind |= reads_behind;
-                self.blended.push(((at - camera.position).dot(forward), key, i as u32));
+                self.blended.push(([0, 0], (at - camera.position).dot(forward), key, i as u32));
             } else {
                 self.order.push((key, i as u32));
             }
@@ -1387,11 +1389,11 @@ impl Renderer {
             };
             let key = (cover, Faces::Both, false, shader, textures, false, mesh);
             // Text over everything goes after everything.
-            let distance = match particles.mode {
-                crate::ParticleMode::Glyphs { on_top: true } => f32::NEG_INFINITY,
-                _ => (particles.center - camera.position).dot(forward),
+            let (sorting, distance) = match particles.mode {
+                crate::ParticleMode::Glyphs { on_top: true } => ([i32::MAX; 2], f32::NEG_INFINITY),
+                _ => (particles.sorting, (particles.center - camera.position).dot(forward)),
             };
-            self.blended.push((distance, key, i as u32 | PARTICLES));
+            self.blended.push((sorting, distance, key, i as u32 | PARTICLES));
         }
         // The camera's screen effects, each one's uniform laid out as
         // effect.wgsl reads it. Any makes the scene image, even at low, for
@@ -1429,14 +1431,15 @@ impl Renderer {
         }
         stats.effects = self.effect_chain.len() as u32;
         self.order.sort_unstable_by(|a, b| a.0.cmp(&b.0));
-        // The same distance keeps the scene's order, so they don't flicker.
-        self.blended.sort_unstable_by(|a, b| b.0.total_cmp(&a.0).then(a.2.cmp(&b.2)));
+        // By sorting layer and order (sprites'), then furthest first; the
+        // same distance keeps the scene's order, so they don't flicker.
+        self.blended.sort_unstable_by(|a, b| a.0.cmp(&b.0).then(b.1.total_cmp(&a.1)).then(a.3.cmp(&b.3)));
 
         for &(key, i) in &self.order {
             batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values);
         }
         self.blended_from = self.batches.len();
-        for &(_, key, i) in &self.blended {
+        for &(_, _, key, i) in &self.blended {
             match i & PARTICLES {
                 0 => batch(&mut self.batches, &mut self.instances, key, &scene.draws[i as usize], values),
                 _ => particle_batch(
@@ -3136,6 +3139,7 @@ impl Pipelines {
         // image their alpha as light.
         let (entry_point, dst_factor) = match (key.additive, key.look.soft) {
             _ if key.look.glyphs => ("fs_fy_glyph", wgpu::BlendFactor::OneMinusSrcAlpha),
+            _ if key.look.sprites => ("fs_fy_sprite", wgpu::BlendFactor::OneMinusSrcAlpha),
             (false, false) => ("fs_fy_particle_transparent", wgpu::BlendFactor::OneMinusSrcAlpha),
             (true, false) => ("fs_fy_particle_additive", wgpu::BlendFactor::One),
             (false, true) => ("fs_fy_particle_soft_transparent", wgpu::BlendFactor::OneMinusSrcAlpha),
@@ -3571,6 +3575,57 @@ fn particle_batch(
     let (cover, faces, _, shader, textures, _, mesh) = key;
     let first = instances.len() as u32;
     let m = &draw.material;
+    if let crate::ParticleMode::Sprites { cutoff } = draw.mode {
+        let from = draw.first as usize;
+        let Some(sprites) = scene.sprites.get(from..from + draw.count as usize) else { return };
+        let values = m.shader.map_or(0, |used| values + used.values);
+        let base = m.base_color;
+        // Furthest first, as a transparent system's particles.
+        order.clear();
+        order.extend(
+            sprites.iter().enumerate().map(|(i, s)| (u64::from(!ordered(s.center.dot(forward))) << 32) | i as u64),
+        );
+        order.sort_unstable();
+        instances.extend(order.iter().map(|&i| {
+            let s = &sprites[(i & 0xFFFF_FFFF) as usize];
+            let [r, g, b, a] = s.color;
+            ParticleInstance {
+                center_size: s.center.extend(1.0).into(),
+                color: [r * base[0], g * base[1], b * base[2], a * base[3]],
+                velocity_turn: s.right.extend(0.0).into(),
+                uv: s.uv,
+                params: [cutoff, 0.0, 0.0, GLYPH_MODE],
+                emissive: [0.0; 4],
+                particle: s.up.extend(1.0).into(),
+                values: [values, 0, 0, 0],
+            }
+        }));
+        let count = instances.len() as u32 - first;
+        let (cover, faces, _, shader, textures, _, _) = key;
+        let look = ParticleLook {
+            mesh: false,
+            trail: false,
+            lit: draw.lit,
+            soft: false,
+            glyphs: false,
+            on_top: false,
+            sprites: true,
+        };
+        batches.push(Batch {
+            cover,
+            faces,
+            skinned: false,
+            outlined: false,
+            shader,
+            textures,
+            mesh: MeshKey(u64::MAX),
+            submesh: 0,
+            particle: Some(look),
+            first,
+            count,
+        });
+        return;
+    }
     if let crate::ParticleMode::Glyphs { on_top } = draw.mode {
         let from = draw.first as usize;
         let Some(glyphs) = scene.glyphs.get(from..from + draw.count as usize) else { return };
@@ -3599,7 +3654,15 @@ fn particle_batch(
         }));
         let count = instances.len() as u32 - first;
         let (cover, faces, _, shader, textures, _, _) = key;
-        let look = ParticleLook { mesh: false, trail: false, lit: draw.lit, soft: false, glyphs: true, on_top };
+        let look = ParticleLook {
+            mesh: false,
+            trail: false,
+            lit: draw.lit,
+            soft: false,
+            glyphs: true,
+            on_top,
+            sprites: false,
+        };
         batches.push(Batch {
             cover,
             faces,
@@ -3626,7 +3689,7 @@ fn particle_batch(
         crate::ParticleMode::Vertical => (3.0, 0.0, 0.0),
         crate::ParticleMode::Mesh(_) => (4.0, 0.0, 0.0),
         crate::ParticleMode::Trail => (5.0, 0.0, 0.0),
-        crate::ParticleMode::Glyphs { .. } => (GLYPH_MODE, 0.0, 0.0),
+        crate::ParticleMode::Glyphs { .. } | crate::ParticleMode::Sprites { .. } => (GLYPH_MODE, 0.0, 0.0),
     };
     let trail = draw.mode == crate::ParticleMode::Trail;
     let softness = if soft_particles { draw.softness } else { 0.0 };
@@ -3686,6 +3749,7 @@ fn particle_batch(
             soft: softness > 0.0,
             glyphs: false,
             on_top: false,
+            sprites: false,
         }),
         first,
         count,

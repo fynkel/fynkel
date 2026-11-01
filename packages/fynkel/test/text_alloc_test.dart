@@ -1,6 +1,7 @@
-// A frame that changes 200 numbers in the scene, as a game's hit numbers
-// and scores do, allocates nothing in Dart (stage 15 phase 2's bar): the
-// text goes to the engine as UTF-8 through scratch memory. The strings are
+// A frame that changes 200 numbers in the scene, and fades half, as a
+// game's hit numbers and scores do, allocates nothing in Dart (stage 15
+// phase 2's bar): the text goes to the engine as UTF-8 through scratch
+// memory, and the setters make no closures. The strings are
 // made before the frames are counted, as a game's own formatting is its
 // own. Counted by the VM service's allocation profile (see
 // allocations.dart).
@@ -21,7 +22,7 @@ final _roboto = File.fromUri(Directory.current.uri.resolve('../../tests/assets/f
 void main() {
   final madeEachFrame = allocations();
 
-  test('a frame that changes 200 numbers allocates nothing', () async {
+  test('a frame that changes 200 numbers and fades 100 allocates nothing', () async {
     final world = World();
     addTearDown(world.dispose);
     world.add(Numbers(Font(_roboto.readAsBytesSync())));
@@ -37,6 +38,7 @@ class Numbers extends GameObject {
   final Font font;
   final texts = <TextRenderer>[];
   static final _numbers = [for (var i = 0; i < 1000; i++) i.isEven ? '+$i' : '-${i * 7} x2'];
+  static final _fades = [for (var i = 0; i < 64; i++) Color.white.withAlpha(i / 63)];
   var _frame = 0;
 
   @override
@@ -67,6 +69,8 @@ class Numbers extends GameObject {
     _frame++;
     for (var i = 0; i < texts.length; i++) {
       texts[i].text = _numbers[(_frame * 13 + i) % _numbers.length];
+      // Faded too, as a popping number is.
+      if (i.isEven) texts[i].color = _fades[(_frame + i) % _fades.length];
     }
   }
 }

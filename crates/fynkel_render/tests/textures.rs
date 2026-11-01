@@ -36,6 +36,7 @@ fn facing_plane(material: PbrMaterial) -> RenderScene {
         particles: Vec::new(),
         particle_draws: Vec::new(),
         glyphs: Vec::new(),
+        sprites: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw {
@@ -236,6 +237,7 @@ fn a_distant_checkerboard_is_mid_grey_not_darker() {
             particles: Vec::new(),
             particle_draws: Vec::new(),
             glyphs: Vec::new(),
+            sprites: Vec::new(),
             sky: None,
             fog: None,
             draws: vec![Draw {

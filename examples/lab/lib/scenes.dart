@@ -60,6 +60,7 @@ import 'scenes/rigidbody_walls.dart';
 import 'scenes/routines.dart';
 import 'scenes/shapes_basics.dart';
 import 'scenes/splines.dart';
+import 'scenes/sprites.dart';
 import 'scenes/all_together.dart';
 import 'scenes/signal_basics.dart';
 import 'scenes/signals.dart';
@@ -111,6 +112,7 @@ final List<LabScene Function()> scenes = [
   WorldWidgetsBasicsScene.new,
   WorldWidgetsScene.new,
   FlatTextScene.new,
+  SpritesScene.new,
   MenusBasicsScene.new,
   RebindingBasicsScene.new,
   MinimapBasicsScene.new,

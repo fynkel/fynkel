@@ -52,6 +52,7 @@ fn scene(n: u32, lamps: u32, shadows: bool, see_through: bool, t: f32) -> Render
         particles: Vec::new(),
         particle_draws: Vec::new(),
         glyphs: Vec::new(),
+        sprites: Vec::new(),
         sky: None,
         fog: None,
         ambient: Vec3::splat(0.15),
