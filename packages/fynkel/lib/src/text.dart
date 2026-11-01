@@ -153,79 +153,189 @@ final class TextRenderer extends Component {
 
   /// What its letters are drawn from.
   Font get font => _font;
-  set font(Font value) => _set(() => _font, (v) => _font = v, value);
+  set font(Font value) {
+    _checkChangeable();
+    final old = _font;
+    _font = value;
+    if (_write() case final failed?) {
+      _font = old;
+      failed.raise();
+    }
+  }
 
   /// Its em, in metres: a capital is about 0.7 of it.
   double get size => _size;
-  set size(double value) => _set(() => _size, (v) => _size = v, value);
+  set size(double value) {
+    _checkChangeable();
+    final old = _size;
+    _size = value;
+    if (_write() case final failed?) {
+      _size = old;
+      failed.raise();
+    }
+  }
 
   /// Its letters' colour.
   Color get color => _color;
-  set color(Color value) => _set(() => _color, (v) => _color = v, value);
+  set color(Color value) {
+    _checkChangeable();
+    final old = _color;
+    _color = value;
+    if (_write() case final failed?) {
+      _color = old;
+      failed.raise();
+    }
+  }
 
   /// How wide the outline round each letter is: 0 none, 1 as far as the
   /// atlas reaches, about a ninth of [size].
   double get outline => _outline;
-  set outline(double value) => _set(() => _outline, (v) => _outline = v, value);
+  set outline(double value) {
+    _checkChangeable();
+    final old = _outline;
+    _outline = value;
+    if (_write() case final failed?) {
+      _outline = old;
+      failed.raise();
+    }
+  }
 
   /// The outline's colour.
   Color get outlineColor => _outlineColor;
-  set outlineColor(Color value) => _set(() => _outlineColor, (v) => _outlineColor = v, value);
+  set outlineColor(Color value) {
+    _checkChangeable();
+    final old = _outlineColor;
+    _outlineColor = value;
+    if (_write() case final failed?) {
+      _outlineColor = old;
+      failed.raise();
+    }
+  }
 
   /// How soft its edges are: 0 crisp, 1 blurred: a glow, with an outline.
   double get softness => _softness;
-  set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
+  set softness(double value) {
+    _checkChangeable();
+    final old = _softness;
+    _softness = value;
+    if (_write() case final failed?) {
+      _softness = old;
+      failed.raise();
+    }
+  }
 
   /// A shadow under the letters (TextMeshPro's underlay), drawn with them:
   /// none while its alpha is 0, as by default.
   Color get shadowColor => _shadowColor;
-  set shadowColor(Color value) => _set(() => _shadowColor, (v) => _shadowColor = v, value);
+  set shadowColor(Color value) {
+    _checkChangeable();
+    final old = _shadowColor;
+    _shadowColor = value;
+    if (_write() case final failed?) {
+      _shadowColor = old;
+      failed.raise();
+    }
+  }
 
   /// Where the shadow is from the letters, in ems: (0.05, -0.05), a little
   /// right and down, by default.
   Vec2 get shadowOffset => _shadowOffset;
-  set shadowOffset(Vec2 value) => _set(() => _shadowOffset, (v) => _shadowOffset = v, value);
+  set shadowOffset(Vec2 value) {
+    _checkChangeable();
+    final old = _shadowOffset;
+    _shadowOffset = value;
+    if (_write() case final failed?) {
+      _shadowOffset = old;
+      failed.raise();
+    }
+  }
 
   /// How soft the shadow's edges are, 0 to 1, as [softness].
   double get shadowSoftness => _shadowSoftness;
-  set shadowSoftness(double value) => _set(() => _shadowSoftness, (v) => _shadowSoftness = v, value);
+  set shadowSoftness(double value) {
+    _checkChangeable();
+    final old = _shadowSoftness;
+    _shadowSoftness = value;
+    if (_write() case final failed?) {
+      _shadowSoftness = old;
+      failed.raise();
+    }
+  }
 
   /// Where each line goes across its object's origin.
   TextAlignment get align => _align;
-  set align(TextAlignment value) => _set(() => _align, (v) => _align = v, value);
+  set align(TextAlignment value) {
+    _checkChangeable();
+    final old = _align;
+    _align = value;
+    if (_write() case final failed?) {
+      _align = old;
+      failed.raise();
+    }
+  }
 
   /// Lines are this many times the font's own line height apart.
   double get lineSpacing => _lineSpacing;
-  set lineSpacing(double value) => _set(() => _lineSpacing, (v) => _lineSpacing = v, value);
+  set lineSpacing(double value) {
+    _checkChangeable();
+    final old = _lineSpacing;
+    _lineSpacing = value;
+    if (_write() case final failed?) {
+      _lineSpacing = old;
+      failed.raise();
+    }
+  }
 
   /// Which way it faces: see [Facing].
   Facing get facing => _facing;
-  set facing(Facing value) => _set(() => _facing, (v) => _facing = v, value);
+  set facing(Facing value) {
+    _checkChangeable();
+    final old = _facing;
+    _facing = value;
+    if (_write() case final failed?) {
+      _facing = old;
+      failed.raise();
+    }
+  }
 
   /// Drawn over everything, walls and all.
   bool get onTop => _onTop;
-  set onTop(bool value) => _set(() => _onTop, (v) => _onTop = v, value);
+  set onTop(bool value) {
+    _checkChangeable();
+    final old = _onTop;
+    _onTop = value;
+    if (_write() case final failed?) {
+      _onTop = old;
+      failed.raise();
+    }
+  }
 
   /// Lit as the scene is, else shown as [color] says.
   bool get lit => _lit;
-  set lit(bool value) => _set(() => _lit, (v) => _lit = v, value);
-
-  void _set<T>(T Function() read, void Function(T) write, T value) {
+  set lit(bool value) {
     _checkChangeable();
-    final old = read();
-    write(value);
-    if (_refused() case final error?) {
-      write(old);
-      throw error;
+    final old = _lit;
+    _lit = value;
+    if (_write() case final failed?) {
+      _lit = old;
+      failed.raise();
     }
-    if (!_enabledFlag) return;
+  }
+
+  /// Checks its settings and sends them, when it's on and live: the
+  /// failure, for the setter to put the old value back and raise. Written
+  /// out in each setter, not through a closure, so a setter called every
+  /// frame makes nothing.
+  _Failure? _write() {
+    if (_refused() case final error?) return _Failure(error, StackTrace.current);
+    if (!_enabledFlag) return null;
     final object = _live;
-    if (object == null) return;
+    if (object == null) return null;
     try {
       _put(object);
-    } catch (_) {
-      write(old);
-      rethrow;
+      return null;
+    } catch (error, stack) {
+      return _Failure(error, stack);
     }
   }
 
