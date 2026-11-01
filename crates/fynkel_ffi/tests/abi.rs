@@ -1476,6 +1476,9 @@ fn flat_text_takes_a_font_and_refuses_what_cant_be() {
             outline: 0.0,
             outline_color: srgb(0.0, 0.0, 0.0),
             softness: 0.0,
+            shadow_color: FyColor { r: 0.0, g: 0.0, b: 0.0, a: 0.0 },
+            shadow_offset: FyVec2 { x: 0.05, y: -0.05 },
+            shadow_softness: 0.0,
             facing: FY_FACING_UPRIGHT,
             on_top: false,
             lit: true,
@@ -1488,6 +1491,8 @@ fn flat_text_takes_a_font_and_refuses_what_cant_be() {
             FyTextSettings { font: 0, ..settings },
             FyTextSettings { font: font + 1, ..settings },
             FyTextSettings { outline: 1.5, ..settings },
+            FyTextSettings { shadow_softness: 2.0, ..settings },
+            FyTextSettings { shadow_offset: FyVec2 { x: f32::NAN, y: 0.0 }, ..settings },
         ] {
             assert_eq!(fy_text_renderer_set(world.0, id, &bad, text.as_ptr(), text.len()), FyStatus::InvalidValue);
         }

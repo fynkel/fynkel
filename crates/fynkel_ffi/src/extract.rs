@@ -588,6 +588,7 @@ impl Extract {
         if world.has_texts()
             && let Some((_, _, rotation, eye)) = camera
         {
+            let forward = rotation * Vec3::NEG_Z;
             let groups = &mut self.text_groups;
             groups.clear();
             let mut letters = 0;
@@ -595,7 +596,7 @@ impl Extract {
                 let s = text.settings();
                 groups.push((s.font, s.on_top, s.lit));
                 if matrices.shown(world, id) && world.in_mask(id, mask) {
-                    letters += text.quads().len();
+                    letters += text.quads().len() << usize::from(text.shadowed());
                 }
             }
             groups.sort_unstable();
@@ -617,6 +618,12 @@ impl Extract {
                     let Some(model) = matrices.matrix(world, id) else { continue };
                     let basis = facing(model, s.facing, rotation, eye);
                     let (color, outline_color) = (s.color.to_linear(), s.outline_color.to_linear());
+                    // A shadow, under each letter: moved by its offset, and
+                    // a hair further from the camera, so it's drawn first.
+                    let shadow = text.shadowed().then(|| {
+                        let moved = basis.transform_vector3((s.shadow_offset * s.size).extend(0.0));
+                        (moved + forward * (s.size * 0.002).max(1e-4), s.shadow_color.to_linear())
+                    });
                     for q in text.quads() {
                         let [l, b, r, t] = q.rect;
                         let [x, y, w, h] = q.pixels.map(f32::from);
@@ -626,11 +633,26 @@ impl Extract {
                         let reach = right.abs() + up.abs();
                         lo = lo.min(center - reach);
                         hi = hi.max(center + reach);
+                        let uv = [w / width, h / height, x / width, y / height];
+                        if let Some((moved, shadow)) = shadow {
+                            scene.glyphs.push(Glyph {
+                                center: center + moved,
+                                right,
+                                up,
+                                uv,
+                                color: shadow,
+                                outline_color: shadow,
+                                outline: s.outline,
+                                softness: s.shadow_softness,
+                            });
+                            lo = lo.min(center + moved - reach);
+                            hi = hi.max(center + moved + reach);
+                        }
                         scene.glyphs.push(Glyph {
                             center,
                             right,
                             up,
-                            uv: [w / width, h / height, x / width, y / height],
+                            uv,
                             color,
                             outline_color,
                             outline: s.outline,

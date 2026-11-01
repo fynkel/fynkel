@@ -786,3 +786,34 @@ fn a_text_facing_the_camera_turns_with_it_and_an_upright_one_only_round_up() {
     assert!(close(normal(&flat), Vec3::Y), "flat, facing up");
     assert!(close(flat.up.normalize(), turned * Vec3::NEG_Z), "its top where the object faces");
 }
+
+#[test]
+fn a_text_with_a_shadow_draws_each_letter_twice_the_shadow_offset_behind_and_first() {
+    let shadow = Color::rgba(0.0, 0.0, 0.0, 0.6);
+    let (world, ..) = with_text("I", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings {
+        outline: 0.3,
+        shadow_color: shadow,
+        shadow_offset: Vec2::new(0.1, -0.2),
+        shadow_softness: 0.5,
+        ..TextSettings::new(f, 2.0)
+    });
+    let scene = extract(&world).0;
+    let [a, b] = scene.glyphs[..] else { panic!("a letter and its shadow: {:?}", scene.glyphs) };
+    let (letter, under) = if a.color == shadow.to_linear() { (b, a) } else { (a, b) };
+    assert_eq!(under.color, shadow.to_linear());
+    assert_eq!(under.outline_color, shadow.to_linear(), "the outline's shadow too");
+    assert_eq!((under.outline, under.softness), (0.3, 0.5));
+    assert_eq!((letter.right, letter.up), (under.right, under.up));
+    // The offset is of the em: 0.1 and -0.2 of 2 m (and a few mm back).
+    let moved = under.center - letter.center;
+    assert!((moved.x - 0.2).abs() < 0.005 && (moved.y + 0.4).abs() < 0.005, "{moved}");
+    // Behind as the camera sees it, so it's drawn first.
+    let camera = Transform::from_position(Vec3::new(0.0, 1.5, 4.0)).looking_at(Vec3::ZERO).rotation;
+    let forward = camera * Vec3::NEG_Z;
+    assert!(under.center.dot(forward) > letter.center.dot(forward));
+    let [draw] = &scene.particle_draws[..] else { panic!() };
+    assert_eq!(draw.count, 2);
+
+    let (plain, ..) = with_text("I", Vec3::ZERO, Quat::IDENTITY, |f| TextSettings::new(f, 2.0));
+    assert_eq!(extract(&plain).0.glyphs.len(), 1, "no shadow unless its colour shows");
+}

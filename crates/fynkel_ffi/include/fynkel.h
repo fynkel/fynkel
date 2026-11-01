@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 49
+#define FY_ABI_VERSION 50
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -902,6 +902,12 @@ typedef struct FyTextSettings {
   struct FyColor outline_color;
   // How soft the edges are, 0 to 1.
   float softness;
+  // A shadow under the letters: none while its alpha is 0.
+  struct FyColor shadow_color;
+  // Where the shadow is from the letters, in ems.
+  struct FyVec2 shadow_offset;
+  // How soft the shadow's edges are, 0 to 1.
+  float shadow_softness;
   // One of the `FY_FACING_*`.
   uint32_t facing;
   // Drawn over everything.

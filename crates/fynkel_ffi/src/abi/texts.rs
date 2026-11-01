@@ -1,7 +1,7 @@
 //! Flat text in the scene (stage 15): fonts the world keeps, and text
 //! renderers drawn from their atlases.
 
-use fynkel_world::{Color, Facing, FontId, TextAlign, TextSettings};
+use fynkel_world::{Color, Facing, FontId, TextAlign, TextSettings, Vec2};
 
 use crate::error::{Error, FyStatus, guard};
 
@@ -36,6 +36,12 @@ pub struct FyTextSettings {
     pub outline_color: FyColor,
     /// How soft the edges are, 0 to 1.
     pub softness: f32,
+    /// A shadow under the letters: none while its alpha is 0.
+    pub shadow_color: FyColor,
+    /// Where the shadow is from the letters, in ems.
+    pub shadow_offset: FyVec2,
+    /// How soft the shadow's edges are, 0 to 1.
+    pub shadow_softness: f32,
     /// One of the `FY_FACING_*`.
     pub facing: u32,
     /// Drawn over everything.
@@ -80,6 +86,9 @@ impl FyTextSettings {
             outline: self.outline,
             outline_color: Color::from(self.outline_color),
             softness: self.softness,
+            shadow_color: Color::from(self.shadow_color),
+            shadow_offset: Vec2::new(self.shadow_offset.x, self.shadow_offset.y),
+            shadow_softness: self.shadow_softness,
             facing,
             on_top: self.on_top,
             lit: self.lit,

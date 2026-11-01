@@ -8,7 +8,7 @@
 use std::sync::Arc;
 
 use fynkel_mesh::{GlyphQuad, SdfFont, TextAlign, TextStyle};
-use glam::Vec3;
+use glam::{Vec2, Vec3};
 
 use crate::world::{Result, World, WorldError};
 use crate::{Color, FontId, ObjectId};
@@ -45,6 +45,14 @@ pub struct TextSettings {
     /// How soft the letters' edges are: 0 crisp, 1 blurred across the
     /// atlas's reach.
     pub softness: f32,
+    /// A shadow under the letters (TextMeshPro's underlay): none while
+    /// its alpha is 0.
+    pub shadow_color: Color,
+    /// Where the shadow is from the letters, in ems: (0.05, -0.05) a
+    /// little down and right.
+    pub shadow_offset: Vec2,
+    /// How soft the shadow's edges are, 0 to 1, as `softness`.
+    pub shadow_softness: f32,
     pub facing: Facing,
     /// Drawn over everything, walls and all (a hit number).
     pub on_top: bool,
@@ -64,6 +72,9 @@ impl TextSettings {
             outline: 0.0,
             outline_color: Color::BLACK,
             softness: 0.0,
+            shadow_color: Color::rgba(0.0, 0.0, 0.0, 0.0),
+            shadow_offset: Vec2::new(0.05, -0.05),
+            shadow_softness: 0.0,
             facing: Facing::None,
             on_top: false,
             lit: false,
@@ -83,8 +94,14 @@ impl TextSettings {
         if !(0.0..=1.0).contains(&self.softness) {
             return Some("a text's softness is 0 to 1");
         }
+        if !(0.0..=1.0).contains(&self.shadow_softness) {
+            return Some("a text's shadow softness is 0 to 1");
+        }
+        if !self.shadow_offset.is_finite() {
+            return Some("a text's shadow offset isn't finite");
+        }
         let finite = |c: Color| c.to_linear().iter().all(|v| v.is_finite());
-        if !finite(self.color) || !finite(self.outline_color) {
+        if !finite(self.color) || !finite(self.outline_color) || !finite(self.shadow_color) {
             return Some("a text's colours have a number that isn't finite");
         }
         None
@@ -120,6 +137,11 @@ impl TextRenderer {
 
     /// The box round its letters, in its object's space, or `None` with
     /// none.
+    /// Whether it has a shadow: its colour shows.
+    pub fn shadowed(&self) -> bool {
+        self.settings.shadow_color.a > 0.0
+    }
+
     pub fn bounds(&self) -> Option<(Vec3, Vec3)> {
         let first = self.quads.first()?;
         let mut r = first.rect;
