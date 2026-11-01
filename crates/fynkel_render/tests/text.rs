@@ -81,6 +81,7 @@ fn add_text(
         count: quads.len() as u32,
         center: at,
         radius: size * text.len() as f32,
+        sorting: [0, 0],
     });
 }
 

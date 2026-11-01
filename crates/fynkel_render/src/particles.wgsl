@@ -347,3 +347,15 @@ fn fs_fy_glyph(in: FyParticleOut) -> @location(0) vec4<f32> {
     }
     return fy_particle_transparent(in, color, 1.0);
 }
+
+// A sprite's quad (stage 15): its texture times its colour, as Unity's
+// Sprite Renderer; cut out where the alpha is below `params.x`, when that's
+// above 0. Lit once at its middle when it's lit.
+@fragment
+fn fs_fy_sprite(in: FyParticleOut, @builtin(front_facing) front: bool) -> @location(0) vec4<f32> {
+    let color = fy_particle_shaded(in, front);
+    if in.params.x > 0.0 && color.a < in.params.x {
+        discard;
+    }
+    return fy_particle_transparent(in, color, 1.0);
+}
