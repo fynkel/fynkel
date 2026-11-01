@@ -1506,3 +1506,44 @@ fn flat_text_takes_a_font_and_refuses_what_cant_be() {
         assert_eq!(fy_font_remove(world.0, font), FyStatus::Ok);
     }
 }
+
+#[test]
+fn a_sprite_takes_a_texture_the_world_has_and_refuses_what_cant_be() {
+    let world = World::new();
+    let id = world.spawn();
+    let texture = Texture::rgba(4, 4, &[255; 64]).unwrap().add(&world);
+    let settings = FySpriteSettings {
+        texture,
+        size: FyVec2 { x: 2.0, y: 1.0 },
+        color: srgb(1.0, 1.0, 1.0),
+        flip_x: false,
+        flip_y: true,
+        pivot: FyVec2 { x: 0.5, y: 0.0 },
+        slice: [1.0, 1.0, 1.0, 1.0],
+        pixels_per_metre: 4.0,
+        alpha_cutoff: 0.0,
+        facing: FY_FACING_CAMERA,
+        sorting_layer: 2,
+        order: -1,
+        lit: false,
+    };
+    // SAFETY: a live world and pointers to locals.
+    unsafe {
+        for bad in [
+            FySpriteSettings { texture: 0, ..settings },
+            FySpriteSettings { texture: texture + 1, ..settings },
+            FySpriteSettings { facing: 9, ..settings },
+            FySpriteSettings { size: FyVec2 { x: -1.0, y: 1.0 }, ..settings },
+            FySpriteSettings { alpha_cutoff: 1.5, ..settings },
+            FySpriteSettings { pixels_per_metre: 0.0, ..settings },
+            FySpriteSettings { slice: [f32::NAN, 0.0, 0.0, 0.0], ..settings },
+        ] {
+            assert_ne!(fy_sprite_renderer_set(world.0, id, &bad), FyStatus::Ok);
+        }
+        assert_eq!(fy_sprite_renderer_remove(world.0, id), FyStatus::NoComponent);
+        assert_eq!(fy_sprite_renderer_set(world.0, id, &settings), FyStatus::Ok);
+        assert_eq!(fy_texture_remove(world.0, texture), FyStatus::InUse);
+        assert_eq!(fy_sprite_renderer_remove(world.0, id), FyStatus::Ok);
+        assert_eq!(fy_texture_remove(world.0, texture), FyStatus::Ok);
+    }
+}

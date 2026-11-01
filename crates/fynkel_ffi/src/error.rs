@@ -78,7 +78,8 @@ impl From<WorldError> for Error {
             | WorldError::ShaderInUse { .. }
             | WorldError::EffectInUse { .. }
             | WorldError::EffectTextureInUse { .. }
-            | WorldError::FontInUse { .. } => FyStatus::InUse,
+            | WorldError::FontInUse { .. }
+            | WorldError::SpriteTextureInUse { .. } => FyStatus::InUse,
             WorldError::Values { .. } | WorldError::EffectValues { .. } => FyStatus::WrongSize,
             WorldError::ShaderKind { .. }
             | WorldError::Field(_)
@@ -90,7 +91,8 @@ impl From<WorldError> for Error {
             | WorldError::Particles(_)
             | WorldError::NoFont(_)
             | WorldError::Font
-            | WorldError::Text(_) => FyStatus::InvalidValue,
+            | WorldError::Text(_)
+            | WorldError::Sprite(_) => FyStatus::InvalidValue,
         };
         Self::new(status, e.to_string())
     }

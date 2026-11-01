@@ -48,7 +48,7 @@ use fynkel_render::glam::{Mat4, Vec3};
 use fynkel_render::{
     AmbientOcclusion, Bloom, CameraView, ColorSpace, CustomShader, Draw, Fog, Glyph, Light as RenderLight, Line,
     MAX_TEXTURES, MaterialTextures, MeshKey, Outline, Particle, ParticleDraw, ParticleMode, PbrMaterial, Quality,
-    RenderScene, ScreenEffect, ShaderKey, ShaderUse, Sky, TextureKey,
+    RenderScene, ScreenEffect, ShaderKey, ShaderUse, Sky, Sprite, TextureKey,
 };
 use fynkel_world::{
     AtlasPixels, Camera, Color, DrawnParticle, Facing, FontId, ImageData, Light, LightKind, MAX_TRAIL_POINTS, Material,
@@ -126,6 +126,9 @@ pub(crate) struct Extract {
     /// Flat text's draws this frame: each font's texts over everything or
     /// not, lit or not. Kept so a frame allocates nothing.
     text_groups: Vec<(FontId, bool, bool)>,
+    /// Sprites' draws this frame: each texture's in each sorting layer and
+    /// order, by cutoff (its bits) and lit or not.
+    sprite_groups: Vec<(TextureId, [i32; 2], u32, bool)>,
 }
 
 pub(crate) fn mesh_key(id: MeshId) -> MeshKey {
@@ -542,6 +545,7 @@ impl Extract {
                     count: self.drawn.len() as u32,
                     center: (lo + hi) * 0.5,
                     radius: (hi - lo).length() * 0.5,
+                    sorting: [0, 0],
                 });
             }
         }
@@ -579,6 +583,7 @@ impl Extract {
                     count: self.drawn.len() as u32,
                     center: (lo + hi) * 0.5,
                     radius: (hi - lo).length() * 0.5,
+                    sorting: [0, 0],
                 });
             }
         }
@@ -680,6 +685,82 @@ impl Extract {
                     count,
                     center: (lo + hi) * 0.5,
                     radius: (hi - lo).length() * 0.5,
+                    sorting: [0, 0],
+                });
+            }
+        }
+
+        // Sprites: each texture's, in each sorting layer and order, cut out
+        // or not, lit or not, one draw; each placed as it faces.
+        if world.has_sprites()
+            && let Some((_, _, rotation, eye)) = camera
+        {
+            let groups = &mut self.sprite_groups;
+            groups.clear();
+            let mut quads = 0;
+            let group = |s: &fynkel_world::SpriteSettings| {
+                (s.texture, [s.sorting_layer, s.order], s.alpha_cutoff.to_bits(), s.lit)
+            };
+            for (id, sprite) in world.sprite_renderers() {
+                groups.push(group(sprite.settings()));
+                if matrices.shown(world, id) && world.in_mask(id, mask) {
+                    quads += sprite.quads().len();
+                }
+            }
+            groups.sort_unstable();
+            groups.dedup();
+            scene.sprites.reserve(quads);
+            for &(texture, sorting, cutoff, lit) in groups.iter() {
+                let Ok(image) = world.texture(texture) else { continue };
+                if uploaded.textures.insert((texture, ColorSpace::Srgb)) {
+                    ops.push(ResourceOp::UploadTexture(texture_key(texture), ColorSpace::Srgb, Arc::clone(image)));
+                }
+                let first = scene.sprites.len() as u32;
+                let (mut lo, mut hi) = (Vec3::splat(f32::INFINITY), Vec3::splat(f32::NEG_INFINITY));
+                for (id, sprite) in world.sprite_renderers() {
+                    let s = sprite.settings();
+                    if group(s) != (texture, sorting, cutoff, lit) {
+                        continue;
+                    }
+                    if !matrices.shown(world, id) || !world.in_mask(id, mask) {
+                        continue;
+                    }
+                    let Some(model) = matrices.matrix(world, id) else { continue };
+                    let basis = facing(model, s.facing, rotation, eye);
+                    let color = s.color.to_linear();
+                    for q in sprite.quads() {
+                        let [l, b, r, t] = q.rect;
+                        let [ul, vt, ur, vb] = q.uv;
+                        let center = basis.transform_point3(Vec3::new((l + r) * 0.5, (b + t) * 0.5, 0.0));
+                        let right = basis.transform_vector3(Vec3::new((r - l) * 0.5, 0.0, 0.0));
+                        let up = basis.transform_vector3(Vec3::new(0.0, (t - b) * 0.5, 0.0));
+                        let reach = right.abs() + up.abs();
+                        lo = lo.min(center - reach);
+                        hi = hi.max(center + reach);
+                        scene.sprites.push(Sprite { center, right, up, uv: [ur - ul, vb - vt, ul, vt], color });
+                    }
+                }
+                let count = scene.sprites.len() as u32 - first;
+                if count == 0 {
+                    continue;
+                }
+                let material = PbrMaterial {
+                    blend: fynkel_render::Blend::Transparent,
+                    textures: MaterialTextures { base_color: Some(texture_key(texture)), ..MaterialTextures::NONE },
+                    ..PbrMaterial::DEFAULT
+                };
+                scene.particle_draws.push(ParticleDraw {
+                    material,
+                    mode: ParticleMode::Sprites { cutoff: f32::from_bits(cutoff) },
+                    sheet: [1, 1],
+                    lit,
+                    softness: 0.0,
+                    largest: 0.0,
+                    first,
+                    count,
+                    center: (lo + hi) * 0.5,
+                    radius: (hi - lo).length() * 0.5,
+                    sorting,
                 });
             }
         }
