@@ -71,7 +71,7 @@ cutting meshes. Shipping is far off.
 
 ## 2. Unity's way, and Fynkel's
 
-| In Unity | In Fynkel after stage 16 |
+| In Unity | In Fynkel after this plan |
 |---|---|
 | `Sprite` (`Sprite.Create(texture, rect, pivot, pixelsPerUnit, border)`) | `Sprite(texture, rect:, pivot:, pixelsPerUnit:, border:)`; a `Texture2D` is a sprite of itself, so stage 15's code stands. |
 | Sprite Editor, Multiple mode: a sheet cut by grid or by hand; Sprite Atlas | `SpriteSheet.grid(texture, cell:)`, `world.assets.spriteSheet('x.json')` (Aseprite's and TexturePacker's export). |
