@@ -19,6 +19,7 @@ import 'scenes/fixed_step_basics.dart';
 import 'scenes/glow.dart';
 import 'scenes/flutter_basics.dart';
 import 'scenes/theme_basics.dart';
+import 'scenes/flat_text.dart';
 import 'scenes/world_widgets.dart';
 import 'scenes/world_widgets_basics.dart';
 import 'scenes/input.dart';
@@ -109,6 +110,7 @@ final List<LabScene Function()> scenes = [
   ThemeBasicsScene.new,
   WorldWidgetsBasicsScene.new,
   WorldWidgetsScene.new,
+  FlatTextScene.new,
   MenusBasicsScene.new,
   RebindingBasicsScene.new,
   MinimapBasicsScene.new,
