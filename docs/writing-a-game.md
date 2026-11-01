@@ -1707,8 +1707,8 @@ void showScore(MeshRenderer score, Font font, int points) {
 - **What it costs**: two lines of 26 letters are about 4,000 triangles
   and take 0.4 ms on a Mac. A score changing a few times a second is
   fine; text that changes every frame is better as a Flutter widget over
-  the view, pinned to a place in the world (§17). Flat, crisp text in
-  the scene, like TextMeshPro's, is still to come.
+  the view, pinned to a place in the world (§17), or flat text in the
+  scene (§12c).
 
 ### Splines: roads, ropes and tracks
 
@@ -1788,6 +1788,227 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
 The lab's "Splines" has a road whose knots can be dragged, a rope that
 swings between two posts, a fence and a cart on a track
 (examples/lab/lib/scenes/splines.dart).
+
+## 12c. Text and pictures in the scene
+
+Flutter widgets over the view (§17) are the game's UI. These are drawn
+in the scene itself, as Unity's TextMeshPro and Sprite Renderer are: hidden
+by what's in front of them, sorted with the rest, as many as a crowd.
+
+### Flat text
+
+A **`TextRenderer`** draws flat text, crisp close up and still readable
+a few pixels high: a sign, a name over a head, a number popping from a
+hit. Its letters come from an atlas the engine makes from the font's
+outlines, once per font. `size` is the em in metres, as `Mesh.text`'s,
+and `align`, `lineSpacing` and `font.measure` lay it out the same way
+(§12b):
+
+```dart
+/// A shop front: OPEN in red with a white outline, the hours in small
+/// print under it, and START painted on the ground before it.
+class ShopFront extends GameObject {
+  ShopFront() : super(name: 'shop front');
+
+  @override
+  Future<void> onLoad() async {
+    super.onLoad();
+    final font = await world.assets.font('fonts/Roboto-Regular.ttf');
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 2.2, 0)),
+        components: [
+          TextRenderer('OPEN', font: font, size: 0.8, color: const Color(0xFFE02020), outline: 0.4, outlineColor: Color.white),
+        ],
+      ),
+    );
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 0)),
+        components: [TextRenderer('9 to 5\nclosed on Sundays', font: font, size: 0.15, lineSpacing: 1.2)],
+      ),
+    );
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0.01, 2)),
+        components: [TextRenderer('START', font: font, size: 0.9, facing: Facing.up, softness: 0.15)],
+      ),
+    );
+  }
+}
+
+/// A number popping from a hit: over everything, rising, fading.
+class HitNumber extends GameObject {
+  HitNumber(int damage, Font font, Vec3 at)
+    : _text = TextRenderer(
+        '-$damage',
+        font: font,
+        size: 0.4,
+        color: const Color(0xFFFFE070),
+        outline: 0.35,
+        shadowColor: const Color.rgb(0, 0, 0, 0.6),
+        facing: Facing.camera,
+        onTop: true,
+      ),
+      super(transform: Transform(position: at)) {
+    addComponent(_text);
+  }
+
+  final TextRenderer _text;
+  double _age = 0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    _age += time.delta;
+    if (_age >= 1) {
+      destroy();
+      return;
+    }
+    position = position + Vec3(0, 1.5 * time.delta, 0);
+    _text.color = const Color(0xFFFFE070).withAlpha(_age < 0.5 ? 1 : 2 - 2 * _age);
+  }
+}
+```
+
+- **The look**: `color`; an `outline` (0 none, 1 about a ninth of the
+  size) in `outlineColor`; `softness` (0 crisp, 1 blurred, a glow with an
+  outline); a shadow under the letters, `shadowColor` (none while its
+  alpha is 0), `shadowOffset` in ems and `shadowSoftness`
+  (TextMeshPro's underlay).
+- **Which way it faces**: `facing` is `Facing.none` (turned as its
+  object is, its front along +Z; nothing shows from behind),
+  `Facing.camera` (square to the camera: a hit number), `Facing.upright`
+  (turned round to the camera, standing: a name over a head) or
+  `Facing.up` (flat on the ground).
+- **What hides it**: what's solid in front of it, as any object, unless
+  it's `onTop`: then it's over everything, walls and all. It's unlit,
+  shown as its colour says in the dark too, unless it's `lit`.
+- **What it costs**: changing `text` lays it out again in the engine and
+  makes nothing once its letters have been seen, so a number changing
+  every frame is fine: 200 of them at once add 0.73 ms to the frame on a
+  Note10+, at 60 fps. Letters are laid out left to right, as
+  `Mesh.text`'s: no right-to-left, no emoji, no bold in the middle of a
+  line.
+
+### Sprites
+
+A **`SpriteRenderer`** draws a picture on a quad: a ring on the ground
+where to go, a leaf, a cloud, a speech bubble, a poster. Its size is its
+texture's pixels at `pixelsPerMetre` (100, as Unity's) unless it's given
+one, and its `pivot` is the point of it that sits on its object's origin
+((0.5, 0.5) its middle, (0.5, 0) its feet). `color` is multiplied into
+the texture, so its alpha fades it; `flipX` and `flipY` mirror it about
+the pivot; `facing` turns it as a text's does:
+
+```dart
+/// Where to go: a ring on the ground, pulsing.
+class TargetRing extends GameObject {
+  TargetRing() : super(name: 'target ring');
+
+  SpriteRenderer? _ring;
+
+  @override
+  Future<void> onLoad() async {
+    super.onLoad();
+    final ring = SpriteRenderer(
+      await world.assets.texture('ring.png'),
+      size: Vec2(1.5, 1.5),
+      color: const Color(0xFFFFD040),
+      facing: Facing.up,
+    );
+    addComponent(ring);
+    _ring = ring;
+  }
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    _ring?.color = Color.rgb(1, 0.82, 0.25, 0.4 + 0.6 * ((time.sinceStart * 1.5) % 1));
+  }
+}
+
+/// A speech bubble standing over its object: one small rounded picture,
+/// 9-sliced to fit the words, the words in front of it.
+GameObject speechBubble(String words, Font font, Texture2D rounded) {
+  const size = 0.22;
+  final fit = font.measure(words, size: size) + Vec2(0.4, 0.3);
+  return GameObject(
+    name: 'bubble',
+    transform: Transform(position: Vec3(0, 2, 0)),
+    components: [
+      SpriteRenderer(rounded, size: fit, slice: const Insets.all(16), pivot: Vec2(0.5, 0), facing: Facing.camera),
+    ],
+    children: [
+      // One line's letters stand on y = 0; what hangs below is about a
+      // quarter of the size.
+      GameObject(
+        transform: Transform(position: Vec3(0, 0.15 + size * 0.25, 0.01)),
+        components: [TextRenderer(words, font: font, size: size, color: Color.black, facing: Facing.camera)],
+      ),
+    ],
+  );
+}
+```
+
+- **9-slice**: `slice: Insets(left, top, right, bottom)` says how far in
+  from each edge the corners are, in the texture's pixels (Unity's
+  sprite borders). The corners keep their size, `pixelsPerMetre` to the
+  metre, however big it's made, and the edges and the middle stretch: a
+  bubble, a panel, a bar. A sprite smaller than its corners shrinks them
+  to fit.
+- **What's drawn over what**: see-through sprites are drawn by their
+  `sortingLayer`, then their `order`, higher over lower, and only then
+  by distance, farther first. Cards in a hand, a shadow under a
+  character, a 2D game's background behind its middle: give them their
+  layers and orders, and the distance doesn't matter. Text that's
+  `onTop` stays over them all.
+- **Cut out**: `alphaCutoff` above 0 cuts the sprite out where its
+  alpha is below it, for leaves and fences that hide what's behind them
+  as solid things do. At 0 it's see-through by its alpha.
+- **Many**: sprites of one texture, sorting layer and order are drawn
+  together, so a thousand cost one draw: 1,000 moving at once hold 60
+  fps on a Note10+ at low and on a 2018 iPad. Put a game's small
+  pictures in one texture (an atlas) to keep them together. A texture
+  can't be disposed while a sprite shows it.
+
+### A widget as a picture
+
+**`widget.toTexture(size:, pixelRatio:)`**, from `package:fynkel_flutter`,
+draws a widget once into a texture: a poster, a scoreboard, a shop's
+price list with the game's own fonts and look, shown by a sprite or a
+material (`Material(baseColorTexture: …)`):
+
+```dart
+// lib/poster.dart
+import 'package:flutter/material.dart' show BorderRadius, BoxDecoration, Center, Colors, Container, Size, Text, TextStyle;
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+/// A poster for [level], drawn by Flutter, on a sprite 2.4 by 1.5 metres.
+Future<GameObject> poster(int level) async {
+  final picture = await Container(
+    decoration: BoxDecoration(color: Colors.indigo, borderRadius: BorderRadius.circular(12)),
+    child: Center(
+      child: Text('LEVEL $level', style: const TextStyle(color: Colors.white, fontSize: 28)),
+    ),
+  ).toTexture(size: const Size(240, 150), pixelRatio: 2);
+  return GameObject(name: 'poster', components: [SpriteRenderer(picture, size: Vec2(2.4, 1.5))]);
+}
+```
+
+It's a picture, not a live widget: it doesn't animate and takes no
+taps. To change it, draw it again and give the sprite the new texture,
+then dispose the old one: a scoreboard once a second, not every frame.
+The widget is drawn round only a `Directionality` and a `MediaQuery` of
+its size, so a `Theme` the game wants is put round it by the game; and
+images in it must be loaded first (`precacheImage`), as nothing waits for
+them. On Android it waits for the app's first frame before drawing. For
+a widget that stays live, a button or a bar that changes, use a
+`WorldWidget` (§17), which stays over the scene rather than in it.
+
+The lab's "Text in the world" and "Pictures in the world" show all of
+this (examples/lab/lib/scenes/flat_text.dart and sprites.dart).
 
 ## 13. Animation
 
@@ -3616,7 +3837,9 @@ where it shows. **`hideBehind: true`** hides it while something is between
 the camera and its point, a pillar or a wall (not its own object), fading
 over 0.15 s; `hideLayers` says what counts (`LayerMask.except([glass])`
 sees through glass). It looks with `world.raycast`, eight widgets a frame
-in turn, so a hundred cost eight casts, not a hundred. **`keepOnScreen:
+in turn, so a hundred cost eight casts, not a hundred: among 3,000
+objects, 0.3 ms a frame on a Mac and 1.3 ms on a Note10+ (each cast
+still looks at every object; a tree over them is to come). **`keepOnScreen:
 true`** keeps all of it inside the view's edge, `edgeMargin` in: a speech
 bubble over someone at the side doesn't hang off, and one whose point
 leaves the view, or goes behind the camera, waits at the edge toward it.
@@ -4494,8 +4717,11 @@ yet (§21).
 ## 21. What isn't there yet
 
 - **Drawing:** reflections of the scene itself (a mirror shows the sky
-  alone), sprites and 2D, flat text in the scene (TextMeshPro's; solid
-  3D text is there, §12b), a model's own vertex colours (a
+  alone), a 2D game's own pieces (2D physics, a pixel-perfect camera,
+  sprite sheets cut by the engine and tilemaps; sprites and flat text are
+  there, §12c), a world-space canvas (live widgets laid out in the scene
+  and tapped through it: a widget drawn once into a texture is there,
+  §12c), a model's own vertex colours (a
   mesh made in code has them, §12b), shadows from point lights (a
   spotlight's are there, §5);
   see-through objects don't cast shadows.
@@ -4573,6 +4799,12 @@ yet (§21).
 | ProBuilder's shapes with settings | `Mesh.box`, `grid`, `sphere`, `cylinder`, `cone`, `torus`, `disc`, `capsule` with sizes and segments |
 | ProBuilder's extrude, a lathe | `Mesh.extrude(Shape2D, depth:)` with holes, `Mesh.lathe(profile)` |
 | `TextMesh` (`text`, `font`, `characterSize`, `alignment`, `lineSpacing`) | `Mesh.text(text, font:, size:, align: TextAlignment.center, lineSpacing:)`, solid with `depth`; `world.assets.font` |
+| TextMeshPro's `TextMeshPro` (`text`, `fontSize`, `color`, outline, underlay) | `TextRenderer(text, font:, size:, color:, outline:, outlineColor:, shadowColor:, shadowOffset:)` (§12c) |
+| A billboard (`transform.LookAt(camera)`) | `facing: Facing.camera`, or `Facing.upright` to stay standing |
+| `SpriteRenderer` (`sprite`, `color`, `flipX`, `flipY`, `sortingLayerName`, `sortingOrder`) | `SpriteRenderer(texture, color:, flipX:, flipY:, sortingLayer:, order:)`; sorting layers are numbers |
+| A sprite's Pixels Per Unit, Pivot and Border (9-slice), Draw Mode Sliced | `pixelsPerMetre:`, `pivot:`, `slice: Insets(…)`; sliced whenever `slice` isn't `Insets.zero` |
+| A UI drawn into a `RenderTexture` | `widget.toTexture(size:, pixelRatio:)`, drawn once (§12c) |
+| A World Space Canvas (a health bar over a head) | `WorldWidget` (§17): a widget over the view at the object, `hideBehind`, `keepOnScreen` |
 | `Mesh.CombineMeshes(CombineInstance[])` | `Mesh.combine([CombineInstance(mesh, position:, ...)])`, a part each kept apart |
 | Splines: `Spline`, `BezierKnot`, `TangentMode`, `Evaluate`, `GetLength`, `SplineUtility.GetNearestPoint` | `Spline` with `Knot`s and `TangentMode`, `positionAt` / `directionAt` / `upAt` / `rotationAt` by distance, `length`, `nearest` |
 | `SplineContainer`, `SplineInstantiate`, `SplineAnimate` | the same three, as components |
