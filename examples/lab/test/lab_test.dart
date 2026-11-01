@@ -43,6 +43,7 @@ import 'package:lab/scenes/rigidbody_walls.dart';
 import 'package:lab/scenes/shapes_basics.dart';
 import 'package:lab/scenes/crowd.dart';
 import 'package:lab/scenes/skinned.dart';
+import 'package:lab/scenes/sprites.dart';
 import 'package:lab/scenes/sound_mix.dart';
 import 'package:lab/scenes/theme_basics.dart';
 import 'package:lab/scenes/flat_text.dart';
@@ -53,6 +54,8 @@ import 'package:lab/scenes/world_widgets_basics.dart';
 Future<Uint8List> files(String asset) async => File('assets/$asset').readAsBytesSync();
 
 void main() {
+  // Pictures in the world draws widgets into textures, as the app does.
+  TestWidgetsFlutterBinding.ensureInitialized();
   // The tests read assets from disk, but the app gets only what the
   // pubspec lists, and a listed folder brings its own files, not its
   // subfolders'.
@@ -384,6 +387,52 @@ void main() {
       if (image.rgba[i] > 180 && image.rgba[i + 1] < 80 && image.rgba[i + 2] < 80) red++;
     }
     expect(red, greaterThan(20));
+  });
+
+  test('Pictures in the world: a bubble fitting its words, rings, a poster from a widget, cards by order', () async {
+    final world = World(source: files);
+    addTearDown(world.dispose);
+    final scene = world.add(SpritesScene());
+    await scene.loaded;
+    world.update(1 / 60);
+    final bubble = scene.bubbleSprite;
+    expect(bubble.slice, const Insets.all(16));
+    final short = bubble.size.x;
+    scene.say('A much longer thing to say than hi');
+    expect(bubble.size.x, greaterThan(short + 1), reason: 'grown to its words');
+    expect(scene.rings.first.facing, Facing.up);
+    final alpha = scene.rings.first.color.a;
+    for (var i = 0; i < 20; i++) {
+      world.update(1 / 60);
+    }
+    expect(scene.rings.first.color.a, isNot(closeTo(alpha, 1e-3)), reason: 'pulsing');
+    final first = scene.posterSprite.texture;
+    await scene.redrawPoster();
+    expect(scene.posterSprite.texture, isNot(same(first)));
+    expect(scene.posterSprite.texture.width, 480, reason: '240 at twice the pixels');
+    final [blue, swarm] = scene.controls.whereType<Toggle>().toList();
+    expect([for (final card in scene.cards) card.order], [0, 1, -1], reason: 'green over red, though farther');
+    blue.onChanged(true);
+    expect(scene.cards[2].order, 3);
+    swarm.onChanged(true);
+    world.update(1 / 60);
+    expect(scene.readout.value, contains('1,000 sprites'));
+    // And drawn: the poster's blue shows.
+    final view = HeadlessView(world, width: 480, height: 360);
+    addTearDown(view.dispose);
+    final image = view.read(view.frame());
+    if (Platform.environment['LAB_SHOT'] case final path?) {
+      File(path).writeAsBytesSync([
+        ...'P6 480 360 255\n'.codeUnits,
+        for (var i = 0; i < image.rgba.length; i++)
+          if (i % 4 != 3) image.rgba[i],
+      ]);
+    }
+    var blueish = 0;
+    for (var i = 0; i < image.rgba.length; i += 4) {
+      if (image.rgba[i + 2] > 120 && image.rgba[i + 2] > image.rgba[i + 1] + 40) blueish++;
+    }
+    expect(blueish, greaterThan(200));
   });
 
   test('Shapes: the basics: six shapes, the sphere as light as Unity\'s, and the quad\'s back on and off', () {
