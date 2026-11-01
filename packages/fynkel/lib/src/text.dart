@@ -117,19 +117,24 @@ final class TextRenderer extends Component {
     this._outline = 0,
     this._outlineColor = Color.black,
     this._softness = 0,
+    this._shadowColor = const Color.rgb(0, 0, 0, 0),
+    Vec2? shadowOffset,
+    this._shadowSoftness = 0,
     this._align = TextAlignment.center,
     this._lineSpacing = 1,
     this._facing = Facing.none,
     this._onTop = false,
     this._lit = false,
-  }) : super._() {
+  }) : _shadowOffset = shadowOffset ?? Vec2(0.05, -0.05),
+       super._() {
     if (_refused() case final error?) throw error;
   }
 
   String _text;
   Font _font;
-  double _size, _outline, _softness, _lineSpacing;
-  Color _color, _outlineColor;
+  double _size, _outline, _softness, _shadowSoftness, _lineSpacing;
+  Color _color, _outlineColor, _shadowColor;
+  Vec2 _shadowOffset;
   TextAlignment _align;
   Facing _facing;
   bool _onTop, _lit;
@@ -170,6 +175,20 @@ final class TextRenderer extends Component {
   /// How soft its edges are: 0 crisp, 1 blurred: a glow, with an outline.
   double get softness => _softness;
   set softness(double value) => _set(() => _softness, (v) => _softness = v, value);
+
+  /// A shadow under the letters (TextMeshPro's underlay), drawn with them:
+  /// none while its alpha is 0, as by default.
+  Color get shadowColor => _shadowColor;
+  set shadowColor(Color value) => _set(() => _shadowColor, (v) => _shadowColor = v, value);
+
+  /// Where the shadow is from the letters, in ems: (0.05, -0.05), a little
+  /// right and down, by default.
+  Vec2 get shadowOffset => _shadowOffset;
+  set shadowOffset(Vec2 value) => _set(() => _shadowOffset, (v) => _shadowOffset = v, value);
+
+  /// How soft the shadow's edges are, 0 to 1, as [softness].
+  double get shadowSoftness => _shadowSoftness;
+  set shadowSoftness(double value) => _set(() => _shadowSoftness, (v) => _shadowSoftness = v, value);
 
   /// Where each line goes across its object's origin.
   TextAlignment get align => _align;
@@ -221,11 +240,16 @@ final class TextRenderer extends Component {
       ..line_spacing = _lineSpacing
       ..outline = _outline
       ..softness = _softness
+      ..shadow_softness = _shadowSoftness
       ..facing = _facing._native
       ..on_top = _onTop
       ..lit = _lit;
     _textViews.color.write(_color);
     _textViews.outlineColor.write(_outlineColor);
+    _textViews.shadowColor.write(_shadowColor);
+    _textViews.shadowOffset
+      ..x = _shadowOffset.x
+      ..y = _shadowOffset.y;
     final length = scratch.utf8Quiet(_text);
     check(fy_text_renderer_set(w, object.id, scratch.textSettings, scratch.bytes(), length));
   }
@@ -237,6 +261,12 @@ final class TextRenderer extends Component {
     if (!_size.isFinite || _size < 0) return ArgumentError.value(_size, 'size', 'must be 0 or more');
     if (!(_outline >= 0 && _outline <= 1)) return ArgumentError.value(_outline, 'outline', 'must be 0 to 1');
     if (!(_softness >= 0 && _softness <= 1)) return ArgumentError.value(_softness, 'softness', 'must be 0 to 1');
+    if (!(_shadowSoftness >= 0 && _shadowSoftness <= 1)) {
+      return ArgumentError.value(_shadowSoftness, 'shadowSoftness', 'must be 0 to 1');
+    }
+    if (!_shadowOffset.x.isFinite || !_shadowOffset.y.isFinite) {
+      return ArgumentError.value(_shadowOffset, 'shadowOffset', 'must be finite');
+    }
     if (!_lineSpacing.isFinite) return ArgumentError.value(_lineSpacing, 'lineSpacing', 'must be finite');
     return null;
   }
@@ -248,10 +278,15 @@ final class TextRenderer extends Component {
 /// [scratch]'s text settings' views, made once: a struct's field read
 /// makes a view each time.
 final class _TextViews {
-  _TextViews(this.settings) : color = settings.color, outlineColor = settings.outline_color;
+  _TextViews(this.settings)
+    : color = settings.color,
+      outlineColor = settings.outline_color,
+      shadowColor = settings.shadow_color,
+      shadowOffset = settings.shadow_offset;
 
   final FyTextSettings settings;
-  final FyColor color, outlineColor;
+  final FyColor color, outlineColor, shadowColor;
+  final FyVec2 shadowOffset;
 }
 
 final _textViews = _TextViews(scratch.textSettings.ref);

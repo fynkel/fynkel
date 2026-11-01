@@ -65,6 +65,19 @@ void main() {
     expect(pixels(const Color.rgb(1, 0, 0)), 0);
   });
 
+  test('a shadow shows under it in its colour, offset as asked', () {
+    final text = TextRenderer('I', font: font, size: 3, shadowColor: const Color.rgb(1, 0, 0));
+    world.add(GameObject(components: [text]));
+    expect(text.shadowOffset, Vec2(0.05, -0.05));
+    final small = pixels(const Color.rgb(1, 0, 0));
+    expect(small, greaterThan(5), reason: 'its edge shows past the letter');
+    text.shadowOffset = Vec2(0.15, -0.1);
+    expect(pixels(const Color.rgb(1, 0, 0)), greaterThan(small * 2));
+    expect(() => text.shadowSoftness = 2, throwsArgumentError);
+    text.shadowColor = const Color.rgb(1, 0, 0, 0);
+    expect(pixels(const Color.rgb(1, 0, 0)), 0, reason: 'none, its alpha 0');
+  });
+
   test('a wall hides it unless it is on top', () {
     world.add(
       GameObject(

@@ -43,7 +43,14 @@ class Numbers extends GameObject {
   void onLoad() {
     super.onLoad();
     for (var i = 0; i < 200; i++) {
-      final text = TextRenderer('0', font: font, size: 0.3, facing: Facing.camera, onTop: true);
+      final text = TextRenderer(
+        '0',
+        font: font,
+        size: 0.3,
+        facing: Facing.camera,
+        onTop: true,
+        shadowColor: Color.black,
+      );
       texts.add(text);
       add(
         GameObject(

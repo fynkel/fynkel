@@ -987,7 +987,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 49;
+const int FY_ABI_VERSION = 50;
 
 const int FY_APPLE_MORE = 2;
 
@@ -2074,6 +2074,13 @@ final class FyTextSettings extends ffi.Struct {
 
   @ffi.Float()
   external double softness;
+
+  external FyColor shadow_color;
+
+  external FyVec2 shadow_offset;
+
+  @ffi.Float()
+  external double shadow_softness;
 
   @ffi.Uint32()
   external int facing;
