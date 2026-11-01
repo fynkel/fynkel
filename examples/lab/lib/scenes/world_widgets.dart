@@ -3,16 +3,25 @@
 // (hideBehind); a flag far off keeps an arrow at the screen's edge while
 // it's off the screen (keepOnScreen). "sync check" spins the camera round
 // a small white cube at 180°/s with a red cross on it: filmed, the cross
-// should never leave the cube.
+// should never leave the cube. "100 tags among 3,000" is the phase's
+// measure: 3,000 cubes, 100 of them tagged, hidden behind the rest.
 
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart' show Alignment;
+import 'package:flutter/scheduler.dart' show FrameTiming, SchedulerBinding;
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import '../lab.dart';
 import '../widgets/tags.dart';
+
+/// `--dart-define=LAB_TAGS=true` starts with the 100 tags among 3,000 on;
+/// `LAB_TAGS=bare`, with the 3,000 and no tags, and `LAB_TAGS=plain`, the
+/// tags not hidden behind, to compare. With
+/// `LAB_RATES` it prints the UI thread's time a frame, where the widgets
+/// are placed and looked for.
+const _startTags = String.fromEnvironment('LAB_TAGS');
 
 /// A cube walking round, its name over it, hidden behind the pillars.
 class Walker extends GameObject {
@@ -59,7 +68,8 @@ class WorldWidgetsScene extends LabScene {
 
   late final List<Walker> walkers;
   final pillars = <GameObject>[];
-  late final GameObject flag, marker;
+  late final GameObject flag, marker, crowd;
+  final tagged = <GameObject>[];
   var turning = false, syncCheck = false;
   var degreesPerSecond = 30.0;
   var _angle = 0.0;
@@ -106,8 +116,62 @@ class WorldWidgetsScene extends LabScene {
         ],
       ),
     )..active = false;
+    // 3,000 cubes in a block beyond the pillars; every 30th tagged, so the
+    // tags are often behind other cubes.
+    crowd = add(GameObject(name: '3,000'))..active = false;
+    final cube = Mesh.cube();
+    final grey = Material(color: const Color(0xFF8A8F98));
+    for (var i = 0; i < 3000; i++) {
+      final object = crowd.add(
+        GameObject(
+          transform: Transform(
+            position: Vec3((i % 60 - 29.5) * 0.7, 0.2 + (i ~/ 60 % 5) * 0.7, -6 - (i ~/ 300) * 1.4),
+            scale: Vec3(0.4, 0.4, 0.4),
+          ),
+          components: [MeshRenderer(cube, grey)],
+        ),
+      );
+      if (i % 30 == 0 && _startTags != 'bare') {
+        object.addComponent(
+          WorldWidget((context) => NameTag('${i ~/ 30}'), offset: Vec3(0, 0.4, 0), hideBehind: _startTags != 'plain'),
+        );
+        tagged.add(object);
+      }
+    }
+    if (_startTags.isNotEmpty) crowd.active = true;
     // `--dart-define=LAB_SYNC_CHECK=true` starts with the sync check on.
     if (const bool.fromEnvironment('LAB_SYNC_CHECK')) controls.whereType<Toggle>().last.onChanged(true);
+  }
+
+  // The UI thread's time a frame, from Flutter's frame timings.
+  final _ui = <int>[];
+  late final _timings = _uiTimes;
+
+  void _uiTimes(List<FrameTiming> timings) {
+    for (final t in timings) {
+      _ui.add(t.buildDuration.inMicroseconds);
+    }
+    if (_ui.length < 120) return;
+    _ui.sort();
+    // ignore: avoid_print
+    print(
+      '[ui] ${crowd.active ? (tagged.isEmpty ? '3,000 bare' : '100 tags among 3,000, $_startTags') : 'the page'}: '
+      'median ${(_ui[_ui.length ~/ 2] / 1000).toStringAsFixed(3)} ms, '
+      'slowest ${(_ui.last / 1000).toStringAsFixed(3)} ms',
+    );
+    _ui.clear();
+  }
+
+  @override
+  void onStart() {
+    super.onStart();
+    if (printRates) SchedulerBinding.instance.addTimingsCallback(_timings);
+  }
+
+  @override
+  void onDestroy() {
+    if (printRates) SchedulerBinding.instance.removeTimingsCallback(_timings);
+    super.onDestroy();
   }
 
   @override
@@ -136,12 +200,14 @@ class WorldWidgetsScene extends LabScene {
   List<Control> get controls => [
     Toggle('turn the camera', () => turning, (on) => turning = on),
     Slider('degrees a second', () => degreesPerSecond, (v) => degreesPerSecond = v, min: 10, max: 180),
+    Toggle('100 tags among 3,000', () => crowd.active, (on) => crowd.active = on),
     Toggle('sync check', () => syncCheck, (on) {
       syncCheck = on;
       marker.active = on;
       // Every frame the display shows, so each is a step to compare.
       world.targetFrameRate = on ? 0 : 60;
       // The cube alone, nothing in front of it.
+      if (on) crowd.active = false;
       for (final o in [...walkers, ...pillars, flag]) {
         o.active = !on;
       }
