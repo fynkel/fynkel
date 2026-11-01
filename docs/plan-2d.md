@@ -1,6 +1,9 @@
-# Stage 16 plan: a 2D engine
+# Plan: a 2D engine (on hold)
 
-Status: proposed 2026-11-01, for the user's word on each decision (§7).
+Status: on hold since 2026-11-01. The user chose to make what is there
+faster and steadier first (speed is stage 16, then a stage making each
+system deeper); this plan gets its stage number when it is picked up.
+Written 2026-11-01, for the user's word on each decision (§7).
 Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 Stage 15 is done ([report](stage-15-report.md)).
 
@@ -10,7 +13,7 @@ sprite sheet, a level laid out in tiles, bodies that fall, bounce and
 stand on platforms in a plane, a camera that keeps pixel art crisp at
 any screen size, and lights for a dark cave. Unity does all of this with
 the same objects, components and scenes as its 3D, and so will Fynkel.
-**Stage 16 makes Fynkel a 2D engine as well**: everything a 2D mobile
+**This plan makes Fynkel a 2D engine as well**: everything a 2D mobile
 game made in Unity uses, made the Fynkel way, by code.
 
 **The goal.** A platformer's hero, its level and its camera, each in a
@@ -349,5 +352,4 @@ On the Mac, the iPhone 16 Pro Max, the iPad (6th gen) and the Note10+
 8. **The raycast tree in phase 1** (*recommended*: taps on sprites need
    it, and it meets stage 15's missed bar now), rather than in the
    speed stage.
-9. **Stage numbers**: this is stage 16; speed becomes 17, path finding
-   18, animation 2 and cutting meshes after.
+9. **Its stage number** is set when it is picked up.
