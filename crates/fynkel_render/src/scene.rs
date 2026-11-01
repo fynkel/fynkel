@@ -652,6 +652,31 @@ pub enum ParticleMode {
     /// there, its velocity the way the strip goes, and its `t` how far
     /// along it is (the texture's u).
     Trail,
+    /// Letters of flat text (stage 15), from [`RenderScene::glyphs`]: the
+    /// material's base colour texture is their font's atlas of distances,
+    /// one byte a pixel. `on_top`: drawn over everything, after the rest.
+    Glyphs { on_top: bool },
+}
+
+/// A letter of flat text: a square of its font's atlas, as TextMeshPro
+/// draws one.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glyph {
+    /// Its middle, in the world.
+    pub center: Vec3,
+    /// Half its width and half its height, in the world: its right and
+    /// its up.
+    pub right: Vec3,
+    pub up: Vec3,
+    /// Where it is in the atlas: u and v scale, then offset, 0 to 1.
+    pub uv: [f32; 4],
+    /// Linear RGBA, not premultiplied: the letter's, and its outline's.
+    pub color: [f32; 4],
+    pub outline_color: [f32; 4],
+    /// How wide the outline is, 0 to 1 of the atlas's reach outside the
+    /// letter, and how soft the edges are, 0 to 1.
+    pub outline: f32,
+    pub softness: f32,
 }
 
 /// A particle system's particles, drawn with `material`: unlit, its
@@ -886,8 +911,11 @@ pub struct RenderScene {
     pub lines: Vec<Line>,
     /// Every particle system's particles, each system's together.
     pub particles: Vec<Particle>,
-    /// The particle systems drawn: each its run of [`Self::particles`].
+    /// The particle systems drawn: each its run of [`Self::particles`], or
+    /// of [`Self::glyphs`] for [`ParticleMode::Glyphs`].
     pub particle_draws: Vec<ParticleDraw>,
+    /// Every flat text's letters, each draw's together.
+    pub glyphs: Vec<Glyph>,
     /// Behind everything, and lighting it, as well as [`Self::ambient`].
     /// `None`: the camera's clear colour, and the ambient light alone.
     pub sky: Option<Sky>,
@@ -938,6 +966,7 @@ impl RenderScene {
         self.lines.clear();
         self.particles.clear();
         self.particle_draws.clear();
+        self.glyphs.clear();
         self.sky = None;
         self.fog = None;
         self.quality = None;

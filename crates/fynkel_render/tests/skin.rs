@@ -93,6 +93,7 @@ fn stage(quality: QualityLevel) -> RenderScene {
         lines: Vec::new(),
         particles: Vec::new(),
         particle_draws: Vec::new(),
+        glyphs: Vec::new(),
         sky: None,
         fog: None,
         draws: vec![Draw::new(PLANE, Mat4::from_scale(Vec3::splat(12.0)), material(0.7))],

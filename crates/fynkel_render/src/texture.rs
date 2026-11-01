@@ -350,6 +350,36 @@ impl GpuTexture {
     }
 }
 
+impl GpuTexture {
+    /// A font's atlas of distances (stage 15): one byte a pixel, read as
+    /// they are, one level. Submits its own GPU work.
+    ///
+    /// # Panics
+    ///
+    /// If `pixels` isn't `width × height` bytes, or a side is 0.
+    pub(crate) fn distances(gpu: &Gpu, width: u32, height: u32, pixels: &[u8]) -> Self {
+        assert_eq!(pixels.len() as u64, width as u64 * height as u64, "{width} × {height} bytes");
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let texture = gpu.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("font atlas"),
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        gpu.queue.write_texture(
+            texture.as_image_copy(),
+            pixels,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width), rows_per_image: None },
+            size,
+        );
+        Self { view: texture.create_view(&Default::default()), bytes: width as u64 * height as u64 }
+    }
+}
+
 impl Textures {
     /// Puts `texture` under `key` for use in `space`, replacing any there.
     pub(crate) fn insert(&mut self, key: TextureKey, space: ColorSpace, texture: GpuTexture) {
