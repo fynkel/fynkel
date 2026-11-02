@@ -89,8 +89,9 @@ impl Pair {
 /// The contact bookkeeping of a world.
 #[derive(Debug)]
 pub(crate) struct Contacts {
-    /// How many followed colliders listen for anything.
-    pub(crate) listening: usize,
+    /// The followed colliders that listen for anything, by their handles'
+    /// indices, in order: a step looks at these alone (stage 14's PH7).
+    pub(crate) listening: Vec<u32>,
     // The pairs that touched after the last step, in order.
     touching: Vec<Pair>,
     // Scratch, kept for its room.
@@ -115,7 +116,7 @@ pub(crate) struct Contacts {
 impl Default for Contacts {
     fn default() -> Self {
         Self {
-            listening: 0,
+            listening: Vec::new(),
             touching: Vec::new(),
             current: Vec::new(),
             enters: Vec::new(),
@@ -296,10 +297,16 @@ impl Physics {
         &self.contacts.points
     }
 
-    pub(crate) fn listening_changed(&mut self, before: u32, after: u32) {
-        match (before != 0, after != 0) {
-            (false, true) => self.contacts.listening += 1,
-            (true, false) => self.contacts.listening -= 1,
+    /// The followed collider at `index` listened for `before`, and now for
+    /// `after`.
+    pub(crate) fn listening_changed(&mut self, index: usize, before: u32, after: u32) {
+        let listening = &mut self.contacts.listening;
+        let index = index as u32;
+        match (before != 0, after != 0, listening.binary_search(&index)) {
+            (_, true, Err(at)) => listening.insert(at, index),
+            (_, false, Ok(at)) => {
+                listening.remove(at);
+            }
             _ => {}
         }
     }
@@ -309,7 +316,7 @@ impl Physics {
     pub(crate) fn contacts_before_step(&mut self) {
         let c = &mut self.contacts;
         c.steps += 1;
-        if c.listening == 0 {
+        if c.listening.is_empty() {
             return;
         }
         let w = &self.world;
@@ -329,18 +336,18 @@ impl Physics {
         let c = &mut self.contacts;
         c.events.clear();
         c.points.clear();
-        if c.listening == 0 && c.touching.is_empty() {
+        if c.listening.is_empty() && c.touching.is_empty() {
             return;
         }
         c.current.clear();
         let w = &self.world;
-        for (index, slot) in self.followed.iter().enumerate() {
-            let Some(followed) = slot else { continue };
+        for &index in &c.listening {
+            let Some(Some(followed)) = self.followed.get(index as usize) else { continue };
             let listens = followed.spec.listens;
             if listens == 0 {
                 continue;
             }
-            let Some((_, handle)) = w.colliders.get_unknown_gen(index as u32) else { continue };
+            let Some((_, handle)) = w.colliders.get_unknown_gen(index) else { continue };
             if listens & LISTEN_COLLISIONS != 0 {
                 for pair in w.narrow_phase.contact_pairs_with(handle) {
                     if pair.has_any_active_contact()

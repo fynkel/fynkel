@@ -340,3 +340,25 @@ fn two_colliders_that_ignore_each_other_neither_collide_nor_trigger_until_they_d
     physics.step(STEP).unwrap();
     assert_eq!(events(&physics), [(ContactKind::Enter, true, 2, 3)]);
 }
+
+/// One trigger listening among 40,000 static colliders that don't: a step
+/// looks at the one, not at all 40,000 (stage 14's PH7: 28 µs more a step,
+/// growing with the colliders). In release, in CI:
+/// `cargo test --release -p fynkel_physics -- --ignored bench_`.
+#[test]
+#[ignore = "a benchmark: run in release"]
+fn bench_a_step_with_one_listener_among_40000_statics() {
+    let mut physics = Physics::new();
+    for i in 0..40_000u64 {
+        let position = Vector::new((i % 200) as f32 * 3.0, -10.0, (i / 200) as f32 * 3.0);
+        physics.add_object_collider(1_000 + i, spec(false, 0), at(position), None).unwrap();
+    }
+    cube(&mut physics, 1, Kind::Static, true, Vector::ZERO);
+    cube(&mut physics, 2, Kind::Rigidbody, false, Vector::new(0.3, 0.0, 0.0));
+    physics.step(STEP).unwrap();
+    physics.step(STEP).unwrap();
+    assert_eq!(events(&physics), [(ContactKind::Stay, true, 1, 2)], "the trigger hears its pair");
+    // 0.044 ms on the Mac when every collider was looked at, 0.000 ms with
+    // only the listeners (2026-11-02).
+    fynkel_bench::bench("a step, one listener among 40,000 statics", 200, 0.01, || physics.step(STEP).unwrap());
+}

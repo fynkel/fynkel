@@ -281,7 +281,7 @@ impl Physics {
             self.followed.resize(index + 1, None);
         }
         self.followed[index] = Some(Followed { spec, object, local, body, character: false });
-        self.listening_changed(0, spec.listens);
+        self.listening_changed(index, 0, spec.listens);
         self.dirty.push(handle);
         if let Some(body) = body {
             self.mass_changed(body);
@@ -294,11 +294,12 @@ impl Physics {
     pub fn set_collider_spec(&mut self, id: u64, spec: ColliderSpec) -> Result<(), PhysicsError> {
         self.check_spec(&spec)?;
         let handle = self.followed_handle(id)?;
-        let followed = self.followed[handle.into_raw_parts().0 as usize].as_mut().expect("followed");
+        let index = handle.into_raw_parts().0 as usize;
+        let followed = self.followed[index].as_mut().expect("followed");
         let before = followed.spec.listens;
         followed.spec = spec;
         let local = followed.local;
-        self.listening_changed(before, spec.listens);
+        self.listening_changed(index, before, spec.listens);
         self.replace(handle, spec, local);
         Ok(())
     }
