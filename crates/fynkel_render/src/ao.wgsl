@@ -3,8 +3,9 @@
 //
 // Its depth is ao_depth.wgsl's. fs_ao: for each pixel, 8 points nearby on screen, within `radius` of it
 // in the world: the more of them above its surface, the darker (as
-// McGuire et al.'s Scalable Ambient Obscurance). fs_blur: 4 × 4 of those
-// averaged, across pixels at about the same depth only, so edges stay.
+// McGuire et al.'s Scalable Ambient Obscurance), and each pixel's distance
+// along the view, for the blur. fs_blur: 4 × 4 of those averaged, across
+// pixels at about the same distance only, so edges stay.
 
 struct Params {
     // Clip space (reversed-Z) back to the view's space.
@@ -19,6 +20,9 @@ struct Params {
 // fs_blur's input: fs_ao's output.
 @group(0) @binding(1) var raw: texture_2d<f32>;
 @group(0) @binding(2) var<uniform> params: Params;
+// fs_blur's input: each pixel's distance as fs_ao worked it out
+// (`position(px).z`), so the blur doesn't work out 16 again.
+@group(0) @binding(3) var distance: texture_2d<f32>;
 
 const SAMPLES: u32 = 8u;
 // Turns the spiral of samples makes.
@@ -51,12 +55,23 @@ fn spin(px: vec2<i32>) -> f32 {
     return (f32(low * 4u + high) + 0.5) / 16.0;
 }
 
+struct AoOut {
+    @location(0) occlusion: vec4<f32>,
+    @location(1) distance: f32,
+};
+
 @fragment
-fn fs_ao(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
+fn fs_ao(@builtin(position) at: vec4<f32>) -> AoOut {
     let px = vec2<i32>(at.xy);
     let c4 = position(px);
+    return AoOut(vec4<f32>(occlusion(px, c4)), c4.z);
+}
+
+// How much of the light round pixel `px`, at `c4` (`position(px)`), isn't
+// hidden: 1 nothing, 0 all.
+fn occlusion(px: vec2<i32>, c4: vec4<f32>) -> f32 {
     if c4.w == 0.0 {
-        return vec4<f32>(1.0);
+        return 1.0;
     }
     let c = c4.xyz;
     // The surface's normal from its neighbours: on each axis the nearer
@@ -80,7 +95,7 @@ fn fs_ao(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     let radius = params.shape.y;
     let pixels = radius * params.shape.x / select(1.0, max(-c.z, 1e-3), params.shape.w > 0.5);
     if pixels < 1.0 {
-        return vec4<f32>(1.0);
+        return 1.0;
     }
     let r2 = radius * radius;
     // Less than this above the surface is the surface itself.
@@ -96,8 +111,8 @@ fn fs_ao(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
         let f = max(r2 - vv, 0.0) * q.w;
         sum += f * f * f * max((dot(v, n) - bias) / (vv + 0.01 * r2), 0.0);
     }
-    let occlusion = sum * 5.0 * params.shape.z / (r2 * r2 * r2 * f32(SAMPLES));
-    return vec4<f32>(max(1.0 - occlusion, 0.0));
+    let hidden = sum * 5.0 * params.shape.z / (r2 * r2 * r2 * f32(SAMPLES));
+    return max(1.0 - hidden, 0.0);
 }
 
 @fragment
@@ -116,7 +131,7 @@ fn fs_blur(@builtin(position) at: vec4<f32>) -> @location(0) vec4<f32> {
     for (var y = -2; y < 2; y++) {
         for (var x = -2; x < 2; x++) {
             let q = clamp(px + vec2<i32>(x, y), vec2<i32>(0), size - 1);
-            let w = max(1.0 - abs(position(q).z - centre.z) / (2.0 * near), 0.0) + 1e-4;
+            let w = max(1.0 - abs(textureLoad(distance, q, 0).r - centre.z) / (2.0 * near), 0.0) + 1e-4;
             sum += textureLoad(raw, q, 0).r * w;
             weights += w;
         }
