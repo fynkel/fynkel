@@ -505,6 +505,55 @@ fn recalculated_normals_follow_the_surface() {
 }
 
 #[test]
+fn owed_normals_are_the_recalculated_ones_when_read() {
+    let (positions, uvs, indices) = grid(8);
+    let mut now = MeshData::new(MeshParts { uvs: Some(&uvs), ..parts(&positions, &indices) }).unwrap();
+    let mut later = now.clone();
+    assert!(!later.owes_normals());
+    let wave: Vec<_> = positions.iter().map(|p| [p[0], (p[0] * 0.7).sin() + (p[2] * 0.5).cos(), p[2]]).collect();
+    now.change(MeshChange { positions: Some(&wave), recalculate_normals: true, ..Default::default() }).unwrap();
+    later.change(MeshChange { positions: Some(&wave), owe_normals: true, ..Default::default() }).unwrap();
+
+    // Not worked out yet, but owed, and a copy owes them too.
+    assert!(later.owes_normals());
+    assert_ne!(later.vertices(), now.vertices());
+    assert!(later.clone().owes_normals());
+    let mut scratch = Vec::new();
+    assert_eq!(later.settled_vertices(&mut scratch), now.vertices());
+    assert_eq!(later.settled().vertices(), now.vertices());
+    assert!(!later.settled().owes_normals());
+    let combined = |m: &MeshData| MeshData::combine(&[(m, glam::Mat4::IDENTITY)]).unwrap();
+    assert_eq!(combined(&later), combined(&now));
+
+    // Tangents need the normals: they're worked out first.
+    let mut tangents_later = later.clone();
+    tangents_later.change(MeshChange { recalculate_tangents: true, ..Default::default() }).unwrap();
+    let mut tangents_now = now.clone();
+    tangents_now.change(MeshChange { recalculate_tangents: true, ..Default::default() }).unwrap();
+    assert_eq!(tangents_later, tangents_now);
+
+    // Normals given, or worked out now, pay what's owed.
+    let mut given = later.clone();
+    let normals: Vec<_> = now.vertices().iter().map(|v| v.normal).collect();
+    given.change(MeshChange { normals: Some(&normals), ..Default::default() }).unwrap();
+    assert!(!given.owes_normals());
+    later.settle();
+    assert!(!later.owes_normals());
+    assert_eq!(later, now);
+
+    // Owed and worked out now: now wins.
+    let mut both = now.clone();
+    both.change(MeshChange {
+        positions: Some(&positions),
+        recalculate_normals: true,
+        owe_normals: true,
+        ..Default::default()
+    })
+    .unwrap();
+    assert!(!both.owes_normals());
+}
+
+#[test]
 fn recalculated_tangents_point_along_u_with_the_bitangent_up_the_image() {
     let (positions, uvs, indices) = grid(4);
     let mut mesh = MeshData::new(MeshParts { uvs: Some(&uvs), ..parts(&positions, &indices) }).unwrap();
@@ -548,6 +597,29 @@ fn bench_changing_a_grid() {
     });
     bench("a 101 × 101 grid: normals", 200, 0.15, || mesh.recalculate_normals());
     bench("a 101 × 101 grid: tangents", 200, 0.12, || mesh.recalculate_tangents());
+
+    // A frame of the lab's water: the world still holds last frame's, so
+    // it's copied, then given positions and colours, then normals.
+    let colors: Vec<[u8; 4]> = (0..n * n).map(|i| [i as u8, 90, 200, 255]).collect();
+    let mut mine = mesh.clone();
+    bench("a 101 × 101 grid: a frame (copy, positions, colours, normals)", 200, 0.15, || {
+        mine.clone_from(&shared);
+        mine.change(MeshChange { positions: Some(&positions), ..MeshChange::default() }).unwrap();
+        mine.change(MeshChange { colors: Some(&colors), ..MeshChange::default() }).unwrap();
+        mine.change(MeshChange { recalculate_normals: true, ..MeshChange::default() }).unwrap();
+    });
+    // The same frame with its normals owed, for the renderer to work out:
+    // what the thread changing it pays.
+    bench("a 101 × 101 grid: a frame, normals owed", 200, 0.12, || {
+        mine.clone_from(&shared);
+        mine.change(MeshChange { positions: Some(&positions), ..MeshChange::default() }).unwrap();
+        mine.change(MeshChange { colors: Some(&colors), ..MeshChange::default() }).unwrap();
+        mine.change(MeshChange { owe_normals: true, ..MeshChange::default() }).unwrap();
+    });
+    let mut scratch = Vec::new();
+    bench("a 101 × 101 grid: owed normals worked out on the way to the GPU", 200, 0.15, || {
+        std::hint::black_box(mine.settled_vertices(&mut scratch));
+    });
 }
 
 #[test]

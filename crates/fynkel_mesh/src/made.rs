@@ -175,6 +175,7 @@ impl MeshData {
         // Each mesh's vertices start here in the result.
         let mut starts = Vec::with_capacity(meshes.len());
         for &(mesh, matrix) in meshes {
+            let mesh = mesh.settled();
             starts.push(out.vertices.len() as u32);
             let normals = Mat3::from_mat4(matrix).inverse().transpose();
             let turn = Mat3::from_mat4(matrix).determinant() < 0.0;
