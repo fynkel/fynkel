@@ -1419,12 +1419,13 @@ fn a_mesh_changed_through_the_c_interface_draws_each_change() {
     assert_golden("mesh_changed_before", &view.read(view.frame(), 256, 160));
 
     // A dent where the bump was. Not drawn until the world is given it.
+    // Its normals owed: the view works them out as it uploads it.
     let dent = |x: f32, z: f32| -bump(x, z) * 0.6;
     let (dented, _) = grid(16, dent);
     // SAFETY: a live mesh and an array of the count given.
     unsafe {
         ok(fy_mesh_set_positions(handle.0, dented.as_ptr().cast(), dented.len()));
-        ok(fy_mesh_recalculate(handle.0, FY_MESH_NORMALS));
+        ok(fy_mesh_recalculate(handle.0, FY_MESH_NORMALS_LATER));
     }
     assert_golden("mesh_changed_before", &view.read(view.frame(), 256, 160));
     // SAFETY: a live world and mesh.
@@ -1445,6 +1446,20 @@ fn a_mesh_changed_through_the_c_interface_draws_each_change() {
         )
     });
     assert_eq!(read, colors);
+    // The normals read are the owed ones worked out.
+    let normals = |mesh: *mut FyMesh| {
+        let mut normals = vec![[0.0f32; 3]; dented.len()];
+        let none = ptr::null_mut();
+        // SAFETY: a live mesh and a buffer of the size given.
+        ok(unsafe {
+            fy_mesh_read_vertices(mesh, normals.as_mut_ptr().cast(), none, none, ptr::null_mut(), normals.len())
+        });
+        normals
+    };
+    let owed = normals(handle.0);
+    // SAFETY: a live mesh.
+    ok(unsafe { fy_mesh_recalculate(handle.0, FY_MESH_NORMALS) });
+    assert_eq!(owed, normals(handle.0));
     // A triangle past the last vertex is refused, and changes nothing.
     let bad = [0, 1, 9999];
     // SAFETY: a live mesh and an array of the count given.

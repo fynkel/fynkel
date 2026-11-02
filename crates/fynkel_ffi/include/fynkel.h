@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 51
+#define FY_ABI_VERSION 52
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -78,6 +78,10 @@
 
 // `fy_mesh_recalculate`'s tangents.
 #define FY_MESH_TANGENTS 2
+
+// `fy_mesh_recalculate`'s normals, but later: by whoever reads them
+// next, as each view uploading it.
+#define FY_MESH_NORMALS_LATER 4
 
 // `FySky::kind`: none; the camera's clear colour shows.
 #define FY_SKY_NONE 0
@@ -1739,7 +1743,10 @@ FyStatus fy_mesh_set_triangles(struct FyMesh *mesh,
 // Works out the mesh's normals (`FY_MESH_NORMALS`), from the faces around
 // each vertex weighted by their area, and its tangents
 // (`FY_MESH_TANGENTS`), from its UVs without splitting a vertex. Normals
-// first, when both.
+// first, when both. `FY_MESH_NORMALS_LATER` owes the normals instead:
+// each view works them out as it uploads the mesh, and reading them
+// (`fy_mesh_read_vertices`) does, so a mesh changed each frame doesn't
+// cost the calling thread its normals. Tangents need them now.
 //
 // # Safety
 //

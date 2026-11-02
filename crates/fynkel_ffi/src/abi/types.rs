@@ -380,3 +380,6 @@ pub struct FyMeshData {
 pub const FY_MESH_NORMALS: u32 = 1;
 /// `fy_mesh_recalculate`'s tangents.
 pub const FY_MESH_TANGENTS: u32 = 2;
+/// `fy_mesh_recalculate`'s normals, but later: by whoever reads them
+/// next, as each view uploading it.
+pub const FY_MESH_NORMALS_LATER: u32 = 4;
