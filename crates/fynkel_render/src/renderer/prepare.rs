@@ -467,6 +467,12 @@ impl Renderer {
         if self.soft_kept {
             stats.behind_bytes += SoftDepth::bytes(self.size.0, self.size.1);
         }
+        // Bloom's images: kept a while too.
+        self.bloom_idle = if self.bloom.is_some() { 0 } else { self.bloom_idle.saturating_add(1) };
+        let image = self.targets.as_ref().filter(|t| (t.width, t.height) == self.size).and_then(|t| t.image.as_ref());
+        if self.bloom.is_some() || image.is_some_and(|i| i.bloom.is_some()) && self.bloom_idle <= KEEP_UNUSED_MAPS {
+            stats.bloom_bytes = crate::bloom::BloomChain::bytes(&self.kit.bloom, self.size.0, self.size.1);
+        }
         // The effects' pictures: kept a while too.
         let count = self.effect_chain.len();
         self.effects_idle = if count > 0 { 0 } else { self.effects_idle.saturating_add(1) };

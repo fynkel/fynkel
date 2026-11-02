@@ -786,3 +786,35 @@ fn a_mesh_owing_its_normals_draws_as_one_that_worked_them_out() {
         assert!(image.rgba == expected.rgba, "owed normals drawn differently (dynamic: {dynamic})");
     }
 }
+
+/// The frame's data (instances, joints) grows with a frame that needs more,
+/// and shrinks again a second after the frames need far less: a crowd that
+/// came and went doesn't keep its room for good (stage 14's RN9 ½).
+#[test]
+fn the_frames_data_shrinks_a_second_after_fewer_objects() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let one = stage1_scene();
+    let mut crowd = one.clone();
+    let cube = crowd.draws[0];
+    crowd.draws = (0..20_000)
+        .map(|i| {
+            let at = Vec3::new((i % 100) as f32 * 0.01, (i / 100) as f32 * 0.01, 0.0);
+            Draw { model: Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(0.01)), ..cube }
+        })
+        .collect();
+    render(&gpu, &mut r, &one, 32, 32);
+    let small = r.frame_data_bytes();
+    for _ in 0..3 {
+        render(&gpu, &mut r, &crowd, 32, 32);
+    }
+    let big = r.frame_data_bytes();
+    assert!(big > 4 * small, "{big} bytes with the crowd, {small} before");
+    let mut frames = 0;
+    while r.frame_data_bytes() > small {
+        render(&gpu, &mut r, &one, 32, 32);
+        frames += 1;
+        assert!(frames < 100, "never shrank: {big} bytes");
+    }
+    assert!((60..=63).contains(&frames), "kept about a second: {frames} frames");
+}

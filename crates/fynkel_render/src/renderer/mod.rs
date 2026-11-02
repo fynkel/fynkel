@@ -120,6 +120,9 @@ pub struct FrameStats {
     /// GPU memory the view holds for the pictures they pass between, kept
     /// as `behind_bytes` is.
     pub effect_bytes: u64,
+    /// GPU memory the view holds for bloom's images, kept as
+    /// `behind_bytes` is.
+    pub bloom_bytes: u64,
     /// Pipelines for materials' own shaders still being made on threads
     /// of their own, for a renderer that doesn't wait for them
     /// ([`Renderer::set_wait_for_shaders`]): their draws are left out
@@ -746,6 +749,9 @@ pub struct Renderer {
     behind: bool,
     behind_kept: bool,
     behind_idle: u32,
+    /// Frames since the last with bloom: its images are let go after
+    /// [`KEEP_UNUSED_MAPS`].
+    bloom_idle: u32,
     /// Whether a soft particle in view reads the solid scene's depth;
     /// whether its image is kept, and for how many frames none has.
     soft: bool,
@@ -904,6 +910,7 @@ impl Renderer {
             behind: false,
             behind_kept: false,
             behind_idle: 0,
+            bloom_idle: 0,
             soft: false,
             soft_kept: false,
             soft_idle: 0,
@@ -1039,6 +1046,13 @@ impl Renderer {
     /// GPU memory held by its assets' meshes ([`Assets::mesh_bytes`]).
     pub fn mesh_bytes(&self) -> u64 {
         assets::lock(&self.assets).mesh_bytes()
+    }
+
+    /// GPU memory of the buffers its frames' data is written to (the
+    /// instances, the joints, the frame's numbers): grown for a frame that
+    /// needs more, shrunk a second after the frames need a quarter or less.
+    pub fn frame_data_bytes(&self) -> u64 {
+        self.frame_data.bytes()
     }
 }
 

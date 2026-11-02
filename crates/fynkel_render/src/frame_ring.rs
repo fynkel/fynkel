@@ -49,6 +49,11 @@ impl Layout {
     }
 }
 
+/// Frames in a row needing a quarter of the ring's room or less before
+/// its buffers shrink, as each comes round: a second at 60 frames a
+/// second, as the renderer keeps its other images.
+const SHRINK_AFTER: u32 = 60;
+
 /// The room for joints a buffer starts with: 64, a few characters'.
 const JOINT_BYTES: u64 = 64 * JOINT_SIZE;
 /// A joint as the shaders read it: its matrix's three rows (`skin.wgsl`).
@@ -118,6 +123,11 @@ pub(crate) struct FrameRing {
     next: usize,
     /// The slot the last frame wrote, until it is asked to map again.
     last: Option<usize>,
+    /// The room for instances a buffer starts with, and keeps however
+    /// little the frames need.
+    instance_bytes: u64,
+    /// Frames in a row that needed a quarter of the largest buffer or less.
+    small_frames: u32,
 }
 
 impl FrameRing {
@@ -139,6 +149,8 @@ impl FrameRing {
             slots: Vec::with_capacity(SLOTS),
             next: 0,
             last: None,
+            instance_bytes,
+            small_frames: 0,
         };
         for _ in 0..SLOTS {
             let slot = ring.create_slot(device, JOINT_BYTES, instance_bytes);
@@ -243,13 +255,32 @@ impl FrameRing {
         self.next = (index + 1) % SLOTS;
         self.wait_until_mapped(device, index);
 
+        // Where the parts after the instances go, from where the instances
+        // start, and the bytes from there to the end.
+        let place = |at: u64| {
+            let lines_at = at + instances.len() as u64;
+            let casters_at = (lines_at + lines.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
+            let particles_at = (casters_at + casters.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
+            (lines_at, casters_at, particles_at, particles_at - at + particles.len() as u64)
+        };
+
+        // Room a crowd that's gone needed goes too, a while after: what
+        // this frame needs, with the least room for joints.
+        let joints_needed = JOINT_BYTES.max((joints.len() as u64).next_power_of_two());
+        let least_at = self.parts.instances_at(joints_needed);
+        let least_data = place(least_at).3;
+        let largest = self.slots.iter().map(|s| s.buffer.size()).max().unwrap_or(0);
+        let small = (least_at + least_data) * 4 <= largest;
+        self.small_frames = if small { self.small_frames.saturating_add(1) } else { 0 };
+        let instance_room = self.instance_bytes.max(least_data.next_power_of_two());
+        if self.small_frames > SHRINK_AFTER && self.slots[index].buffer.size() > least_at + instance_room {
+            self.slots[index] = self.create_slot(device, joints_needed, instance_room);
+        }
+
         // Room for the joints first: where the instances start follows.
         let joint_room = self.slots[index].joints.max((joints.len() as u64).next_power_of_two());
         let at = self.parts.instances_at(joint_room);
-        let lines_at = at + instances.len() as u64;
-        let casters_at = (lines_at + lines.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
-        let particles_at = (casters_at + casters.len() as u64).next_multiple_of(wgpu::VERTEX_ALIGNMENT);
-        let data = particles_at - at + particles.len() as u64;
+        let (lines_at, casters_at, particles_at, data) = place(at);
         if self.slots[index].joints < joint_room || self.slots[index].buffer.size() < at + data {
             // Dropping the old buffer frees it once the GPU is done with it.
             self.slots[index] = self.create_slot(device, joint_room, data.next_power_of_two());
@@ -283,6 +314,11 @@ impl FrameRing {
             casters: casters_at,
             particles: particles_at,
         }
+    }
+
+    /// The GPU memory of its buffers.
+    pub(crate) fn bytes(&self) -> u64 {
+        self.slots.iter().map(|s| s.buffer.size()).sum()
     }
 
     /// Lets wgpu finish the mapping of slot `index`, waiting for the GPU

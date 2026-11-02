@@ -236,6 +236,15 @@ impl BloomChain {
         Self { scene: read(scene), levels, glow, params, written: bytemuck::Zeroable::zeroed() }
     }
 
+    /// The GPU memory of a chain for a `width` × `height` view: its images
+    /// and their smaller levels, and the glow.
+    pub(crate) fn bytes(kit: &BloomKit, width: u32, height: u32) -> u64 {
+        let (w, h, levels) = shape(width, height);
+        let pixel = u64::from(kit.format.block_copy_size(None).unwrap_or(8));
+        let level = |l: u32| u64::from((w >> l).max(1)) * u64::from((h >> l).max(1)) * pixel;
+        (0..levels).map(level).sum::<u64>() + level(0)
+    }
+
     /// What the last pass reads: the glow, blurred and at its strength.
     pub(crate) fn glow(&self) -> &wgpu::BindGroup {
         &self.glow.1
