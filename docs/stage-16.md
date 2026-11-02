@@ -145,7 +145,8 @@ words. Done when merged with CI green and measured on the devices.
 - Ten minutes sustained on each phone.
 - One table of every number in this plan, today's, as the start line.
 
-*Done when* every cell of that table has a number.
+*Done when* every cell of that table has a number. **Done** 2026-11-02:
+[the start line](stage-16-start.md).
 
 ### Phase 2: the renderer in passes (M)
 
