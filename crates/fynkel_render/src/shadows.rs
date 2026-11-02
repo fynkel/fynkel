@@ -698,6 +698,18 @@ fn texel_bytes(format: wgpu::TextureFormat) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// High's 3 × 3 filter reads its 4 × 4 texels with four gathers, not
+    /// nine filtered compares: the shadow lookups were 14 ms of the A10's
+    /// 30 ms scene pass at high (stage 16).
+    #[test]
+    fn the_softer_filter_gathers_its_texels() {
+        let shader = include_str!("forward.wgsl");
+        let start = shader.find("fn filtered(").expect("filtered");
+        let filtered = &shader[start..start + shader[start..].find("\n}\n").expect("its end")];
+        assert_eq!(filtered.matches("textureGatherCompare").count(), 1, "{filtered}");
+        assert_eq!(filtered.matches("textureSampleCompareLevel").count(), 5, "hard and soft as they were: {filtered}");
+    }
     use crate::scene::QualityLevel;
 
     fn camera(position: Vec3, target: Vec3) -> CameraView {
