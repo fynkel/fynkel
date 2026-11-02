@@ -602,6 +602,22 @@ fn a_kept_caster_hits_what_testing_every_object_hits_as_the_world_changes() {
         }
         same_as_every_object(&mut caster, &s, &rays);
     }
+    // A few at a time, which the caster follows by what moved: one moved,
+    // a parent with its child, a parent turned off and on again.
+    s.world.set_parent(ids[50], Some(ids[51])).unwrap();
+    same_as_every_object(&mut caster, &s, &rays);
+    for k in 0..3 {
+        for (id, by) in [(ids[51], Vec3::new(0.0, 0.4, 0.0)), (ids[60 + k], Vec3::new(0.5, 0.0, 0.0))] {
+            let mut t = s.world.get::<Transform>(id).unwrap();
+            t.position += by;
+            s.world.insert(id, t).unwrap();
+        }
+        same_as_every_object(&mut caster, &s, &rays);
+    }
+    for on in [false, true] {
+        s.world.set_active(ids[51], on).unwrap();
+        same_as_every_object(&mut caster, &s, &rays);
+    }
     // Turned off, given another mesh, removed, despawned, added.
     s.world.set_active(ids[10], false).unwrap();
     s.world

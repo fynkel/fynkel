@@ -105,10 +105,16 @@ pub struct Raycaster {
 /// What a ray can hit, as of the world's versions in `seen`.
 #[derive(Debug, Default)]
 struct Objects {
-    /// The world's transforms and renderers versions the list is for.
-    seen: Option<(u64, u64)>,
+    /// The world's transforms, renderers and hierarchy versions the list
+    /// is for, and where its list of moved objects was.
+    seen: Option<Seen>,
     /// Each object that can be hit, in the world's order.
     list: Vec<Object>,
+    /// Where each is in [`list`](Self::list).
+    at: IdMap<ObjectId, u32>,
+    /// The objects that moved since the last cast and those below them,
+    /// to work out again; reused.
+    moved: Vec<ObjectId>,
     /// The world box of each in [`list`](Self::list) the tree holds, and
     /// its index there.
     boxes: Vec<(Vec3, Vec3)>,
@@ -124,6 +130,26 @@ struct Objects {
     casts: u32,
 }
 
+/// The world's versions a list was made or brought up to date for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seen {
+    transforms: u64,
+    renderers: u64,
+    hierarchy: u64,
+    moved: u64,
+}
+
+impl Seen {
+    fn of(world: &World) -> Self {
+        Self {
+            transforms: world.transforms_version(),
+            renderers: world.renderers_version(),
+            hierarchy: world.hierarchy_version(),
+            moved: world.moved_end(),
+        }
+    }
+}
+
 /// An object a ray can hit, as the world had it.
 #[derive(Clone, Copy, Debug)]
 struct Object {
@@ -133,6 +159,9 @@ struct Object {
     /// Its world matrix; unused for a skinned one.
     model: Mat4,
     skinned: bool,
+    /// Its box's index in [`Objects::boxes`], or `u32::MAX` when it's
+    /// tested on every cast.
+    boxed: u32,
 }
 
 /// The meshes' trees and what a test needs, kept between casts.
@@ -213,11 +242,20 @@ impl Objects {
     /// Brings the list up to date with `world`, and the tree when there's
     /// one; makes the tree once enough casts have come.
     fn update(&mut self, world: &World, matrices: &WorldMatrices) {
-        let seen = (world.transforms_version(), world.renderers_version());
+        let seen = Seen::of(world);
         if self.seen != Some(seen) {
-            self.collect(world, matrices);
+            let followed = self.follow_moved(world, matrices, seen);
+            if !followed {
+                self.collect(world, matrices);
+            }
             self.seen = Some(seen);
-            if !self.tree.is_empty() {
+            if followed && !self.tree.is_empty() {
+                // The same objects: only their boxes changed.
+                if !self.tree.refit(&self.boxes) {
+                    self.tree = ObjectTree::default();
+                    self.casts = 0;
+                }
+            } else if !self.tree.is_empty() {
                 let same = self.tree_ids.len() == self.boxed.len()
                     && self.boxed.iter().zip(&self.tree_ids).all(|(&k, &id)| self.list[k as usize].id == id);
                 if !same || !self.tree.refit(&self.boxes) {
@@ -236,10 +274,73 @@ impl Objects {
         }
     }
 
+    /// Brings the list up to date with only the objects that moved since
+    /// `self.seen`, and those below them, when nothing else changed: no
+    /// renderer, no parent, no object added or gone, and only a few moved
+    /// (the tags' walkers among 3,000 still cubes). False when it can't,
+    /// and the list must be made again.
+    fn follow_moved(&mut self, world: &World, matrices: &WorldMatrices, now: Seen) -> bool {
+        let Some(was) = self.seen else { return false };
+        if was.renderers != now.renderers || was.hierarchy != now.hierarchy {
+            return false;
+        }
+        // Each move went through the list, once each: nothing else changed
+        // the transforms (an object added or gone).
+        let Some(moved) = world.moved_since(was.moved) else { return false };
+        if now.transforms - was.transforms != moved.len() as u64 || moved.len() > self.list.len() / 4 + 1 {
+            return false;
+        }
+        let Self { list, at, moved: walk, boxes, .. } = self;
+        walk.clear();
+        walk.extend_from_slice(moved);
+        let has_skins = world.has_skins();
+        let mut next = 0;
+        while next < walk.len() {
+            let id = walk[next];
+            next += 1;
+            if let Ok(children) = world.children(id) {
+                walk.extend_from_slice(children);
+            }
+            // What it is now, if it can be hit: as `collect` finds it.
+            let now = world.get::<MeshRenderer>(id).ok().and_then(|r| {
+                let (mesh_id, material) = (r.mesh?, r.material?);
+                let mesh = world.mesh(mesh_id).ok()?;
+                let model = matrices.world(world, id, &world.get::<Transform>(id).ok()?)?;
+                let skinned = has_skins && mesh.skin().is_some() && world.skin(id).is_some();
+                Some((mesh, mesh_id, material, model, skinned))
+            });
+            match (at.get(&id), now) {
+                (None, None) => {}
+                (Some(&k), Some((mesh, mesh_id, material, model, skinned))) => {
+                    let object = &mut list[k as usize];
+                    if (object.mesh, object.material, object.skinned) != (mesh_id, material, skinned) {
+                        return false;
+                    }
+                    object.model = model;
+                    if object.boxed != u32::MAX {
+                        let (lo, hi) = world_box(mesh, model);
+                        if !lo.is_finite() || !hi.is_finite() {
+                            return false;
+                        }
+                        boxes[object.boxed as usize] = (lo, hi);
+                    } else if !skinned {
+                        // Tested on every cast for a box that wasn't finite:
+                        // it may be now.
+                        return false;
+                    }
+                }
+                // Shown or hidden: the list changes.
+                _ => return false,
+            }
+        }
+        true
+    }
+
     /// Every object drawn: a mesh and a material, shown.
     fn collect(&mut self, world: &World, matrices: &WorldMatrices) {
-        let Self { list, boxes, boxed, loose, .. } = self;
+        let Self { list, at, boxes, boxed, loose, .. } = self;
         list.clear();
+        at.clear();
         boxes.clear();
         boxed.clear();
         loose.clear();
@@ -250,14 +351,17 @@ impl Objects {
             let Some(model) = matrices.world(world, id, t) else { return };
             let skinned = has_skins && mesh.skin().is_some() && world.skin(id).is_some();
             let k = list.len() as u32;
-            list.push(Object { id, mesh: mesh_id, material, model, skinned });
+            at.insert(id, k);
             let (lo, hi) = world_box(mesh, model);
-            if skinned || !lo.is_finite() || !hi.is_finite() {
+            let in_box = if skinned || !lo.is_finite() || !hi.is_finite() {
                 loose.push(k);
+                u32::MAX
             } else {
                 boxes.push((lo, hi));
                 boxed.push(k);
-            }
+                boxes.len() as u32 - 1
+            };
+            list.push(Object { id, mesh: mesh_id, material, model, skinned, boxed: in_box });
         });
     }
 }

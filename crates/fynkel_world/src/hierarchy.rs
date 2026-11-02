@@ -52,6 +52,11 @@ struct Node {
 }
 
 impl Hierarchy {
+    /// Goes up whenever a parent changes.
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
     fn parent(&self, id: ObjectId) -> Option<ObjectId> {
         self.nodes.get(&id).and_then(|n| n.parent)
     }

@@ -352,6 +352,11 @@ impl World {
         self.moved.get(at as usize..)
     }
 
+    /// A number that goes up whenever a parent changes.
+    pub(crate) fn hierarchy_version(&self) -> u64 {
+        self.hierarchy.version()
+    }
+
     /// Where [`moved_since`](Self::moved_since) starts for what moves next.
     pub(crate) fn moved_end(&self) -> u64 {
         self.moved_start + self.moved.len() as u64
