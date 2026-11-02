@@ -178,6 +178,28 @@ Nothing it draws changed, and it got quicker, not slower.
 level on the Note10+ and the iPad, and Sheepdog holds 120 at high on
 the iPhone, or the gap left is measured and explained pass by pass.
 
+**Progress** 2026-11-02 (`stage-16-gpu`), the field against the start
+line, Unity in brackets:
+
+| | low | medium | high |
+|---|---|---|---|
+| Note10+, fps (median of 3) | 59.4 → 59.6 (59.5) | 45.1 → 47.7 (52.1) | 33.1 → 34.6 (53.3) |
+| iPad, fps | 40.0 → 40.0 (59.4) | 30.3 → 32.7 (39.7) | 19.0 → 20.8 (28.5) |
+| iPad, GPU ms | 16.3 → 16.3 | 32.1 → 27.2 | 52.8 → 48.1 |
+
+- The iPad's own pick: the A10 and A11 low, the A12 and A13 medium, the
+  A14 on high. Sheepdog on the iPad 11 → 42 fps; its memory no longer
+  climbs (181 → 191 MB, was 180 → 449).
+- The finish: bloom's glow blurred once at a quarter size and read with
+  one tap; no tone-mapping curves where nothing glows. iPad 5.9 → 1.9 ms.
+- Ambient occlusion's blur reads the distances its first pass worked out:
+  iPad 10.7 → 9.15 ms. Its depth is 0.34 of it; the occlusion about 4.8.
+- Shadows already take only the casters in each cascade.
+
+The Note10+ now meets the bar at low and medium (−8%). Still short: the
+Note10+ at high, the iPad at every level (its scene pass alone is 14.8
+ms at low).
+
 ### Phase 4: the CPU (M)
 
 - The tree over objects; world matrices; the mesh change; the small
