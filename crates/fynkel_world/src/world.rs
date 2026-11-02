@@ -236,6 +236,8 @@ pub struct World {
     pub(crate) moved_start: u64,
     /// See [`World::renderers_version`].
     pub(crate) renderers_version: u64,
+    /// See [`World::resources_version`].
+    resources_version: u64,
     /// The roots of the animators the last [`World::animate`] posed.
     pub(crate) posed: Vec<ObjectId>,
     /// The skin of each model copy's skinned part, by the part.
@@ -304,6 +306,7 @@ impl World {
             moved: Vec::new(),
             moved_start: 0,
             renderers_version: 0,
+            resources_version: next_resources_version(),
             posed: Vec::new(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
@@ -379,6 +382,18 @@ impl World {
     /// keeps are out of date.
     pub fn renderers_version(&self) -> u64 {
         self.renderers_version
+    }
+
+    /// A number that changes whenever a mesh, material (or its values),
+    /// texture or shader is added, changed or removed, and is never the
+    /// same in two worlds: while it stays the same, what was made of them
+    /// for the GPU still holds (stage 14's BR6 ½).
+    pub fn resources_version(&self) -> u64 {
+        self.resources_version
+    }
+
+    fn resources_changed(&mut self) {
+        self.resources_version = next_resources_version();
     }
 
     /// Removes an object, its components and its children, theirs too.
@@ -566,6 +581,7 @@ impl World {
     /// it from here, and raycasts read it.
     pub fn add_mesh(&mut self, mesh: impl Into<Arc<MeshData>>) -> MeshId {
         let id = MeshId::new(self.mesh_ids.next());
+        self.resources_changed();
         self.meshes.insert(id, (mesh.into(), 0));
         id
     }
@@ -579,6 +595,7 @@ impl World {
     /// copied.
     pub fn set_mesh(&mut self, id: MeshId, mesh: impl Into<Arc<MeshData>>) -> Result<()> {
         let (data, version) = self.meshes.get_mut(&id).ok_or(WorldError::NoMesh(id))?;
+        self.resources_version = next_resources_version();
         *data = mesh.into();
         *version += 1;
         self.renderers_version += 1;
@@ -647,6 +664,7 @@ impl World {
         if let Some((&object, _)) = self.particles.iter().find(|(_, s)| drawn_with(s)) {
             return Err(WorldError::MeshInUse { mesh: id, object });
         }
+        self.resources_changed();
         self.meshes.remove(&id);
         Ok(())
     }
@@ -660,6 +678,7 @@ impl World {
         self.check_references(&material)?;
         self.check_shader(&material)?;
         let id = MaterialId::new(self.material_ids.next());
+        self.resources_changed();
         self.materials.insert(id, material);
         self.reset_values(id);
         Ok(id)
@@ -677,6 +696,7 @@ impl World {
         validate_all(&material)?;
         self.check_references(&material)?;
         self.check_shader(&material)?;
+        self.resources_changed();
         let old = self.materials.insert(id, material).expect("checked above");
         // Its values are its shader's: a new shader starts from zeros.
         if old.shader != material.shader {
@@ -728,6 +748,7 @@ impl World {
         if let Some(values) = values {
             values[offset..end].copy_from_slice(bytes);
         }
+        self.resources_changed();
         Ok(())
     }
 
@@ -748,6 +769,7 @@ impl World {
         if let Some((&object, _)) = self.submesh_materials.iter().find(|(_, m)| m.contains(&id)) {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
+        self.resources_changed();
         self.materials.remove(&id);
         self.material_values.remove(&id);
         Ok(())
@@ -764,6 +786,7 @@ impl World {
     /// view's renderer uploads it from here.
     pub fn add_texture(&mut self, image: impl Into<Arc<ImageData>>) -> TextureId {
         let id = TextureId::new(self.texture_ids.next());
+        self.resources_changed();
         self.textures.insert(id, image.into());
         id
     }
@@ -793,6 +816,7 @@ impl World {
         if let Some((&object, _)) = self.sprites.iter().find(|(_, s)| s.settings().texture == id) {
             return Err(WorldError::SpriteTextureInUse { texture: id, object });
         }
+        self.resources_changed();
         self.textures.remove(&id);
         Ok(())
     }
@@ -803,6 +827,7 @@ impl World {
     pub fn add_shader(&mut self, shader: Shader) -> ShaderId {
         let id = ShaderId::new(self.shader_ids.next());
         self.shader_versions += 1;
+        self.resources_changed();
         self.shaders.insert(id, (shader, self.shader_versions));
         id
     }
@@ -830,6 +855,7 @@ impl World {
         }
         let size = shader.values_size;
         self.shader_versions += 1;
+        self.resources_changed();
         self.shaders.insert(id, (shader, self.shader_versions));
         for effect in self.camera_effects.values_mut().flatten().filter(|e| e.shader == id) {
             effect.values.resize(size, 0);
@@ -857,6 +883,7 @@ impl World {
         if let Some((&object, _)) = self.camera_effects.iter().find(|(_, e)| e.iter().any(|e| e.shader == id)) {
             return Err(WorldError::EffectInUse { shader: id, object });
         }
+        self.resources_changed();
         self.shaders.remove(&id);
         Ok(())
     }
@@ -919,4 +946,11 @@ fn validate_all<T: Describe>(value: &T) -> std::result::Result<(), FieldError> {
         crate::describe::validate(T::NAME, field, current)?;
     }
     Ok(())
+}
+
+/// A new [`World::resources_version`], never handed out before, in any
+/// world.
+fn next_resources_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }
