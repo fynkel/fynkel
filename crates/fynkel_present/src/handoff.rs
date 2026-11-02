@@ -113,7 +113,7 @@ mod tests {
     use super::*;
 
     /// Stage 14's BR4: once `take` returns, a lease that just ended holds
-    /// no reference, so the taker's is the only one (the iOS layer is
+    /// no reference, so the taker's is the only one (the iOS layer was
     /// unwrapped with `Arc::into_inner`).
     #[test]
     fn the_taker_holds_the_only_reference() {
