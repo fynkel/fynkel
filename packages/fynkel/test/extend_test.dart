@@ -101,6 +101,25 @@ void main() {
     expect(world.movedReader, throwsStateError);
   });
 
+  test('a reader is told when an object above another moved too, so it can pass over it', () {
+    final world = World();
+    addTearDown(world.dispose);
+    final top = world.add(GameObject());
+    final middle = top.add(GameObject());
+    final bottom = middle.add(GameObject());
+    final moved = world.movedReader();
+    bottom.position = Vec3(1, 0, 0);
+    expect(moved.movedAbove(bottom), isFalse, reason: 'only it moved');
+    top.position = Vec3(0, 1, 0);
+    expect(moved.movedAbove(bottom), isTrue, reason: 'its grandparent moved since');
+    expect(moved.movedAbove(middle), isTrue);
+    expect(moved.movedAbove(top), isFalse, reason: 'nothing above it');
+    moved.markRead();
+    bottom.position = Vec3(2, 0, 0);
+    expect(moved.movedAbove(bottom), isFalse, reason: 'the grandparent was read');
+    moved.close();
+  });
+
   test('many world transforms are read in one call, after the moves are sent', () {
     final world = World();
     addTearDown(world.dispose);
