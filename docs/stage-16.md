@@ -240,8 +240,23 @@ What came of following it up:
   template that records the performance limiters, is what's left.
 
 Low on the iPad holds at exactly 40 fps (25.0 ms a frame) with 16.3 ms
-on the GPU: just over a 60 Hz frame, so each frame takes one or two
-refreshes in turn. About 2 ms less would take it to 60.
+on the GPU, each frame one or two 60 Hz refreshes in turn. Cheaper
+settings (throwaway field levels, fps):
+
+| Low with | fps |
+|---|---|
+| nothing changed | 40.0 |
+| 2× anti-aliasing | 40.0 |
+| no sun shadows | 40.0 |
+| 0.6 of the screen (2× or 4×) | 40.0, 40.5 |
+| no anti-aliasing, no sun shadows | 45.9 |
+| no sun shadows, 0.6 of the screen, 2× | 43.9 |
+| no sun shadows, 0.6 of the screen, 4× | 59.7, 49.1, 56.1 (three runs) |
+
+Only the last, with about 13 ms on the GPU, comes near 60, and not
+steadily: shadows gone and a softer picture, too much to give for it.
+The A10's low stays at 40; the gap to Unity's 59 is its scene pass,
+about 11 ms of which is the ground and the sky, shaded per pixel.
 
 ### Phase 4: the CPU (M)
 
