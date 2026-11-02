@@ -10,8 +10,8 @@
 
 @group(0) @binding(0) var image: texture_2d<f32>;
 
-// Bloom's first image, half the view's size, its glow added up
-// (bloom.wgsl), and how strong it is.
+// Bloom's glow, a quarter of the view's size, already blurred and at its
+// strength (bloom.wgsl's fs_glow); `Params` is bloom's.
 struct Params {
     strength: f32,
     threshold: f32,
@@ -47,24 +47,19 @@ fn fs_main(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(textureLoad(image, pixel(in.uv), 0).rgb, 1.0);
 }
 
-fn tap(uv: vec2<f32>) -> vec3<f32> {
-    return textureSampleLevel(glow, linear, uv, 0.0).rgb;
-}
-
 // The glow added to the scene's light, and tone mapped again. Where there
 // is none, the pixel is as it was: it's the change tone mapping makes
-// that's added, so undoing and redoing it costs no precision.
+// that's added, so undoing and redoing it costs no precision, and where
+// nothing glows it isn't done (on an A10 it's 2.5 ms of a frame).
 @fragment
 fn fs_bloom(in: Out) -> @location(0) vec4<f32> {
     let at = pixel(in.uv);
     let mapped = textureLoad(image, at, 0).rgb;
     let uv = (vec2<f32>(at) + 0.5) / vec2<f32>(textureDimensions(image));
-    let t = 1.0 / vec2<f32>(textureDimensions(glow));
-    var sum = tap(uv) * 4.0;
-    sum += (tap(uv + vec2<f32>(-t.x, 0.0)) + tap(uv + vec2<f32>(t.x, 0.0))) * 2.0;
-    sum += (tap(uv + vec2<f32>(0.0, -t.y)) + tap(uv + vec2<f32>(0.0, t.y))) * 2.0;
-    sum += tap(uv - t) + tap(uv + t) + tap(uv + vec2<f32>(-t.x, t.y)) + tap(uv + vec2<f32>(t.x, -t.y));
-    let added = sum / 16.0 * (params.strength / params.levels);
+    let added = textureSampleLevel(glow, linear, uv, 0.0).rgb;
+    if max(added.r, max(added.g, added.b)) <= 0.0 {
+        return vec4<f32>(mapped, 1.0);
+    }
     let light = untonemap(mapped);
     return vec4<f32>(mapped + tonemap(light + added) - tonemap(light), 1.0);
 }

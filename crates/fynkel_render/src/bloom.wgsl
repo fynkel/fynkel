@@ -1,5 +1,6 @@
 // Bloom's passes (`bloom.rs`), each from one image of the chain into the
-// next, half or twice its size. Comes after neutral.wgsl.
+// next, half or twice its size, and the glow the last pass adds. Comes
+// after neutral.wgsl.
 //
 // The prefilter: the scene image's light, from half white up (by
 // `Params`), into the first, half-size image. Down: each into the next,
@@ -106,4 +107,14 @@ fn tent(uv: vec2<f32>) -> vec3<f32> {
 @fragment
 fn fs_up(in: Out) -> @location(0) vec4<f32> {
     return vec4<f32>(tent(in.uv), 1.0);
+}
+
+// The glow the last pass adds (finish.wgsl's fs_bloom), from the first
+// image: blurred by the tent once here, at a quarter of the view's size,
+// and at its strength, so the last pass reads it with one tap a pixel.
+// Each of its taps falls on a texel's centre, so the last pass's one
+// filtered tap gives what nine of the first image's would.
+@fragment
+fn fs_glow(in: Out) -> @location(0) vec4<f32> {
+    return vec4<f32>(tent(in.uv) * (params.strength / params.levels), 1.0);
 }
