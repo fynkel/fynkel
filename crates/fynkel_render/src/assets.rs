@@ -257,17 +257,24 @@ impl Kit {
         let device = &self.gpu.device;
         let dynamic = data.is_dynamic() && data.skin().is_none();
         let buffer = if dynamic { roomy_buffer } else { filled_buffer };
-        let vertices =
-            buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(data.vertices()));
+        let made = SETTLED.with_borrow_mut(|scratch| {
+            let settled = data.settled_vertices(scratch);
+            // Worked out once for a mesh that doesn't change: a hash map of
+            // every vertex is too slow for one that changes every frame.
+            let outline_normals = (!dynamic).then(|| outline_normals(settled)).flatten();
+            (
+                buffer(device, "mesh vertices", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(settled)),
+                outline_normals,
+            )
+        });
+        let (vertices, outline_normals) = made;
         let indices = buffer(device, "mesh indices", wgpu::BufferUsages::INDEX, bytemuck::cast_slice(data.indices()));
         let (centre, radius) = sphere(data);
         let skin = data.skin().map(|skin| GpuSkin {
             buffer: filled_buffer(device, "mesh joints", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(skin)),
             joints: joint_bounds(data.vertices(), skin),
         });
-        // Worked out once for a mesh that doesn't change: a hash map of every
-        // vertex is too slow for one that changes every frame.
-        let outline_normals = (!dynamic).then(|| outline_normals(data.vertices())).flatten().map(|normals| {
+        let outline_normals = outline_normals.map(|normals| {
             filled_buffer(device, "mesh outline normals", wgpu::BufferUsages::VERTEX, bytemuck::cast_slice(&normals))
         });
         MadeMesh(GpuMesh {
@@ -377,6 +384,13 @@ pub(crate) struct GpuMesh {
     dynamic: bool,
 }
 
+thread_local! {
+    /// The vertices of a mesh owing its normals, with them worked out
+    /// ([`MeshData::settled_vertices`]): kept on the thread, so a mesh
+    /// changed each frame allocates nothing (stage 16's phase 4).
+    static SETTLED: std::cell::RefCell<Vec<fynkel_mesh::Vertex>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
 /// What a skeleton bends a mesh with: each vertex's joints and weights
 /// (`fynkel_mesh::SkinVertex`, at locations 14 and 15), and, for culling,
 /// a sphere around the vertices each joint moves, in the mesh's space as
@@ -396,15 +410,17 @@ impl GpuMesh {
     /// Writes `data` into a dynamic mesh's buffers where they are, if it
     /// fits; returns whether it did.
     fn write(&mut self, queue: &wgpu::Queue, data: &MeshData) -> bool {
-        let (vertices, indices): (&[u8], &[u8]) =
-            (bytemuck::cast_slice(data.vertices()), bytemuck::cast_slice(data.indices()));
-        let fits = vertices.len() as u64 <= self.vertices.size() && indices.len() as u64 <= self.indices.size();
+        let indices: &[u8] = bytemuck::cast_slice(data.indices());
+        let vertex_bytes = std::mem::size_of_val(data.vertices()) as u64;
+        let fits = vertex_bytes <= self.vertices.size() && indices.len() as u64 <= self.indices.size();
         if !self.dynamic || !data.is_dynamic() || data.skin().is_some() || !fits {
             return false;
         }
         // Queued: frames already sent draw with what was there.
-        if !vertices.is_empty() {
-            queue.write_buffer(&self.vertices, 0, vertices);
+        if vertex_bytes > 0 {
+            SETTLED.with_borrow_mut(|scratch| {
+                queue.write_buffer(&self.vertices, 0, bytemuck::cast_slice(data.settled_vertices(scratch)));
+            });
         }
         if !indices.is_empty() {
             queue.write_buffer(&self.indices, 0, indices);
