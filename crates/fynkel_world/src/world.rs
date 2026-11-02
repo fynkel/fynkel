@@ -185,6 +185,11 @@ impl From<FieldError> for WorldError {
 
 pub type Result<T> = std::result::Result<T, WorldError>;
 
+/// How many moved objects [`World`] keeps a list of: past it, kept world
+/// matrices are all worked out again, as they would be anyway when so
+/// many move.
+pub(crate) const MOVED_KEPT: usize = 8192;
+
 /// Holds every object, component, mesh, material and texture.
 ///
 /// Objects are addressed only by [`ObjectId`]. The `hecs` entity behind an
@@ -222,6 +227,13 @@ pub struct World {
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
     /// See [`World::transforms_version`].
     pub(crate) transforms_version: u64,
+    /// The objects that moved, each meaning it and everything below it,
+    /// in order, the first the `moved_start`th: so world matrices kept
+    /// elsewhere work out only theirs again (stage 14's WO10). Cleared
+    /// past [`MOVED_KEPT`], with a gap, so whoever was reading it works
+    /// them all out.
+    pub(crate) moved: Vec<ObjectId>,
+    pub(crate) moved_start: u64,
     /// See [`World::renderers_version`].
     pub(crate) renderers_version: u64,
     /// The roots of the animators the last [`World::animate`] posed.
@@ -289,6 +301,8 @@ impl World {
             debug_lines: Vec::new(),
             animators: IdMap::default(),
             transforms_version: 0,
+            moved: Vec::new(),
+            moved_start: 0,
             renderers_version: 0,
             posed: Vec::new(),
             skins: IdMap::default(),
@@ -314,6 +328,33 @@ impl World {
         self.entities.insert(id, entity);
         self.transforms_version += 1;
         id
+    }
+
+    /// Notes that `id`'s world matrix, or whether it's shown, may have
+    /// changed, and so its children's.
+    pub(crate) fn moved(&mut self, id: ObjectId) {
+        self.transforms_version += 1;
+        if self.moved.len() == MOVED_KEPT {
+            self.moved_start += MOVED_KEPT as u64 + 1;
+            self.moved.clear();
+        }
+        // All of it at once, so a steady frame allocates nothing.
+        if self.moved.capacity() == 0 {
+            self.moved.reserve_exact(MOVED_KEPT);
+        }
+        self.moved.push(id);
+    }
+
+    /// The objects that moved since the `from`th, or `None` when they
+    /// aren't all known: then any may have.
+    pub(crate) fn moved_since(&self, from: u64) -> Option<&[ObjectId]> {
+        let at = from.checked_sub(self.moved_start)?;
+        self.moved.get(at as usize..)
+    }
+
+    /// Where [`moved_since`](Self::moved_since) starts for what moves next.
+    pub(crate) fn moved_end(&self) -> u64 {
+        self.moved_start + self.moved.len() as u64
     }
 
     /// A number that goes up whenever an object's world matrix, or whether
@@ -402,7 +443,7 @@ impl World {
     /// exist.
     pub fn insert<C: Component>(&mut self, id: ObjectId, component: C) -> Result<()> {
         let entity = self.check(id, &component)?;
-        self.write(entity, component);
+        self.write(id, entity, component);
         Ok(())
     }
 
@@ -417,8 +458,8 @@ impl World {
             Ok(())
         });
         if checked.is_ok() {
-            for ((_, component), &entity) in items.zip(&entities) {
-                self.write(entity, component);
+            for ((id, component), &entity) in items.zip(&entities) {
+                self.write(id, entity, component);
             }
         }
         self.batch = entities;
@@ -426,9 +467,9 @@ impl World {
     }
 
     /// Writes a checked component.
-    fn write<C: Component>(&mut self, entity: hecs::Entity, component: C) {
+    fn write<C: Component>(&mut self, id: ObjectId, entity: hecs::Entity, component: C) {
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
-            self.transforms_version += 1;
+            self.moved(id);
         } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
             self.renderers_version += 1;
         }
@@ -456,7 +497,7 @@ impl World {
     pub fn remove<C: Component>(&mut self, id: ObjectId) -> Result<C> {
         let entity = self.entity(id)?;
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
-            self.transforms_version += 1;
+            self.moved(id);
         } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
             self.renderers_version += 1;
         }
