@@ -993,7 +993,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 51;
+const int FY_ABI_VERSION = 52;
 
 const int FY_APPLE_MORE = 2;
 
@@ -1032,6 +1032,8 @@ const int FY_MESH_CUBE = 0;
 const int FY_MESH_CYLINDER = 4;
 
 const int FY_MESH_NORMALS = 1;
+
+const int FY_MESH_NORMALS_LATER = 4;
 
 const int FY_MESH_PLANE = 2;
 

@@ -216,6 +216,14 @@ void main() {
       scene.world.update(1 / 60);
       expectGolden('mesh_changed_after', view.read(view.frame()).rgba, 256, 160);
       expect(mesh.colors, colors, reason: 'kept');
+      // The frame left the normals for the view to work out; reading them
+      // works them out too.
+      final worked = Mesh()
+        ..setPositions(positions)
+        ..setTriangles(indices)
+        ..recalculateNormals();
+      addTearDown(worked.dispose);
+      expect(mesh.normals, worked.normals);
       expect(() => scene.world.update(0), returnsNormally);
     });
 
