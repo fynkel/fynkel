@@ -658,14 +658,14 @@ final class Physics extends WorldSystem implements Finalizable {
       _endFollowing();
       return;
     }
-    // The bodies first, then the colliders, which may be on them. A
-    // collider is found once each time it's below a moved object, and
-    // followed once.
+    // The bodies first, then the colliders, which may be on them. What's
+    // below a moved object is walked from the highest that moved, once
+    // (stage 14's PH6: a moved chain was walked from each of its links).
     final found = _toFollow..clear();
     _below.clear();
     for (var i = 0; i < count; i++) {
       final object = moved[i];
-      if (object.isDestroyed) continue;
+      if (object.isDestroyed || moved.movedAbove(object)) continue;
       // Read by index, then cleared.
       final below = _below..add(object);
       for (var j = 0; j < below.length; j++) {
