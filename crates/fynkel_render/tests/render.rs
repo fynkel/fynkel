@@ -89,6 +89,39 @@ fn each_gpu_gets_its_quality_level() {
     }
 }
 
+/// Apple's GPUs by generation (stage 16): the A10 (an iPad of 2018) draws
+/// Sheepdog at 11 fps at high and 40 at low, so it and the A11 are low;
+/// the A12 and A13 medium; the A14 on and the Macs' M chips high, as is an
+/// Apple GPU whose name doesn't say.
+#[test]
+fn apples_gpus_get_their_level_by_generation() {
+    let this = gpu().adapter.get_info();
+    let apple = |name: &str| wgpu::AdapterInfo {
+        name: name.to_owned(),
+        vendor: 0x106B,
+        device_type: wgpu::DeviceType::IntegratedGpu,
+        backend: wgpu::Backend::Metal,
+        ..this.clone()
+    };
+    let cases = [
+        ("Apple A9 GPU", QualityLevel::Low),
+        ("Apple A10 GPU", QualityLevel::Low),
+        ("Apple A11 GPU", QualityLevel::Low),
+        ("Apple A12 GPU", QualityLevel::Medium),
+        ("Apple A12Z GPU", QualityLevel::Medium),
+        ("Apple A13 GPU", QualityLevel::Medium),
+        ("Apple A14 GPU", QualityLevel::High),
+        ("Apple A18 Pro GPU", QualityLevel::High),
+        ("Apple M1", QualityLevel::High),
+        ("Apple M4 Max", QualityLevel::High),
+        ("Apple iOS simulator GPU", QualityLevel::High),
+        ("", QualityLevel::High),
+    ];
+    for (name, want) in cases {
+        assert_eq!(QualityLevel::for_adapter_on(&apple(name), false), want, "{name:?}");
+    }
+}
+
 #[test]
 fn an_empty_scene_shows_exactly_the_clear_colour() {
     let gpu = gpu();

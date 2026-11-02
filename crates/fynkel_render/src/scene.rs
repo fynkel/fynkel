@@ -420,7 +420,9 @@ impl QualityLevel {
         }
     }
 
-    /// The level for a GPU: high on Apple's and on desktops', low on
+    /// The level for a GPU: high on desktops' and on Apple's from the A14
+    /// on, medium on the A12 and A13, low on older Apple GPUs (the A10
+    /// draws Sheepdog at 11 fps at high: docs/stage-16-start.md), on
     /// phones' (Mali, Adreno), on a software one, and on one not known.
     /// Phones were medium until the Android frame pacing work found a
     /// Galaxy Note10+ couldn't hold 60 at it (docs/android-pacing-report.md).
@@ -440,10 +442,25 @@ impl QualityLevel {
             (Cpu, _) => Self::Low,
             _ if android => Self::Low,
             (_, ARM | QUALCOMM) => Self::Low,
-            (_, APPLE) => Self::High,
-            (_, _) if info.backend == wgpu::Backend::Metal => Self::High,
+            (_, APPLE) => Self::for_apple(&info.name),
+            (_, _) if info.backend == wgpu::Backend::Metal => Self::for_apple(&info.name),
             (wgpu::DeviceType::DiscreteGpu | wgpu::DeviceType::IntegratedGpu, _) => Self::High,
             _ => Self::Low,
+        }
+    }
+
+    /// An Apple GPU's level by its A-series generation, from its name
+    /// ("Apple A10 GPU", "Apple A18 Pro GPU"): low to the A11, medium on
+    /// the A12 and A13, high from the A14 (the M chips' generation). One
+    /// whose name doesn't say (a Mac's M chip, the simulator) is high.
+    fn for_apple(name: &str) -> Self {
+        let generation = name
+            .strip_prefix("Apple A")
+            .map(|rest| rest.bytes().take_while(u8::is_ascii_digit).fold(0u32, |n, d| n * 10 + u32::from(d - b'0')));
+        match generation {
+            Some(1..=11) => Self::Low,
+            Some(12 | 13) => Self::Medium,
+            _ => Self::High,
         }
     }
 }
