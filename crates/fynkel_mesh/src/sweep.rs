@@ -68,6 +68,8 @@ impl MeshData {
             let bounds = swept(sweep, scratch)?;
             // The old vertices become the next sweep's room.
             std::mem::swap(&mut self.vertices, &mut scratch.vertices);
+            // Every normal is new.
+            self.normals_owed = false;
             let whole = 0..scratch.indices.len() as u32;
             if self.indices != scratch.indices || self.submeshes[..] != [whole.clone()] {
                 std::mem::swap(&mut self.indices, &mut scratch.indices);

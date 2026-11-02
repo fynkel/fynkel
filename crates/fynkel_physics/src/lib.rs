@@ -195,11 +195,13 @@ impl Physics {
         self.forget_joints_of(handle);
         let w = &mut self.world;
         for collider in w.bodies[handle].colliders() {
-            if let Some(slot) = self.followed.get_mut(collider.into_raw_parts().0 as usize)
+            let index = collider.into_raw_parts().0;
+            if let Some(slot) = self.followed.get_mut(index as usize)
                 && let Some(followed) = slot.take()
                 && followed.spec.listens != 0
+                && let Ok(at) = self.contacts.listening.binary_search(&index)
             {
-                self.contacts.listening -= 1;
+                self.contacts.listening.remove(at);
             }
         }
         if let Some(slot) = self.bodies.get_mut(handle.into_raw_parts().0 as usize) {
@@ -259,10 +261,11 @@ impl Physics {
         let w = &mut self.world;
         let body = w.colliders[handle].parent();
         w.colliders.remove(handle, &mut w.islands, &mut w.bodies, &mut w.soft_bodies, true);
-        if let Some(slot) = self.followed.get_mut(handle.into_raw_parts().0 as usize)
+        let index = handle.into_raw_parts().0 as usize;
+        if let Some(slot) = self.followed.get_mut(index)
             && let Some(followed) = slot.take()
         {
-            self.listening_changed(followed.spec.listens, 0);
+            self.listening_changed(index, followed.spec.listens, 0);
         }
         if let Some(body) = body {
             self.mass_changed(body);
@@ -420,9 +423,9 @@ mod tests {
             listens: LISTEN_COLLISIONS,
         };
         physics.add_object_collider(1, spec, ObjectPose::IDENTITY, Some(body)).unwrap();
-        assert_eq!(physics.contacts.listening, 1);
+        assert_eq!(physics.contacts.listening.len(), 1);
         physics.remove_body(body).unwrap();
-        assert_eq!(physics.contacts.listening, 0, "nothing listens, so the steps skip the contacts");
+        assert_eq!(physics.contacts.listening.len(), 0, "nothing listens, so the steps skip the contacts");
     }
 
     #[test]

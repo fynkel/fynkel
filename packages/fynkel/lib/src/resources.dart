@@ -694,11 +694,17 @@ final class Mesh implements Finalizable {
     return length ~/ per;
   }
 
-  /// Works out the normals and tangents out of date.
-  void _settle() {
+  /// Works out the normals and tangents out of date. [later] owes the
+  /// normals instead, when no tangents need them now: each view works
+  /// them out as it uploads the mesh, and reading them does, so a mesh
+  /// changed every frame doesn't cost the game's thread its normals
+  /// (stage 16's phase 4: 0.8 ms on the Note10+ for the lab's water).
+  void _settle({bool later = false}) {
     if (!_staleNormals && !_staleTangents) return;
     // Without UVs tangents mean nothing: they wait for them.
-    final what = (_staleNormals ? FY_MESH_NORMALS : 0) | (_staleTangents && _hasUvs ? FY_MESH_TANGENTS : 0);
+    final tangents = _staleTangents && _hasUvs;
+    final normals = !_staleNormals ? 0 : (later && !tangents ? FY_MESH_NORMALS_LATER : FY_MESH_NORMALS);
+    final what = normals | (tangents ? FY_MESH_TANGENTS : 0);
     _staleNormals = _staleTangents = false;
     if (what != 0) check(fy_mesh_recalculate(_live, what));
   }
@@ -712,7 +718,7 @@ final class Mesh implements Finalizable {
       final mesh = changed[i];
       mesh._changed = false;
       if (mesh.isDisposed) continue;
-      mesh._settle();
+      mesh._settle(later: true);
       mesh._version++;
       if (mesh._reshaped) {
         mesh._reshaped = false;

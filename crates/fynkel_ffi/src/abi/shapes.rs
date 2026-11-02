@@ -690,7 +690,10 @@ pub unsafe extern "C" fn fy_mesh_set_triangles(
 /// Works out the mesh's normals (`FY_MESH_NORMALS`), from the faces around
 /// each vertex weighted by their area, and its tangents
 /// (`FY_MESH_TANGENTS`), from its UVs without splitting a vertex. Normals
-/// first, when both.
+/// first, when both. `FY_MESH_NORMALS_LATER` owes the normals instead:
+/// each view works them out as it uploads the mesh, and reading them
+/// (`fy_mesh_read_vertices`) does, so a mesh changed each frame doesn't
+/// cost the calling thread its normals. Tangents need them now.
 ///
 /// # Safety
 ///
@@ -701,6 +704,7 @@ pub unsafe extern "C" fn fy_mesh_recalculate(mesh: *mut FyMesh, what: u32) -> Fy
         let change = fynkel_world::MeshChange {
             recalculate_normals: what & FY_MESH_NORMALS != 0,
             recalculate_tangents: what & FY_MESH_TANGENTS != 0,
+            owe_normals: what & FY_MESH_NORMALS_LATER != 0,
             ..Default::default()
         };
         // SAFETY: per this function's contract.
@@ -762,7 +766,9 @@ pub unsafe extern "C" fn fy_mesh_read_vertices(
     guard(|| {
         // SAFETY: per this function's contract.
         let mesh = unsafe { handle(mesh, "mesh") }?;
-        let vertices = mesh.0.vertices();
+        // With the normals it owes, if it does.
+        let mut settled = Vec::new();
+        let vertices = mesh.0.settled_vertices(&mut settled);
         if vertex_count != vertices.len() {
             return Err(Error::new(
                 FyStatus::WrongSize,

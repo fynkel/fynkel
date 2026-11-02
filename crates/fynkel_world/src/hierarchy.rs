@@ -52,6 +52,11 @@ struct Node {
 }
 
 impl Hierarchy {
+    /// Goes up whenever a parent changes.
+    pub(crate) fn version(&self) -> u64 {
+        self.version
+    }
+
     fn parent(&self, id: ObjectId) -> Option<ObjectId> {
         self.nodes.get(&id).and_then(|n| n.parent)
     }
@@ -165,7 +170,7 @@ impl World {
         } else {
             self.hierarchy.inactive.insert(id, ());
         }
-        self.transforms_version += 1;
+        self.moved(id);
         Ok(())
     }
 
@@ -317,9 +322,10 @@ impl World {
 /// the extract.
 ///
 /// [`update`](Self::update) recomputes them in one pass, parents before
-/// children. The order is rebuilt only after a parent changes, so a steady
-/// frame allocates nothing, and turning objects on and off rebuilds
-/// nothing. Objects with neither parent nor children aren't stored;
+/// children, only those that moved and the ones below them when few did
+/// (stage 14's WO10). The order is rebuilt only after a parent changes,
+/// so a steady frame allocates nothing, and turning objects on and off
+/// rebuilds nothing. Objects with neither parent nor children aren't stored;
 /// [`world`](Self::world) uses their own transform and flag. One of these
 /// belongs to one world.
 #[derive(Debug, Default)]
@@ -328,6 +334,12 @@ pub struct WorldMatrices {
     /// transforms version the matrices were worked out for.
     version: Option<u64>,
     transforms: Option<u64>,
+    /// Where the world's list of moved objects was when they were worked
+    /// out ([`World::moved_since`]).
+    moved: Option<u64>,
+    /// Each object in [`order`](Self::order) to work out again, in the
+    /// pass that does: false between passes.
+    stale: Vec<bool>,
     /// Every object in a tree, parents first, with its parent's index.
     order: Vec<(ObjectId, hecs::Entity, Option<u32>)>,
     matrices: Vec<Mat4>,
@@ -343,18 +355,49 @@ impl WorldMatrices {
         if self.version == Some(tree.version) && self.transforms == Some(world.transforms_version) {
             return;
         }
-        if self.version != Some(tree.version) {
-            self.rebuild(world);
-        }
+        let moved = match self.moved {
+            Some(from) if self.version == Some(tree.version) => world.moved_since(from),
+            _ => None,
+        };
+        // Past a quarter, marking them costs more than it saves.
+        let few = moved.filter(|moved| moved.len() <= self.order.len() / 4);
+        let first = match few {
+            Some(moved) => {
+                let mut first = self.order.len();
+                for id in moved {
+                    if let Some(&i) = self.index.get(id) {
+                        self.stale[i as usize] = true;
+                        first = first.min(i as usize);
+                    }
+                }
+                first
+            }
+            None => {
+                if self.version != Some(tree.version) {
+                    self.rebuild(world);
+                }
+                self.stale.fill(true);
+                0
+            }
+        };
         self.transforms = Some(world.transforms_version);
-        for i in 0..self.order.len() {
+        self.moved = Some(world.moved_end());
+        // Parents come first, so a child's parent is already settled.
+        for i in first..self.order.len() {
             let (id, entity, parent) = self.order[i];
+            if !self.stale[i] && !parent.is_some_and(|p| self.stale[p as usize]) {
+                continue;
+            }
+            self.stale[i] = true;
             let local = world.local_matrix(entity);
             let own = !tree.is_off(id);
             (self.matrices[i], self.shown[i]) = match parent {
                 Some(p) => (self.matrices[p as usize] * local, own && self.shown[p as usize]),
                 None => (local, own),
             };
+        }
+        if first < self.stale.len() {
+            self.stale[first..].fill(false);
         }
     }
 
@@ -409,6 +452,8 @@ impl WorldMatrices {
         self.matrices.resize(self.order.len(), Mat4::IDENTITY);
         self.shown.clear();
         self.shown.resize(self.order.len(), true);
+        self.stale.clear();
+        self.stale.resize(self.order.len(), false);
         self.version = Some(tree.version);
     }
 }

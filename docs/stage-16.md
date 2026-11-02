@@ -267,6 +267,41 @@ about 11 ms of which is the ground and the sky, shaded per pixel.
 measured on the iPhone and the iPad), stage 13's mesh change is under
 1 ms there, and every small row is closed with its test.
 
+**Progress** 2026-11-02 (branch `stage-16-cpu`):
+
+- **The tags**: 100 tags among 3,000 cubes, the UI thread's ms a frame
+  placing and painting them (the median of 20 windows, profile builds):
+
+  | | before | the tree + WO10 | + BR7 |
+  |---|---|---|---|
+  | Note10+ | 1.93 | 0.78 | **0.72** |
+  | iPad | 3.05 | 0.52 | **0.42** |
+  | iPhone | 0.70 | 0.27 | **0.27** |
+
+  Most of it was the casts: each looked at every cube's box. Now a
+  tree over the boxes (`object_tree.rs`) is refitted as they move, and a
+  caster follows only the objects that moved instead of listing all
+  again. The casts alone on the Note10+: 1.44 → 0.36 ms.
+- **World matrices** (WO10): only the moved objects and their children
+  are worked out again.
+- **The mesh change**: the game thread's setting and sending on the
+  Note10+, 1.4 → 0.78 ms. A changed mesh's normals are now worked out
+  on the way to the GPU (ABI 52), so the render thread pays them
+  instead: 2.5 → 3.9 ms, off the frame's critical path at 60.
+- **The small rows**, each with its test first:
+
+  | Row | What | Before → after |
+  |---|---|---|
+  | RN3 | the pipeline cache written a second after the last new pipeline, on one thread | a thread and a write each → one write |
+  | AU7 | a streamed voice reads its file where the clip keeps it | 1 MB looped 4 times: 8.5 → 4.3 MB allocated |
+  | PH6 | physics walks what's below moved objects once | 300 links all moved: 158 → 0.8 ms (Mac) |
+  | PH7 | contacts look at the listening bodies only | 0.044 → 0.000 ms |
+  | DF13 | shaders and effects let go of dead users | 20,000 → 1,000 entries |
+  | RN9 ½ | bloom's images and the frame data's room let go a second after unused | kept forever → 60 frames |
+  | BR7 | world widgets placed without allocating | an Offset and vectors each → none |
+  | BR6 ½ | the extract looks at resources only when they changed | 0.10 → 0.00 ms with 2,000 |
+  | BR5 | the iOS layer's main thread never waits for a drawable | up to 988 ms → a few µs |
+
 ### Phase 5: budgets, the guide, the report (S)
 
 - Each device's budget; §20 with the numbers; the report with the

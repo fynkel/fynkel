@@ -551,6 +551,27 @@ fn bench_extract() {
     }
 }
 
+/// A world holding many resources and drawing few objects, as a game
+/// with many models loaded: 2,000 meshes and 2,000 materials, each frame
+/// looked at again (stage 14's BR6 ½). In release:
+/// `cargo test --release -p fynkel_ffi --lib -- --ignored --nocapture bench_extract_many`.
+#[test]
+#[ignore = "a benchmark: run in release"]
+fn bench_extract_many_resources() {
+    let (mut world, _) = stage1_world();
+    for i in 0..2000 {
+        world.add_mesh(MeshData::cube());
+        world.add_material(Material { roughness: i as f32 / 2000.0, ..Material::default() }).unwrap();
+    }
+    let mut extract = Extract::default();
+    let (mut scene, mut ops) = (RenderScene::default(), Vec::new());
+    extract.run(&world, &mut scene, &mut ops);
+    fynkel_bench::bench("extracting a frame among 2,000 meshes and materials", 500, 0.02, || {
+        ops.clear();
+        extract.run(&world, &mut scene, &mut ops);
+    });
+}
+
 #[test]
 fn an_orthographic_camera_is_extracted_with_its_size() {
     let (mut world, _) = stage1_world();

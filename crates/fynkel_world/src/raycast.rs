@@ -17,6 +17,11 @@
 //!   drawn; with a joint destroyed, where it was bound.
 //! - Cut-outs (`alpha_cutoff`) are hit as if solid: the texture isn't read.
 //!
+//! A caster kept between casts has a box tree over the objects' world
+//! boxes ([`crate::object_tree`]), so a ray looks at the few objects along
+//! its line; skinned meshes are looked at on every cast. Of two objects hit
+//! at one distance, the first in the world's order is hit, tree or not.
+//!
 //! The test runs in each object's own space, so its matrix is inverted once
 //! and no triangle is moved. A still mesh of many triangles has a box tree
 //! over them ([`crate::bvh`]), made the first time a ray reaches it and
@@ -35,7 +40,8 @@ use crate::bvh::{Bvh, WORTH_A_TREE};
 use crate::components::{MeshRenderer, Transform};
 use crate::hierarchy::WorldMatrices;
 use crate::id::IdMap;
-use crate::{MeshId, ObjectId, World};
+use crate::object_tree::ObjectTree;
+use crate::{MaterialId, MeshId, ObjectId, World};
 
 /// A half-line: from `origin`, along `direction` (unit length).
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -82,12 +88,85 @@ pub struct RayHit {
 /// Rays that reach one version of a mesh before its tree is made.
 const CASTS_BEFORE_A_TREE: u32 = 16;
 
-/// Casts rays at a world. It keeps the world matrices between casts, and
-/// the trees over its meshes' triangles, so a steady world is cast at
-/// without allocating. One of these belongs to one world.
+/// Objects a world needs before its casts go through a tree of them.
+const OBJECTS_WORTH_A_TREE: usize = 64;
+
+/// Casts rays at a world. It keeps the world matrices between casts, a
+/// tree over the objects' boxes, and the trees over its meshes'
+/// triangles, so a steady world is cast at without allocating. One of
+/// these belongs to one world.
 #[derive(Debug, Default)]
 pub struct Raycaster {
     matrices: WorldMatrices,
+    objects: Objects,
+    meshes: Meshes,
+}
+
+/// What a ray can hit, as of the world's versions in `seen`.
+#[derive(Debug, Default)]
+struct Objects {
+    /// The world's transforms, renderers and hierarchy versions the list
+    /// is for, and where its list of moved objects was.
+    seen: Option<Seen>,
+    /// Each object that can be hit, in the world's order.
+    list: Vec<Object>,
+    /// Where each is in [`list`](Self::list).
+    at: IdMap<ObjectId, u32>,
+    /// The objects that moved since the last cast and those below them,
+    /// to work out again; reused.
+    moved: Vec<ObjectId>,
+    /// The world box of each in [`list`](Self::list) the tree holds, and
+    /// its index there.
+    boxes: Vec<(Vec3, Vec3)>,
+    boxed: Vec<u32>,
+    /// Those not in the tree, tested on every cast: skinned meshes, whose
+    /// box their joints decide, and any without a finite box.
+    loose: Vec<u32>,
+    /// The ids the tree was made for, in order: the same ones again, it's
+    /// refitted rather than made.
+    tree_ids: Vec<ObjectId>,
+    tree: ObjectTree,
+    /// Casts since the objects last changed, while there's no tree.
+    casts: u32,
+}
+
+/// The world's versions a list was made or brought up to date for.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct Seen {
+    transforms: u64,
+    renderers: u64,
+    hierarchy: u64,
+    moved: u64,
+}
+
+impl Seen {
+    fn of(world: &World) -> Self {
+        Self {
+            transforms: world.transforms_version(),
+            renderers: world.renderers_version(),
+            hierarchy: world.hierarchy_version(),
+            moved: world.moved_end(),
+        }
+    }
+}
+
+/// An object a ray can hit, as the world had it.
+#[derive(Clone, Copy, Debug)]
+struct Object {
+    id: ObjectId,
+    mesh: MeshId,
+    material: MaterialId,
+    /// Its world matrix; unused for a skinned one.
+    model: Mat4,
+    skinned: bool,
+    /// Its box's index in [`Objects::boxes`], or `u32::MAX` when it's
+    /// tested on every cast.
+    boxed: u32,
+}
+
+/// The meshes' trees and what a test needs, kept between casts.
+#[derive(Debug, Default)]
+struct Meshes {
     /// A skin's joints as they bend its mesh, and its vertices bent.
     joints: Vec<Mat4>,
     bent: Vec<Vec3>,
@@ -105,80 +184,264 @@ impl Raycaster {
     /// The closest hit along `ray` no further than `max_distance`, on the
     /// layers in `mask` (bit `n` for layer `n`), in the world as it is now.
     pub fn cast(&mut self, world: &World, ray: Ray, max_distance: f32, mask: u32) -> Option<RayHit> {
-        let Self { matrices, joints, bent, trees, sides } = self;
+        let Self { matrices, objects, meshes } = self;
         matrices.update(world);
         // Trees of meshes no longer in the world go, now and then.
-        if trees.len() > 16 && trees.len() > 2 * world.mesh_count() {
-            trees.retain(|&id, _| world.has_mesh(id));
+        if meshes.trees.len() > 16 && meshes.trees.len() > 2 * world.mesh_count() {
+            meshes.trees.retain(|&id, _| world.has_mesh(id));
         }
-        let (has_skins, has_extra) = (world.has_skins(), world.has_submesh_materials());
-        let mut best: Option<RayHit> = None;
+        objects.update(world, matrices);
+        let has_extra = world.has_submesh_materials();
+        // The closest hit so far, and the index in the list of what it hit:
+        // of two at one distance, the first in the world's order is hit, as
+        // when every object is tested in turn.
+        let mut best: Option<(RayHit, usize)> = None;
+        let mut test = |k: usize, best: &mut Option<(RayHit, usize)>| {
+            let object = objects.list[k];
+            if !world.in_mask(object.id, mask) {
+                return;
+            }
+            // An earlier object may tie with the closest; a later one must
+            // be closer.
+            let reach = match *best {
+                None => max_distance,
+                Some((hit, at)) if k < at => hit.distance.next_up(),
+                Some((hit, _)) => hit.distance,
+            };
+            let Some((distance, normal)) = meshes.hit(world, matrices, &object, ray, reach, has_extra) else { return };
+            if best.is_none_or(|(hit, at)| distance < hit.distance || (distance == hit.distance && k < at)) {
+                *best = Some((RayHit { object: object.id, point: ray.at(distance), normal, distance }, k));
+            }
+        };
+        if objects.tree.is_empty() {
+            for k in 0..objects.list.len() {
+                test(k, &mut best);
+            }
+        } else {
+            for &k in &objects.loose {
+                test(k as usize, &mut best);
+            }
+            let best = std::cell::Cell::new(best);
+            objects.tree.walk(
+                ray.origin,
+                ray.direction,
+                || best.get().map_or(max_distance, |(hit, _)| hit.distance),
+                |i| {
+                    let mut b = best.get();
+                    test(objects.boxed[i] as usize, &mut b);
+                    best.set(b);
+                },
+            );
+            return best.get().map(|(hit, _)| hit);
+        }
+        best.map(|(hit, _)| hit)
+    }
+}
+
+impl Objects {
+    /// Brings the list up to date with `world`, and the tree when there's
+    /// one; makes the tree once enough casts have come.
+    fn update(&mut self, world: &World, matrices: &WorldMatrices) {
+        let seen = Seen::of(world);
+        if self.seen != Some(seen) {
+            let followed = self.follow_moved(world, matrices, seen);
+            if !followed {
+                self.collect(world, matrices);
+            }
+            self.seen = Some(seen);
+            if followed && !self.tree.is_empty() {
+                // The same objects: only their boxes changed.
+                if !self.tree.refit(&self.boxes) {
+                    self.tree = ObjectTree::default();
+                    self.casts = 0;
+                }
+            } else if !self.tree.is_empty() {
+                let same = self.tree_ids.len() == self.boxed.len()
+                    && self.boxed.iter().zip(&self.tree_ids).all(|(&k, &id)| self.list[k as usize].id == id);
+                if !same || !self.tree.refit(&self.boxes) {
+                    self.tree = ObjectTree::default();
+                    self.casts = 0;
+                }
+            }
+        }
+        if self.tree.is_empty() && self.boxed.len() >= OBJECTS_WORTH_A_TREE {
+            self.casts += 1;
+            if self.casts >= CASTS_BEFORE_A_TREE {
+                self.tree.make(&self.boxes);
+                self.tree_ids.clear();
+                self.tree_ids.extend(self.boxed.iter().map(|&k| self.list[k as usize].id));
+            }
+        }
+    }
+
+    /// Brings the list up to date with only the objects that moved since
+    /// `self.seen`, and those below them, when nothing else changed: no
+    /// renderer, no parent, no object added or gone, and only a few moved
+    /// (the tags' walkers among 3,000 still cubes). False when it can't,
+    /// and the list must be made again.
+    fn follow_moved(&mut self, world: &World, matrices: &WorldMatrices, now: Seen) -> bool {
+        let Some(was) = self.seen else { return false };
+        if was.renderers != now.renderers || was.hierarchy != now.hierarchy {
+            return false;
+        }
+        // Each move went through the list, once each: nothing else changed
+        // the transforms (an object added or gone).
+        let Some(moved) = world.moved_since(was.moved) else { return false };
+        if now.transforms - was.transforms != moved.len() as u64 || moved.len() > self.list.len() / 4 + 1 {
+            return false;
+        }
+        let Self { list, at, moved: walk, boxes, .. } = self;
+        walk.clear();
+        walk.extend_from_slice(moved);
+        let has_skins = world.has_skins();
+        let mut next = 0;
+        while next < walk.len() {
+            let id = walk[next];
+            next += 1;
+            if let Ok(children) = world.children(id) {
+                walk.extend_from_slice(children);
+            }
+            // What it is now, if it can be hit: as `collect` finds it.
+            let now = world.get::<MeshRenderer>(id).ok().and_then(|r| {
+                let (mesh_id, material) = (r.mesh?, r.material?);
+                let mesh = world.mesh(mesh_id).ok()?;
+                let model = matrices.world(world, id, &world.get::<Transform>(id).ok()?)?;
+                let skinned = has_skins && mesh.skin().is_some() && world.skin(id).is_some();
+                Some((mesh, mesh_id, material, model, skinned))
+            });
+            match (at.get(&id), now) {
+                (None, None) => {}
+                (Some(&k), Some((mesh, mesh_id, material, model, skinned))) => {
+                    let object = &mut list[k as usize];
+                    if (object.mesh, object.material, object.skinned) != (mesh_id, material, skinned) {
+                        return false;
+                    }
+                    object.model = model;
+                    if object.boxed != u32::MAX {
+                        let (lo, hi) = world_box(mesh, model);
+                        if !lo.is_finite() || !hi.is_finite() {
+                            return false;
+                        }
+                        boxes[object.boxed as usize] = (lo, hi);
+                    } else if !skinned {
+                        // Tested on every cast for a box that wasn't finite:
+                        // it may be now.
+                        return false;
+                    }
+                }
+                // Shown or hidden: the list changes.
+                _ => return false,
+            }
+        }
+        true
+    }
+
+    /// Every object drawn: a mesh and a material, shown.
+    fn collect(&mut self, world: &World, matrices: &WorldMatrices) {
+        let Self { list, at, boxes, boxed, loose, .. } = self;
+        list.clear();
+        at.clear();
+        boxes.clear();
+        boxed.clear();
+        loose.clear();
+        let has_skins = world.has_skins();
         world.for_each2::<MeshRenderer, Transform>(|id, r, t| {
             let (Some(mesh_id), Some(material)) = (r.mesh, r.material) else { return };
-            if !world.in_mask(id, mask) {
-                return;
-            }
             let Ok(mesh) = world.mesh(mesh_id) else { return };
-            let reach = best.map_or(max_distance, |b| b.distance);
             let Some(model) = matrices.world(world, id, t) else { return };
-            // A skinned mesh, all its joints there: bent as it's drawn.
-            joints.clear();
-            let skin = if has_skins && mesh.skin().is_some() { world.skin(id) } else { None };
-            let skinned = skin.is_some_and(|skin| {
-                skin.joints().iter().zip(skin.inverse_binds()).all(|(&joint, &inverse_bind)| {
-                    matrices.matrix(world, joint).map(|m| joints.push(m * inverse_bind)).is_some()
-                })
-            });
-            // A still mesh's box first: most are missed there.
-            let into = if skinned { None } else { into_object(mesh, model, ray, reach) };
-            if !skinned && into.is_none() {
-                return;
-            }
-            // Each submesh drawn, and whether it's seen from behind.
-            let extra = if has_extra { world.submesh_materials(id) } else { &[] };
-            sides.clear();
-            sides.extend((0..mesh.submeshes().len()).map(|k| {
-                let material = if k == 0 { Some(material) } else { extra.get(k - 1).copied() };
-                material.and_then(|m| world.material(m).ok()).map(|m| m.double_sided)
-            }));
-            let parts =
-                mesh.submeshes().iter().zip(sides.iter()).filter_map(|(range, side)| Some((range.clone(), (*side)?)));
-            let hit = match into {
-                None => hit_skinned(mesh, joints, bent, parts, ray, reach),
-                Some((inverse, origin, direction)) => {
-                    let positions = mesh.vertices();
-                    let at = |i: u32| Vec3::from(positions[i as usize].position);
-                    let tree = if mesh.indices().len() / 3 < WORTH_A_TREE {
-                        None
-                    } else {
-                        let version = world.mesh_version(mesh_id);
-                        match trees.get_mut(&mesh_id) {
-                            Some((seen, casts, tree)) if *seen == version => {
-                                *casts += 1;
-                                if tree.is_none() && *casts >= CASTS_BEFORE_A_TREE {
-                                    *tree = Some(Bvh::new(mesh));
-                                }
-                                tree.as_ref()
-                            }
-                            _ => {
-                                trees.insert(mesh_id, (version, 1, None));
-                                None
-                            }
-                        }
-                    };
-                    let hit = match tree {
-                        Some(tree) => tree.closest(mesh, at, sides, origin, direction, reach),
-                        None => closest(mesh, parts, at, origin, direction, reach),
-                    };
-                    hit.map(|(distance, face)| (distance, world_normal(inverse, face, ray.direction)))
-                }
+            let skinned = has_skins && mesh.skin().is_some() && world.skin(id).is_some();
+            let k = list.len() as u32;
+            at.insert(id, k);
+            let (lo, hi) = world_box(mesh, model);
+            let in_box = if skinned || !lo.is_finite() || !hi.is_finite() {
+                loose.push(k);
+                u32::MAX
+            } else {
+                boxes.push((lo, hi));
+                boxed.push(k);
+                boxes.len() as u32 - 1
             };
-            if let Some((distance, normal)) = hit {
-                best = Some(RayHit { object: id, point: ray.at(distance), normal, distance });
-            }
+            list.push(Object { id, mesh: mesh_id, material, model, skinned, boxed: in_box });
         });
-        best
     }
+}
+
+impl Meshes {
+    /// Where `ray` hits `object` first, no further than `reach`: the
+    /// distance and the world normal.
+    fn hit(
+        &mut self,
+        world: &World,
+        matrices: &WorldMatrices,
+        object: &Object,
+        ray: Ray,
+        reach: f32,
+        has_extra: bool,
+    ) -> Option<(f32, Vec3)> {
+        let Self { joints, bent, trees, sides } = self;
+        let mesh_id = object.mesh;
+        let mesh = world.mesh(mesh_id).ok()?;
+        // A skinned mesh, all its joints there: bent as it's drawn.
+        joints.clear();
+        let skin = if object.skinned { world.skin(object.id) } else { None };
+        let skinned = skin.is_some_and(|skin| {
+            skin.joints().iter().zip(skin.inverse_binds()).all(|(&joint, &inverse_bind)| {
+                matrices.matrix(world, joint).map(|m| joints.push(m * inverse_bind)).is_some()
+            })
+        });
+        // A still mesh's box first: most are missed there.
+        let into = if skinned { None } else { into_object(mesh, object.model, ray, reach) };
+        if !skinned && into.is_none() {
+            return None;
+        }
+        // Each submesh drawn, and whether it's seen from behind.
+        let extra = if has_extra { world.submesh_materials(object.id) } else { &[] };
+        sides.clear();
+        sides.extend((0..mesh.submeshes().len()).map(|k| {
+            let material = if k == 0 { Some(object.material) } else { extra.get(k - 1).copied() };
+            material.and_then(|m| world.material(m).ok()).map(|m| m.double_sided)
+        }));
+        let parts =
+            mesh.submeshes().iter().zip(sides.iter()).filter_map(|(range, side)| Some((range.clone(), (*side)?)));
+        match into {
+            None => hit_skinned(mesh, joints, bent, parts, ray, reach),
+            Some((inverse, origin, direction)) => {
+                let positions = mesh.vertices();
+                let at = |i: u32| Vec3::from(positions[i as usize].position);
+                let tree = if mesh.indices().len() / 3 < WORTH_A_TREE {
+                    None
+                } else {
+                    let version = world.mesh_version(mesh_id);
+                    match trees.get_mut(&mesh_id) {
+                        Some((seen, casts, tree)) if *seen == version => {
+                            *casts += 1;
+                            if tree.is_none() && *casts >= CASTS_BEFORE_A_TREE {
+                                *tree = Some(Bvh::new(mesh));
+                            }
+                            tree.as_ref()
+                        }
+                        _ => {
+                            trees.insert(mesh_id, (version, 1, None));
+                            None
+                        }
+                    }
+                };
+                let hit = match tree {
+                    Some(tree) => tree.closest(mesh, at, sides, origin, direction, reach),
+                    None => closest(mesh, parts, at, origin, direction, reach),
+                };
+                hit.map(|(distance, face)| (distance, world_normal(inverse, face, ray.direction)))
+            }
+        }
+    }
+}
+
+/// The box around `mesh`'s box placed by `model`, in the world.
+fn world_box(mesh: &MeshData, model: Mat4) -> (Vec3, Vec3) {
+    let (lo, hi) = mesh.bounds();
+    let centre = model.transform_point3((lo + hi) * 0.5);
+    let half = Mat3::from_mat4(model).abs() * ((hi - lo) * 0.5);
+    (centre - half, centre + half)
 }
 
 /// The ray in the space of `mesh` placed by `model`, when it reaches the
@@ -187,10 +450,8 @@ impl Raycaster {
 fn into_object(mesh: &MeshData, model: Mat4, ray: Ray, reach: f32) -> Option<(Mat4, Vec3, Vec3)> {
     // The box around the object's box, in the world: far cheaper than the
     // inverse, which only objects the ray may hit need.
-    let (lo, hi) = mesh.bounds();
-    let centre = model.transform_point3((lo + hi) * 0.5);
-    let half = Mat3::from_mat4(model).abs() * ((hi - lo) * 0.5);
-    if !hits_box(ray.origin, ray.direction, centre - half, centre + half, reach) {
+    let (lo, hi) = world_box(mesh, model);
+    if !hits_box(ray.origin, ray.direction, lo, hi, reach) {
         return None;
     }
     let inverse = model.inverse();

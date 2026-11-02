@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 51
+#define FY_ABI_VERSION 52
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -78,6 +78,10 @@
 
 // `fy_mesh_recalculate`'s tangents.
 #define FY_MESH_TANGENTS 2
+
+// `fy_mesh_recalculate`'s normals, but later: by whoever reads them
+// next, as each view uploading it.
+#define FY_MESH_NORMALS_LATER 4
 
 // `FySky::kind`: none; the camera's clear colour shows.
 #define FY_SKY_NONE 0
@@ -1739,7 +1743,10 @@ FyStatus fy_mesh_set_triangles(struct FyMesh *mesh,
 // Works out the mesh's normals (`FY_MESH_NORMALS`), from the faces around
 // each vertex weighted by their area, and its tangents
 // (`FY_MESH_TANGENTS`), from its UVs without splitting a vertex. Normals
-// first, when both.
+// first, when both. `FY_MESH_NORMALS_LATER` owes the normals instead:
+// each view works them out as it uploads the mesh, and reading them
+// (`fy_mesh_read_vertices`) does, so a mesh changed each frame doesn't
+// cost the calling thread its normals. Tangents need them now.
 //
 // # Safety
 //
@@ -2726,8 +2733,9 @@ uint32_t fy_apple_acquire(const struct FyView *view, void **out_surface);
 FyStatus fy_apple_set_frame_ready(const struct FyView *view, FyFrameReady function, void *userdata);
 
 // Draws an Apple layer view's next frames to `layer` (a `CAMetalLayer`)
-// at `width` × `height` pixels, after a frame in progress on the old one.
-// For the Flutter plugin, on the main thread.
+// at `width` × `height` pixels. It never waits for the render thread: a
+// frame in progress ends on the old layer, and a new size is set before
+// the next frame. For the Flutter plugin, on the main thread.
 //
 // # Safety
 //
@@ -2738,8 +2746,9 @@ FyStatus fy_apple_layer_attach(const struct FyView *view,
                                uint32_t width,
                                uint32_t height);
 
-// Stops an Apple layer view drawing to its layer, after a frame in
-// progress: the layer may then go. Frames are skipped until the next
+// Stops an Apple layer view drawing to its layer, without waiting for a
+// frame in progress, which ends on it: the layer may then go (the frame's
+// surface keeps it alive). Frames are skipped until the next
 // `fy_apple_layer_attach`.
 //
 // # Safety

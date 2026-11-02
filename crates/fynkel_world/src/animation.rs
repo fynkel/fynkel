@@ -842,8 +842,9 @@ impl World {
             animator.tidy();
         }
         self.animators = animators;
-        if !self.posed.is_empty() {
-            self.transforms_version += 1;
+        // Each posed animator moved its parts, all below its root.
+        for at in 0..self.posed.len() {
+            self.moved(self.posed[at]);
         }
     }
 }

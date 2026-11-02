@@ -273,7 +273,7 @@ fn cached_world_matrices_always_match_the_walk_up() {
     let mut live: Vec<ObjectId> = Vec::new();
 
     for step in 0..2_000 {
-        match rng.below(12) {
+        match rng.below(13) {
             0..=2 => {
                 let id = world.spawn();
                 if rng.below(4) != 0 {
@@ -308,6 +308,10 @@ fn cached_world_matrices_always_match_the_walk_up() {
             9 | 10 if !live.is_empty() => {
                 let id = live[rng.below(live.len())];
                 world.set_active(id, rng.below(3) == 0).unwrap();
+            }
+            11 if !live.is_empty() => {
+                let id = live[rng.below(live.len())];
+                let _ = world.remove::<Transform>(id);
             }
             _ => {}
         }

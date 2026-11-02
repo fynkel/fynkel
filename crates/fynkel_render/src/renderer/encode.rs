@@ -237,6 +237,12 @@ impl Renderer {
         {
             image.bloom = Some(BloomChain::new(&self.kit.bloom, &image.view, width, height));
         }
+        if self.bloom.is_none()
+            && self.bloom_idle > KEEP_UNUSED_MAPS
+            && let Some(image) = self.targets.as_mut().and_then(|t| t.image.as_mut())
+        {
+            image.bloom = None;
+        }
     }
 
     pub(super) fn create_targets(&self, width: u32, height: u32, image: Option<wgpu::TextureFormat>) -> Targets {

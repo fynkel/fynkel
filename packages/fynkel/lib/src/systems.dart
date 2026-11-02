@@ -332,6 +332,17 @@ final class MovedReader {
     return _world._movedLog[_cursor - _world._movedBase + index];
   }
 
+  /// Whether an object above [object] is among those that moved since the
+  /// last [markRead]: what's below a moved object moved with it, so a
+  /// reader that walks down from each can pass over [object].
+  bool movedAbove(GameObject object) {
+    if (_closed) return false;
+    for (var o = object.parent; o != null; o = o.parent) {
+      if (o._loggedAt >= _cursor && !o.isDestroyed) return true;
+    }
+    return false;
+  }
+
   /// Marks every object up to now read: [length] is 0 until another moves.
   void markRead() {
     if (_closed) return;

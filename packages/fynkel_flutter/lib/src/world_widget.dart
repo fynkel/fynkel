@@ -448,21 +448,46 @@ class _RenderPlaced extends RenderBox
     // The camera draws moved by its shake: moving each point back instead
     // keeps the widgets on what they mark.
     final shake = world.cameras.shakeOf(camera);
+    // Camera.worldToScreenPoint's numbers, worked out once, so a hundred
+    // widgets a frame make nothing each (stage 14's BR7): the point from
+    // the eye, turned back by the camera's turn, over the view.
+    final (ex, ey, ez) = (eye.x + shake.x, eye.y + shake.y, eye.z + shake.z);
+    final (qx, qy, qz, qw) = (-turn.x, -turn.y, -turn.z, turn.w);
+    final viewWidth = size.width, viewHeight = size.height, aspect = viewWidth / viewHeight;
+    final orthographic = camera.orthographic, orthographicSize = camera.orthographicSize;
+    final tanHalf = orthographic ? 0.0 : math.tan(camera.fovY / 2);
     var i = 0;
     for (var child = firstChild; child != null; child = childAfter(child), i++) {
       final place = child.parentData! as _Place..index = i;
       final w = i < widgets.length ? widgets[i] : null;
       final where = i < places.length ? places[i] : null;
       if (w == null || where == null || w.isRemoved) continue;
-      final point = w.point - shake;
-      final at = camera.worldToScreenPoint(point, width: size.width, height: size.height);
-      final distance = (point - eye).length;
-      final onView = at != null && at.x >= 0 && at.x <= size.width && at.y >= 0 && at.y <= size.height;
+      // Its point, from the eye (both moved back by the shake).
+      final own = w.gameObject.worldTransform.position, offset = w.offset;
+      final px = own.x + offset.x - ex, py = own.y + offset.y - ey, pz = own.z + offset.z - ez;
+      final distance = math.sqrt(px * px + py * py + pz * pz);
+      // Turned into the camera's frame (Quat.rotate's numbers).
+      final tx = (qy * pz - qz * py) * 2, ty = (qz * px - qx * pz) * 2, tz = (qx * py - qy * px) * 2;
+      final cx = px + tx * qw + (qy * tz - qz * ty), cy = py + ty * qw + (qz * tx - qx * tz);
+      final cz = pz + tz * qw + (qx * ty - qy * tx);
+      var inFront = true;
+      double across, up;
+      if (orthographic) {
+        across = cx / (orthographicSize * aspect);
+        up = cy / orthographicSize;
+      } else {
+        final ahead = -cz;
+        inFront = ahead > 0;
+        across = inFront ? cx / (ahead * tanHalf * aspect) : 0;
+        up = inFront ? cy / (ahead * tanHalf) : 0;
+      }
+      final atX = (across + 1) / 2 * viewWidth, atY = (1 - up) / 2 * viewHeight;
+      final onView = inFront && atX >= 0 && atX <= viewWidth && atY >= 0 && atY <= viewHeight;
       if (w.keepOnScreen && !onView) {
         // Held at the edge, on the line from the middle toward the point:
         // which way it is from the camera, across and up, holds behind it
         // too.
-        final to = point - eye;
+        final to = Vec3(px, py, pz);
         var dx = to.dot(turn.rotate(Vec3.right)), dy = -to.dot(turn.rotate(Vec3.up));
         if (dx.abs() < 1e-9 && dy.abs() < 1e-9) dy = 1; // Straight behind: below.
         final width = child.size.width, height = child.size.height;
@@ -488,23 +513,24 @@ class _RenderPlaced extends RenderBox
         continue;
       }
       if (look && w.keepOnScreen) where._offScreen.value = false;
-      if (at == null) continue; // Behind the camera.
+      if (!inFront) continue; // Behind the camera.
       final beyond = w.shrinkBeyond;
       // A release build doesn't check it: one that isn't above 0 keeps full size.
       final scale = beyond == null || !(beyond > 0) || distance <= beyond ? 1.0 : beyond / distance;
       final width = child.size.width * scale, height = child.size.height * scale;
-      var x = at.x - (w.alignment.x + 1) / 2 * width;
-      var y = at.y - (w.alignment.y + 1) / 2 * height;
+      var x = atX - (w.alignment.x + 1) / 2 * width;
+      var y = atY - (w.alignment.y + 1) / 2 * height;
       if (w.keepOnScreen) {
         // Its point on the view: all of it inside the edge too.
         x = x.clamp(w.edgeMargin, math.max(w.edgeMargin, size.width - w.edgeMargin - width));
         y = y.clamp(w.edgeMargin, math.max(w.edgeMargin, size.height - w.edgeMargin - height));
       }
       if (x > size.width || y > size.height || x + width < 0 || y + height < 0) continue;
+      // Still, it keeps its offset: nothing made.
+      if (place.offset.dx != x || place.offset.dy != y) place.offset = Offset(x, y);
       place
         ..shown = true
         ..index = i
-        ..offset = Offset(x, y)
         ..scale = scale
         ..depth = distance;
       if (!w.hideBehind) {
@@ -515,7 +541,7 @@ class _RenderPlaced extends RenderBox
         if (where._behind == null) {
           // Its first look is now, whatever the share, and it shows as it
           // is: no fade in from nothing.
-          where._behind = _isBehind(w, eye, point);
+          where._behind = _isBehind(w, eye, Vec3(eye.x + px, eye.y + py, eye.z + pz));
           where._opacity = where._behind! ? 0 : 1;
         } else {
           _looking.add(i);

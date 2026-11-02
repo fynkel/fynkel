@@ -514,7 +514,7 @@ final class Camera extends Component {
     }
     _effects = List.unmodifiable(value);
     for (final effect in _effects) {
-      effect._cameras.add(WeakReference(this));
+      _addWeak(effect._cameras, this);
     }
   }
 

@@ -45,6 +45,7 @@ impl Skin {
 impl World {
     pub(crate) fn add_skin(&mut self, object: ObjectId, skin: Skin) {
         self.skins.insert(object, skin);
+        self.renderers_version += 1;
     }
 
     /// The skin that bends `object`'s mesh, if a model copy's.

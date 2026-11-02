@@ -218,3 +218,22 @@ fn outlines_dont_glow() {
         }
     }
 }
+
+/// Bloom's images are kept a second after the last frame with bloom, so a
+/// camera that turns it on and off doesn't make them again each time,
+/// then let go (stage 14's RN9 ½: they were kept for good).
+#[test]
+fn bloom_is_let_go_a_second_after_the_last_frame_with_it() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let plain = glowing(8.0, None, QualityLevel::Medium);
+    assert_eq!(render(&gpu, &mut r, &plain, SIZE, SIZE).1.bloom_bytes, 0);
+    let (_, stats) = render(&gpu, &mut r, &glowing(8.0, Some(Bloom::DEFAULT), QualityLevel::Medium), SIZE, SIZE);
+    assert!(stats.bloom_bytes > 0);
+    let mut frames = 0;
+    while render(&gpu, &mut r, &plain, SIZE, SIZE).1.bloom_bytes > 0 {
+        frames += 1;
+        assert!(frames < 100, "never let go");
+    }
+    assert_eq!(frames, 60, "kept about a second");
+}

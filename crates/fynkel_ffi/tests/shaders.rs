@@ -81,12 +81,12 @@ fn values_own_numbers_time_and_new_code_show_in_the_next_frame() {
     let cube = stage1(&world);
     let shader = add(&world, "tint.wgsl", TINT).unwrap();
     let (mut renderer, mut material) = (FyMeshRenderer::default(), FyMaterial::default());
+    let red: Vec<u8> = [1.0f32, 0.0, 0.0, 1.0].iter().flat_map(|v| v.to_le_bytes()).collect();
     // SAFETY: a live world, pointers to locals and slices of the lengths passed.
     unsafe {
         ok(fy_mesh_renderer_get(world.0, cube, &mut renderer));
         ok(fy_material_get(world.0, renderer.material, &mut material));
         ok(fy_material_set(world.0, renderer.material, &FyMaterial { shader, ..material }));
-        let red: Vec<u8> = [1.0f32, 0.0, 0.0, 1.0].iter().flat_map(|v| v.to_le_bytes()).collect();
         ok(fy_material_values_set(world.0, renderer.material, 0, red.as_ptr(), red.len()));
         assert_eq!(fy_material_values_set(world.0, renderer.material, 30, red.as_ptr(), 4), FyStatus::WrongSize);
         assert_eq!(fy_shader_remove(world.0, shader), FyStatus::InUse);
@@ -94,6 +94,16 @@ fn values_own_numbers_time_and_new_code_show_in_the_next_frame() {
     let view = View::headless(&world, 32, 32);
     let [r, g, b, _] = centre(&view);
     assert!(r > 200 && g < 40 && b < 40, "red: {r} {g} {b}");
+
+    // Values changed after a frame show in the next (the extract keeps
+    // what it worked out until the world's resources change).
+    let blue: Vec<u8> = [0.0f32, 0.0, 1.0, 1.0].iter().flat_map(|v| v.to_le_bytes()).collect();
+    // SAFETY: a live world and a slice of the length passed.
+    ok(unsafe { fy_material_values_set(world.0, renderer.material, 0, blue.as_ptr(), blue.len()) });
+    let [r, g, b, _] = centre(&view);
+    assert!(r < 40 && g < 40 && b > 200, "blue: {r} {g} {b}");
+    // SAFETY: as above.
+    ok(unsafe { fy_material_values_set(world.0, renderer.material, 0, red.as_ptr(), red.len()) });
 
     // SAFETY: a live world and a local value.
     ok(unsafe { fy_mesh_renderer_set(world.0, cube, &FyMeshRenderer { own: [1.0, 0.0, 0.0, 0.0], ..renderer }) });

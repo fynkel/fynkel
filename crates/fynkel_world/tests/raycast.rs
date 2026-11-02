@@ -532,3 +532,102 @@ fn a_changed_mesh_is_hit_where_it_is_now() {
         assert!((at(&mut caster, &s) - 3.0).abs() < 1e-3);
     }
 }
+
+/// A world of `count` cubes, some on layer 1, some double-sided, two at
+/// the same place (a tie: the first in the world's order is hit).
+fn crowd(count: u32) -> (Scene, Vec<ObjectId>) {
+    let mut s = scene();
+    let mut ids = Vec::new();
+    for i in 0..count {
+        let position =
+            Vec3::new((i % 10) as f32 * 1.5 - 7.0, (i / 10 % 10) as f32 * 1.5 - 7.0, -((i / 100) as f32) * 1.5);
+        let material = if i % 7 == 0 { s.two_sided } else { s.one_sided };
+        let mesh = if i % 11 == 0 { s.sphere } else { s.cube };
+        let id = s.spawn(mesh, material, Transform::from_position(position));
+        if i % 5 == 0 {
+            s.world.set_layer(id, 1).unwrap();
+        }
+        ids.push(id);
+    }
+    let first = ids[44];
+    let at = s.world.get::<Transform>(first).unwrap();
+    ids.push(s.cube_at(at.position));
+    (s, ids)
+}
+
+/// Rays from in front of the crowd, at it.
+fn at_the_crowd(count: u32) -> Vec<Ray> {
+    rays(count)
+        .map(|r| {
+            Ray::new(r.origin() * 3.0 + Vec3::new(0.0, 0.0, 12.0), r.direction() + Vec3::new(0.0, 0.0, -1.0)).unwrap()
+        })
+        .collect()
+}
+
+/// A caster that has kept its tree hits what a new one, testing every
+/// object, hits: the same object, at the same point.
+#[track_caller]
+fn same_as_every_object(caster: &mut Raycaster, s: &Scene, rays: &[Ray]) -> usize {
+    let mut hits = 0;
+    for &ray in rays {
+        for mask in [u32::MAX, 1, 2] {
+            let kept = caster.cast(&s.world, ray, f32::INFINITY, mask);
+            let fresh = s.world.raycast(ray, f32::INFINITY, mask);
+            assert_eq!(kept, fresh, "{ray:?}, mask {mask}");
+            hits += usize::from(fresh.is_some());
+        }
+    }
+    hits
+}
+
+#[test]
+fn a_kept_caster_hits_what_testing_every_object_hits_as_the_world_changes() {
+    let (mut s, ids) = crowd(300);
+    let rays = at_the_crowd(200);
+    let mut caster = Raycaster::default();
+    // The first casts go one by one, the rest through the tree.
+    assert!(same_as_every_object(&mut caster, &s, &rays) > 200);
+    // The tie: straight at the two cubes in one place.
+    let at = s.world.get::<Transform>(ids[44]).unwrap().position;
+    let ray = Ray::new(at + Vec3::new(0.0, 0.0, 20.0), Vec3::NEG_Z).unwrap();
+    let hit = caster.cast(&s.world, ray, f32::INFINITY, u32::MAX).unwrap();
+    assert_eq!(hit, s.world.raycast(ray, f32::INFINITY, u32::MAX).unwrap());
+    // Moved: some a little, some far, so the tree is refitted and then
+    // made again.
+    for (step, far) in [(0.3, false), (0.6, false), (8.0, true)] {
+        for (i, &id) in ids.iter().enumerate().step_by(3) {
+            let mut t = s.world.get::<Transform>(id).unwrap();
+            t.position += Vec3::new(step, if far { (i % 4) as f32 * step } else { 0.0 }, 0.0);
+            s.world.insert(id, t).unwrap();
+        }
+        same_as_every_object(&mut caster, &s, &rays);
+    }
+    // A few at a time, which the caster follows by what moved: one moved,
+    // a parent with its child, a parent turned off and on again.
+    s.world.set_parent(ids[50], Some(ids[51])).unwrap();
+    same_as_every_object(&mut caster, &s, &rays);
+    for k in 0..3 {
+        for (id, by) in [(ids[51], Vec3::new(0.0, 0.4, 0.0)), (ids[60 + k], Vec3::new(0.5, 0.0, 0.0))] {
+            let mut t = s.world.get::<Transform>(id).unwrap();
+            t.position += by;
+            s.world.insert(id, t).unwrap();
+        }
+        same_as_every_object(&mut caster, &s, &rays);
+    }
+    for on in [false, true] {
+        s.world.set_active(ids[51], on).unwrap();
+        same_as_every_object(&mut caster, &s, &rays);
+    }
+    // Turned off, given another mesh, removed, despawned, added.
+    s.world.set_active(ids[10], false).unwrap();
+    s.world
+        .insert(ids[20], MeshRenderer { mesh: Some(s.sphere), material: Some(s.one_sided), ..Default::default() })
+        .unwrap();
+    s.world.remove::<MeshRenderer>(ids[30]).unwrap();
+    s.world.despawn(ids[40]).unwrap();
+    s.cube_at(Vec3::new(0.0, 0.0, 3.0));
+    same_as_every_object(&mut caster, &s, &rays);
+    // A mesh changed in place: every object drawn with it is bigger.
+    s.world.set_mesh(s.cube, MeshData::box_shape(Vec3::splat(1.4), [1, 1, 1], 1.0).unwrap()).unwrap();
+    same_as_every_object(&mut caster, &s, &rays);
+}

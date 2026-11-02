@@ -183,7 +183,7 @@ final class ScreenEffect {
     }
     values.forEach(_setValue);
     _bytes = shader._layout.pack(_values, shader);
-    shader._effects.add(WeakReference(this));
+    _addWeak(shader._effects, this);
   }
 
   /// Its shader.
@@ -532,4 +532,14 @@ final class _ShaderValue {
   }
 
   static double _toLinear(double s) => s <= 0.04045 ? s / 12.92 : math.pow((s + 0.055) / 1.055, 2.4).toDouble();
+}
+
+/// Adds a weak reference to [target] to [list], first letting go of those
+/// whose targets are gone once it has 16, 32, 64… (stage 14's DF13): an
+/// effect made for each hit, or a camera for each shot, doesn't grow the
+/// list for good.
+void _addWeak<T extends Object>(List<WeakReference<T>> list, T target) {
+  final n = list.length;
+  if (n >= 16 && n & (n - 1) == 0) list.removeWhere((w) => w.target == null);
+  list.add(WeakReference(target));
 }

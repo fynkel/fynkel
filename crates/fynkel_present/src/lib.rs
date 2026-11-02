@@ -13,8 +13,8 @@ mod apple;
 #[cfg(target_vendor = "apple")]
 #[allow(unsafe_code)]
 mod layer;
-// Used by the Android and Apple layer targets; tested everywhere.
-#[cfg_attr(not(any(target_os = "android", target_vendor = "apple")), allow(dead_code))]
+// Used by the Android target; tested everywhere.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod handoff;
 mod headless;
 mod ring;

@@ -86,6 +86,9 @@ pub struct MeshData {
     /// Which setting of the indices it has, so a copy into a mesh that has
     /// the same ones already leaves them.
     indices_made: Made,
+    /// Its normals are to be worked out from its faces by whoever reads
+    /// them next ([`MeshChange::owe_normals`]).
+    normals_owed: bool,
 }
 
 /// A number for each time a mesh's indices are set, never the same twice;
@@ -116,6 +119,7 @@ impl Clone for MeshData {
             bounds: self.bounds,
             dynamic: self.dynamic,
             indices_made: self.indices_made,
+            normals_owed: self.normals_owed,
         }
     }
 
@@ -131,6 +135,7 @@ impl Clone for MeshData {
         self.submeshes.clone_from(&source.submeshes);
         self.bounds = source.bounds;
         self.dynamic = source.dynamic;
+        self.normals_owed = source.normals_owed;
     }
 }
 
@@ -319,6 +324,7 @@ impl MeshData {
             bounds: bounds(positions.iter().copied()),
             dynamic: false,
             indices_made: Made::next(),
+            normals_owed: false,
         };
 
         match (tangents, uvs) {
@@ -436,6 +442,14 @@ pub struct MeshChange<'a> {
     /// Each vertex's tangent again from its UVs, without splitting any
     /// vertex (Unity's `RecalculateTangents`): quicker than MikkTSpace.
     pub recalculate_tangents: bool,
+    /// The normals as [`recalculate_normals`](Self::recalculate_normals)
+    /// works them out, but not now: by whoever reads them next
+    /// ([`MeshData::settled_vertices`], [`MeshData::settle`]). A renderer
+    /// does it as it copies the vertices to the GPU, so a mesh changed each
+    /// frame doesn't cost the thread changing it its normals (stage 16's
+    /// phase 4: 0.8 ms of the Note10+'s game thread for 10,201 vertices).
+    /// [`MeshData::vertices`] has the old ones meanwhile.
+    pub owe_normals: bool,
 }
 
 impl MeshData {
@@ -545,10 +559,17 @@ impl MeshData {
             self.indices_made = Made::next();
             self.submeshes = submeshes;
         }
+        if normals.is_some() {
+            self.normals_owed = false;
+        }
         if change.recalculate_normals || (resized && normals.is_none()) {
             self.recalculate_normals();
+        } else if change.owe_normals {
+            self.normals_owed = true;
         }
         if change.recalculate_tangents || (resized && tangents.is_none()) {
+            // Worked out along the normals: they're paid first.
+            self.settle();
             self.recalculate_tangents();
         }
         Ok(())
@@ -570,23 +591,44 @@ impl MeshData {
     /// Each vertex's normal from the faces around it, weighted by their
     /// area. A vertex no face with an area touches faces +Y.
     pub fn recalculate_normals(&mut self) {
-        // Summed in the normals themselves, so nothing is allocated.
-        for v in &mut self.vertices {
-            v.normal = [0.0; 3];
+        area_normals(&mut self.vertices, &self.indices);
+        self.normals_owed = false;
+    }
+
+    /// Whether its normals are owed ([`MeshChange::owe_normals`]):
+    /// [`vertices`](Self::vertices) has old ones.
+    pub fn owes_normals(&self) -> bool {
+        self.normals_owed
+    }
+
+    /// Works out the normals it owes, if it does.
+    pub fn settle(&mut self) {
+        if self.normals_owed {
+            self.recalculate_normals();
         }
-        let vertices = &mut self.vertices;
-        for tri in self.indices.chunks_exact(3) {
-            let p = [0, 1, 2].map(|k| Vec3::from(vertices[tri[k] as usize].position));
-            // Twice the triangle's area long, so bigger faces count more.
-            let face = (p[1] - p[0]).cross(p[2] - p[0]);
-            for &i in tri {
-                let n = &mut vertices[i as usize].normal;
-                *n = (Vec3::from(*n) + face).into();
-            }
+    }
+
+    /// Its vertices with the normals it owes worked out, in `scratch`, or
+    /// its own when it owes none: for a reader that can't change it, as a
+    /// renderer copying it to the GPU.
+    pub fn settled_vertices<'a>(&'a self, scratch: &'a mut Vec<Vertex>) -> &'a [Vertex] {
+        if !self.normals_owed {
+            return &self.vertices;
         }
-        for v in vertices {
-            v.normal = Vec3::from(v.normal).try_normalize().unwrap_or(FALLBACK_NORMAL).into();
+        scratch.clone_from(&self.vertices);
+        area_normals(scratch, &self.indices);
+        scratch
+    }
+
+    /// Itself with the normals it owes worked out: a copy only when it
+    /// owes them.
+    pub fn settled(&self) -> std::borrow::Cow<'_, MeshData> {
+        if !self.normals_owed {
+            return std::borrow::Cow::Borrowed(self);
         }
+        let mut settled = self.clone();
+        settled.settle();
+        std::borrow::Cow::Owned(settled)
     }
 
     /// Each vertex's tangent from its UVs (Lengyel's method): along u, at
@@ -664,6 +706,27 @@ pub(crate) fn submesh_ranges(count: usize, starts: &[u32]) -> Result<Vec<Range<u
 /// origin for none.
 /// The box around `positions`, refusing one that isn't finite: one pass
 /// for both.
+/// Each vertex's normal from the faces around it, weighted by their area;
+/// one no face with an area touches faces +Y. Summed in the normals
+/// themselves, so nothing is allocated.
+fn area_normals(vertices: &mut [Vertex], indices: &[u32]) {
+    for v in vertices.iter_mut() {
+        v.normal = [0.0; 3];
+    }
+    for tri in indices.chunks_exact(3) {
+        let p = [0, 1, 2].map(|k| Vec3::from(vertices[tri[k] as usize].position));
+        // Twice the triangle's area long, so bigger faces count more.
+        let face = (p[1] - p[0]).cross(p[2] - p[0]);
+        for &i in tri {
+            let n = &mut vertices[i as usize].normal;
+            *n = (Vec3::from(*n) + face).into();
+        }
+    }
+    for v in vertices {
+        v.normal = Vec3::from(v.normal).try_normalize().unwrap_or(FALLBACK_NORMAL).into();
+    }
+}
+
 fn checked_bounds(positions: &[[f32; 3]]) -> Result<(Vec3, Vec3), MeshError> {
     let (mut lo, mut hi) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
     for (at, &p) in positions.iter().enumerate() {

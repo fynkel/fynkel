@@ -267,3 +267,22 @@ fn a_loop_played_backwards_reports_the_span_it_went_through() {
     let [e] = toy.events.as_slice() else { panic!("{:?}", toy.events) };
     assert_eq!((e.from, e.to, e.loops), (0.5, 1.5, 2));
 }
+
+/// Kept world matrices follow what an animator poses, each frame, with
+/// nothing else moving (stage 16's WO10: only what moved is worked out
+/// again).
+#[test]
+fn kept_world_matrices_follow_an_animators_poses() {
+    let mut toy = Toy::new();
+    toy.world.play(toy.root, SLIDE, 0.0, true).unwrap();
+    let mut matrices = WorldMatrices::default();
+    matrices.update(&toy.world);
+    for _ in 0..5 {
+        toy.step(0.3);
+        matrices.update(&toy.world);
+        for id in [toy.root, toy.body, toy.arm] {
+            let (kept, walked) = (matrices.matrix(&toy.world, id).unwrap(), toy.world.world_matrix(id).unwrap());
+            assert!(kept.abs_diff_eq(walked, 1e-5), "{id}: {kept} vs {walked}");
+        }
+    }
+}

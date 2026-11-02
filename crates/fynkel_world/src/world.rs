@@ -185,6 +185,11 @@ impl From<FieldError> for WorldError {
 
 pub type Result<T> = std::result::Result<T, WorldError>;
 
+/// How many moved objects [`World`] keeps a list of: past it, kept world
+/// matrices are all worked out again, as they would be anyway when so
+/// many move.
+pub(crate) const MOVED_KEPT: usize = 8192;
+
 /// Holds every object, component, mesh, material and texture.
 ///
 /// Objects are addressed only by [`ObjectId`]. The `hecs` entity behind an
@@ -222,6 +227,17 @@ pub struct World {
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
     /// See [`World::transforms_version`].
     pub(crate) transforms_version: u64,
+    /// The objects that moved, each meaning it and everything below it,
+    /// in order, the first the `moved_start`th: so world matrices kept
+    /// elsewhere work out only theirs again (stage 14's WO10). Cleared
+    /// past [`MOVED_KEPT`], with a gap, so whoever was reading it works
+    /// them all out.
+    pub(crate) moved: Vec<ObjectId>,
+    pub(crate) moved_start: u64,
+    /// See [`World::renderers_version`].
+    pub(crate) renderers_version: u64,
+    /// See [`World::resources_version`].
+    resources_version: u64,
     /// The roots of the animators the last [`World::animate`] posed.
     pub(crate) posed: Vec<ObjectId>,
     /// The skin of each model copy's skinned part, by the part.
@@ -287,6 +303,10 @@ impl World {
             debug_lines: Vec::new(),
             animators: IdMap::default(),
             transforms_version: 0,
+            moved: Vec::new(),
+            moved_start: 0,
+            renderers_version: 0,
+            resources_version: next_resources_version(),
             posed: Vec::new(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
@@ -313,6 +333,38 @@ impl World {
         id
     }
 
+    /// Notes that `id`'s world matrix, or whether it's shown, may have
+    /// changed, and so its children's.
+    pub(crate) fn moved(&mut self, id: ObjectId) {
+        self.transforms_version += 1;
+        if self.moved.len() == MOVED_KEPT {
+            self.moved_start += MOVED_KEPT as u64 + 1;
+            self.moved.clear();
+        }
+        // All of it at once, so a steady frame allocates nothing.
+        if self.moved.capacity() == 0 {
+            self.moved.reserve_exact(MOVED_KEPT);
+        }
+        self.moved.push(id);
+    }
+
+    /// The objects that moved since the `from`th, or `None` when they
+    /// aren't all known: then any may have.
+    pub(crate) fn moved_since(&self, from: u64) -> Option<&[ObjectId]> {
+        let at = from.checked_sub(self.moved_start)?;
+        self.moved.get(at as usize..)
+    }
+
+    /// A number that goes up whenever a parent changes.
+    pub(crate) fn hierarchy_version(&self) -> u64 {
+        self.hierarchy.version()
+    }
+
+    /// Where [`moved_since`](Self::moved_since) starts for what moves next.
+    pub(crate) fn moved_end(&self) -> u64 {
+        self.moved_start + self.moved.len() as u64
+    }
+
     /// A number that goes up whenever an object's world matrix, or whether
     /// it's shown, may have changed: a `Transform` set or removed, an
     /// object spawned or despawned, turned on or off, given a new parent,
@@ -321,6 +373,27 @@ impl World {
     /// work out again.
     pub fn transforms_version(&self) -> u64 {
         self.transforms_version
+    }
+
+    /// A number that goes up whenever what an object is drawn as may have
+    /// changed: a `MeshRenderer` set or removed, a mesh changed, a skin
+    /// added. With [`transforms_version`](Self::transforms_version), it
+    /// says when the boxes a [`Raycaster`](crate::raycast::Raycaster)
+    /// keeps are out of date.
+    pub fn renderers_version(&self) -> u64 {
+        self.renderers_version
+    }
+
+    /// A number that changes whenever a mesh, material (or its values),
+    /// texture or shader is added, changed or removed, and is never the
+    /// same in two worlds: while it stays the same, what was made of them
+    /// for the GPU still holds (stage 14's BR6 ½).
+    pub fn resources_version(&self) -> u64 {
+        self.resources_version
+    }
+
+    fn resources_changed(&mut self) {
+        self.resources_version = next_resources_version();
     }
 
     /// Removes an object, its components and its children, theirs too.
@@ -390,7 +463,7 @@ impl World {
     /// exist.
     pub fn insert<C: Component>(&mut self, id: ObjectId, component: C) -> Result<()> {
         let entity = self.check(id, &component)?;
-        self.write(entity, component);
+        self.write(id, entity, component);
         Ok(())
     }
 
@@ -405,8 +478,8 @@ impl World {
             Ok(())
         });
         if checked.is_ok() {
-            for ((_, component), &entity) in items.zip(&entities) {
-                self.write(entity, component);
+            for ((id, component), &entity) in items.zip(&entities) {
+                self.write(id, entity, component);
             }
         }
         self.batch = entities;
@@ -414,9 +487,11 @@ impl World {
     }
 
     /// Writes a checked component.
-    fn write<C: Component>(&mut self, entity: hecs::Entity, component: C) {
+    fn write<C: Component>(&mut self, id: ObjectId, entity: hecs::Entity, component: C) {
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
-            self.transforms_version += 1;
+            self.moved(id);
+        } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
+            self.renderers_version += 1;
         }
         // Replacing is the common case (a transform set every frame), and
         // writing in place skips hecs's archetype lookup; `query_one_mut`
@@ -442,7 +517,9 @@ impl World {
     pub fn remove<C: Component>(&mut self, id: ObjectId) -> Result<C> {
         let entity = self.entity(id)?;
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
-            self.transforms_version += 1;
+            self.moved(id);
+        } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
+            self.renderers_version += 1;
         }
         self.ecs.remove_one::<C>(entity).map_err(|_| WorldError::NoComponent { object: id, component: C::NAME })
     }
@@ -504,6 +581,7 @@ impl World {
     /// it from here, and raycasts read it.
     pub fn add_mesh(&mut self, mesh: impl Into<Arc<MeshData>>) -> MeshId {
         let id = MeshId::new(self.mesh_ids.next());
+        self.resources_changed();
         self.meshes.insert(id, (mesh.into(), 0));
         id
     }
@@ -517,8 +595,10 @@ impl World {
     /// copied.
     pub fn set_mesh(&mut self, id: MeshId, mesh: impl Into<Arc<MeshData>>) -> Result<()> {
         let (data, version) = self.meshes.get_mut(&id).ok_or(WorldError::NoMesh(id))?;
+        self.resources_version = next_resources_version();
         *data = mesh.into();
         *version += 1;
+        self.renderers_version += 1;
         Ok(())
     }
 
@@ -584,6 +664,7 @@ impl World {
         if let Some((&object, _)) = self.particles.iter().find(|(_, s)| drawn_with(s)) {
             return Err(WorldError::MeshInUse { mesh: id, object });
         }
+        self.resources_changed();
         self.meshes.remove(&id);
         Ok(())
     }
@@ -597,6 +678,7 @@ impl World {
         self.check_references(&material)?;
         self.check_shader(&material)?;
         let id = MaterialId::new(self.material_ids.next());
+        self.resources_changed();
         self.materials.insert(id, material);
         self.reset_values(id);
         Ok(id)
@@ -614,6 +696,7 @@ impl World {
         validate_all(&material)?;
         self.check_references(&material)?;
         self.check_shader(&material)?;
+        self.resources_changed();
         let old = self.materials.insert(id, material).expect("checked above");
         // Its values are its shader's: a new shader starts from zeros.
         if old.shader != material.shader {
@@ -665,6 +748,7 @@ impl World {
         if let Some(values) = values {
             values[offset..end].copy_from_slice(bytes);
         }
+        self.resources_changed();
         Ok(())
     }
 
@@ -685,6 +769,7 @@ impl World {
         if let Some((&object, _)) = self.submesh_materials.iter().find(|(_, m)| m.contains(&id)) {
             return Err(WorldError::MaterialInUse { material: id, object });
         }
+        self.resources_changed();
         self.materials.remove(&id);
         self.material_values.remove(&id);
         Ok(())
@@ -701,6 +786,7 @@ impl World {
     /// view's renderer uploads it from here.
     pub fn add_texture(&mut self, image: impl Into<Arc<ImageData>>) -> TextureId {
         let id = TextureId::new(self.texture_ids.next());
+        self.resources_changed();
         self.textures.insert(id, image.into());
         id
     }
@@ -730,6 +816,7 @@ impl World {
         if let Some((&object, _)) = self.sprites.iter().find(|(_, s)| s.settings().texture == id) {
             return Err(WorldError::SpriteTextureInUse { texture: id, object });
         }
+        self.resources_changed();
         self.textures.remove(&id);
         Ok(())
     }
@@ -740,6 +827,7 @@ impl World {
     pub fn add_shader(&mut self, shader: Shader) -> ShaderId {
         let id = ShaderId::new(self.shader_ids.next());
         self.shader_versions += 1;
+        self.resources_changed();
         self.shaders.insert(id, (shader, self.shader_versions));
         id
     }
@@ -767,6 +855,7 @@ impl World {
         }
         let size = shader.values_size;
         self.shader_versions += 1;
+        self.resources_changed();
         self.shaders.insert(id, (shader, self.shader_versions));
         for effect in self.camera_effects.values_mut().flatten().filter(|e| e.shader == id) {
             effect.values.resize(size, 0);
@@ -794,6 +883,7 @@ impl World {
         if let Some((&object, _)) = self.camera_effects.iter().find(|(_, e)| e.iter().any(|e| e.shader == id)) {
             return Err(WorldError::EffectInUse { shader: id, object });
         }
+        self.resources_changed();
         self.shaders.remove(&id);
         Ok(())
     }
@@ -856,4 +946,11 @@ fn validate_all<T: Describe>(value: &T) -> std::result::Result<(), FieldError> {
         crate::describe::validate(T::NAME, field, current)?;
     }
     Ok(())
+}
+
+/// A new [`World::resources_version`], never handed out before, in any
+/// world.
+fn next_resources_version() -> u64 {
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
 }

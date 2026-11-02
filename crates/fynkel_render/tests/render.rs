@@ -746,3 +746,75 @@ fn samples_are_1_2_or_4() {
         assert!(invalid.as_deref().is_some_and(|e| e.contains("1, 2 or 4")), "{samples}: {invalid:?}");
     }
 }
+
+/// A mesh owing its normals (stage 16's phase 4) draws as the same mesh
+/// with them worked out: the renderer works them out on the way to the
+/// GPU, made new or written into a dynamic mesh's buffers where they are.
+#[test]
+fn a_mesh_owing_its_normals_draws_as_one_that_worked_them_out() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let lumpy = |owe: bool, dynamic: bool| {
+        let mut mesh = MeshData::sphere(24, 16);
+        let positions: Vec<[f32; 3]> = mesh
+            .vertices()
+            .iter()
+            .map(|v| {
+                let p = Vec3::from(v.position);
+                (p * Vec3::new(1.3, 0.7, 1.0) * (1.0 + 0.15 * (p.x * 9.0).sin())).into()
+            })
+            .collect();
+        let change = fynkel_mesh::MeshChange {
+            positions: Some(&positions),
+            recalculate_normals: !owe,
+            owe_normals: owe,
+            ..fynkel_mesh::MeshChange::default()
+        };
+        mesh.change(change).unwrap();
+        if dynamic {
+            mesh.mark_dynamic();
+        }
+        mesh
+    };
+    assert_ne!(lumpy(true, false).vertices(), lumpy(false, false).vertices(), "owed, not worked out yet");
+    for dynamic in [false, true] {
+        // Made with the normals worked out, then again owing them.
+        r.upload_mesh(CUBE, &lumpy(false, dynamic));
+        let (expected, _) = render(&gpu, &mut r, &stage1_scene(), 128, 128);
+        r.upload_mesh(CUBE, &lumpy(true, dynamic));
+        let (image, _) = render(&gpu, &mut r, &stage1_scene(), 128, 128);
+        assert!(image.rgba == expected.rgba, "owed normals drawn differently (dynamic: {dynamic})");
+    }
+}
+
+/// The frame's data (instances, joints) grows with a frame that needs more,
+/// and shrinks again a second after the frames need far less: a crowd that
+/// came and went doesn't keep its room for good (stage 14's RN9 ½).
+#[test]
+fn the_frames_data_shrinks_a_second_after_fewer_objects() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let one = stage1_scene();
+    let mut crowd = one.clone();
+    let cube = crowd.draws[0];
+    crowd.draws = (0..20_000)
+        .map(|i| {
+            let at = Vec3::new((i % 100) as f32 * 0.01, (i / 100) as f32 * 0.01, 0.0);
+            Draw { model: Mat4::from_translation(at) * Mat4::from_scale(Vec3::splat(0.01)), ..cube }
+        })
+        .collect();
+    render(&gpu, &mut r, &one, 32, 32);
+    let small = r.frame_data_bytes();
+    for _ in 0..3 {
+        render(&gpu, &mut r, &crowd, 32, 32);
+    }
+    let big = r.frame_data_bytes();
+    assert!(big > 4 * small, "{big} bytes with the crowd, {small} before");
+    let mut frames = 0;
+    while r.frame_data_bytes() > small {
+        render(&gpu, &mut r, &one, 32, 32);
+        frames += 1;
+        assert!(frames < 100, "never shrank: {big} bytes");
+    }
+    assert!((60..=63).contains(&frames), "kept about a second: {frames} frames");
+}

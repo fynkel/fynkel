@@ -605,8 +605,9 @@ pub unsafe extern "C" fn fy_apple_set_frame_ready(
 }
 
 /// Draws an Apple layer view's next frames to `layer` (a `CAMetalLayer`)
-/// at `width` × `height` pixels, after a frame in progress on the old one.
-/// For the Flutter plugin, on the main thread.
+/// at `width` × `height` pixels. It never waits for the render thread: a
+/// frame in progress ends on the old layer, and a new size is set before
+/// the next frame. For the Flutter plugin, on the main thread.
 ///
 /// # Safety
 ///
@@ -634,8 +635,9 @@ pub unsafe extern "C" fn fy_apple_layer_attach(
     })
 }
 
-/// Stops an Apple layer view drawing to its layer, after a frame in
-/// progress: the layer may then go. Frames are skipped until the next
+/// Stops an Apple layer view drawing to its layer, without waiting for a
+/// frame in progress, which ends on it: the layer may then go (the frame's
+/// surface keeps it alive). Frames are skipped until the next
 /// `fy_apple_layer_attach`.
 ///
 /// # Safety
