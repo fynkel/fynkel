@@ -68,3 +68,53 @@ fn bench_fifty_raycasts() {
         }
     });
 }
+
+/// Stage 15's tags, as the lab draws them: 3,000 cubes in a block, every
+/// 30th tagged, the camera looking at the tagged ones past the rest; and
+/// 30 walkers moving every frame, so the world's matrices change each
+/// time.
+fn tags_world() -> (World, Vec<ObjectId>, Vec<Ray>) {
+    let mut world = World::new();
+    let cube = world.add_mesh(MeshData::cube());
+    let material = world.add_material(Material::default()).unwrap();
+    let spawn = |world: &mut World, position: Vec3| {
+        let id = world.spawn();
+        world.insert(id, Transform { scale: Vec3::splat(0.5), ..Transform::from_position(position) }).unwrap();
+        world.insert(id, MeshRenderer { mesh: Some(cube), material: Some(material), ..Default::default() }).unwrap();
+        id
+    };
+    let mut tagged = Vec::new();
+    for i in 0..3000 {
+        let position = Vec3::new((i % 30) as f32 - 15.0, (i / 30 % 10) as f32, -10.0 - (i / 300) as f32);
+        spawn(&mut world, position);
+        if i % 30 == 0 {
+            tagged.push(position);
+        }
+    }
+    let walkers = (0..30).map(|i| spawn(&mut world, Vec3::new(i as f32 - 15.0, 0.0, 5.0))).collect();
+    let eye = Vec3::new(0.0, 5.0, 20.0);
+    let rays = tagged.iter().map(|&p| Ray::new(eye, p - eye).unwrap()).collect();
+    (world, walkers, rays)
+}
+
+/// A frame of the tags page: the walkers move, then eight tags look (the
+/// world widget's `castsPerFrame`). 0.26 ms on a Mac with every object's
+/// box tested on each cast, 0.04 through a tree of them.
+#[test]
+#[ignore = "a benchmark: run in release"]
+fn bench_eight_tags_among_3000_a_frame() {
+    let (mut world, walkers, rays) = tags_world();
+    let mut caster = Raycaster::default();
+    let (mut frame, mut next) = (0_u32, 0_usize);
+    fynkel_bench::bench("8 casts into 3,000 objects, 30 moving, a frame", 50, 0.1, || {
+        frame += 1;
+        for (i, &id) in walkers.iter().enumerate() {
+            let x = i as f32 - 15.0 + (frame as f32 * 0.01).sin();
+            world.insert(id, Transform::from_position(Vec3::new(x, 0.0, 5.0))).unwrap();
+        }
+        for _ in 0..8 {
+            std::hint::black_box(caster.cast(&world, rays[next % rays.len()], f32::INFINITY, u32::MAX));
+            next += 1;
+        }
+    });
+}

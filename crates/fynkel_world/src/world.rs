@@ -222,6 +222,8 @@ pub struct World {
     pub(crate) animators: IdMap<ObjectId, crate::animation::Animator>,
     /// See [`World::transforms_version`].
     pub(crate) transforms_version: u64,
+    /// See [`World::renderers_version`].
+    pub(crate) renderers_version: u64,
     /// The roots of the animators the last [`World::animate`] posed.
     pub(crate) posed: Vec<ObjectId>,
     /// The skin of each model copy's skinned part, by the part.
@@ -287,6 +289,7 @@ impl World {
             debug_lines: Vec::new(),
             animators: IdMap::default(),
             transforms_version: 0,
+            renderers_version: 0,
             posed: Vec::new(),
             skins: IdMap::default(),
             camera_effects: IdMap::default(),
@@ -321,6 +324,15 @@ impl World {
     /// work out again.
     pub fn transforms_version(&self) -> u64 {
         self.transforms_version
+    }
+
+    /// A number that goes up whenever what an object is drawn as may have
+    /// changed: a `MeshRenderer` set or removed, a mesh changed, a skin
+    /// added. With [`transforms_version`](Self::transforms_version), it
+    /// says when the boxes a [`Raycaster`](crate::raycast::Raycaster)
+    /// keeps are out of date.
+    pub fn renderers_version(&self) -> u64 {
+        self.renderers_version
     }
 
     /// Removes an object, its components and its children, theirs too.
@@ -417,6 +429,8 @@ impl World {
     fn write<C: Component>(&mut self, entity: hecs::Entity, component: C) {
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
             self.transforms_version += 1;
+        } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
+            self.renderers_version += 1;
         }
         // Replacing is the common case (a transform set every frame), and
         // writing in place skips hecs's archetype lookup; `query_one_mut`
@@ -443,6 +457,8 @@ impl World {
         let entity = self.entity(id)?;
         if TypeId::of::<C>() == TypeId::of::<Transform>() {
             self.transforms_version += 1;
+        } else if TypeId::of::<C>() == TypeId::of::<MeshRenderer>() {
+            self.renderers_version += 1;
         }
         self.ecs.remove_one::<C>(entity).map_err(|_| WorldError::NoComponent { object: id, component: C::NAME })
     }
@@ -519,6 +535,7 @@ impl World {
         let (data, version) = self.meshes.get_mut(&id).ok_or(WorldError::NoMesh(id))?;
         *data = mesh.into();
         *version += 1;
+        self.renderers_version += 1;
         Ok(())
     }
 

@@ -13,6 +13,7 @@ mod describe;
 mod hierarchy;
 mod id;
 mod model;
+mod object_tree;
 mod particles;
 pub mod raycast;
 mod resources;
