@@ -84,6 +84,9 @@ pub(crate) struct Uploaded {
     shaders: HashMap<ShaderId, u64>,
     /// Each font's atlas version uploaded.
     atlases: HashMap<FontId, u64>,
+    /// The world's resources version the meshes, textures and shaders
+    /// were last looked at for: the same again, nothing of theirs changed.
+    resources: Option<u64>,
 }
 
 /// A world's [`Uploaded`], shared by its views, and the changes still to
@@ -114,9 +117,13 @@ pub(crate) struct Extract {
     /// The lights found, by id, before they're put in order. Kept so a
     /// frame allocates nothing.
     lights: Vec<(ObjectId, RenderLight)>,
-    /// Each material as the renderer takes it, worked out once a frame:
-    /// objects are many, materials few.
+    /// Each material as the renderer takes it, and their shaders' values,
+    /// worked out again when the world's resources change (stage 14's BR6
+    /// ½: 2,000 materials and meshes were 0.1 ms a frame on a Mac).
     materials: HashMap<MaterialId, PbrMaterial>,
+    shader_values: Vec<[[f32; 4]; 3]>,
+    /// The world's resources version they were worked out for.
+    resources: Option<u64>,
     /// Where each skeleton's joints start in the scene's, found this frame
     /// ([`fynkel_world::Skin::key`]), or `None` for one missing a joint.
     skins: HashMap<usize, Option<u32>>,
@@ -193,15 +200,9 @@ impl Extract {
         self.fill(world, scene, uploaded, ops)
     }
 
-    fn fill(
-        &mut self,
-        world: &World,
-        scene: &mut RenderScene,
-        uploaded: &mut Uploaded,
-        ops: &mut Vec<ResourceOp>,
-    ) -> Result<(), String> {
-        scene.clear();
-
+    /// Uploads and removes what of the world's meshes, textures and
+    /// shaders changed since the ledger last looked.
+    fn follow_resources(world: &World, uploaded: &mut Uploaded, ops: &mut Vec<ResourceOp>) {
         uploaded.meshes.retain(|&id, _| {
             let kept = world.mesh(id).is_ok();
             if !kept {
@@ -245,19 +246,6 @@ impl Extract {
             }
             kept
         });
-        uploaded.atlases.retain(|&id, _| {
-            let kept = world.font(id).is_ok();
-            if !kept {
-                ops.push(ResourceOp::RemoveTexture(atlas_key(id)));
-            }
-            kept
-        });
-        for (id, font) in world.fonts() {
-            let pixels = font.pixels();
-            if uploaded.atlases.insert(id, pixels.version) != Some(pixels.version) {
-                ops.push(ResourceOp::UploadAtlas(atlas_key(id), Arc::clone(pixels)));
-            }
-        }
         for (id, _, version) in world.shaders() {
             if uploaded.shaders.insert(id, version) != Some(version)
                 && let Some(shader) = compiled(world, id)
@@ -265,11 +253,13 @@ impl Extract {
                 ops.push(ResourceOp::UploadShader(shader_key(id), shader));
             }
         }
-        scene.time = world.shader_time();
+    }
 
-        // Materials are few next to objects, so looking at each one's
-        // slots, and resolving it, every frame costs little.
+    /// Resolves each material as the renderer takes it, and its shader's
+    /// values, uploading the textures it uses not yet up.
+    fn resolve_materials(&mut self, world: &World, uploaded: &mut Uploaded, ops: &mut Vec<ResourceOp>) {
         self.materials.clear();
+        self.shader_values.clear();
         let mut upload = |id: TextureId, space: ColorSpace| {
             if uploaded.textures.insert((id, space)) {
                 let image = world.texture(id).expect("the world refuses a material with a missing texture");
@@ -291,12 +281,52 @@ impl Extract {
                         textures[i] = Some(texture_key(texture));
                     }
                 }
-                let values = scene.shader_values.len() as u32;
-                push_values(&mut scene.shader_values, world.material_values(id).unwrap_or_default());
+                let values = self.shader_values.len() as u32;
+                push_values(&mut self.shader_values, world.material_values(id).unwrap_or_default());
                 m.shader = Some(ShaderUse { shader: shader_key(shader), values, textures, reach: material.reach });
             }
             self.materials.insert(id, m);
         }
+    }
+
+    fn fill(
+        &mut self,
+        world: &World,
+        scene: &mut RenderScene,
+        uploaded: &mut Uploaded,
+        ops: &mut Vec<ResourceOp>,
+    ) -> Result<(), String> {
+        scene.clear();
+
+        let version = world.resources_version();
+        let walk = uploaded.resources != Some(version);
+        if walk {
+            uploaded.resources = Some(version);
+            Self::follow_resources(world, uploaded, ops);
+        }
+        uploaded.atlases.retain(|&id, _| {
+            let kept = world.font(id).is_ok();
+            if !kept {
+                ops.push(ResourceOp::RemoveTexture(atlas_key(id)));
+            }
+            kept
+        });
+        for (id, font) in world.fonts() {
+            let pixels = font.pixels();
+            if uploaded.atlases.insert(id, pixels.version) != Some(pixels.version) {
+                ops.push(ResourceOp::UploadAtlas(atlas_key(id), Arc::clone(pixels)));
+            }
+        }
+        scene.time = world.shader_time();
+
+        // Materials are few next to objects: each is resolved once each
+        // time the world's resources change, not for each object. A ledger
+        // walked anew (a new one) has its textures looked at again here.
+        if walk || self.resources != Some(version) {
+            self.resources = Some(version);
+            self.resolve_materials(world, uploaded, ops);
+        }
+        scene.shader_values.extend_from_slice(&self.shader_values);
 
         self.matrices.update(world);
         let matrices = &self.matrices;
