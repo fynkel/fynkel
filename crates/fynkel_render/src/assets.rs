@@ -77,8 +77,8 @@ pub(crate) struct PipelineMaker {
 struct DiskCache {
     cache: wgpu::PipelineCache,
     file: PathBuf,
-    /// Held while a copy is written, so two don't write one file.
-    writing: Arc<Mutex<()>>,
+    /// Writes it a moment after the last new pipeline, not after each.
+    saver: Debounced,
 }
 
 impl DiskCache {
@@ -103,20 +103,80 @@ impl DiskCache {
                 fallback: true,
             })
         };
-        Some(Self { cache, file, writing: Arc::default() })
+        Some(Self { cache, file, saver: Debounced::new(SAVE_AFTER) })
     }
 
-    /// Writes the cache to its file, off this thread: a new pipeline was
-    /// just made. Whole or not at all, through a file beside it.
+    /// Writes the cache to its file soon, off this thread: a new pipeline
+    /// was just made. Whole or not at all, through a file beside it.
     fn save(&self) {
-        let this = self.clone();
-        std::thread::spawn(move || {
-            let _writing = this.writing.lock().unwrap_or_else(PoisonError::into_inner);
-            let Some(data) = this.cache.get_data() else { return };
-            let temporary = this.file.with_extension("partial");
+        let (cache, file) = (self.cache.clone(), self.file.clone());
+        self.saver.ask(move || {
+            let Some(data) = cache.get_data() else { return };
+            let temporary = file.with_extension("partial");
             // Nothing to report: without the file, the next run compiles.
             if std::fs::write(&temporary, data).is_ok() {
-                let _ = std::fs::rename(&temporary, &this.file);
+                let _ = std::fs::rename(&temporary, &file);
+            }
+        });
+    }
+}
+
+/// How long the pipeline cache waits after a new pipeline before it's
+/// written: a first run makes dozens in its first seconds, and writing the
+/// whole cache after each was a hitch on Android (stage 14's RN3).
+const SAVE_AFTER: std::time::Duration = std::time::Duration::from_secs(1);
+
+/// Runs the last job it was asked for once no more have come for a while,
+/// on a thread of its own, and at most once each while: the latest job is
+/// always run, after it was asked for.
+#[derive(Clone, Debug)]
+struct Debounced {
+    wait: std::time::Duration,
+    state: Arc<Mutex<Waiting>>,
+}
+
+#[derive(Default)]
+struct Waiting {
+    job: Option<Box<dyn FnOnce() + Send>>,
+    /// A thread waits to run it.
+    running: bool,
+}
+
+impl std::fmt::Debug for Waiting {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Waiting").field("job", &self.job.is_some()).field("running", &self.running).finish()
+    }
+}
+
+impl Debounced {
+    fn new(wait: std::time::Duration) -> Self {
+        Self { wait, state: Arc::default() }
+    }
+
+    /// Runs `job` in a while, instead of any asked for before it that
+    /// hasn't run yet.
+    fn ask(&self, job: impl FnOnce() + Send + 'static) {
+        let mut state = self.state.lock().unwrap_or_else(PoisonError::into_inner);
+        state.job = Some(Box::new(job));
+        if state.running {
+            return;
+        }
+        state.running = true;
+        let (wait, shared) = (self.wait, Arc::clone(&self.state));
+        std::thread::spawn(move || {
+            loop {
+                std::thread::sleep(wait);
+                let job = {
+                    let mut state = shared.lock().unwrap_or_else(PoisonError::into_inner);
+                    match state.job.take() {
+                        Some(job) => job,
+                        None => {
+                            state.running = false;
+                            return;
+                        }
+                    }
+                };
+                job();
             }
         });
     }
@@ -651,4 +711,46 @@ fn filled_buffer(device: &wgpu::Device, label: &str, usage: wgpu::BufferUsages, 
     buffer.get_mapped_range_mut(..).expect("mapped at creation").slice(..contents.len()).copy_from_slice(contents);
     buffer.unmap();
     buffer
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Debounced;
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicU32, Ordering};
+    use std::time::Duration;
+
+    /// Forty pipelines made one after another write the cache once or
+    /// twice, not forty times (stage 14's RN3), and the last is always
+    /// written.
+    #[test]
+    fn many_saves_close_together_write_once_and_the_last_is_kept() {
+        let writes = Arc::new(AtomicU32::new(0));
+        let seen = Arc::new(AtomicU32::new(0));
+        let asked = Arc::new(AtomicU32::new(0));
+        let saver = Debounced::new(Duration::from_millis(100));
+        for _ in 0..40 {
+            asked.fetch_add(1, Ordering::SeqCst);
+            let (writes, seen, asked) = (writes.clone(), seen.clone(), asked.clone());
+            saver.ask(move || {
+                writes.fetch_add(1, Ordering::SeqCst);
+                seen.store(asked.load(Ordering::SeqCst), Ordering::SeqCst);
+            });
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        std::thread::sleep(Duration::from_millis(400));
+        let written = writes.load(Ordering::SeqCst);
+        assert!((1..=2).contains(&written), "{written} writes for 40 saves");
+        assert_eq!(seen.load(Ordering::SeqCst), 40, "the last write came after the last save");
+        // Another, later on, is written too.
+        asked.fetch_add(1, Ordering::SeqCst);
+        let (w, s, a) = (writes.clone(), seen.clone(), asked.clone());
+        saver.ask(move || {
+            w.fetch_add(1, Ordering::SeqCst);
+            s.store(a.load(Ordering::SeqCst), Ordering::SeqCst);
+        });
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(writes.load(Ordering::SeqCst), written + 1);
+        assert_eq!(seen.load(Ordering::SeqCst), 41);
+    }
 }
