@@ -12,6 +12,11 @@
 // dog from Sheepdog's glTF files with their walk and run (glTFast, its
 // materials swapped for URP's Lit, as Fynkel draws a glTF's with its own).
 // The builds land in tools/unity_field/Build (git-ignored).
+//
+// Build.CrowdIOS|CrowdAndroid build the lab's crowd instead (Crowd.cs,
+// stage 16): KayKit's Knight and Rogue copied from examples/lab/assets/
+// kaykit into Assets/Crowd (git-ignored), every clip a state of their
+// controller, skinned on the GPU as Fynkel skins them.
 
 using System;
 using System.IO;
@@ -31,15 +36,36 @@ public static class Build
 
     public static void IOS()
     {
-        Setup();
+        Setup("field");
         PlayerSettings.iOS.appleDeveloperTeamID = "N2VZ98KJRE";
         PlayerSettings.iOS.appleEnableAutomaticSigning = true;
         Player(BuildTarget.iOS, BuildTargetGroup.iOS, "Build/ios");
     }
 
+    public static void CrowdIOS()
+    {
+        Setup("crowd");
+        PlayerSettings.iOS.appleDeveloperTeamID = "N2VZ98KJRE";
+        PlayerSettings.iOS.appleEnableAutomaticSigning = true;
+        Player(BuildTarget.iOS, BuildTargetGroup.iOS, "Build/crowd-ios", crowd: true);
+    }
+
+    public static void CrowdAndroid()
+    {
+        Setup("crowd");
+        AndroidSettings();
+        Player(BuildTarget.Android, BuildTargetGroup.Android, "Build/android/crowd.apk", crowd: true);
+    }
+
     public static void Android()
     {
-        Setup();
+        Setup("field");
+        AndroidSettings();
+        Player(BuildTarget.Android, BuildTargetGroup.Android, "Build/android/field.apk");
+    }
+
+    static void AndroidSettings()
+    {
         // The Hub's Android module came without its NDK and command-line
         // tools here: they're installed into its SDK with sdkmanager
         // (NDK r27c, as Unity 6 wants).
@@ -49,12 +75,11 @@ public static class Build
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
         PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
         PlayerSettings.SetGraphicsAPIs(BuildTarget.Android, new[] { GraphicsDeviceType.Vulkan });
-        Player(BuildTarget.Android, BuildTargetGroup.Android, "Build/android/field.apk");
     }
 
     public static void Mac()
     {
-        Setup();
+        Setup("field");
         Player(BuildTarget.StandaloneOSX, BuildTargetGroup.Standalone, "Build/mac/Field.app");
     }
 
@@ -83,9 +108,14 @@ public static class Build
         new("high", true, 4, 1, 2048, 3, true, 100, true, true),
     };
 
-    static void Setup()
+    static void Setup(string which)
     {
         Directory.CreateDirectory(Res);
+        File.WriteAllText($"{Res}/scene.txt", which);
+        AssetDatabase.ImportAsset($"{Res}/scene.txt");
+        // The field as it was measured in stage 14 (skinned on the CPU, by
+        // jobs); the crowd on the GPU, as Fynkel skins.
+        Skinning(which == "crowd" ? 2 : 0);
         PlayerSettings.colorSpace = ColorSpace.Linear;
         PlayerSettings.enableFrameTimingStats = true;
 
@@ -96,6 +126,12 @@ public static class Build
         Materials();
         Animal("sheep", "Walk");
         Animal("dog", "Run");
+        if (which == "crowd")
+        {
+            Lit("floor", Hex(0x3A3F4A), 0.5f);
+            Person("knight");
+            Person("rogue");
+        }
         AssetDatabase.SaveAssets();
 
         // The scene's fog, so its shaders' fog is kept in the build (the
@@ -315,6 +351,69 @@ public static class Build
         UnityEngine.Object.DestroyImmediate(model);
     }
 
+    // ProjectSettings' mesh deformation: 0 on the CPU, 1 on the GPU, 2 on
+    // the GPU batched (Unity 6's default for a new project).
+    static void Skinning(int how)
+    {
+        var settings = new SerializedObject(AssetDatabase.LoadAllAssetsAtPath("ProjectSettings/ProjectSettings.asset")[0]);
+        var skinning = settings.FindProperty("gpuSkinning") ?? throw new Exception("ProjectSettings has no gpuSkinning");
+        skinning.intValue = how;
+        settings.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    // KayKit's [name].glb from the lab, every clip a state of its
+    // controller (named as the clip), URP's Lit with its texture.
+    static void Person(string name)
+    {
+        Directory.CreateDirectory("Assets/Crowd");
+        var glb = $"Assets/Crowd/{name}.glb";
+        if (!File.Exists(glb))
+        {
+            File.Copy($"../../examples/lab/assets/kaykit/{name}.glb", glb);
+            AssetDatabase.ImportAsset(glb);
+        }
+        var importer = AssetImporter.GetAtPath(glb);
+        var s = new SerializedObject(importer);
+        var method = s.FindProperty("importSettings.animationMethod");
+        if (method.intValue != 2)
+        {
+            method.intValue = 2; // Mecanim
+            s.ApplyModifiedPropertiesWithoutUndo();
+            importer.SaveAndReimport();
+        }
+        var all = AssetDatabase.LoadAllAssetsAtPath(glb);
+        var controllerPath = $"{Res}/{name}.controller";
+        AssetDatabase.DeleteAsset(controllerPath);
+        var controller = AnimatorController.CreateAnimatorControllerAtPath(controllerPath);
+        foreach (var clip in all.OfType<AnimationClip>().OrderBy(c => c.name))
+        {
+            controller.AddMotion(clip);
+        }
+
+        var model = (GameObject)PrefabUtility.InstantiatePrefab(AssetDatabase.LoadAssetAtPath<GameObject>(glb));
+        PrefabUtility.UnpackPrefabInstance(model, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
+        foreach (var legacy in model.GetComponentsInChildren<Animation>()) UnityEngine.Object.DestroyImmediate(legacy);
+        var animator = model.GetComponent<Animator>() ?? model.AddComponent<Animator>();
+        animator.runtimeAnimatorController = controller;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+        var made = 0;
+        foreach (var r in model.GetComponentsInChildren<Renderer>(true))
+        {
+            r.sharedMaterials = r.sharedMaterials.Select(m =>
+            {
+                var color = m.HasProperty("baseColorFactor") ? m.GetColor("baseColorFactor") : Color.white;
+                var lit = Lit($"{name} {made++}", color, 0.5f);
+                if (m.HasProperty("baseColorTexture")) lit.SetTexture("_BaseMap", m.GetTexture("baseColorTexture"));
+                EditorUtility.SetDirty(lit);
+                return lit;
+            }).ToArray();
+        }
+        var prefab = $"{Res}/{name}.prefab";
+        AssetDatabase.DeleteAsset(prefab);
+        PrefabUtility.SaveAsPrefabAsset(model, prefab);
+        UnityEngine.Object.DestroyImmediate(model);
+    }
+
     static string Fields(SerializedObject s)
     {
         var names = new System.Collections.Generic.List<string>();
@@ -323,11 +422,11 @@ public static class Build
         return string.Join(", ", names);
     }
 
-    static void Player(BuildTarget target, BuildTargetGroup group, string path)
+    static void Player(BuildTarget target, BuildTargetGroup group, string path, bool crowd = false)
     {
-        PlayerSettings.productName = "Unity Field";
+        PlayerSettings.productName = crowd ? "Unity Crowd" : "Unity Field";
         PlayerSettings.companyName = "Fynkel";
-        PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(group), Id);
+        PlayerSettings.SetApplicationIdentifier(UnityEditor.Build.NamedBuildTarget.FromBuildTargetGroup(group), crowd ? "com.fynkel.unitycrowd" : Id);
         var report = BuildPipeline.BuildPlayer(new[] { "Assets/Field.unity" }, path, target, BuildOptions.None);
         Debug.Log($"FIELD BUILD {report.summary.result}: {path}");
         if (report.summary.result != UnityEditor.Build.Reporting.BuildResult.Succeeded) EditorApplication.Exit(1);

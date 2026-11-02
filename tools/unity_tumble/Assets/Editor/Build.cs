@@ -31,6 +31,11 @@ public static class Build
 
     public static void Android()
     {
+        // As unity_field's: the Hub's Android module came without its NDK,
+        // installed into its SDK with sdkmanager (NDK r27c, as Unity 6 wants).
+        var player = System.IO.Path.Combine(EditorApplication.applicationPath, "../PlaybackEngines/AndroidPlayer");
+        var ndk = System.IO.Path.GetFullPath(System.IO.Path.Combine(player, "SDK/ndk/27.2.12479018"));
+        if (System.IO.Directory.Exists(ndk)) UnityEditor.Android.AndroidExternalToolsSettings.ndkRootPath = ndk;
         PlayerSettings.Android.targetArchitectures = AndroidArchitecture.ARM64;
         PlayerSettings.SetScriptingBackend(UnityEditor.Build.NamedBuildTarget.Android, ScriptingImplementation.IL2CPP);
         Player(BuildTarget.Android, BuildTargetGroup.Android, "Build/android/tumble.apk");

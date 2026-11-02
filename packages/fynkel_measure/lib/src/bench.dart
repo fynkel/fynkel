@@ -238,7 +238,7 @@ List<String> _extract() {
         ),
     ];
     for (var i = 0; i < objects.length; i++) {
-      if (parentOf(i) case final p?) objects[i].parent = objects[p];
+      if (parentOf(i) case final p?) objects[i].setParent(objects[p], worldPositionStays: false);
     }
     final view = HeadlessView(world, width: 64, height: 64);
     for (var i = 0; i < 20; i++) {
@@ -282,7 +282,9 @@ List<String> _raycasts() {
             components: [MeshRenderer(cube, material)],
           ),
         );
-        if (chained) object.parent = previous!.$1;
+        // Its local position kept: `parent =` keeps the world one (as
+        // Unity's SetParent), which would put the chain's cubes elsewhere.
+        if (chained) object.setParent(previous!.$1, worldPositionStays: false);
         previous = (object, position);
       }
     }
