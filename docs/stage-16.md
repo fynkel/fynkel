@@ -196,9 +196,30 @@ line, Unity in brackets:
   iPad 10.7 → 9.15 ms. Its depth is 0.34 of it; the occlusion about 4.8.
 - Shadows already take only the casters in each cascade.
 
+- High's 3 × 3 shadow filter reads its 4 × 4 texels with four gathers:
+  the A10's scene pass at high 29.8 → 26.6 ms, the field 20.8 → 22.4 fps.
+
 The Note10+ now meets the bar at low and medium (−8%). Still short: the
-Note10+ at high, the iPad at every level (its scene pass alone is 14.8
-ms at low).
+Note10+ at high, the iPad at every level.
+
+Where the A10's scene pass goes (throwaway builds, each with one part
+off; ms at low, medium, high, against 14.8, 20.4, 29.8):
+
+| Off | low | medium | high |
+|---|---|---|---|
+| Every pixel flat (no shading at all) | 2.6 | 2.3 | 2.4 |
+| The sun's shadow lookups | 14.3 | 15.5 | 15.9 |
+| The lamps | 13.7 | 12.2 | 22.0 |
+| The lamps' lighting math only | 14.9 | 19.0 | 25.2 |
+| Fog and dither | 14.8 | 19.2 | 25.3 |
+| Textures | 15.0 | 20.4 | 29.9 |
+| The sky's light | 14.9 | 20.5 | 29.8 |
+
+(Rows after the shadow filter's change are against 26.6 at high.) The
+pixels are four fifths of the pass; no one part explains low's 14.8, and
+walking the lamps costs about 5 ms at medium even where they light
+little: the shader's size, not one instruction, looks to be what the A10
+pays for. The next step there is Xcode's GPU profiler on the iPad.
 
 ### Phase 4: the CPU (M)
 
