@@ -1,6 +1,6 @@
 //! Raycasts against what's drawn.
 
-use fynkel_world::Ray;
+use fynkel_world::{Ray, Raycaster};
 
 use crate::error::{Error, FyStatus, guard};
 
@@ -63,9 +63,13 @@ pub unsafe extern "C" fn fy_raycast(
             return Err(Error::new(FyStatus::InvalidValue, format!("max_distance can't be {max_distance}")));
         }
         let world = handle.lock()?;
-        // The raycaster holds only matrices it recomputes, so one left
-        // behind by a panic is as good as new.
-        let mut caster = handle.raycaster.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        // One left behind by a panic may hold half-made trees: it starts
+        // again from nothing.
+        let mut caster = handle.raycaster.lock().unwrap_or_else(|poisoned| {
+            let mut caster = poisoned.into_inner();
+            *caster = Raycaster::default();
+            caster
+        });
         let hit = caster.cast(&world, ray, max_distance, mask).map_or_else(FyRayHit::default, |h| FyRayHit {
             object: h.object.raw(),
             point: h.point.into(),
