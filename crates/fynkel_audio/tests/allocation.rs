@@ -18,6 +18,7 @@ struct Counting;
 thread_local! {
     static ARMED: Cell<bool> = const { Cell::new(false) };
     static COUNT: Cell<usize> = const { Cell::new(0) };
+    static LARGEST: Cell<usize> = const { Cell::new(0) };
 }
 
 fn count() {
@@ -26,10 +27,17 @@ fn count() {
     }
 }
 
+fn note_size(bytes: usize) {
+    if ARMED.with(Cell::get) {
+        LARGEST.with(|c| c.set(c.get().max(bytes)));
+    }
+}
+
 // SAFETY: passes every call to the system's allocator, counting.
 unsafe impl GlobalAlloc for Counting {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
         count();
+        note_size(layout.size());
         // SAFETY: as the caller promised.
         unsafe { System.alloc(layout) }
     }
@@ -149,4 +157,34 @@ fn mixing_streams_and_fades_allocates_nothing() {
     });
     assert_eq!(allocations, 0);
     assert_eq!(audio.stats().starved, 0);
+}
+
+/// A streamed clip that loops opens its file again each time round, but
+/// reads it where the clip keeps it, never copying the whole file (stage
+/// 14's AU7: each start and loop copied it, 4 MB for 4 rounds of 1 MB).
+/// What's left is the decoder's, a packet at a time.
+#[test]
+fn a_looping_stream_doesnt_copy_its_file_each_time_round() {
+    let mut audio = Audio::new();
+    let frames = 262_144;
+    let samples: Vec<f32> = (0..frames * 2).map(|i| (i as f32 * 0.05).sin() * 0.3).collect();
+    let file = wav(QUIET_RATE, 2, &samples);
+    let streamed = Arc::new(Clip::load(&file, "loop.wav", Streaming::Always).unwrap());
+    let looping = Play { settings: Settings { looping: true, ..Settings::default() }, ..Play::default() };
+    let mut out = vec![0.0; 1024 * 2];
+    // Started, then round three times and a bit.
+    let renders = frames * 33 / 10 / 1024;
+    LARGEST.with(|c| c.set(0));
+    counted(|| {
+        audio.play(&streamed, looping).unwrap().unwrap();
+        for _ in 0..renders {
+            audio.decode_streams();
+            audio.render_mixer(&mut out).unwrap();
+        }
+    });
+    let largest = LARGEST.with(Cell::get);
+    assert_eq!(audio.stats().starved, 0);
+    // A second decoded ahead, 384,000 bytes, is the largest; a copy of
+    // the file was.
+    assert!(largest < file.len() / 2, "{largest} bytes at once, playing a {} byte file", file.len());
 }

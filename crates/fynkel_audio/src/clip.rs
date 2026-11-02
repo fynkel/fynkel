@@ -78,8 +78,10 @@ struct Opened {
 }
 
 impl Opened {
-    fn new(file: &[u8], extension: &str) -> Result<Self, String> {
-        let source = MediaSourceStream::new(Box::new(Cursor::new(file.to_vec())), Default::default());
+    /// Reads `file` where it is, shared: a streamed clip opens it again
+    /// each time a voice starts or loops (stage 14's AU7).
+    fn new(file: Arc<[u8]>, extension: &str) -> Result<Self, String> {
+        let source = MediaSourceStream::new(Box::new(Cursor::new(file)), Default::default());
         let mut hint = Hint::new();
         if !extension.is_empty() {
             hint.with_extension(extension);
@@ -182,7 +184,8 @@ impl Clip {
     pub fn load(bytes: &[u8], name: &str, streaming: Streaming) -> Result<Self, String> {
         let fail = |what: String| if name.is_empty() { what } else { format!("{name}: {what}") };
         let extension = name.rsplit_once('.').map_or(String::new(), |(_, e)| e.to_ascii_lowercase());
-        let mut opened = Opened::new(bytes, &extension).map_err(fail)?;
+        let file: Arc<[u8]> = bytes.into();
+        let mut opened = Opened::new(Arc::clone(&file), &extension).map_err(fail)?;
         let stream = match streaming {
             Streaming::Always => true,
             Streaming::Never => false,
@@ -226,7 +229,7 @@ impl Clip {
             rate: opened.rate,
             channels,
             frames: usize::try_from(frames).unwrap_or(usize::MAX),
-            data: Data::Streamed { file: bytes.into(), extension },
+            data: Data::Streamed { file, extension },
         })
     }
 
@@ -331,7 +334,7 @@ impl Reader {
 
     fn open(&mut self) -> Result<(), String> {
         let Data::Streamed { file, extension } = &self.clip.data else { return Err("not a streamed clip".into()) };
-        let mut opened = Opened::new(file, extension)?;
+        let mut opened = Opened::new(Arc::clone(file), extension)?;
         // A fifth of a second early, decoded and dropped: a decoder needs
         // what came before to make the first frames after a seek as they'd
         // be had it played through.
