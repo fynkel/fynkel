@@ -153,6 +153,22 @@ words. Done when merged with CI green and measured on the devices.
 - RN8 (§3.1). *Done when* every golden is byte-for-byte the same and the
   GPU timing is within noise on the three devices.
 
+**Done** 2026-11-02. `renderer/` holds preparing a frame, recording it,
+each pass as a function of its own (`passes/`) and every pipeline made
+in one place (`pipelines/`). All 66 goldens are byte-for-byte the same.
+The field, against [the start line](stage-16-start.md) (iPad and iPhone:
+the GPU's ms a frame; Note10+: frames a second, the median of three):
+
+| | low | medium | high |
+|---|---|---|---|
+| Note10+, before → after | 59.4 → 59.5 | 45.1 → 45.8 | 33.1 → 33.0 |
+| iPad, before → after | 16.31 → 16.27 | 32.06 → 31.97 | 52.80 → 52.77 |
+| iPhone, before → after | 2.10 → 2.22 | 11.72 → 6.51 | 12.54 → 12.48 |
+
+The iPhone's medium is the one that moved. Its GPU reports a frame's
+passes as one, and its numbers moved this much between runs in phase 1.
+Nothing it draws changed, and it got quicker, not slower.
+
 ### Phase 3: the GPU (L)
 
 - Bloom, the finish, ambient occlusion, shadows, anti-aliasing on the
