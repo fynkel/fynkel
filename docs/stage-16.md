@@ -178,6 +178,86 @@ Nothing it draws changed, and it got quicker, not slower.
 level on the Note10+ and the iPad, and Sheepdog holds 120 at high on
 the iPhone, or the gap left is measured and explained pass by pass.
 
+**Progress** 2026-11-02 (`stage-16-gpu`), the field against the start
+line, Unity in brackets:
+
+| | low | medium | high |
+|---|---|---|---|
+| Note10+, fps (median of 3) | 59.4 → 59.6 (59.5) | 45.1 → 47.7 (52.1) | 33.1 → 34.6 (53.3) |
+| iPad, fps | 40.0 → 40.0 (59.4) | 30.3 → 32.7 (39.7) | 19.0 → 20.8 (28.5) |
+| iPad, GPU ms | 16.3 → 16.3 | 32.1 → 27.2 | 52.8 → 48.1 |
+
+- The iPad's own pick: the A10 and A11 low, the A12 and A13 medium, the
+  A14 on high. Sheepdog on the iPad 11 → 42 fps; its memory no longer
+  climbs (181 → 191 MB, was 180 → 449).
+- The finish: bloom's glow blurred once at a quarter size and read with
+  one tap; no tone-mapping curves where nothing glows. iPad 5.9 → 1.9 ms.
+- Ambient occlusion's blur reads the distances its first pass worked out:
+  iPad 10.7 → 9.15 ms. Its depth is 0.34 of it; the occlusion about 4.8.
+- Shadows already take only the casters in each cascade.
+
+- High's 3 × 3 shadow filter reads its 4 × 4 texels with four gathers:
+  the A10's scene pass at high 29.8 → 26.6 ms, the field 20.8 → 22.4 fps.
+
+The Note10+ now meets the bar at low and medium (−8%). Still short: the
+Note10+ at high, the iPad at every level.
+
+Where the A10's scene pass goes (throwaway builds, each with one part
+off; ms at low, medium, high, against 14.8, 20.4, 29.8):
+
+| Off | low | medium | high |
+|---|---|---|---|
+| Every pixel flat (no shading at all) | 2.6 | 2.3 | 2.4 |
+| The sun's shadow lookups | 14.3 | 15.5 | 15.9 |
+| The lamps | 13.7 | 12.2 | 22.0 |
+| The lamps' lighting math only | 14.9 | 19.0 | 25.2 |
+| Fog and dither | 14.8 | 19.2 | 25.3 |
+| Textures | 15.0 | 20.4 | 29.9 |
+| The sky's light | 14.9 | 20.5 | 29.8 |
+
+(Rows after the shadow filter's change are against 26.6 at high.) The
+pixels are four fifths of the pass; no one part explains low's 14.8, and
+walking the lamps costs about 5 ms at medium even where they light
+little.
+
+What came of following it up:
+
+- **Not the shader's size.** The shadow filter and lamp highlights made
+  constants (so each level's shader holds only its own filter): low
+  14.8 → 14.85, high 26.6 → 26.1. Which filter runs is what costs: the
+  hard one in high's place takes its scene pass to 18.6 ms, the 4 × 4 one
+  in medium's place takes medium's to 24.3.
+- **Not the pixels' number.** Low (already 0.75 of the screen) at 0.6
+  and 0.5 of it, 64% and 44% of its pixels: scene 14.8 → 14.4 → 11.8.
+- **What's drawn** (medium, one kind hidden at a time, scene 20.6): dust
+  −2.2, the 61 animals −2.5, the 8 lamps and their light −4.3, the 120
+  posts −0.2. About 11 ms is the ground and the sky alone.
+- **No profiler to be had from the command line.** The A10 (iOS 17)
+  gives Instruments no counters; the A18's Metal System Trace from
+  `xctrace` records one counter (the ray-tracing unit's) and no shader
+  samples, and the app quits when launched outside `flutter run`, so the
+  trace never sees its shaders made. Instruments' own window, with a
+  template that records the performance limiters, is what's left.
+
+Low on the iPad holds at exactly 40 fps (25.0 ms a frame) with 16.3 ms
+on the GPU, each frame one or two 60 Hz refreshes in turn. Cheaper
+settings (throwaway field levels, fps):
+
+| Low with | fps |
+|---|---|
+| nothing changed | 40.0 |
+| 2× anti-aliasing | 40.0 |
+| no sun shadows | 40.0 |
+| 0.6 of the screen (2× or 4×) | 40.0, 40.5 |
+| no anti-aliasing, no sun shadows | 45.9 |
+| no sun shadows, 0.6 of the screen, 2× | 43.9 |
+| no sun shadows, 0.6 of the screen, 4× | 59.7, 49.1, 56.1 (three runs) |
+
+Only the last, with about 13 ms on the GPU, comes near 60, and not
+steadily: shadows gone and a softer picture, too much to give for it.
+The A10's low stays at 40; the gap to Unity's 59 is its scene pass,
+about 11 ms of which is the ground and the sky, shaded per pixel.
+
 ### Phase 4: the CPU (M)
 
 - The tree over objects; world matrices; the mesh change; the small

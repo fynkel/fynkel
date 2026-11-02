@@ -547,9 +547,11 @@ from:
 | `antiAliasing`: samples a pixel, smoothing edges (MSAA) | 4 | 4 | 4 |
 | `softParticles`: particles fade where they meet what's behind | no | yes | yes |
 
-When the game doesn't choose, the device picks a level: high on Apple's
-GPUs and desktops', low on Android phones (Mali, Adreno and the rest), on a
-software GPU and on one it doesn't know. `Quality.device` says which.
+When the game doesn't choose, the device picks a level: high on desktops'
+GPUs and Apple's from the A14 (iPhone 12, 2020) on, medium on the A12 and
+A13, low on older Apple GPUs (a 2018 iPad's A10 draws a busy scene at 11
+fps at high, 40 at low), on Android phones (Mali, Adreno and the rest), on
+a software GPU and on one it doesn't know. `Quality.device` says which.
 Phones get low because a Galaxy Note10+ (2019) doesn't hold 60 fps at
 medium: about 40–50 in a scene with everything
 ([the report](android-pacing-report.md)). A newer phone may: a game can

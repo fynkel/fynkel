@@ -5,8 +5,9 @@
 //! half the size of the one before, the first a quarter of the view's: the scene
 //! image's bright light goes into the first (the prefilter), then each
 //! into the next, smaller (down), then each back into the larger, blurred
-//! and added (up). The last pass adds the first image's glow to the scene
-//! (`finish.wgsl`'s `fs_bloom`). Each pass but the first reads a few texels
+//! and added (up). The first is blurred once more, at its strength, into
+//! the glow (`fs_glow`), which the last pass adds to the scene
+//! (`finish.wgsl`'s `fs_bloom`) with one tap a pixel. Each pass but the first reads a few texels
 //! of a small image. The images are 32 bits a pixel where the GPU can draw
 //! into that format, half-float otherwise. Measured on a Note10+, a chain
 //! starting at half the view's size in half floats cost more than its
@@ -58,6 +59,7 @@ struct Pipelines {
     prefilter: wgpu::RenderPipeline,
     down: wgpu::RenderPipeline,
     up: wgpu::RenderPipeline,
+    glow: wgpu::RenderPipeline,
 }
 
 impl BloomKit {
@@ -160,6 +162,7 @@ impl BloomKit {
                 prefilter: make("bloom prefilter", "fs_prefilter", None),
                 down: make("bloom down", "fs_down", None),
                 up: make("bloom up", "fs_up", Some(wgpu::BlendState { color: add, alpha: add })),
+                glow: make("bloom glow", "fs_glow", None),
             }
         })
     }
@@ -170,6 +173,8 @@ pub(crate) struct BloomChain {
     /// Each image's view, largest first, and the bind group a pass reads
     /// it through.
     levels: Vec<(wgpu::TextureView, wgpu::BindGroup)>,
+    /// The glow the last pass adds: the first image's size, blurred.
+    glow: (wgpu::TextureView, wgpu::BindGroup),
     /// The scene image, read by the prefilter.
     scene: wgpu::BindGroup,
     params: wgpu::Buffer,
@@ -179,19 +184,22 @@ pub(crate) struct BloomChain {
 
 impl BloomChain {
     /// A chain for a `width` × `height` view whose scene image is `image`.
-    pub(crate) fn new(kit: &BloomKit, image: &wgpu::TextureView, width: u32, height: u32) -> Self {
+    pub(crate) fn new(kit: &BloomKit, scene: &wgpu::TextureView, width: u32, height: u32) -> Self {
         let device = &kit.device;
         let (w, h, levels) = shape(width, height);
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("bloom"),
-            size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
-            mip_level_count: levels,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: kit.format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
+        let image = |label, mip_level_count| {
+            device.create_texture(&wgpu::TextureDescriptor {
+                label: Some(label),
+                size: wgpu::Extent3d { width: w, height: h, depth_or_array_layers: 1 },
+                mip_level_count,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: kit.format,
+                usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+        };
+        let texture = image("bloom", levels);
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("bloom"),
             size: std::mem::size_of::<Params>() as u64,
@@ -220,16 +228,20 @@ impl BloomChain {
                 (view, group)
             })
             .collect();
-        Self { scene: read(image), levels, params, written: bytemuck::Zeroable::zeroed() }
+        let glow = image("bloom glow", 1).create_view(&Default::default());
+        let glow = {
+            let group = read(&glow);
+            (glow, group)
+        };
+        Self { scene: read(scene), levels, glow, params, written: bytemuck::Zeroable::zeroed() }
     }
 
-    /// What the last pass reads: the first image, its glow added up.
+    /// What the last pass reads: the glow, blurred and at its strength.
     pub(crate) fn glow(&self) -> &wgpu::BindGroup {
-        &self.levels[0].1
+        &self.glow.1
     }
 
-    /// Records the passes that work out the glow of `bloom` into the first
-    /// image.
+    /// Records the passes that work out the glow of `bloom`.
     pub(crate) fn encode(
         &mut self,
         kit: &BloomKit,
@@ -277,6 +289,7 @@ impl BloomChain {
             let load = wgpu::LoadOp::Load;
             pass(encoder, "bloom up", &self.levels[level].0, load, &pipelines.up, &self.levels[level + 1].1);
         }
+        pass(encoder, "bloom glow", &self.glow.0, fresh, &pipelines.glow, &self.levels[0].1);
     }
 }
 
@@ -294,5 +307,16 @@ mod tests {
         // Small views: fewer images, down to one of a pixel.
         assert_eq!(shape(64, 64), (16, 16, 3));
         assert_eq!(shape(3, 1), (1, 1, 1));
+    }
+
+    /// The glow is blurred once, at a quarter of the view's size
+    /// (`fs_glow`), so the last pass reads it with one tap a pixel: nine
+    /// there cost the A10 1.6 ms of its 5.9 (stage 16).
+    #[test]
+    fn the_last_pass_reads_the_glow_once_a_pixel() {
+        let finish = include_str!("finish.wgsl");
+        let body = &finish[finish.find("fn fs_bloom").expect("fs_bloom")..];
+        assert_eq!(body.matches("textureSample").count(), 1, "{body}");
+        assert!(include_str!("bloom.wgsl").contains("fn fs_glow"));
     }
 }

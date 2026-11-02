@@ -22,6 +22,9 @@ use fynkel_mesh::Vertex;
 /// The depth's format, and the occlusion's: one channel, 0 to 1.
 pub(crate) const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+/// Each pixel's distance along the view, as fs_ao works it out, for the
+/// blur: as exact as the sum it was in the shader.
+const DISTANCE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R32Float;
 
 /// `Params` in ao.wgsl.
 #[repr(C)]
@@ -55,12 +58,15 @@ pub(crate) struct AoKit {
     maker: PipelineMaker,
     frame_layout: wgpu::BindGroupLayout,
     instance_stride: u64,
-    /// ao.wgsl's group 0: the depth, the unblurred occlusion, the params.
+    /// ao.wgsl's group 0: the depth, the unblurred occlusion, the params,
+    /// the distances.
     layout: wgpu::BindGroupLayout,
     /// How the forward pass reads the occlusion.
     pub(crate) sampler: wgpu::Sampler,
     /// 1 × 1 white: nothing hidden.
     pub(crate) none: wgpu::TextureView,
+    /// 1 × 1 of distances: fs_ao's stand-in for the ones it writes.
+    no_distance: wgpu::TextureView,
     pipelines: OnceLock<Pipelines>,
 }
 
@@ -104,6 +110,7 @@ impl AoKit {
                     },
                     count: None,
                 },
+                texture(3, wgpu::TextureSampleType::Float { filterable: false }),
             ],
         });
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
@@ -128,6 +135,18 @@ impl AoKit {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: None, rows_per_image: None },
             wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
         );
+        let no_distance = device
+            .create_texture(&wgpu::TextureDescriptor {
+                label: Some("no ambient occlusion distances"),
+                size: wgpu::Extent3d { width: 1, height: 1, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: DISTANCE_FORMAT,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING,
+                view_formats: &[],
+            })
+            .create_view(&Default::default());
         Self {
             device: device.clone(),
             maker: maker.clone(),
@@ -136,6 +155,7 @@ impl AoKit {
             layout,
             sampler,
             none: white.create_view(&Default::default()),
+            no_distance,
             pipelines: OnceLock::new(),
         }
     }
@@ -214,7 +234,9 @@ impl AoKit {
                 bind_group_layouts: &[Some(&self.layout)],
                 immediate_size: 0,
             });
-            let make = |label, entry_point| {
+            let target =
+                |format| Some(wgpu::ColorTargetState { format, blend: None, write_mask: wgpu::ColorWrites::ALL });
+            let make = |label, entry_point, targets: &[Option<wgpu::ColorTargetState>]| {
                 self.maker.make(wgpu::RenderPipelineDescriptor {
                     label: Some(label),
                     layout: Some(&layout),
@@ -231,17 +253,17 @@ impl AoKit {
                         module: &shader,
                         entry_point: Some(entry_point),
                         compilation_options: Default::default(),
-                        targets: &[Some(wgpu::ColorTargetState {
-                            format: FORMAT,
-                            blend: None,
-                            write_mask: wgpu::ColorWrites::ALL,
-                        })],
+                        targets,
                     }),
                     multiview_mask: None,
                     cache: None,
                 })
             };
-            Pipelines { depth, ao: make("ambient occlusion", "fs_ao"), blur: make("ambient occlusion blur", "fs_blur") }
+            Pipelines {
+                depth,
+                ao: make("ambient occlusion", "fs_ao", &[target(FORMAT), target(DISTANCE_FORMAT)]),
+                blur: make("ambient occlusion blur", "fs_blur", &[target(FORMAT)]),
+            }
         })
     }
 }
@@ -255,6 +277,7 @@ pub(crate) struct AoImages {
     pub(crate) id: u64,
     depth: wgpu::TextureView,
     raw: wgpu::TextureView,
+    distance: wgpu::TextureView,
     /// What the forward pass reads.
     pub(crate) blurred: wgpu::TextureView,
     ao_group: wgpu::BindGroup,
@@ -284,6 +307,7 @@ impl AoImages {
         };
         let depth = image("ambient occlusion depth", DEPTH_FORMAT);
         let raw = image("ambient occlusion unblurred", FORMAT);
+        let distance = image("ambient occlusion distances", DISTANCE_FORMAT);
         let blurred = image("ambient occlusion", FORMAT);
         let params = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ambient occlusion"),
@@ -291,7 +315,7 @@ impl AoImages {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let group = |second: &wgpu::TextureView| {
+        let group = |second: &wgpu::TextureView, fourth: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("ambient occlusion"),
                 layout: &kit.layout,
@@ -299,16 +323,18 @@ impl AoImages {
                     wgpu::BindGroupEntry { binding: 0, resource: wgpu::BindingResource::TextureView(&depth) },
                     wgpu::BindGroupEntry { binding: 1, resource: wgpu::BindingResource::TextureView(second) },
                     wgpu::BindGroupEntry { binding: 2, resource: params.as_entire_binding() },
+                    wgpu::BindGroupEntry { binding: 3, resource: wgpu::BindingResource::TextureView(fourth) },
                 ],
             })
         };
-        // fs_ao doesn't read binding 1; the stand-in fills it.
-        let ao_group = group(&kit.none);
-        let blur_group = group(&raw);
+        // fs_ao doesn't read bindings 1 and 3; the stand-ins fill them.
+        let ao_group = group(&kit.none, &kit.no_distance);
+        let blur_group = group(&raw, &distance);
         Self {
             id: NEXT_ID.fetch_add(1, Ordering::Relaxed),
             depth,
             raw,
+            distance,
             blurred,
             ao_group,
             blur_group,
@@ -352,21 +378,23 @@ impl AoImages {
     /// Records the occlusion and its blur, after the depth pass.
     pub(crate) fn encode(&self, kit: &AoKit, encoder: &mut wgpu::CommandEncoder, timer: &GpuTimer) {
         let pipelines = kit.pipelines();
+        let attach = |view| {
+            Some(wgpu::RenderPassColorAttachment {
+                view,
+                depth_slice: None,
+                resolve_target: None,
+                ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::WHITE), store: wgpu::StoreOp::Store },
+            })
+        };
+        let ao = [attach(&self.raw), attach(&self.distance)];
+        let blur = [attach(&self.blurred)];
         for (label, into, pipeline, group) in [
-            ("ambient occlusion", &self.raw, &pipelines.ao, &self.ao_group),
-            ("ambient occlusion blur", &self.blurred, &pipelines.blur, &self.blur_group),
+            ("ambient occlusion", &ao[..], &pipelines.ao, &self.ao_group),
+            ("ambient occlusion blur", &blur[..], &pipelines.blur, &self.blur_group),
         ] {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some(label),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: into,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::WHITE),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: into,
                 depth_stencil_attachment: None,
                 timestamp_writes: timer.pass(Part::AmbientOcclusion),
                 occlusion_query_set: None,
@@ -376,5 +404,19 @@ impl AoImages {
             pass.set_bind_group(0, group, &[]);
             pass.draw(0..3, 0..1);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    /// The blur reads each neighbour's distance as fs_ao wrote it, rather
+    /// than working it out from the depth again: 16 matrix products a
+    /// pixel cost the A10 most of the blur's 5.6 ms (stage 16).
+    #[test]
+    fn the_blur_reads_distances_fs_ao_wrote() {
+        let shader = include_str!("ao.wgsl");
+        let blur = &shader[shader.find("fn fs_blur").expect("fs_blur")..];
+        assert_eq!(blur.matches("position(").count(), 1, "only its own pixel's: {blur}");
+        assert!(blur.contains("textureLoad(distance"), "{blur}");
     }
 }
