@@ -62,6 +62,7 @@ use crate::texture::OwnTextures;
 use fynkel_mesh::{MeshData, Vertex};
 
 mod encode;
+mod passes;
 mod pipelines;
 mod prepare;
 
