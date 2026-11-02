@@ -218,8 +218,30 @@ off; ms at low, medium, high, against 14.8, 20.4, 29.8):
 (Rows after the shadow filter's change are against 26.6 at high.) The
 pixels are four fifths of the pass; no one part explains low's 14.8, and
 walking the lamps costs about 5 ms at medium even where they light
-little: the shader's size, not one instruction, looks to be what the A10
-pays for. The next step there is Xcode's GPU profiler on the iPad.
+little.
+
+What came of following it up:
+
+- **Not the shader's size.** The shadow filter and lamp highlights made
+  constants (so each level's shader holds only its own filter): low
+  14.8 → 14.85, high 26.6 → 26.1. Which filter runs is what costs: the
+  hard one in high's place takes its scene pass to 18.6 ms, the 4 × 4 one
+  in medium's place takes medium's to 24.3.
+- **Not the pixels' number.** Low (already 0.75 of the screen) at 0.6
+  and 0.5 of it, 64% and 44% of its pixels: scene 14.8 → 14.4 → 11.8.
+- **What's drawn** (medium, one kind hidden at a time, scene 20.6): dust
+  −2.2, the 61 animals −2.5, the 8 lamps and their light −4.3, the 120
+  posts −0.2. About 11 ms is the ground and the sky alone.
+- **No profiler to be had from the command line.** The A10 (iOS 17)
+  gives Instruments no counters; the A18's Metal System Trace from
+  `xctrace` records one counter (the ray-tracing unit's) and no shader
+  samples, and the app quits when launched outside `flutter run`, so the
+  trace never sees its shaders made. Instruments' own window, with a
+  template that records the performance limiters, is what's left.
+
+Low on the iPad holds at exactly 40 fps (25.0 ms a frame) with 16.3 ms
+on the GPU: just over a 60 Hz frame, so each frame takes one or two
+refreshes in turn. About 2 ms less would take it to 60.
 
 ### Phase 4: the CPU (M)
 
