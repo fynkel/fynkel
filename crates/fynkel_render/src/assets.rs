@@ -5,7 +5,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 
 use glam::Vec3;
@@ -28,6 +28,9 @@ use fynkel_mesh::MeshData;
 pub struct Kit {
     pub(crate) gpu: Gpu,
     quality: QualityLevel,
+    /// [`crate::gathers_shadows`] for this device, for pipelines made from
+    /// now on.
+    gather_shadows: AtomicBool,
     pub(crate) frame_layout: wgpu::BindGroupLayout,
     /// The last pass's input: the scene's image.
     pub(crate) image_layout: wgpu::BindGroupLayout,
@@ -278,6 +281,7 @@ impl Kit {
             maker,
             gpu: gpu.clone(),
             quality: QualityLevel::for_adapter(&gpu.adapter.get_info()),
+            gather_shadows: AtomicBool::new(crate::scene::gathers_shadows(&gpu.adapter.get_info())),
             frame_layout,
             image_layout,
             msaa_depth_layout,
@@ -295,6 +299,18 @@ impl Kit {
     /// for a scene that doesn't choose its quality.
     pub fn device_quality(&self) -> QualityLevel {
         self.quality
+    }
+
+    /// Whether this device's shaders read high's shadow filter with gathers.
+    pub(crate) fn gather_shadows(&self) -> bool {
+        self.gather_shadows.load(Ordering::Relaxed)
+    }
+
+    /// For tests: draw shadows as another GPU would. Before any pipelines
+    /// are made.
+    #[doc(hidden)]
+    pub fn set_gather_shadows(&self, on: bool) {
+        self.gather_shadows.store(on, Ordering::Relaxed);
     }
 
     /// How many render pipelines it has made: each is a shader compiled

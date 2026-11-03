@@ -102,6 +102,34 @@ fn the_sun_casts_shadows_at_every_level() {
     }
 }
 
+/// High's filter draws the same shadow read either way: four gathers on
+/// Apple's GPUs, nine filtered compares elsewhere (stage 16).
+#[test]
+fn the_softer_filter_draws_the_same_shadow_gathered_or_not() {
+    let gpu = gpu();
+    let scene = stage(vec![sun()], QualityLevel::High);
+    let draw = |kit: std::sync::Arc<Kit>| {
+        let mut r = Renderer::sharing(Assets::shared(&kit), SRGB);
+        r.upload_mesh(CUBE, &MeshData::cube());
+        r.upload_mesh(PLANE, &MeshData::plane());
+        render(&gpu, &mut r, &scene, SIZE, SIZE).0
+    };
+    let gathered = Kit::new(&gpu);
+    gathered.set_gather_shadows(true);
+    let compared = Kit::new(&gpu);
+    compared.set_gather_shadows(false);
+    let (a, b) = (draw(gathered), draw(compared));
+    let mut most = 0;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
+            for (p, q) in a.pixel(x, y).into_iter().zip(b.pixel(x, y)) {
+                most = most.max(p.abs_diff(q));
+            }
+        }
+    }
+    assert!(most <= 2, "the two differ by {most} of 255");
+}
+
 /// Hardening R10: a caster far towards the sun, past how far the map's
 /// depth range may stretch, is flattened onto its near end: it still
 /// casts.

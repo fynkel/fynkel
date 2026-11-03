@@ -65,6 +65,12 @@ fn each_gpu_gets_its_quality_level() {
     for (info, want) in cases {
         assert_eq!(QualityLevel::for_adapter_on(&info, false), want, "{info:?}");
     }
+    // Only Apple's GPUs read shadows with gathers: they cost a Mali-G76 a
+    // third of its frames (stage 16), and no other has been measured.
+    assert!(gathers_shadows(&gpu(0x106B, IntegratedGpu, Metal)));
+    assert!(!gathers_shadows(&gpu(0x13B5, IntegratedGpu, Vulkan)), "Mali");
+    assert!(!gathers_shadows(&gpu(0x5143, IntegratedGpu, Vulkan)), "Adreno");
+    assert!(!gathers_shadows(&gpu(0x10DE, DiscreteGpu, Vulkan)), "not measured");
     #[cfg(target_os = "macos")]
     assert_eq!(QualityLevel::for_adapter(&this), QualityLevel::High, "this Mac");
     #[cfg(target_os = "android")]

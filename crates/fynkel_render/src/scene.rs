@@ -465,6 +465,16 @@ impl QualityLevel {
     }
 }
 
+/// Whether `info`'s GPU reads high's shadow filter with gathers: Apple's,
+/// where that took an A10's scene pass from 29.8 to 26.6 ms. A shader
+/// holding them took a Mali-G76 at medium from 47.7 to 30 fps, at a level
+/// that never runs them, so nothing else gets them until it's measured
+/// (docs/stage-16.md).
+pub fn gathers_shadows(info: &wgpu::AdapterInfo) -> bool {
+    const APPLE: u32 = 0x106B;
+    info.vendor == APPLE || info.backend == wgpu::Backend::Metal
+}
+
 /// How shadows are drawn ([`Quality::shadows`]).
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct ShadowLevel {

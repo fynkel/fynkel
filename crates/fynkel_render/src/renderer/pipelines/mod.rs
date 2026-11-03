@@ -18,6 +18,7 @@ impl Pipelines {
         Self {
             format,
             samples,
+            gather_shadows: kit.gather_shadows(),
             maker: kit.maker.clone(),
             device: kit.gpu.device.clone(),
             frame_layout: kit.frame_layout.clone(),

@@ -121,6 +121,9 @@ override double_sided: bool = false;
 // Off for a frame no light casts shadows in, and for a material with no
 // textures: the work is left out, rather than done and thrown away.
 override shadowed: bool = true;
+// High's shadow filter read with gathers: quicker on Apple's GPUs, far slower
+// on a Mali-G76, even at the levels that never run it (`gathers_shadows`).
+override gather_shadows: bool = false;
 override textured: bool = true;
 // Off without a sky that lights the scene from its cubes (a gradient or an
 // image's): a plain sky is in the ambient term.
@@ -457,8 +460,9 @@ fn reflected(s: Brdf, l: vec3<f32>, irradiance: vec3<f32>) -> vec3<f32> {
 
 // How lit `uv` is at `depth` in `layer` of `map`, 0 to 1, by the frame's
 // filter: one compare (smoothed across a texel by the sampler), 4 half a
-// texel apart, or 9 a texel apart (read with four gathers). `texel` is
-// 1 / the map's size. Outside the map is lit.
+// texel apart, or 9 a texel apart (read with four gathers where
+// `gather_shadows` is on). `texel` is 1 / the map's size. Outside the map is
+// lit.
 fn filtered(map: texture_depth_2d_array, layer: u32, uv: vec2<f32>, depth: f32, texel: f32) -> f32 {
     if any(uv < vec2<f32>(0.0)) || any(uv > vec2<f32>(1.0)) || depth >= 1.0 {
         return 1.0;
@@ -474,30 +478,40 @@ fn filtered(map: texture_depth_2d_array, layer: u32, uv: vec2<f32>, depth: f32, 
             + textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(-d, d), layer, depth)
             + textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(d, d), layer, depth));
     }
-    // Nine filtered compares a texel apart read 4 × 4 texels: those a
-    // texel or more inside count once each, the outer rows and columns by
-    // how far `uv` is across its texel. Four gathers of 2 × 2 read them.
-    let at = uv / texel - 0.5;
-    let base = floor(at);
-    let f = at - base;
-    // Each axis's weights: the first texel, two whole, the last.
-    let wx = array<f32, 4>(1.0 - f.x, 1.0, 1.0, f.x);
-    let wy = array<f32, 4>(1.0 - f.y, 1.0, 1.0, f.y);
+    if gather_shadows {
+        // Nine filtered compares a texel apart read 4 × 4 texels: those a
+        // texel or more inside count once each, the outer rows and columns
+        // by how far `uv` is across its texel. Four gathers of 2 × 2 read
+        // them.
+        let at = uv / texel - 0.5;
+        let base = floor(at);
+        let f = at - base;
+        // Each axis's weights: the first texel, two whole, the last.
+        let wx = array<f32, 4>(1.0 - f.x, 1.0, 1.0, f.x);
+        let wy = array<f32, 4>(1.0 - f.y, 1.0, 1.0, f.y);
+        var gathered = 0.0;
+        for (var k = 0u; k < 4u; k++) {
+            let i = k & 1u;
+            let j = k >> 1u;
+            // Texels base - 1 and base, or base + 1 and base + 2: a gather
+            // at `c` reads floor(c / texel - 0.5) and the next, and `base`
+            // is half a texel inside that.
+            let corner = (base + vec2<f32>(f32(i * 2u), f32(j * 2u))) * texel;
+            // x: (left, lower), y: (right, lower), z: (right, upper), w: (left, upper).
+            let g = textureGatherCompare(map, shadow_sampler, corner, layer, depth);
+            let l = wx[i * 2u];
+            let r = wx[i * 2u + 1u];
+            let u = wy[j * 2u];
+            let d = wy[j * 2u + 1u];
+            gathered += g.w * l * u + g.z * r * u + g.x * l * d + g.y * r * d;
+        }
+        return gathered / 9.0;
+    }
     var sum = 0.0;
-    for (var k = 0u; k < 4u; k++) {
-        let i = k & 1u;
-        let j = k >> 1u;
-        // Texels base - 1 and base, or base + 1 and base + 2: a gather at
-        // `c` reads floor(c / texel - 0.5) and the next, and `base` is half
-        // a texel inside that.
-        let corner = (base + vec2<f32>(f32(i * 2u), f32(j * 2u))) * texel;
-        // x: (left, lower), y: (right, lower), z: (right, upper), w: (left, upper).
-        let g = textureGatherCompare(map, shadow_sampler, corner, layer, depth);
-        let l = wx[i * 2u];
-        let r = wx[i * 2u + 1u];
-        let u = wy[j * 2u];
-        let d = wy[j * 2u + 1u];
-        sum += g.w * l * u + g.z * r * u + g.x * l * d + g.y * r * d;
+    for (var y = -1; y <= 1; y++) {
+        for (var x = -1; x <= 1; x++) {
+            sum += textureSampleCompareLevel(map, shadow_sampler, uv + vec2<f32>(f32(x), f32(y)) * texel, layer, depth);
+        }
     }
     return sum / 9.0;
 }
