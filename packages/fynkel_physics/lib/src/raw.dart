@@ -3,9 +3,11 @@
 // steps of docs/stage-5.md build colliders and rigidbodies on it.
 
 import 'dart:ffi';
+import 'dart:typed_data';
 
 import 'package:ffi/ffi.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:meta/meta.dart';
 
 import 'bindings.g.dart';
 import 'owned_memory.dart';
@@ -155,6 +157,13 @@ final class RawPhysics implements Finalizable {
   late final _hit = _memory<FpHit>();
   Pointer<FpMoved> _moved = nullptr;
   var _movedCapacity = 0;
+  // The same, read as numbers: each moved body is _stride floats, its key
+  // the first two as one Uint64 (reading through .ref makes an object for
+  // each struct it goes through, which the compiled app keeps: 1,000
+  // tumbling bodies made 500 KB a frame).
+  Float32List _movedFloats = Float32List(0);
+  Uint64List _movedKeys = Uint64List(0);
+  static final _stride = sizeOf<FpMoved>() ~/ 4;
   var _movedCount = 0;
 
   Pointer<FpWorld> get _live {
@@ -307,41 +316,63 @@ final class RawPhysics implements Finalizable {
       if (_moved != nullptr) _memory.free(_moved);
       _movedCapacity = count * 2;
       _moved = _memory<FpMoved>(_movedCapacity);
+      _movedFloats = _moved.cast<Float>().asTypedList(_movedCapacity * _stride);
+      _movedKeys = _moved.cast<Uint64>().asTypedList(_movedCapacity * _stride ~/ 2);
     }
     _check(fp_moved_read(world, _moved, count));
     return _movedCount = count;
   }
 
   /// The key of the [i]th body the last step moved.
-  int movedKey(int i) => _movedAt(i).key;
+  int movedKey(int i) {
+    RangeError.checkValidIndex(i, null, 'i', _movedCount);
+    return _movedKeys[i * _stride ~/ 2];
+  }
 
   /// Where the [i]th body the last step moved is, in the world.
   Vec3 movedPosition(int i) {
-    final p = _movedAt(i).pose.position;
-    return Vec3(p.x, p.y, p.z);
+    final f = _movedFloats, at = _movedOffset(i);
+    return Vec3(f[at + 2], f[at + 3], f[at + 4]);
   }
 
   /// How the [i]th body the last step moved is turned, in the world.
   Quat movedRotation(int i) {
-    final r = _movedAt(i).pose.rotation;
-    return Quat(r.x, r.y, r.z, r.w);
+    final f = _movedFloats, at = _movedOffset(i);
+    return Quat(f[at + 5], f[at + 6], f[at + 7], f[at + 8]);
   }
 
   /// How fast the [i]th body the last step moved goes, in m/s.
   Vec3 movedLinearVelocity(int i) {
-    final v = _movedAt(i).linear_velocity;
-    return Vec3(v.x, v.y, v.z);
+    final f = _movedFloats, at = _movedOffset(i);
+    return Vec3(f[at + 9], f[at + 10], f[at + 11]);
   }
 
   /// How fast the [i]th body the last step moved turns, in rad/s.
   Vec3 movedAngularVelocity(int i) {
-    final v = _movedAt(i).angular_velocity;
-    return Vec3(v.x, v.y, v.z);
+    final f = _movedFloats, at = _movedOffset(i);
+    return Vec3(f[at + 12], f[at + 13], f[at + 14]);
   }
 
-  FpMoved _movedAt(int i) {
+  /// Writes the [i]th moved body's velocities into [into]: how fast it
+  /// goes (0 to 2) and turns (3 to 5), with nothing made (for the
+  /// package's rigidbodies, which keep them as numbers).
+  @internal
+  void movedVelocities(int i, Float64List into) {
+    final f = _movedFloats, at = _movedOffset(i);
+    into
+      ..[0] = f[at + 9]
+      ..[1] = f[at + 10]
+      ..[2] = f[at + 11]
+      ..[3] = f[at + 12]
+      ..[4] = f[at + 13]
+      ..[5] = f[at + 14];
+  }
+
+  /// Where the [i]th moved body's floats start in [_movedFloats]: after
+  /// its key, the position (3), the rotation (4) and the two velocities.
+  int _movedOffset(int i) {
     RangeError.checkValidIndex(i, null, 'i', _movedCount);
-    return (_moved + i).ref;
+    return i * _stride;
   }
 
   void _writePose(Vec3 p, Quat r) {

@@ -302,6 +302,29 @@ measured on the iPhone and the iPad), stage 13's mesh change is under
   | BR6 ½ | the extract looks at resources only when they changed | 0.10 → 0.00 ms with 2,000 |
   | BR5 | the iOS layer's main thread never waits for a drawable | up to 988 ms → a few µs |
 
+**After phase 4** 2026-11-03 (branch `stage-16-garbage`):
+
+- **The iPad's memory climb** at high (10 minutes, sheepdog): 264 →
+  407 → 425 MB, against phase 1's 180 → 422 → 449. A slower climb is
+  left at high; at low, the iPad's default, it's flat.
+- **The pile's garbage**: 1,000 tumbling cubes, the Dart heap allocated
+  a frame (profile builds). The compiled app kept an object for every
+  struct a `.ref` read went through, which the JIT harness never saw;
+  the step is now read through typed views, a Rigidbody keeps its
+  velocities as numbers, and a child's local pose is worked out in
+  numbers. What's left is each move's new transform, position and
+  rotation.
+
+  | | before | after |
+  |---|---|---|
+  | Mac, Rigidbody pile | 596 KB | **165 KB** |
+  | Mac, raw pile | 297 KB | **143 KB** |
+  | Note10+, raw pile | 293 KB | **161 KB** |
+  | Note10+, Rigidbody pile | — | 207 KB |
+
+  The Note10+'s frame rate is unchanged (52): the pile is bound by its
+  physics and drawing there, not by collecting.
+
 ### Phase 5: budgets, the guide, the report (S)
 
 - Each device's budget; §20 with the numbers; the report with the

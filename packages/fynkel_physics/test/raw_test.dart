@@ -2,6 +2,7 @@
 // crates/fynkel_physics_ffi, and these drive it as the later steps will.
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:fynkel/fynkel.dart';
 import 'package:fynkel_physics/raw.dart';
@@ -29,6 +30,32 @@ void main() {
     }
     expect(landed, closeTo(expected, step * 1.5));
     expect(physics.bodyPose(ball).$1.y, closeTo(0.5, 0.02));
+  });
+
+  test('each moved body reads back its own key, pose and velocities', () {
+    final physics = withGround();
+    for (var key = 100; key < 103; key++) {
+      final body = physics.addBody(BodyKind.dynamic, key, position: Vec3((key - 100) * 2.0, 3, 0));
+      physics.addBox(body, const Vec3(0.5, 0.5, 0.5));
+    }
+    final moved = physics.step();
+    final fall = -9.81 * physics.stepLength;
+    final velocities = Float64List(6);
+    for (var i = 0; i < moved; i++) {
+      final key = physics.movedKey(i);
+      final p = physics.movedPosition(i);
+      expect(p.x, closeTo((key - 100) * 2.0, 1e-6));
+      expect(p.y, allOf(lessThan(3), greaterThan(2.99)));
+      expect(p.z, closeTo(0, 1e-6));
+      final r = physics.movedRotation(i);
+      expect([r.x, r.y, r.z, r.w], [closeTo(0, 1e-6), closeTo(0, 1e-6), closeTo(0, 1e-6), closeTo(1, 1e-6)]);
+      final v = physics.movedLinearVelocity(i);
+      expect([v.x, v.y, v.z], [closeTo(0, 1e-6), closeTo(fall, 1e-3), closeTo(0, 1e-6)]);
+      final w = physics.movedAngularVelocity(i);
+      expect([w.x, w.y, w.z], [closeTo(0, 1e-6), closeTo(0, 1e-6), closeTo(0, 1e-6)]);
+      physics.movedVelocities(i, velocities);
+      expect(velocities, [v.x, v.y, v.z, w.x, w.y, w.z]);
+    }
   });
 
   test('a step gives back the bodies it moved, by key, until they sleep', () {
