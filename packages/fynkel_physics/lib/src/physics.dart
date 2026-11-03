@@ -12,6 +12,7 @@
 import 'dart:collection';
 import 'dart:ffi';
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:fynkel/extend.dart';
 import 'package:fynkel/fynkel.dart';
@@ -183,6 +184,8 @@ final class Physics extends WorldSystem implements Finalizable {
   final _below = FrameList<GameObject>();
   final _toFollow = FrameList<Collider>();
   final _toPut = FrameList<Rigidbody>();
+  // A moved body's velocities, read from the step into numbers.
+  final _velocities = Float64List(6);
   final _tree = FrameList<GameObject>();
   // The colliders in the follow batch, told they're seen once it's taken.
   final _batch = FrameList<Collider>();
@@ -893,13 +896,8 @@ final class Physics extends WorldSystem implements Finalizable {
       if (key >= _bodiesByKey.length) continue;
       final body = _bodiesByKey[key];
       if (body == null) continue;
-      body._stepped(
-        raw.movedPosition(i),
-        raw.movedRotation(i),
-        raw.movedLinearVelocity(i),
-        raw.movedAngularVelocity(i),
-        _steps,
-      );
+      raw.movedVelocities(i, _velocities);
+      body._stepped(raw.movedPosition(i), raw.movedRotation(i), _velocities, _steps);
       if (body._interpolation == RigidbodyInterpolation.none) {
         body._prepare(body._p1, body._r1);
         _toPut.add(body);
@@ -1241,7 +1239,10 @@ final class Physics extends WorldSystem implements Finalizable {
       final extrapolate = body._interpolation == RigidbodyInterpolation.extrapolate;
       if (_due || extrapolate) {
         final ahead = (alpha + (_due && extrapolate ? 1 : 0)) * delta;
-        body._prepare(body._p1 + body._v1 * ahead, _turned(body._r1, body._w1, ahead));
+        body._prepare(
+          body._p1 + Vec3(body._vx, body._vy, body._vz) * ahead,
+          _turned(body._r1, Vec3(body._wx, body._wy, body._wz), ahead),
+        );
       } else {
         body._prepare(Vec3.lerp(body._p0, body._p1, alpha), Quat.slerp(body._r0, body._r1, alpha));
       }

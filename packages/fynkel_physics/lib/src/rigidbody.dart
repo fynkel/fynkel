@@ -369,8 +369,10 @@ final class Rigidbody extends Behaviour {
   var _p1 = Vec3.zero;
   var _r0 = Quat.identity;
   var _r1 = Quat.identity;
-  var _v1 = Vec3.zero;
-  var _w1 = Vec3.zero;
+  // Its velocities after the last step, as numbers: kept for each step,
+  // but read only to extrapolate.
+  var _vx = 0.0, _vy = 0.0, _vz = 0.0;
+  var _wx = 0.0, _wy = 0.0, _wz = 0.0;
   var _movedAt = -1;
   var _resting = true;
 
@@ -502,14 +504,18 @@ final class Rigidbody extends Behaviour {
   }
 
   /// The step numbered [step] left it at [position] and [rotation], moving
-  /// at [linear] and [angular].
-  void _stepped(Vec3 position, Quat rotation, Vec3 linear, Vec3 angular, int step) {
+  /// as [velocities] says ([RawPhysics.movedVelocities]).
+  void _stepped(Vec3 position, Quat rotation, Float64List velocities, int step) {
     _p0 = _movedAt == step - 1 ? _p1 : position;
     _r0 = _movedAt == step - 1 ? _r1 : rotation;
     _p1 = position;
     _r1 = rotation;
-    _v1 = linear;
-    _w1 = angular;
+    _vx = velocities[0];
+    _vy = velocities[1];
+    _vz = velocities[2];
+    _wx = velocities[3];
+    _wy = velocities[4];
+    _wz = velocities[5];
     _movedAt = step;
     _resting = false;
   }
@@ -553,13 +559,29 @@ final class Rigidbody extends Behaviour {
     if (ancestors.isEmpty) {
       object.transform = object.transform.copyWith(position: position, rotation: rotation);
     } else {
-      final parent = ancestors.first.worldTransform;
-      final back = parent.rotation.inverse;
-      final local = back.rotate(position - parent.position);
-      final scale = parent.scale;
+      // The parent's rotation undone, then its scale, worked out in
+      // numbers so that only the new position and rotation are made: it
+      // runs for every move of a child (stage 16, the pile).
+      final Transform(position: at, rotation: turn, scale: scale) = ancestors.first.worldTransform;
+      final bx = -turn.x, by = -turn.y, bz = -turn.z, bw = turn.w;
+      final dx = position.x - at.x, dy = position.y - at.y, dz = position.z - at.z;
+      final tx = (by * dz - bz * dy) * 2, ty = (bz * dx - bx * dz) * 2, tz = (bx * dy - by * dx) * 2;
+      final lx = dx + tx * bw + (by * tz - bz * ty);
+      final ly = dy + ty * bw + (bz * tx - bx * tz);
+      final lz = dz + tz * bw + (bx * ty - by * tx);
+      final r = rotation;
+      final qx = bw * r.x + bx * r.w + by * r.z - bz * r.y;
+      final qy = bw * r.y - bx * r.z + by * r.w + bz * r.x;
+      final qz = bw * r.z + bx * r.y - by * r.x + bz * r.w;
+      final qw = bw * r.w - bx * r.x - by * r.y - bz * r.z;
+      final length = math.sqrt(qx * qx + qy * qy + qz * qz + qw * qw);
       object.transform = object.transform.copyWith(
-        position: Vec3(local.x / scale.x, local.y / scale.y, local.z / scale.z),
-        rotation: (back * rotation).normalized,
+        position: Vec3(lx / scale.x, ly / scale.y, lz / scale.z),
+        // No length, or none that's finite, is no rotation: Quat.normalized
+        // says so. (Compared, not .isFinite, which boxes the double.)
+        rotation: length >= 1e-12 && length < double.infinity
+            ? Quat(qx / length, qy / length, qz / length, qw / length)
+            : Quat(qx, qy, qz, qw).normalized,
       );
     }
     place.seen();
