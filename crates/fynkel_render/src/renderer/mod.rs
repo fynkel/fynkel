@@ -652,6 +652,8 @@ pub(crate) struct Pipelines {
     format: wgpu::TextureFormat,
     /// The samples a pixel of the scene they draw into has.
     samples: u32,
+    /// Whether high's shadow filter reads with gathers ([`crate::gathers_shadows`]).
+    gather_shadows: bool,
     maker: PipelineMaker,
     device: wgpu::Device,
     frame_layout: wgpu::BindGroupLayout,

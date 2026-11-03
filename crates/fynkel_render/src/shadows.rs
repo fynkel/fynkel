@@ -699,16 +699,22 @@ fn texel_bytes(format: wgpu::TextureFormat) -> u64 {
 mod tests {
     use super::*;
 
-    /// High's 3 × 3 filter reads its 4 × 4 texels with four gathers, not
-    /// nine filtered compares: the shadow lookups were 14 ms of the A10's
-    /// 30 ms scene pass at high (stage 16).
+    /// High's 3 × 3 filter reads its 4 × 4 texels with four gathers on
+    /// Apple's GPUs, not nine filtered compares: the shadow lookups were
+    /// 14 ms of the A10's 30 ms scene pass at high. Elsewhere it stays nine
+    /// compares: a shader holding the gathers cost a Mali-G76 a third of
+    /// its frames at medium and high, though medium never runs them (stage
+    /// 16), so they're behind a constant.
     #[test]
-    fn the_softer_filter_gathers_its_texels() {
+    fn only_a_gpu_that_gathers_has_the_gathers_in_its_shader() {
         let shader = include_str!("forward.wgsl");
         let start = shader.find("fn filtered(").expect("filtered");
         let filtered = &shader[start..start + shader[start..].find("\n}\n").expect("its end")];
         assert_eq!(filtered.matches("textureGatherCompare").count(), 1, "{filtered}");
-        assert_eq!(filtered.matches("textureSampleCompareLevel").count(), 5, "hard and soft as they were: {filtered}");
+        let gather = filtered.find("textureGatherCompare").unwrap();
+        let guard = filtered.find("if gather_shadows {").expect("behind the constant");
+        assert!(guard < gather, "{filtered}");
+        assert_eq!(filtered.matches("textureSampleCompareLevel").count(), 6, "hard, soft and the nine: {filtered}");
     }
     use crate::scene::QualityLevel;
 

@@ -78,6 +78,7 @@ impl Pipelines {
                 ("particle_lit", on(key.look.lit || shader.is_some())),
                 ("particle_lit_once", on(once)),
                 ("shadowed", on(key.shadowed)),
+                ("gather_shadows", on(self.gather_shadows)),
                 ("sky_lit", on(key.sky_lit)),
                 ("ao", 0.0),
                 ("double_sided", 0.0),

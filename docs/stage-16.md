@@ -325,6 +325,34 @@ measured on the iPhone and the iPad), stage 13's mesh change is under
   The Note10+'s frame rate is unchanged (52): the pile is bound by its
   physics and drawing there, not by collecting.
 
+**Found in phase 5** 2026-11-03 (branch `stage-16-shadow-mali`): phase 3's
+gathers (high's shadow filter, above) cost the Note10+ a third of its
+frames, and no Note10+ run was made after them, so #195 merged with it.
+The shaders hold the gathers, not only high's: medium, which never runs
+them, lost as much. Now only Apple's GPUs get them (`gathers_shadows`, an
+`override` in forward.wgsl), and every other GPU has the nine compares
+back. Both draw the same shadow, within 2 of 255 (tested). The A10's gain
+stays. Note10+, frames a second, each run with the GPU's clock logged:
+
+| | before the gathers | with them | fixed |
+|---|---|---|---|
+| 'All of it together', low | 59.9, 59.9 | 57.0, 56.8 | 59.7, 59.6 |
+| medium | 48.7, 55.1 | 31.2, 31.0 | 48.7, 59.8 |
+| high | 46.1, 52.1 | 21.3, 21.3 | 52.3, 51.9 |
+| The field, low | 59.8 | 59.8 | 59.9 |
+| medium | 46.5 | 30.1 | 47.3 |
+| high | 34.5 | 19.7 | 34.4 |
+
+(At the start of the stage the scene read 59.9, 49.1, 51.9.) Medium's two
+readings differ because the render thread sits either at about 4 ms or at
+about 20 from one run to the next.
+
+**Every run on the Note10+ now logs its GPU's clock.** One run of main's
+build had it held at 377 MHz of 754 throughout, with about half the
+frames (29.9, 15.9, 10.8), the phone at about 29 °C shortly before and
+not in power saving. Why isn't known yet. A run's frames say little on
+this phone without its clock.
+
 ### Phase 5: budgets, the guide, the report (S)
 
 - Each device's budget; §20 with the numbers; the report with the

@@ -200,6 +200,7 @@ impl Pipelines {
         let constants = [
             ("double_sided", on(faces == Faces::Both)),
             ("shadowed", on(shadowed)),
+            ("gather_shadows", on(self.gather_shadows)),
             ("textured", on(textured)),
             ("ao", on(ao)),
             ("sky_lit", on(sky_lit)),
