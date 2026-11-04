@@ -4501,6 +4501,12 @@ What keeps a game fast:
   pools, particles, queries that miss. Keep a list and change it in place
   for those. To see what a game allocates, run it with `flutter run
   --profile` and open DevTools' Memory view.
+- **When memory runs short, the system says so.** `world.onLowMemory` is
+  Unity's `Application.lowMemory`: let go of what the game can get back, a
+  cache or a pool, or drop `world.quality`: Sheepdog on an iPad holds 232 MB
+  of GPU memory at high and 43 MB at low. A phone that stays short can close
+  the game. While the app is away its views also let go of the images they draw
+  through, and make them again with the next frame.
 - **What the camera can't see costs the GPU nothing.** An object wholly
   out of view isn't drawn; it still costs its update and its copy to the
   renderer, so hide or destroy what's far away for good.
@@ -4794,6 +4800,7 @@ yet (§21).
 | `Time.deltaTime`, `Time.timeScale` | `time.delta`, `time.scale` |
 | `Time.timeScale = 0` for a pause menu | `world.paused = true`: time and input stop |
 | `Application.targetFrameRate` | `world.targetFrameRate` (60 unless set) |
+| `Application.lowMemory` | `world.onLowMemory` |
 | The render scale (URP), `QualitySettings` | `Quality.renderScale`, `world.quality` |
 | Anti Aliasing (MSAA) | `Quality.antiAliasing`: 0, 2 or 4 |
 | On-screen stick and button (`OnScreenStick`, `OnScreenButton`) | `Stick(input)`; a button is a Flutter widget calling `action.press()`/`release()` |

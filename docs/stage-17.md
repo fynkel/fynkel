@@ -62,22 +62,54 @@ Left as they are, agreed with the user:
 
 ### Phase 2: running out of memory
 
-- **No low-memory response.** Nothing in `packages` or `crates` hears the
-  system's warning, so a phone under pressure can simply kill the game.
-- **Textures aren't compressed.** The render crate has no ASTC, ETC2 or BC
-  formats; Unity compresses textures on phones. Fynkel 1 made textures 4–5
-  times smaller this way (ADR-0061), so this is likely the biggest saving,
-  though it hasn't been measured here. It wants its own ADR: how it fits the
-  way assets load now, which formats on which GPU.
-- **Not a leak, but a lot.** Followed for 30 minutes on 2026-11-04, the iPad
-  at high goes 129 → 425 MB in the first 7.5 minutes and then only to 431, and
-  the Note10+ settles at 213. So this phase is about the size, not a leak:
-  what fills those 300 MB on the iPad isn't known, and finding out comes first.
+**Done** 2026-11-04, smaller than planned, agreed with the user.
 
-**Bar:** the warning reaches the game and the engine frees what it can make
-again, tested; a texture-heavy scene measured before and after on each
-device, with frame rate no worse; compressed textures shown to the user and
-agreed, since they change the look.
+**Corrected: texture compression is postponed.** This plan called it likely
+the biggest saving without measuring it. Measured, it would save almost
+nothing today: Sheepdog's textures hold 0.3 MB of GPU memory, and Ring Ring
+Deals' 53 models contain no textures. It comes back when a game has large
+textures, with its own ADR.
+
+**The warning reaches the game.** `world.onLowMemory` is Unity's
+`Application.lowMemory`, told once per world per warning. While the app is
+away, its views let go of the images they draw through
+(`WorldView.releaseImages`), and the next frame makes them again with the same
+picture. On screen they keep them: they'd only be made again at once, with a
+slow frame. Tested on a Mac; on the Note10+ a real warning
+(`am send-trim-memory`) reached the world, on screen and away, and images stayed
+on screen. Away, they already read 0 before the release ran, and why isn't
+known, so the release itself is proved by the tests only. The iPad's warning
+hasn't been tried: it can't be sent from here.
+
+**What the memory is.** Sheepdog on the iPad, in MB, from `fynkel_measure`:
+
+| | low (1152×1536) | high (1536×2048) |
+|---|---:|---:|
+| Footprint | 191 | 406 |
+| GPU, all of it | 43 | 232 |
+| Bare Flutter's GPU memory | 14 | 14 |
+| Frames on their way (three drawables) | 20.3 | 36 |
+| What's behind | 0 | 72 |
+| Shadow maps | 2 | 24 |
+| Scene image, ambient occlusion | 0 | 19.5 |
+| Meshes | 5.1 | 5.1 |
+| Bloom | 0 | 1.7 |
+| Textures, sky | 0.5 | 0.5 |
+| Not named | about 1 | about 59 |
+
+So low is explained. The biggest part of high is what's behind, 72 MB: the
+pond's water reads it, only at medium and up, and it keeps a stored multisampled
+depth. Those 59 MB may be the map's view: the report counts one view, and
+the map has its own images. That hasn't been checked. Nothing was shrunk: that
+waits for the user to see these.
+
+**Found on the way: a view could freeze for good.** Configuring a surface fails
+if another thread is submitting to the GPU, and one failure stopped the iOS
+layer until its size next changed. Sheepdog has two views, so at high on the
+iPad 6 runs in 21 drew one frame and no more; a player would have seen a frozen
+picture. It now tries again next frame: 0 runs in 12. Older than this stage. A
+new layer's first configure, on the platform's thread, can lose the same race;
+that one reports an error rather than freezing, and is left as it is.
 
 ### Phase 3: Ring Ring Deals, measured and covered
 
