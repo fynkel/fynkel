@@ -269,7 +269,9 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
       return '${_mb(values.first)}, ${_mb(values[quarter])}, ${_mb(values.last)}';
     }
 
-    print('by minute MB    ${[for (var m = 0; m + 60 <= footprints.length; m += 60) (footprints[m] / (1 << 20)).round()].join(', ')}');
+    print(
+      'by minute MB    ${[for (var m = 0; m + 60 <= footprints.length; m += 60) (footprints[m] / (1 << 20)).round()].join(', ')}',
+    );
     print('gpu memory      ${each('graphics')} (start, a quarter, end)');
     print('  textures      ${each('textureBytes')}');
     print('  meshes        ${each('meshBytes')}');
