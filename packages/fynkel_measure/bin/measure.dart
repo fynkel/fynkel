@@ -161,6 +161,34 @@ Future<void> _buildMac() async {
   }
 }
 
+/// Waits [seconds], asking the VM service something each half minute, and
+/// says each five minutes what the app reports, so a run that dies later
+/// still leaves its memory. Returns when the service stopped answering, if
+/// it did.
+Future<int?> _watch(_Heap heap, _App app, int from, int seconds) async {
+  final clock = Stopwatch()..start();
+  int? silent;
+  var said = 0;
+  while (clock.elapsed.inSeconds < seconds) {
+    final left = seconds - clock.elapsed.inSeconds;
+    await Future<void>.delayed(Duration(seconds: left < 30 ? left : 30));
+    if (silent == null) {
+      try {
+        await heap.alive();
+      } on StateError {
+        silent = clock.elapsed.inSeconds;
+      }
+    }
+    if (clock.elapsed.inMinutes >= said + 5 && app.windows.length > from) {
+      said = clock.elapsed.inMinutes;
+      print(
+        'at ${said}m           ${_mb((app.windows.last['footprint'] as num).toInt())}, ${app.windows.length - from} windows',
+      );
+    }
+  }
+  return silent;
+}
+
 /// [seconds] of the app running: the frame rate the player sees, every
 /// frame that wasn't fresh, and the Dart allocation per frame. With
 /// `--baseline`, Flutter's frames and allocation alone.
@@ -175,11 +203,17 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     final heap = await _Heap.connect(app.service!);
     final from = app.windows.length;
     final gpu = _android != null ? _GpuClock.sample() : null;
-    await Future<void>.delayed(Duration(seconds: seconds));
+    final silent = await _watch(heap, app, from, seconds);
     final clocks = await gpu?.stop();
-    final allocated = await heap.allocatedSinceStart();
-    await heap.printReports();
-    await heap.close();
+    // The memory and the frames came on another connection: a VM service
+    // that stopped answering costs this line, not a long run's report.
+    final allocated = silent == null ? await heap.allocatedSinceStart() : null;
+    if (silent == null) {
+      await heap.printReports();
+      await heap.close();
+    } else {
+      print('vm service      stopped answering after ${silent}s');
+    }
     final windows = app.windows.sublist(from);
     if (windows.isEmpty) throw StateError('the app printed no stats');
 
@@ -247,13 +281,15 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
       print('thermal         ${changes.join(', ')}');
     }
     print('mouse in view   ${sum('mouse')} of ${windows.length} windows (Flutter hit-tests it after every frame)');
-    print(
-      'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
-      '${allocated.collections} collections',
-    );
-    // The baseline has no engine frames: per Flutter frame instead.
-    final frames = _baseline ? sum('flutterFrames') : presented;
-    print('per frame       ${(allocated.bytes / frames).toStringAsFixed(0)} B');
+    if (allocated != null) {
+      print(
+        'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
+        '${allocated.collections} collections',
+      );
+      // The baseline has no engine frames: per Flutter frame instead.
+      final frames = _baseline ? sum('flutterFrames') : presented;
+      print('per frame       ${(allocated.bytes / frames).toStringAsFixed(0)} B');
+    }
     // The app's own footprint, once a second: whether it grows while
     // nothing but frames happens.
     final footprints = [for (final w in windows) (w['footprint'] as num).toInt()];
@@ -851,6 +887,9 @@ class _Heap {
     if (_streams case final streams?) await _call('setVMTimelineFlags', {'recordedStreams': streams});
     await _socket.close();
   }
+
+  /// Throws if the service doesn't answer.
+  Future<void> alive() => _micros();
 
   Future<int> _micros() async => ((await _call('getVMTimelineMicros'))['timestamp'] as num).toInt();
 
