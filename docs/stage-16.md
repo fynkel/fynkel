@@ -4,6 +4,7 @@ Status: accepted 2026-11-01 ("yes to all"), with the recommended
 answer to each decision (§7).
 Scope and rules: [ADR-0001](decisions/0001-fynkel-2-code-first.md).
 Stage 15 is done ([report](stage-15-report.md)).
+**Done** 2026-11-04: [the report](stage-16-report.md).
 
 **The direction** (the user, 2026-11-01): make what Fynkel has faster,
 deeper and steadier before adding new things. This stage is the first
@@ -357,6 +358,8 @@ this phone without its clock.
 
 - Each device's budget; §20 with the numbers; the report with the
   start line and the end line side by side.
+
+**Done** 2026-11-04: [the report](stage-16-report.md).
 
 ## 5. Not in this stage
 
