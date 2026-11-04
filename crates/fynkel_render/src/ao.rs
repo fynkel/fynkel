@@ -287,6 +287,15 @@ pub(crate) struct AoImages {
 }
 
 impl AoImages {
+    /// Their GPU memory, for a `width` × `height` view: half its size each
+    /// way, in the four formats [`AoImages::new`] makes them in.
+    pub(crate) fn bytes(width: u32, height: u32) -> u64 {
+        let pixels = u64::from((width / 2).max(1)) * u64::from((height / 2).max(1));
+        let size = |format: wgpu::TextureFormat| u64::from(format.block_copy_size(None).unwrap_or(4));
+        // The depth is 4 bytes a pixel; a depth format has no copy size.
+        pixels * (4 + size(FORMAT) * 2 + size(DISTANCE_FORMAT))
+    }
+
     /// Images for a `width` × `height` view.
     pub(crate) fn new(kit: &AoKit, width: u32, height: u32) -> Self {
         let device = &kit.device;

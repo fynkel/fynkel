@@ -102,6 +102,11 @@ pub struct FrameStats {
     /// GPU memory of the shadow maps the view holds, shared with the kit's
     /// other views or not.
     pub shadow_bytes: u64,
+    /// GPU memory the view holds for the image the scene is drawn into
+    /// before its last pass, and for ambient occlusion's images. What a
+    /// frame draws into and throws away is left out: on tiled GPUs it takes
+    /// none.
+    pub target_bytes: u64,
     /// GPU memory the view holds for the sky's light, and an image sky's
     /// pixels.
     pub sky_bytes: u64,
