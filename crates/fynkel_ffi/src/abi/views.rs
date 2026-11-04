@@ -442,6 +442,15 @@ pub struct FyViewStats {
     /// GPU memory the sky's light holds for this view, in bytes: 0 for no
     /// sky or a plain one.
     pub sky_bytes: u64,
+    /// GPU memory the view's shadow maps hold, in bytes.
+    pub shadow_bytes: u64,
+    /// GPU memory the images hold for what's behind see-through surfaces
+    /// and soft particles, in bytes.
+    pub behind_bytes: u64,
+    /// GPU memory bloom's images hold, in bytes.
+    pub bloom_bytes: u64,
+    /// GPU memory the screen effects' pictures hold, in bytes.
+    pub effect_bytes: u64,
     /// Microseconds the view's render thread spent on scenes, from taking
     /// one to being done with it: busy, against waiting for the next. On
     /// Android it includes waiting for the GPU to finish each frame.
@@ -471,6 +480,23 @@ pub struct FyViewStats {
     pub gpu_untimed_passes: u64,
 }
 
+/// Lets go of the images `view` draws through, between frames and without
+/// waiting for one, for when the system is short of memory and the view
+/// isn't drawing. Its next frame makes them again, a little slower.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_release_images(view: *const FyView) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        view.worker.release_images();
+        Ok(())
+    })
+}
+
 /// Times every view's frames on the GPU, each part of a frame on its own,
 /// or stops (the default): for finding what a frame's GPU time goes on.
 /// The times are in [`FyViewStats`]. Timing costs a little GPU time, and
@@ -498,6 +524,10 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             texture_bytes: w.texture_bytes,
             mesh_bytes: w.mesh_bytes,
             sky_bytes: w.sky_bytes,
+            shadow_bytes: w.shadow_bytes,
+            behind_bytes: w.behind_bytes,
+            bloom_bytes: w.bloom_bytes,
+            effect_bytes: w.effect_bytes,
             busy_micros: w.busy_micros,
             gpu_frames: w.gpu.frames,
             gpu_shadows_micros: w.gpu.shadows / 1000,
