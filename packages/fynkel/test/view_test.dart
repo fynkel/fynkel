@@ -166,6 +166,9 @@ void main() {
     final pointer = Pointer<FyView>.fromAddress(view.address);
     view.frame();
     final deadline = DateTime.now().add(const Duration(seconds: 5));
+    // Its frames on their way to the screen: five, of 64 × 32 at 4 bytes.
+    while (view.stats.frameBytes == 0 && DateTime.now().isBefore(deadline)) {}
+    expect(view.stats.frameBytes, 5 * 64 * 32 * 4);
     var flags = 0;
     while (flags & FY_APPLE_SHOWN == 0 && DateTime.now().isBefore(deadline)) {
       flags = fy_apple_acquire(pointer, surface);

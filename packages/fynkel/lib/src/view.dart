@@ -22,6 +22,8 @@ final class ViewStats {
     this.meshBytes = 0,
     this.skyBytes = 0,
     this.shadowBytes = 0,
+    this.targetBytes = 0,
+    this.frameBytes = 0,
     this.behindBytes = 0,
     this.bloomBytes = 0,
     this.effectBytes = 0,
@@ -65,6 +67,16 @@ final class ViewStats {
   /// a shadow. As of the last frame drawn; 0 after [WorldView.releaseImages].
   final int shadowBytes;
 
+  /// GPU memory this view's scene image and ambient occlusion's images hold,
+  /// in bytes. As of the last frame drawn; 0 after
+  /// [WorldView.releaseImages].
+  final int targetBytes;
+
+  /// GPU memory the frames on their way to the screen hold, in bytes: 0 where
+  /// the view doesn't own them, as on Android. As of the last frame drawn;
+  /// these stay after [WorldView.releaseImages].
+  final int frameBytes;
+
   /// GPU memory holding a copy of what's behind see-through surfaces that
   /// read it, for this view, in bytes. As of the last frame drawn; 0 after
   /// [WorldView.releaseImages].
@@ -100,6 +112,8 @@ final class ViewStats {
     meshBytes: meshBytes,
     skyBytes: skyBytes,
     shadowBytes: shadowBytes,
+    targetBytes: targetBytes,
+    frameBytes: frameBytes,
     behindBytes: behindBytes,
     bloomBytes: bloomBytes,
     effectBytes: effectBytes,
@@ -110,7 +124,7 @@ final class ViewStats {
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes shadowBytes=$shadowBytes '
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes shadowBytes=$shadowBytes targetBytes=$targetBytes frameBytes=$frameBytes '
       'behindBytes=$behindBytes bloomBytes=$bloomBytes effectBytes=$effectBytes busyMicros=${busy.inMicroseconds} '
       'gpuFrames=${gpu.frames} gpuShadowsMicros=${gpu.shadows.inMicroseconds} '
       'gpuSkyLightMicros=${gpu.skyLight.inMicroseconds} gpuAmbientOcclusionMicros=${gpu.ambientOcclusion.inMicroseconds} '
@@ -342,6 +356,8 @@ abstract base class WorldView implements Finalizable {
       meshBytes: r.mesh_bytes,
       skyBytes: r.sky_bytes,
       shadowBytes: r.shadow_bytes,
+      targetBytes: r.target_bytes,
+      frameBytes: r.frame_bytes,
       behindBytes: r.behind_bytes,
       bloomBytes: r.bloom_bytes,
       effectBytes: r.effect_bytes,

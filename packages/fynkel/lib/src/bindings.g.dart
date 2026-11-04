@@ -996,7 +996,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 53;
+const int FY_ABI_VERSION = 54;
 
 const int FY_APPLE_MORE = 2;
 
@@ -2248,6 +2248,12 @@ final class FyViewStats extends ffi.Struct {
   external int shadow_bytes;
 
   @ffi.Uint64()
+  external int target_bytes;
+
+  @ffi.Uint64()
+  external int frame_bytes;
+
+  @ffi.Uint64()
   external int behind_bytes;
 
   @ffi.Uint64()
@@ -2298,6 +2304,8 @@ final class FyViewStats extends ffi.Struct {
     required int mesh_bytes,
     required int sky_bytes,
     required int shadow_bytes,
+    required int target_bytes,
+    required int frame_bytes,
     required int behind_bytes,
     required int bloom_bytes,
     required int effect_bytes,
@@ -2322,6 +2330,8 @@ final class FyViewStats extends ffi.Struct {
     ..ref.mesh_bytes = mesh_bytes
     ..ref.sky_bytes = sky_bytes
     ..ref.shadow_bytes = shadow_bytes
+    ..ref.target_bytes = target_bytes
+    ..ref.frame_bytes = frame_bytes
     ..ref.behind_bytes = behind_bytes
     ..ref.bloom_bytes = bloom_bytes
     ..ref.effect_bytes = effect_bytes
