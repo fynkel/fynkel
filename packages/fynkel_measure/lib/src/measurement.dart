@@ -106,6 +106,10 @@ class Measurement {
     return _lastFootprint ?? 0;
   }
 
+  /// The GPU's part of the footprint, where it's known (` graphics=…`), else
+  /// nothing: Android's only `dumpsys meminfo` knows.
+  String _graphics() => Platform.isAndroid ? '' : ' graphics=${footprint().graphics}';
+
   /// The thermal state, where the system says (` thermal=0`), else nothing.
   String _thermal() {
     final state = thermalState();
@@ -144,7 +148,7 @@ class Measurement {
     final text =
         '$view flutter=${(_flutterFrames / seconds).toStringAsFixed(1)} flutterFrames=$_flutterFrames '
         'slow=$_slowFrames slowBuild=$_slowBuilds slowRaster=$_slowRasters '
-        'longestRaster=${_longestRaster.inMicroseconds} budget=${_budget.inMicroseconds} footprint=${_footprint()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}'
+        'longestRaster=${_longestRaster.inMicroseconds} budget=${_budget.inMicroseconds} footprint=${_footprint()}${_graphics()} mouse=${RendererBinding.instance.mouseTracker.mouseIsConnected ? 1 : 0}'
         '${_thermal()}';
     _flutterFrames = 0;
     _slowFrames = _slowBuilds = _slowRasters = 0;
