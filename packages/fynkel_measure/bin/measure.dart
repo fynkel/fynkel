@@ -274,6 +274,10 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     print('  textures      ${each('textureBytes')}');
     print('  meshes        ${each('meshBytes')}');
     print('  sky           ${each('skyBytes')}');
+    print('  shadows       ${each('shadowBytes')}');
+    print('  behind        ${each('behindBytes')}');
+    print('  bloom         ${each('bloomBytes')}');
+    print('  effects       ${each('effectBytes')}');
   } finally {
     await app.stop();
   }
