@@ -4548,11 +4548,32 @@ What keeps a game fast:
   the level a device draws at: your code 3 ms, the animators 1.5,
   meshes you change 1, physics 1, particles 0.5, sound 0.25, so
   `world.update` 7 in all; the render thread 14 a frame. The lab's 'All
-  of it together', everything at once, takes 4.2 ms of `world.update`
-  and 4.7 of the render thread on a Galaxy Note10+ at low, and a tenth
-  of the budgets on a Mac (docs/stage-14-findings.md has each part).
-  The lab's `tool/measured.dart` breaks a scene's frame down so on a
-  device: `--define 'TOUR=<title>'`.
+  of it together', everything at once, takes this, in ms
+  (docs/stage-16-report.md has each part):
+
+  | | Galaxy Note10+ (low) | iPad, 6th gen (low) | iPhone 16 Pro Max (high) | Mac (high) |
+  |---|---|---|---|---|
+  | `world.update` | 3.2 | 1.3 | 1.4 | 0.3 |
+  | Flutter's UI thread | 4.2 | 1.7 | 1.2 | 0.3 |
+  | The render thread | 4.4 | 33.5, waiting for its GPU | 3.0 | 0.9 |
+  | Frames a second | 59.9 | 39.3 | 60 | 60 |
+
+  So a 2018 iPad holds 40 here, not 60: on an A10, plan on the GPU being
+  what limits you. The lab's `tool/measured.dart` breaks a scene's
+  frame down so on a device: `--define 'TOUR=<title>'`.
+- **Each level on each phone**: Sheepdog's field, frames a second, a
+  sense of what the levels cost (docs/stage-16-report.md has the crowd and
+  the pile too):
+
+  | | low | medium | high |
+  |---|---|---|---|
+  | Galaxy Note10+ | 60 | 48 | 34 |
+  | iPad, 6th gen | 40 | 34 | 23 |
+  | iPhone 16 Pro Max | 60 | 60 | 60 |
+
+- **Measure a change on every GPU you support.** The same shader can be
+  quicker on one and far slower on another: reading shadows with gathers
+  helped an A10 and cost a Mali-G76 a third of its frames.
 - **Where the GPU's time goes**: `WorldView.timeGpu = true` times each
   part of every view's frames on the GPU (shadows, ambient occlusion, the
   scene, bloom, the last pass, screen effects), and `view.stats.gpu`
