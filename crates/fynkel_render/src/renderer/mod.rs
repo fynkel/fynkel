@@ -1040,6 +1040,21 @@ impl Renderer {
         assets::lock(&self.assets).upload_shader(key, shader);
     }
 
+    /// Lets go of the images it draws through (the scene's, its shadow maps,
+    /// bloom's, ambient occlusion's and the effects'), for when the system is
+    /// short of memory and the view isn't drawing. Its next frame makes them
+    /// again, a little slower, and draws the same.
+    pub fn release_images(&mut self) {
+        self.targets = None;
+        self.shadow_maps = None;
+        self.effect_images = None;
+    }
+
+    /// Whether it holds any images [`Renderer::release_images`] lets go of.
+    pub fn holds_images(&self) -> bool {
+        self.targets.is_some() || self.shadow_maps.is_some() || self.effect_images.is_some()
+    }
+
     /// GPU memory held by its assets' textures ([`Assets::texture_bytes`]).
     pub fn texture_bytes(&self) -> u64 {
         assets::lock(&self.assets).texture_bytes()
