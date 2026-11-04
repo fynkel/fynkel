@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'dart:ffi' show AllocatorAlloc, Pointer;
+import 'dart:ffi' show AllocatorAlloc, Pointer, StructPointer;
 import 'dart:io';
 import 'dart:math' as math;
 
@@ -432,6 +432,73 @@ void main() {
     expect(world.applicationPaused, isTrue, reason: 'coming back');
     binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     expect(world.applicationPaused, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a memory warning tells the world once, and views let go of their images only while away', (
+    tester,
+  ) async {
+    world.add(
+      GameObject(
+        transform: Transform(rotation: Quat.lookRotation(Vec3(0.6, -1, -0.5))),
+        components: [Light.sun(shadows: true)],
+      ),
+    );
+    world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material())..castShadows = true]));
+    var told = 0;
+    world.onLowMemory.listen((_) => told++);
+    final seen = <ViewStats>[];
+    await tester.pumpWidget(
+      sized(
+        Row(
+          children: [
+            Expanded(child: FynkelView.world(world, onViewStats: seen.add)),
+            Expanded(child: FynkelView.world(world, input: false)),
+          ],
+        ),
+      ),
+    );
+    for (var i = 0; i < 20; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    int held() {
+      final stats = malloc<FyViewStats>();
+      try {
+        var sum = 0;
+        for (final view in views.values) {
+          expect(fy_view_stats(Pointer.fromAddress(view), stats), FyStatus.FY_STATUS_OK);
+          sum += stats.ref.shadow_bytes;
+        }
+        return sum;
+      } finally {
+        malloc.free(stats);
+      }
+    }
+
+    await tester.runAsync(() async {
+      while (held() == 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    });
+    final drawing = held();
+
+    final binding = tester.binding;
+    binding.handleMemoryPressure();
+    await tester.idle();
+    expect(told, 1, reason: 'one warning, whatever the number of views');
+    await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 50)));
+    expect(held(), drawing, reason: 'drawing, they would only be made again');
+
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    binding.handleMemoryPressure();
+    await tester.idle();
+    expect(told, 2, reason: 'the next warning is a warning of its own');
+    await tester.runAsync(() async {
+      while (held() != 0) {
+        await Future<void>.delayed(const Duration(milliseconds: 1));
+      }
+    });
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpWidget(const SizedBox());
   });
 

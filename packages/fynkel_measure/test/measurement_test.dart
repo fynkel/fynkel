@@ -49,6 +49,7 @@ void main() {
     for (final field in ['ticks=60.0', 'flutter=', 'slow=', 'budget=', 'footprint=', 'mouse=']) {
       expect(line, contains(field));
     }
+    expect(int.parse(RegExp(r' graphics=(\d+)').firstMatch(line)!.group(1)!), greaterThanOrEqualTo(0));
     expect(int.parse(RegExp(r'footprint=(\d+)').firstMatch(line)!.group(1)!), greaterThan(10 << 20));
     expect(find.text(line), findsOneWidget);
   });

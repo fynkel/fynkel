@@ -53,6 +53,19 @@ pub(crate) struct WorkerStats {
     pub(crate) mesh_bytes: u64,
     /// GPU memory the sky's light holds, as of the last scene drawn.
     pub(crate) sky_bytes: u64,
+    /// GPU memory the view's shadow maps, what's-behind images, bloom's
+    /// images and effects' pictures hold, as of the last scene drawn; 0
+    /// once they've been let go.
+    pub(crate) shadow_bytes: u64,
+    /// GPU memory of the scene's image and ambient occlusion's, as of the
+    /// last scene drawn; 0 once they've been let go.
+    pub(crate) target_bytes: u64,
+    /// GPU memory of the frames on their way to the screen, when the target
+    /// owns them. These stay when images are let go.
+    pub(crate) frame_bytes: u64,
+    pub(crate) behind_bytes: u64,
+    pub(crate) bloom_bytes: u64,
+    pub(crate) effect_bytes: u64,
     /// Time the render thread spent on scenes, from taking one to being
     /// done with it, in microseconds. On Android that includes waiting for
     /// the GPU to finish the frame.
@@ -105,6 +118,8 @@ struct Mailbox {
     /// A new size for the target, applied before the next scene is drawn.
     size: Option<(u32, u32)>,
     stop: bool,
+    /// The view was asked to let go of its images ([`Worker::release_images`]).
+    release_images: bool,
     /// A test asked the worker to destroy the device ([`Worker::lose_device`]).
     lose_device: bool,
     /// A test asked the worker to panic ([`Worker::panic`]).
@@ -240,6 +255,13 @@ impl Worker {
         }
         mailbox.size = Some((width, height));
         Ok(())
+    }
+
+    /// Lets go of the images the view draws through, between frames and
+    /// without waiting for one. Its next frame makes them again.
+    pub(crate) fn release_images(&self) {
+        self.shared.lock().release_images = true;
+        self.shared.wake.notify_one();
     }
 
     /// For tests: destroys the device, as a driver reset would, which stops
@@ -451,6 +473,16 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                     drop(mailbox);
                     panic!("a test made the render worker panic");
                 }
+                if mailbox.release_images {
+                    mailbox.release_images = false;
+                    drop(mailbox);
+                    fynkel_present::autorelease_pool(|| renderer.release_images());
+                    mailbox = shared.lock();
+                    let stats = &mut mailbox.stats;
+                    (stats.shadow_bytes, stats.behind_bytes, stats.bloom_bytes, stats.effect_bytes) = (0, 0, 0, 0);
+                    stats.target_bytes = 0;
+                    continue;
+                }
                 if mailbox.lose_device {
                     mailbox.lose_device = false;
                     drop(mailbox);
@@ -547,7 +579,17 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                             renderer.set_gpu_timing(timing);
                         }
                         let stats = renderer.prepare(&scene, width, height);
-                        shared.lock().stats.sky_bytes = stats.sky_bytes;
+                        {
+                            let mut mailbox = shared.lock();
+                            let held = &mut mailbox.stats;
+                            held.sky_bytes = stats.sky_bytes;
+                            held.shadow_bytes = stats.shadow_bytes;
+                            held.target_bytes = stats.target_bytes;
+                            held.frame_bytes = target.frame_bytes();
+                            held.behind_bytes = stats.behind_bytes;
+                            held.bloom_bytes = stats.bloom_bytes;
+                            held.effect_bytes = stats.effect_bytes;
+                        }
                         let mut encoder =
                             gpu.device.create_command_encoder(&fynkel_render::wgpu::CommandEncoderDescriptor {
                                 label: Some("frame"),

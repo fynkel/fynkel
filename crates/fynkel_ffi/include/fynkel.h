@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 52
+#define FY_ABI_VERSION 54
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -973,6 +973,21 @@ typedef struct FyViewStats {
   // GPU memory the sky's light holds for this view, in bytes: 0 for no
   // sky or a plain one.
   uint64_t sky_bytes;
+  // GPU memory the view's shadow maps hold, in bytes.
+  uint64_t shadow_bytes;
+  // GPU memory the image the scene is drawn into and ambient occlusion's
+  // images hold, in bytes.
+  uint64_t target_bytes;
+  // GPU memory the frames on their way to the screen hold, in bytes: 0
+  // when the target doesn't own them.
+  uint64_t frame_bytes;
+  // GPU memory the images hold for what's behind see-through surfaces
+  // and soft particles, in bytes.
+  uint64_t behind_bytes;
+  // GPU memory bloom's images hold, in bytes.
+  uint64_t bloom_bytes;
+  // GPU memory the screen effects' pictures hold, in bytes.
+  uint64_t effect_bytes;
   // Microseconds the view's render thread spent on scenes, from taking
   // one to being done with it: busy, against waiting for the next. On
   // Android it includes waiting for the GPU to finish each frame.
@@ -2697,6 +2712,15 @@ FyStatus fy_view_lose_device(const struct FyView *view);
 //
 // `view` is null or live.
 FyStatus fy_view_fail_worker(const struct FyView *view);
+
+// Lets go of the images `view` draws through, between frames and without
+// waiting for one, for when the system is short of memory and the view
+// isn't drawing. Its next frame makes them again, a little slower.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_release_images(const struct FyView *view);
 
 // Times every view's frames on the GPU, each part of a frame on its own,
 // or stops (the default): for finding what a frame's GPU time goes on.

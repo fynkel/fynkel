@@ -383,6 +383,22 @@ void main() {
       ]);
       expect(world.paused, isFalse, reason: 'it stops nothing');
     });
+
+    test('the system running short of memory is told by onLowMemory, and a listener that throws stays there', () async {
+      final world = newWorld();
+      var told = 0;
+      world.onLowMemory.listen((_) => throw StateError('a listener that fails'));
+      world.onLowMemory.listen((_) => told++);
+      final errors = <ObjectError>[];
+      world.errors.listen(errors.add);
+      world.lowMemory();
+      expect(told, 1);
+      await Future<void>.delayed(Duration.zero);
+      expect(errors, hasLength(1));
+      world.dispose();
+      world.lowMemory();
+      expect(told, 1, reason: 'a disposed world has no one to tell');
+    });
   });
 
   group('pointer hits', () {

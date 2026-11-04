@@ -138,3 +138,45 @@ fn the_main_thread_never_waits_for_a_drawable() {
     drop(held);
     drop(layer);
 }
+
+/// Configuring a surface waits for the GPU and then fails if the queue isn't
+/// empty, which it isn't when another view's render thread is submitting.
+/// One such failure stopped the view for good, until its size next changed:
+/// on an iPad, 6 runs in 21 of a game with a map froze on its first resize.
+#[test]
+fn a_resize_that_lost_to_another_views_frame_is_tried_again() {
+    let (instance, adapter, device, queue) = gpu();
+    let layer = metal_layer();
+    let (mut target, presenter): (Layer, LayerPresenter) = Layer::new(&instance, &adapter, &device, &queue, 64, 64);
+    let pointer = NonNull::new(Retained::as_ptr(&layer) as *mut c_void).unwrap();
+    // SAFETY: a live CAMetalLayer, kept alive for the whole test.
+    unsafe { presenter.attach(pointer, 64, 64) }.unwrap();
+
+    let stop = Arc::new(AtomicBool::new(false));
+    let other_view = thread::spawn({
+        let (stop, device, queue) = (stop.clone(), device.clone(), queue.clone());
+        move || {
+            while !stop.load(Ordering::Relaxed) {
+                let encoder = device.create_command_encoder(&Default::default());
+                queue.submit([encoder.finish()]);
+            }
+        }
+    });
+
+    // Each new size until one loses the race.
+    let mut lost = false;
+    for size in 65..2000 {
+        // SAFETY: as above.
+        unsafe { presenter.attach(pointer, size, size) }.unwrap();
+        if !fynkel_present::autorelease_pool(|| draw(&device, &mut target)) {
+            lost = true;
+            break;
+        }
+    }
+    stop.store(true, Ordering::Relaxed);
+    other_view.join().unwrap();
+    assert!(lost, "no resize lost to the other view, so this test shows nothing");
+
+    // The same size still wanted, and the other view gone quiet.
+    assert!(fynkel_present::autorelease_pool(|| draw(&device, &mut target)), "the view draws again");
+}

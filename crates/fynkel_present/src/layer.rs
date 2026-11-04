@@ -18,7 +18,7 @@
 
 use std::ffi::c_void;
 use std::ptr::NonNull;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 
 use crate::target::Target;
@@ -35,12 +35,10 @@ struct Live {
     config: wgpu::SurfaceConfiguration,
     /// The size the platform side asked for last, as [`pack`]ed.
     wanted: AtomicU64,
-    /// The size the surface is configured at: only the render thread
-    /// configures it after it's made.
+    /// The size the surface is configured at, or 0 when it must be
+    /// configured again: only the render thread configures it after it's
+    /// made.
     configured: AtomicU64,
-    /// It couldn't be configured at `configured`: frames to it are skipped
-    /// until another size is asked for.
-    dead: AtomicBool,
 }
 
 struct Shared {
@@ -128,6 +126,11 @@ impl Target for Layer {
         self.size
     }
 
+    /// Core Animation's three drawables, in 4 bytes a pixel.
+    fn frame_bytes(&self) -> u64 {
+        3 * u64::from(self.size.0) * u64::from(self.size.1) * 4
+    }
+
     /// The layer's next drawable, or `None` with no layer. Configures it
     /// at the size last asked for first, then waits for Core Animation to
     /// free a drawable (it has three), holding nothing the platform side
@@ -136,19 +139,19 @@ impl Target for Layer {
         let live = self.shared.layer.lock().unwrap_or_else(PoisonError::into_inner).clone()?;
         let wanted = live.wanted.load(Ordering::Acquire);
         if wanted != live.configured.load(Ordering::Relaxed) {
+            // It fails when another view's thread is submitting, so it's
+            // tried again next frame. A size that can never work fails fast,
+            // before the wait for the GPU.
+            if configure(&self.shared.device, &live.surface, &live.config_at(wanted)).is_err() {
+                return None;
+            }
             live.configured.store(wanted, Ordering::Relaxed);
-            let configured = configure(&self.shared.device, &live.surface, &live.config_at(wanted));
-            live.dead.store(configured.is_err(), Ordering::Relaxed);
-        }
-        if live.dead.load(Ordering::Relaxed) {
-            return None;
         }
         let image = match live.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(image) | wgpu::CurrentSurfaceTexture::Suboptimal(image) => image,
             wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
-                if configure(&self.shared.device, &live.surface, &live.config_at(wanted)).is_err() {
-                    live.dead.store(true, Ordering::Relaxed);
-                }
+                // Configured again next frame: no size is 0.
+                live.configured.store(0, Ordering::Relaxed);
                 return None;
             }
             _ => return None,
@@ -181,8 +184,8 @@ impl LayerPresenter {
     /// Draws the next frames to `layer` (a `CAMetalLayer`) at `width` ×
     /// `height` pixels. A frame in progress ends on the old one. The layer
     /// drawn to already, at a new size, keeps its surface: the render
-    /// thread configures it at the new size before its next frame, and a
-    /// size it can't be configured at skips frames until the next.
+    /// thread configures it at the new size before its next frame, and
+    /// skips frames, trying each time, while it can't be configured.
     ///
     /// # Safety
     ///
@@ -228,7 +231,6 @@ impl LayerPresenter {
             config,
             wanted: AtomicU64::new(pack(width, height)),
             configured: AtomicU64::new(pack(width, height)),
-            dead: AtomicBool::new(false),
         };
         let old = shared.layer.lock().unwrap_or_else(PoisonError::into_inner).replace(Arc::new(live));
         // Dropped out of the lock: the old surface may be let go here.

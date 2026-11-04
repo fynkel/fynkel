@@ -102,6 +102,11 @@ pub struct FrameStats {
     /// GPU memory of the shadow maps the view holds, shared with the kit's
     /// other views or not.
     pub shadow_bytes: u64,
+    /// GPU memory the view holds for the image the scene is drawn into
+    /// before its last pass, and for ambient occlusion's images. What a
+    /// frame draws into and throws away is left out: on tiled GPUs it takes
+    /// none.
+    pub target_bytes: u64,
     /// GPU memory the view holds for the sky's light, and an image sky's
     /// pixels.
     pub sky_bytes: u64,
@@ -1038,6 +1043,21 @@ impl Renderer {
     /// Puts a material's own shader under `key` ([`Assets::upload_shader`]).
     pub fn upload_shader(&mut self, key: ShaderKey, shader: Arc<CustomShader>) {
         assets::lock(&self.assets).upload_shader(key, shader);
+    }
+
+    /// Lets go of the images it draws through (the scene's, its shadow maps,
+    /// bloom's, ambient occlusion's and the effects'), for when the system is
+    /// short of memory and the view isn't drawing. Its next frame makes them
+    /// again, a little slower, and draws the same.
+    pub fn release_images(&mut self) {
+        self.targets = None;
+        self.shadow_maps = None;
+        self.effect_images = None;
+    }
+
+    /// Whether it holds any images [`Renderer::release_images`] lets go of.
+    pub fn holds_images(&self) -> bool {
+        self.targets.is_some() || self.shadow_maps.is_some() || self.effect_images.is_some()
     }
 
     /// GPU memory held by its assets' textures ([`Assets::texture_bytes`]).

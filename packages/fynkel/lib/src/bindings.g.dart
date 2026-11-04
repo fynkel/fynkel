@@ -933,6 +933,9 @@ external int fy_view_read(
   ffi.Pointer<ffi.Uint64> out_number,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>)>(isLeaf: true)
+external int fy_view_release_images(ffi.Pointer<FyView> view);
+
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>, ffi.Uint32, ffi.Uint32)>(isLeaf: true)
 external int fy_view_resize(ffi.Pointer<FyView> view, int width, int height);
 
@@ -993,7 +996,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 52;
+const int FY_ABI_VERSION = 54;
 
 const int FY_APPLE_MORE = 2;
 
@@ -2242,6 +2245,24 @@ final class FyViewStats extends ffi.Struct {
   external int sky_bytes;
 
   @ffi.Uint64()
+  external int shadow_bytes;
+
+  @ffi.Uint64()
+  external int target_bytes;
+
+  @ffi.Uint64()
+  external int frame_bytes;
+
+  @ffi.Uint64()
+  external int behind_bytes;
+
+  @ffi.Uint64()
+  external int bloom_bytes;
+
+  @ffi.Uint64()
+  external int effect_bytes;
+
+  @ffi.Uint64()
   external int busy_micros;
 
   @ffi.Uint64()
@@ -2282,6 +2303,12 @@ final class FyViewStats extends ffi.Struct {
     required int texture_bytes,
     required int mesh_bytes,
     required int sky_bytes,
+    required int shadow_bytes,
+    required int target_bytes,
+    required int frame_bytes,
+    required int behind_bytes,
+    required int bloom_bytes,
+    required int effect_bytes,
     required int busy_micros,
     required int gpu_frames,
     required int gpu_shadows_micros,
@@ -2302,6 +2329,12 @@ final class FyViewStats extends ffi.Struct {
     ..ref.texture_bytes = texture_bytes
     ..ref.mesh_bytes = mesh_bytes
     ..ref.sky_bytes = sky_bytes
+    ..ref.shadow_bytes = shadow_bytes
+    ..ref.target_bytes = target_bytes
+    ..ref.frame_bytes = frame_bytes
+    ..ref.behind_bytes = behind_bytes
+    ..ref.bloom_bytes = bloom_bytes
+    ..ref.effect_bytes = effect_bytes
     ..ref.busy_micros = busy_micros
     ..ref.gpu_frames = gpu_frames
     ..ref.gpu_shadows_micros = gpu_shadows_micros

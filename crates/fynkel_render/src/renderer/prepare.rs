@@ -467,6 +467,14 @@ impl Renderer {
         if self.soft_kept {
             stats.behind_bytes += SoftDepth::bytes(self.size.0, self.size.1);
         }
+        // The scene's image, and ambient occlusion's, which stay once made.
+        let (width, height) = (u64::from(self.size.0), u64::from(self.size.1));
+        if let Some(format) = self.image_format {
+            stats.target_bytes = width * height * u64::from(format.block_copy_size(None).unwrap_or(4));
+        }
+        if self.ao.is_some() || self.targets.as_ref().is_some_and(|t| t.ao.is_some()) {
+            stats.target_bytes += AoImages::bytes(self.size.0, self.size.1);
+        }
         // Bloom's images: kept a while too.
         self.bloom_idle = if self.bloom.is_some() { 0 } else { self.bloom_idle.saturating_add(1) };
         let image = self.targets.as_ref().filter(|t| (t.width, t.height) == self.size).and_then(|t| t.image.as_ref());

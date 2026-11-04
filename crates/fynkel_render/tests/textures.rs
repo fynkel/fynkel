@@ -412,7 +412,15 @@ fn draws_are_batched_by_textures_too() {
     // A ×2, B, none, and A cut out.
     assert_eq!(
         stats,
-        FrameStats { draws: 5, draw_calls: 4, missing_meshes: 0, culled: 0, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 5,
+            draw_calls: 4,
+            missing_meshes: 0,
+            culled: 0,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
 }
 

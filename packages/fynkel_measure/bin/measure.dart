@@ -262,6 +262,26 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
       'footprint       ${_mb(footprints.first)} at the start, ${_mb(footprints[quarter])} after a quarter, '
       '${_mb(footprints.last)} at the end',
     );
+    // What it's made of, from the same windows: the footprint's GPU part,
+    // and what the engine knows it's holding there.
+    String each(String key) {
+      final values = [for (final w in windows) ((w[key] ?? 0) as num).toInt()];
+      return '${_mb(values.first)}, ${_mb(values[quarter])}, ${_mb(values.last)}';
+    }
+
+    print(
+      'by minute MB    ${[for (var m = 0; m + 60 <= footprints.length; m += 60) (footprints[m] / (1 << 20)).round()].join(', ')}',
+    );
+    print('gpu memory      ${each('graphics')} (start, a quarter, end)');
+    print('  textures      ${each('textureBytes')}');
+    print('  meshes        ${each('meshBytes')}');
+    print('  sky           ${each('skyBytes')}');
+    print('  shadows       ${each('shadowBytes')}');
+    print('  scene, AO     ${each('targetBytes')}');
+    print('  frames        ${each('frameBytes')}');
+    print('  behind        ${each('behindBytes')}');
+    print('  bloom         ${each('bloomBytes')}');
+    print('  effects       ${each('effectBytes')}');
   } finally {
     await app.stop();
   }

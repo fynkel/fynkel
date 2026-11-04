@@ -26,6 +26,13 @@ pub trait Target: Send {
     /// The size frames are drawn at, in pixels.
     fn size(&self) -> (u32, u32);
 
+    /// GPU memory of the images frames wait in on their way to the screen,
+    /// when the target owns them: all of them, whether a frame's reached
+    /// them yet or not.
+    fn frame_bytes(&self) -> u64 {
+        0
+    }
+
     /// Somewhere to draw the next frame, or `None` for now.
     fn begin(&mut self) -> Option<Self::Frame>;
 

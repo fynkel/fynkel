@@ -215,6 +215,10 @@ impl Target for Apple {
         self.size
     }
 
+    fn frame_bytes(&self) -> u64 {
+        SLOTS as u64 * u64::from(self.size.0) * u64::from(self.size.1) * 4
+    }
+
     fn begin(&mut self) -> Option<Ticket> {
         self.shared.ring.reserve()
     }
