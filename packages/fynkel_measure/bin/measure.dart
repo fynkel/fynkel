@@ -275,6 +275,8 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
     print('  meshes        ${each('meshBytes')}');
     print('  sky           ${each('skyBytes')}');
     print('  shadows       ${each('shadowBytes')}');
+    print('  scene, AO     ${each('targetBytes')}');
+    print('  frames        ${each('frameBytes')}');
     print('  behind        ${each('behindBytes')}');
     print('  bloom         ${each('bloomBytes')}');
     print('  effects       ${each('effectBytes')}');
