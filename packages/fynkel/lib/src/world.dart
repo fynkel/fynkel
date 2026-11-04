@@ -476,6 +476,20 @@ final class World implements Finalizable {
 
   var _applicationPaused = false;
 
+  /// Tells [onLowMemory]'s listeners that the system is short of memory.
+  /// [FynkelView] calls it when the system says so; a test can call it.
+  void lowMemory() {
+    if (isDisposed) return;
+    _emit(onLowMemory, null);
+  }
+
+  /// Emits when the system is short of memory, as Unity's
+  /// `Application.lowMemory`: time to let go of what the game can get back,
+  /// such as a cache, or to drop [quality]. A system that stays short may
+  /// close the app. While the app is away, its views let go of the images
+  /// they draw through by themselves.
+  final onLowMemory = Signal<void>();
+
   /// The most frames a second the world runs and its views draw, as
   /// Unity's `Application.targetFrameRate`: 60 unless set, and 0 for every
   /// frame the display shows (120 on a ProMotion iPhone or Mac). A game can

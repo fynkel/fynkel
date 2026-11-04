@@ -21,6 +21,10 @@ final class ViewStats {
     this.textureBytes = 0,
     this.meshBytes = 0,
     this.skyBytes = 0,
+    this.shadowBytes = 0,
+    this.behindBytes = 0,
+    this.bloomBytes = 0,
+    this.effectBytes = 0,
     this.busy = Duration.zero,
     this.gpu = const GpuTimes(),
   });
@@ -57,6 +61,24 @@ final class ViewStats {
   /// a sky or with a [ColorSky]. As of the last frame drawn.
   final int skyBytes;
 
+  /// GPU memory this view's shadow maps hold, in bytes: 0 when nothing casts
+  /// a shadow. As of the last frame drawn; 0 after [WorldView.releaseImages].
+  final int shadowBytes;
+
+  /// GPU memory holding a copy of what's behind see-through surfaces that
+  /// read it, for this view, in bytes. As of the last frame drawn; 0 after
+  /// [WorldView.releaseImages].
+  final int behindBytes;
+
+  /// GPU memory bloom's images hold for this view, in bytes. As of the last
+  /// frame drawn; 0 after [WorldView.releaseImages].
+  final int bloomBytes;
+
+  /// GPU memory the pictures full-screen effects read hold for this view,
+  /// in bytes. As of the last frame drawn; 0 after
+  /// [WorldView.releaseImages].
+  final int effectBytes;
+
   /// Time the render thread spent on scenes, from taking one to being done
   /// with it; the rest of the time it waited for the next. On Android this
   /// includes waiting for the GPU to finish each frame.
@@ -77,6 +99,10 @@ final class ViewStats {
     textureBytes: textureBytes,
     meshBytes: meshBytes,
     skyBytes: skyBytes,
+    shadowBytes: shadowBytes,
+    behindBytes: behindBytes,
+    bloomBytes: bloomBytes,
+    effectBytes: effectBytes,
     busy: busy - earlier.busy,
     gpu: gpu - earlier.gpu,
   );
@@ -84,7 +110,8 @@ final class ViewStats {
   @override
   String toString() =>
       'posted=$posted rendered=$rendered coalesced=$coalesced skipped=$skipped presented=$presented dropped=$dropped '
-      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes busyMicros=${busy.inMicroseconds} '
+      'textureBytes=$textureBytes meshBytes=$meshBytes skyBytes=$skyBytes shadowBytes=$shadowBytes '
+      'behindBytes=$behindBytes bloomBytes=$bloomBytes effectBytes=$effectBytes busyMicros=${busy.inMicroseconds} '
       'gpuFrames=${gpu.frames} gpuShadowsMicros=${gpu.shadows.inMicroseconds} '
       'gpuSkyLightMicros=${gpu.skyLight.inMicroseconds} gpuAmbientOcclusionMicros=${gpu.ambientOcclusion.inMicroseconds} '
       'gpuSceneMicros=${gpu.scene.inMicroseconds} gpuBloomMicros=${gpu.bloom.inMicroseconds} '
@@ -279,6 +306,13 @@ abstract base class WorldView implements Finalizable {
     _height = height;
   }
 
+  /// Lets go of the images the view draws through (its shadow maps and the
+  /// pictures its effects work on), for when memory is short and the view
+  /// isn't drawing. The render thread does it soon after, with no frame
+  /// needed. The next [frame] makes them again, for the same picture, so
+  /// doing this while drawing only costs a slow frame.
+  void releaseImages() => check(fy_view_release_images(_live));
+
   /// Whether every view's frames are timed on the GPU, each part of a frame
   /// on its own, into [ViewStats.gpu]: for measuring, off by default.
   /// Timing costs a little GPU time, and on Apple GPUs keeps some driver
@@ -307,6 +341,10 @@ abstract base class WorldView implements Finalizable {
       textureBytes: r.texture_bytes,
       meshBytes: r.mesh_bytes,
       skyBytes: r.sky_bytes,
+      shadowBytes: r.shadow_bytes,
+      behindBytes: r.behind_bytes,
+      bloomBytes: r.bloom_bytes,
+      effectBytes: r.effect_bytes,
       busy: Duration(microseconds: r.busy_micros),
       gpu: r.gpu_frames == 0
           ? const GpuTimes()
