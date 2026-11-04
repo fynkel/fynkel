@@ -15,9 +15,37 @@ fn the_stage_1_cube_matches_its_golden() {
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 256, 256);
     assert_eq!(
         stats,
-        FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, culled: 0, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 1,
+            draw_calls: 1,
+            missing_meshes: 0,
+            culled: 0,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
     assert_golden("cube", &image);
+}
+
+/// What the frame's stats say the scene's image and ambient occlusion's hold:
+/// one image at 4 bytes a pixel, and four at half the size each way.
+#[test]
+fn the_stored_images_are_counted() {
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    let high = |ao| {
+        let mut scene = RenderScene { quality: Some(Quality::HIGH), ..stage1_scene() };
+        scene.camera.as_mut().unwrap().ambient_occlusion = ao;
+        scene
+    };
+    assert_eq!(render(&gpu, &mut r, &high(None), 64, 64).1.target_bytes, 64 * 64 * 4);
+    let with_ao = render(&gpu, &mut r, &high(Some(AmbientOcclusion::DEFAULT)), 64, 64).1;
+    assert_eq!(with_ao.target_bytes, 64 * 64 * 4 + 32 * 32 * (4 + 1 + 1 + 4));
+
+    let low = RenderScene { quality: Some(Quality::LOW), ..stage1_scene() };
+    let mut plain = renderer(&gpu, SRGB);
+    assert_eq!(render(&gpu, &mut plain, &low, 64, 64).1.target_bytes, 0);
 }
 
 /// Every level draws the same picture (stage 8 phase 1): the scene image
@@ -370,7 +398,15 @@ fn draws_sharing_a_mesh_are_instanced_together() {
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 160);
     assert_eq!(
         stats,
-        FrameStats { draws: 5, draw_calls: 2, missing_meshes: 0, culled: 0, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 5,
+            draw_calls: 2,
+            missing_meshes: 0,
+            culled: 0,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
     assert_golden("instanced", &image);
 }
@@ -461,7 +497,15 @@ fn draws_outside_the_view_are_culled() {
     let (image, stats) = render(&gpu, &mut r, &scene, 64, 64);
     assert_eq!(
         stats,
-        FrameStats { draws: 3, draw_calls: 1, missing_meshes: 0, culled: 4, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 3,
+            draw_calls: 1,
+            missing_meshes: 0,
+            culled: 4,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
     let lit = |x: u32, y: u32| image.pixel(x, y) != [0, 0, 0, 255];
     assert!(lit(32, 32) && lit(32, 0) && lit(0, 32), "the middle, the top and the left edge are drawn");
@@ -489,7 +533,15 @@ fn a_missing_mesh_is_skipped_and_counted() {
     let (_, stats) = render(&gpu, &mut r, &scene, 32, 32);
     assert_eq!(
         stats,
-        FrameStats { draws: 1, draw_calls: 1, missing_meshes: 1, culled: 0, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 1,
+            draw_calls: 1,
+            missing_meshes: 1,
+            culled: 0,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
 
     assert!(r.remove_mesh(CUBE));
@@ -497,7 +549,15 @@ fn a_missing_mesh_is_skipped_and_counted() {
     let (image, stats) = render(&gpu, &mut r, &stage1_scene(), 32, 32);
     assert_eq!(
         stats,
-        FrameStats { draws: 0, draw_calls: 0, missing_meshes: 1, culled: 0, lines: 0, ..Default::default() }
+        FrameStats {
+            draws: 0,
+            draw_calls: 0,
+            missing_meshes: 1,
+            culled: 0,
+            lines: 0,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
     let clear = image.pixel(16, 16);
     assert_eq!(clear, image.pixel(0, 0), "with the cube gone, the centre shows the clear colour");
@@ -653,7 +713,15 @@ fn debug_lines_are_drawn_on_top_of_the_scene() {
     let (image, stats) = render(&gpu, &mut r, &scene, 256, 256);
     assert_eq!(
         stats,
-        FrameStats { draws: 1, draw_calls: 1, missing_meshes: 0, culled: 0, lines: 2, ..Default::default() }
+        FrameStats {
+            draws: 1,
+            draw_calls: 1,
+            missing_meshes: 0,
+            culled: 0,
+            lines: 2,
+            target_bytes: stats.target_bytes,
+            ..Default::default()
+        }
     );
     assert_golden("lines", &image);
     // The same at every level.
