@@ -47,6 +47,7 @@ fn a_view_lets_go_of_its_images_and_makes_them_again() {
     let before = view.read(view.frame(), 64, 64);
     let held = stats(&view);
     assert!(held.shadow_bytes > 0, "the sun casts shadows: {held:?}");
+    assert!(held.target_bytes > 0, "high draws through a scene image: {held:?}");
 
     // SAFETY: a live view.
     ok(unsafe { fy_view_release_images(view.0) });
@@ -56,7 +57,10 @@ fn a_view_lets_go_of_its_images_and_makes_them_again() {
         std::thread::yield_now();
     }
 
+    assert_eq!(stats(&view).target_bytes, 0);
+
     let after = view.read(view.frame(), 64, 64);
+    assert_eq!(stats(&view).target_bytes, held.target_bytes);
     assert_eq!(stats(&view).shadow_bytes, held.shadow_bytes);
     assert_eq!(before.rgba, after.rgba, "the same picture");
 }

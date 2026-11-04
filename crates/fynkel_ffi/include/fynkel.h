@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 53
+#define FY_ABI_VERSION 54
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -975,6 +975,12 @@ typedef struct FyViewStats {
   uint64_t sky_bytes;
   // GPU memory the view's shadow maps hold, in bytes.
   uint64_t shadow_bytes;
+  // GPU memory the image the scene is drawn into and ambient occlusion's
+  // images hold, in bytes.
+  uint64_t target_bytes;
+  // GPU memory the frames on their way to the screen hold, in bytes: 0
+  // when the target doesn't own them.
+  uint64_t frame_bytes;
   // GPU memory the images hold for what's behind see-through surfaces
   // and soft particles, in bytes.
   uint64_t behind_bytes;

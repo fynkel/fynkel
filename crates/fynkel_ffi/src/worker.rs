@@ -57,6 +57,12 @@ pub(crate) struct WorkerStats {
     /// images and effects' pictures hold, as of the last scene drawn; 0
     /// once they've been let go.
     pub(crate) shadow_bytes: u64,
+    /// GPU memory of the scene's image and ambient occlusion's, as of the
+    /// last scene drawn; 0 once they've been let go.
+    pub(crate) target_bytes: u64,
+    /// GPU memory of the frames on their way to the screen, when the target
+    /// owns them. These stay when images are let go.
+    pub(crate) frame_bytes: u64,
     pub(crate) behind_bytes: u64,
     pub(crate) bloom_bytes: u64,
     pub(crate) effect_bytes: u64,
@@ -474,6 +480,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                     mailbox = shared.lock();
                     let stats = &mut mailbox.stats;
                     (stats.shadow_bytes, stats.behind_bytes, stats.bloom_bytes, stats.effect_bytes) = (0, 0, 0, 0);
+                    stats.target_bytes = 0;
                     continue;
                 }
                 if mailbox.lose_device {
@@ -577,6 +584,8 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                             let held = &mut mailbox.stats;
                             held.sky_bytes = stats.sky_bytes;
                             held.shadow_bytes = stats.shadow_bytes;
+                            held.target_bytes = stats.target_bytes;
+                            held.frame_bytes = target.frame_bytes();
                             held.behind_bytes = stats.behind_bytes;
                             held.bloom_bytes = stats.bloom_bytes;
                             held.effect_bytes = stats.effect_bytes;

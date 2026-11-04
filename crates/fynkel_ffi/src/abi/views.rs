@@ -444,6 +444,12 @@ pub struct FyViewStats {
     pub sky_bytes: u64,
     /// GPU memory the view's shadow maps hold, in bytes.
     pub shadow_bytes: u64,
+    /// GPU memory the image the scene is drawn into and ambient occlusion's
+    /// images hold, in bytes.
+    pub target_bytes: u64,
+    /// GPU memory the frames on their way to the screen hold, in bytes: 0
+    /// when the target doesn't own them.
+    pub frame_bytes: u64,
     /// GPU memory the images hold for what's behind see-through surfaces
     /// and soft particles, in bytes.
     pub behind_bytes: u64,
@@ -525,6 +531,8 @@ pub unsafe extern "C" fn fy_view_stats(view: *const FyView, out: *mut FyViewStat
             mesh_bytes: w.mesh_bytes,
             sky_bytes: w.sky_bytes,
             shadow_bytes: w.shadow_bytes,
+            target_bytes: w.target_bytes,
+            frame_bytes: w.frame_bytes,
             behind_bytes: w.behind_bytes,
             bloom_bytes: w.bloom_bytes,
             effect_bytes: w.effect_bytes,
