@@ -612,6 +612,26 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
   }
 
+  /// The system is short of memory: the world's told
+  /// ([World.onLowMemory]), once for all its views. While the app is away
+  /// they let go of the images they draw through too. While it's on screen
+  /// they'd only make them again at once, with a slow frame.
+  @override
+  void didHaveMemoryPressure() {
+    final world = widget.world ?? _rootWorld;
+    if (world == null || world.isDisposed) return;
+    final clock = _WorldClock.of(world);
+    if (clock.warned) return;
+    clock.warned = true;
+    // Every view hears of it before this runs.
+    scheduleMicrotask(() => clock.warned = false);
+    world.lowMemory();
+    if (!world.applicationPaused) return;
+    for (final view in clock.views) {
+      view._host?.view.releaseImages();
+    }
+  }
+
   /// A hot reload: the world's shaders and sounds are read again
   /// ([World.reloadAssets]), once for all its views. A [FynkelGame] does
   /// it for its own world.
@@ -1455,9 +1475,10 @@ class _WorldClock {
   /// view showing it goes.
   bool made = false;
 
-  /// Whether a debug build said that two views take input, and whether a
-  /// hot reload is reading the world's files again.
-  bool toldInput = false, reloading = false;
+  /// Whether a debug build said that two views take input, whether a hot
+  /// reload is reading the world's files again, and whether a memory
+  /// warning is being told.
+  bool toldInput = false, reloading = false, warned = false;
 
   void leave(FynkelViewState view) {
     views.remove(view);
