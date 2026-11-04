@@ -180,9 +180,21 @@ picks, in the lab's busiest scene, 'All of it together'. Medians in ms over
   the stage's start too. Not looked into.
 - **The pile's step**, 17% to 30% slower than stage 5's (the start line),
   was never explained, and the gap to Unity's frames isn't the garbage.
-- **Memory over ten minutes.** Note10+ 188 → 225 MB (205 → 202 at the
-  start), iPad 182 → 209, iPhone 525 → 475. The iPad at high climbs 264 →
-  425. CI's soak is flat, so what grows here isn't known.
+- **Memory over ten minutes.** The Note10+ read 188 → 225 MB, but its first
+  reading moves a lot between runs (170, 188, 205 MB) and its last much less
+  (202 at the start of the stage; 209 and 225 now), so most of that climb is
+  the app warming up. Followed for 30 minutes after the stage (2026-11-04),
+  neither device shows a leak in that time:
+  - **Note10+**, its default level: 173 MB at the start, 206 after 7.5
+    minutes, 213 at the end. Graphics is flat. Native settles at about 92 MB
+    and what Android calls "Unknown" at 46.7 MB, both unchanged over the last
+    ten minutes or more. What "Unknown" holds isn't confirmed. A first run
+    ended at 22 minutes when the phone dropped off USB.
+  - **iPad at high**: 129 MB at the start, 425 after 7.5 minutes, 431 at the
+    end. Stage 16's ten-minute run already read 422 after 2.5 minutes, so the
+    climb is over early. What fills those 300 MB isn't known. It draws about
+    12 frames a second here. Its default is low (182 → 209 MB over ten minutes),
+    not followed for 30.
 - **BR6 and RN9** were each half done, as phase 4's table says. The rest is
   still open.
 
