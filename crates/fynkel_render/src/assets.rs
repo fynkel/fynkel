@@ -418,17 +418,41 @@ impl Kit {
 
 /// Each vertex's normal averaged with those of every other vertex at the
 /// same place, unit length; `None` when every vertex at a place has the
-/// same normal already, as on a smooth mesh.
+/// same normal already, as on a smooth mesh. Where they cancel out, as at a
+/// double-walled mesh's corners: away from the mesh's middle for a wall
+/// facing out, and none for one facing in.
 fn outline_normals(vertices: &[fynkel_mesh::Vertex]) -> Option<Vec<[f32; 3]>> {
+    /// Added up, the normals at a place shorter than this cancel out.
+    const CANCELLED: f32 = 0.05;
     let mut at = HashMap::<[u32; 3], (Vec3, Vec3)>::with_capacity(vertices.len());
     let mut split = false;
+    let (mut min, mut max) = (Vec3::INFINITY, Vec3::NEG_INFINITY);
     for v in vertices {
         let normal = Vec3::from(v.normal);
         let (first, sum) = at.entry(v.position.map(f32::to_bits)).or_insert((normal, Vec3::ZERO));
         split |= first.dot(normal) < 0.999;
         *sum += normal;
+        min = min.min(v.position.into());
+        max = max.max(v.position.into());
     }
-    split.then(|| vertices.iter().map(|v| at[&v.position.map(f32::to_bits)].1.normalize_or_zero().into()).collect())
+    let middle = (min + max) * 0.5;
+    split.then(|| {
+        vertices
+            .iter()
+            .map(|v| {
+                let sum = at[&v.position.map(f32::to_bits)].1;
+                let out = Vec3::from(v.position) - middle;
+                let way = match sum.length() >= CANCELLED {
+                    true => sum,
+                    // A wall facing in stays: pushed, it'd come in front of the
+                    // outer wall it lies on.
+                    false if out.dot(v.normal.into()) < 0.0 => Vec3::ZERO,
+                    false => out,
+                };
+                way.normalize_or_zero().into()
+            })
+            .collect()
+    })
 }
 
 /// A sphere around every vertex of `data`: its centre and radius.

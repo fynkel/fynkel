@@ -43,6 +43,23 @@ frame at a time, so they can't see a flash.
 faces close up shown to the user and agreed, since this changes the look;
 outlines usable in the office, which the user can then choose to turn back on.
 
+**Done** 2026-11-04. What it was: the game's box is double-walled, an inner
+wall exactly on each outer one, so the outline's back faces lay on the box's
+front and fought it for depth, which is why it came and went with the camera.
+Its normals also cancelled out at each corner, so it never had a ring. The
+outline now sits a touch further away, and such a corner's outer walls are
+pushed away from the mesh's middle. Checked on a Mac by test, on the Note10+ by
+three screenshots and on the iPad by the user's eyes; the iPhone not yet.
+
+Left as they are, agreed with the user:
+- That ring is uneven, thicker on some sides, as the push isn't along each
+  wall. Accepted for now. Solid meshes don't take this path.
+- **Faces up close.** Not a glitch: each small part (glasses, eyes, brows) has
+  its own outline, its width in metres, thick beside them and thicker as the
+  camera nears. A game keeps outlines off faces, as Ring Ring Deals does. A
+  width in pixels would stop it growing, not the lines round each part, so it
+  comes if a game asks.
+
 ### Phase 2: running out of memory
 
 - **No low-memory response.** Nothing in `packages` or `crates` hears the
