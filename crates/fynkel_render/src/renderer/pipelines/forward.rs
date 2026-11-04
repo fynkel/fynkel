@@ -141,7 +141,13 @@ impl Pipelines {
                     cull_mode: Some(wgpu::Face::Front),
                     ..Default::default()
                 },
-                depth_stencil: Some(depth(DEPTH_FORMAT, true, wgpu::CompareFunction::Greater)),
+                // A touch further away (the depth is reversed), so it loses to
+                // a surface in the same place: a double-walled mesh's back
+                // faces lie exactly on its front ones.
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    bias: wgpu::DepthBiasState { constant: -4, slope_scale: -1.0, clamp: 0.0 },
+                    ..depth(DEPTH_FORMAT, true, wgpu::CompareFunction::Greater)
+                }),
                 multisample: wgpu::MultisampleState { count: self.samples, ..Default::default() },
                 fragment: Some(wgpu::FragmentState {
                     module: &module,

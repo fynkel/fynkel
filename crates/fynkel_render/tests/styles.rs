@@ -263,6 +263,120 @@ fn an_outline_rings_an_object_in_its_colour() {
     }
 }
 
+/// The most green pixels well inside `mesh`'s own shape, with where, as the
+/// camera goes round it `distance` away: an outline only rings.
+fn green_inside(gpu: &Gpu, r: &mut Renderer, mesh: MeshKey, size: Vec3, distance: f32) -> (usize, String) {
+    /// How far from its edge, in pixels, a pixel counts as inside.
+    const MARGIN: i32 = 3;
+    let mut worst = (0, String::new());
+    let scene = |camera: CameraView, m: Option<PbrMaterial>| {
+        let mut scene = stage(QualityLevel::Low, None);
+        scene.camera = Some(camera);
+        scene.draws.clear();
+        scene.draws.extend(m.map(|m| Draw::new(mesh, Mat4::from_scale(size), m)));
+        scene
+    };
+    for height in [-0.3, 0.05, 0.6] {
+        for step in 0..36 {
+            let turn = (step as f32 * 10.0 + 3.0f32).to_radians();
+            let at = Vec3::new(turn.sin(), height, turn.cos()).normalize() * distance;
+            let camera = CameraView::looking_at(at, Vec3::ZERO);
+            let plain = material(0xFFD06040, 0.4);
+            let (empty, _) = render(gpu, r, &scene(camera, None), SIZE, SIZE);
+            let (bare, _) = render(gpu, r, &scene(camera, Some(plain)), SIZE, SIZE);
+            let lined = PbrMaterial { outline: Some(GREEN), ..plain };
+            let (ringed, _) = render(gpu, r, &scene(camera, Some(lined)), SIZE, SIZE);
+            let pixel = |image: &Image, x: i32, y: i32| {
+                let at = (y as usize * SIZE as usize + x as usize) * 4;
+                [image.rgba[at], image.rgba[at + 1], image.rgba[at + 2]]
+            };
+            let on_it = |x: i32, y: i32| {
+                (0..SIZE as i32).contains(&x)
+                    && (0..SIZE as i32).contains(&y)
+                    && pixel(&empty, x, y).iter().zip(pixel(&bare, x, y)).any(|(a, b)| a.abs_diff(b) > 8)
+            };
+            let mut inside = 0;
+            for y in 0..SIZE as i32 {
+                for x in 0..SIZE as i32 {
+                    let p = pixel(&ringed, x, y);
+                    if p[1] > 200 && p[0] < 60 && p[2] < 60 {
+                        let deep = [(-MARGIN, 0), (MARGIN, 0), (0, -MARGIN), (0, MARGIN)];
+                        inside += usize::from(deep.iter().all(|(dx, dy)| on_it(x + dx, y + dy)));
+                    }
+                }
+            }
+            if inside > worst.0 {
+                worst = (inside, format!("{}° round, {height} up", step * 10 + 3));
+            }
+        }
+    }
+    worst
+}
+
+/// A cube with an inner wall on each face, at the same corners and facing
+/// the other way: a thin box, as the cardboard box in Ring Ring Deals' kit.
+fn double_walled_cube() -> MeshData {
+    let cube = MeshData::cube();
+    let count = cube.vertices().len() as u32;
+    let positions: Vec<[f32; 3]> = cube.vertices().iter().map(|v| v.position).collect();
+    let normals: Vec<[f32; 3]> = cube.vertices().iter().map(|v| v.normal).collect();
+    let (mut all_positions, mut all_normals) = (positions.clone(), normals.clone());
+    all_positions.extend(&positions);
+    all_normals.extend(normals.iter().map(|n| n.map(|c| -c)));
+    let mut indices = cube.indices().to_vec();
+    indices.extend(cube.indices().chunks(3).flat_map(|t| [t[0] + count, t[2] + count, t[1] + count]));
+    MeshData::new(MeshParts {
+        positions: &all_positions,
+        normals: Some(&all_normals),
+        indices: &indices,
+        ..MeshParts::default()
+    })
+    .expect("a mesh")
+}
+
+/// From any side, an outline stays round its object: over a solid box or a
+/// double-walled one, whose inner walls lie exactly on its outer ones, and
+/// whose back faces are where the outer ones are. Ring Ring Deals saw those
+/// as a dark wedge "for a frame now and then".
+#[test]
+fn an_outline_never_draws_over_its_object() {
+    const DOUBLE: MeshKey = MeshKey(77);
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    r.upload_mesh(DOUBLE, &double_walled_cube());
+    for (name, mesh, size) in
+        [("cube", CUBE, Vec3::ONE), ("desk", CUBE, Vec3::new(1.6, 0.1, 0.8)), ("double-walled box", DOUBLE, Vec3::ONE)]
+    {
+        for distance in [1.8, 4.0] {
+            let (pixels, at) = green_inside(&gpu, &mut r, mesh, size, distance);
+            assert_eq!(pixels, 0, "the {name} from {distance} m: {pixels} pixels at {at}");
+        }
+    }
+}
+
+/// A double-walled box is ringed as a solid one is, though each corner's
+/// normals cancel out: its outline has nowhere to be pushed by them.
+#[test]
+fn an_outline_rings_a_double_walled_box() {
+    const DOUBLE: MeshKey = MeshKey(77);
+    let gpu = gpu();
+    let mut r = renderer(&gpu, SRGB);
+    r.upload_mesh(DOUBLE, &double_walled_cube());
+    let scene = |mesh| {
+        let mut scene = stage(QualityLevel::Low, None);
+        scene.draws.clear();
+        let wide = Outline { width: 0.1, ..GREEN };
+        let m = PbrMaterial { outline: Some(wide), ..material(0xFFD06040, 0.4) };
+        scene.draws.push(Draw::new(mesh, Mat4::IDENTITY, m));
+        scene
+    };
+    let (solid, _) = render(&gpu, &mut r, &scene(CUBE), SIZE, SIZE);
+    let (double, _) = render(&gpu, &mut r, &scene(DOUBLE), SIZE, SIZE);
+    let (solid, double) = (green(&solid), green(&double));
+    assert!(solid > 60, "{solid} green pixels round the solid box");
+    assert!(double * 10 > solid * 8, "{double} green pixels round the double-walled box, {solid} round the solid");
+}
+
 /// Moves every vertex by `values.by`, in the world.
 const SHIFT: &str = "struct Values { by: vec3<f32> }
 
