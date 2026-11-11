@@ -30,7 +30,7 @@
 // passes the settings as `--dart-define`s, and reads the app's output
 // through its VM service, since an iOS app's output doesn't reach
 // `flutter run`. Nothing outside an iPhone can read an app's footprint, so
-// there the app reports its own (lib/src/footprint.dart). Add `--debug` for
+// there the app reports its own (fynkel_flutter's lib/src/footprint.dart). Add `--debug` for
 // the iOS Simulator, which has no profile mode: its memory points still
 // mean something, its frame rate and Dart allocation don't.
 //
@@ -62,7 +62,8 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
-import 'package:fynkel_measure/src/thermal.dart' show thermalStates;
+// ignore: implementation_imports
+import 'package:fynkel_flutter/src/thermal.dart' show thermalStates;
 
 /// The app's name, from the pubspec.yaml here.
 final String _name = () {
@@ -81,10 +82,15 @@ String get _app => 'build/macos/Build/Products/Profile/$_name.app/Contents/MacOS
 
 /// The entry point measured: the game wrapped in MeasuredApp, if the app
 /// has one.
-final String _target = [
-  'tool/measured.dart',
-  'lib/measured.dart',
-].firstWhere((path) => File(path).existsSync(), orElse: () => 'lib/main.dart');
+String get _target => _attaching
+    ? 'lib/main.dart'
+    : [
+        'tool/measured.dart',
+        'lib/measured.dart',
+      ].firstWhere((path) => File(path).existsSync(), orElse: () => 'lib/main.dart');
+
+/// `attach`: the app's own lib/main.dart, as a player gets it.
+var _attaching = false;
 
 /// Seconds of a run that aren't measured: startup and the first frames.
 /// `--warmup N` for more, such as to let a profiler attach first: attaching
@@ -100,9 +106,17 @@ String? _android;
 /// The phone to measure on, or null for this Mac.
 String? get _device => _ios ?? _android;
 
-/// The app's Android package: the examples' bundle ids are all
-/// `dev.fynkel.<name>`.
-String get _package => 'dev.fynkel.$_name';
+/// The app's Android package: its `applicationId`, or for the examples,
+/// whose bundle ids are all `dev.fynkel.<name>`, that.
+final String _package = () {
+  for (final path in ['android/app/build.gradle.kts', 'android/app/build.gradle']) {
+    final file = File(path);
+    if (!file.existsSync()) continue;
+    final id = RegExp(r'''applicationId\s*=?\s*["']([^"']+)["']''').firstMatch(file.readAsStringSync());
+    if (id != null) return id.group(1)!;
+  }
+  return 'dev.fynkel.$_name';
+}();
 
 /// `flutter run --debug` instead of `--profile`, for the iOS Simulator.
 var _debug = false;
@@ -123,9 +137,17 @@ Future<void> main(List<String> args) async {
   _baseline = args.contains('--baseline');
   for (var i = 0; i < args.length - 1; i++) {
     if (args[i] == '--define') _defines.add('--dart-define=${args[i + 1]}');
+    if (args[i] == '--define-file') _defines.add('--dart-define-from-file=${args[i + 1]}');
+  }
+  final mode = args.isEmpty ? 'rate' : args.first;
+  if (mode == 'attach') {
+    if (_device == null) {
+      stderr.writeln('attach measures on a phone: give --ios <device> or --android <device>');
+      exit(2);
+    }
+    _attaching = true;
   }
   if (_device == null) await _buildMac();
-  final mode = args.isEmpty ? 'rate' : args.first;
   final fullscreen = args.contains('--fullscreen');
   final secondsAt = args.indexOf('--seconds');
   final seconds = secondsAt < 0 ? 60 : int.parse(args[secondsAt + 1]);
@@ -139,9 +161,11 @@ Future<void> main(List<String> args) async {
       await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
     case 'bench':
       await _bench();
+    case 'attach':
+      await _attach(secondsAt < 0 ? 600 : seconds);
     default:
       stderr.writeln(
-        'usage: dart run fynkel_measure:measure rate [--seconds N] [--warmup N] [--fullscreen] | lifecycle [--cycles N] | bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]',
+        'usage: dart run fynkel_measure:measure rate [--seconds N] [--warmup N] [--fullscreen] | lifecycle [--cycles N] | bench | attach [--seconds N]  [--define KEY=VALUE] [--define-file FILE] [--baseline] [--ios <device> | --android <device>] [--debug]',
       );
       exit(2);
   }
@@ -321,6 +345,247 @@ Future<void> _rate(int seconds, {required bool fullscreen}) async {
   } finally {
     await app.stop();
   }
+}
+
+/// [seconds] of the app as it is, played by hand: its own lib/main.dart,
+/// with no code of its own for measuring. Each second the engine says
+/// through `ext.fynkel.views` (fynkel_flutter's inspection.dart) what each
+/// view has done so far and the app's footprint and heat, and the
+/// differences make the windows. On Android, the memory from `dumpsys
+/// meminfo`, the battery's temperature and the thermal status, each ten
+/// seconds, and the GPU's clock and the app in front at the start and end.
+Future<void> _attach(int seconds) async {
+  final app = await _App.launch(const {});
+  try {
+    final heap = await _Heap.connect(app.service!);
+    Future<Map<String, Object?>> ask() => heap._call('ext.fynkel.views', {'isolateId': heap._isolate});
+    // The engine's extension comes with the first view: until then, the
+    // app's own screens.
+    stderr.writeln('Attached. Play for ${seconds}s.');
+    if (_android != null) print('in front        ${await _inFront()} at the start');
+    final gpu = _android != null ? _GpuClock.sample() : null;
+    final android = <({int at, _Footprint memory, double? battery, int? status})>[];
+    final clock = Stopwatch()..start();
+    final androidLoop = _android == null
+        ? null
+        : () async {
+            while (clock.elapsed.inSeconds < seconds) {
+              final at = clock.elapsed.inSeconds;
+              try {
+                android.add((
+                  at: at,
+                  memory: await _Footprint.ofAndroid(),
+                  battery: await _battery(),
+                  status: await _thermalStatus(),
+                ));
+              } on StateError {
+                // The app away or restarting: the next reading.
+              }
+              await Future<void>.delayed(const Duration(seconds: 10));
+            }
+          }();
+
+    final windows = <Map<String, Object?>>[];
+    Map<String, Object?>? last;
+    var unanswered = 0, views = 0;
+    while (clock.elapsed.inSeconds < seconds) {
+      await Future<void>.delayed(const Duration(seconds: 1));
+      final Map<String, Object?> now;
+      try {
+        now = await ask();
+      } on StateError catch (error) {
+        // Not registered yet (no view so far), or the app is away.
+        if (unanswered++ == 0) stderr.writeln('no answer yet: $error');
+        continue;
+      }
+      if (last != null) {
+        final window = _window(last, now, at: clock.elapsed.inSeconds);
+        windows.add(window);
+        views = max(views, (now['views']! as List).length);
+      }
+      last = now;
+      final minutes = clock.elapsed.inSeconds ~/ 60;
+      if (clock.elapsed.inSeconds % 60 == 0 && minutes > 0 && windows.isNotEmpty) {
+        stderr.writeln('${minutes}m: ${_mb((windows.last['footprint']! as num).toInt())}');
+      }
+    }
+    await androidLoop;
+    final clocks = await gpu?.stop();
+    final allocated = await heap.allocatedSinceStart();
+    await heap.close();
+    if (_android != null) print('in front        ${await _inFront()} at the end');
+
+    print('mode            ${_ios != null ? 'iOS' : 'Android'}, the app as it is (attach), $seconds s');
+    print('seconds         ${windows.length} read, $unanswered without an answer (before the first view, or away)');
+    print('views           at most $views at once');
+    final drawing = [
+      for (final w in windows)
+        if (w['fresh'] != null) w,
+    ];
+    if (drawing.isEmpty) {
+      print('no view drew in the run');
+    } else {
+      final fresh = [for (final w in drawing) w['fresh']! as double]..sort();
+      double at(List<double> sorted, double q) => sorted[(q * (sorted.length - 1)).round()];
+      print(
+        'fresh fps       median ${at(fresh, 0.5).toStringAsFixed(1)}, 5th percentile ${at(fresh, 0.05).toStringAsFixed(1)}, '
+        'min ${fresh.first.toStringAsFixed(1)}, max ${fresh.last.toStringAsFixed(1)}, over ${drawing.length} s with a view',
+      );
+      final slowest = [for (final w in drawing) (w['at']! as int, w['fresh']! as double)]
+        ..sort((a, b) => a.$2.compareTo(b.$2));
+      print('slowest seconds ${slowest.take(5).map((s) => '${s.$1}: ${s.$2.toStringAsFixed(1)}').join(', ')}');
+      if (drawing.length >= 120) {
+        final minutes = [
+          for (var m = 0; m + 60 <= drawing.length; m += 60)
+            (drawing.sublist(m, m + 60).map((w) => w['fresh']! as double).toList()..sort())[30],
+        ];
+        print('by minute       ${minutes.map((m) => m.toStringAsFixed(0)).join(', ')}');
+      }
+      final ticks = [for (final w in drawing) w['ticks']! as double]..sort();
+      print('dart ticks/s    median ${at(ticks, 0.5).toStringAsFixed(1)}, min ${ticks.first.toStringAsFixed(1)}');
+      int sum(String key) => drawing.fold(0, (total, w) => total + ((w[key] ?? 0) as num).toInt());
+      print('frames          posted ${sum('posted')}, rendered ${sum('rendered')}, presented ${sum('presented')}');
+      print('not shown       coalesced ${sum('coalesced')}, skipped ${sum('skipped')}, dropped ${sum('dropped')}');
+      print(
+        'render thread   busy ${(sum('busyMicros') / 1e6 / drawing.length * 100).toStringAsFixed(0)} % of the time',
+      );
+      print('sizes           ${{for (final w in drawing) w['size']}.join(', ')}');
+      print(
+        'dart heap       ${allocated.bytes} B allocated in ${allocated.seconds.toStringAsFixed(1)} s, '
+        '${allocated.collections} collections, ${(allocated.bytes / max(1, sum('presented'))).toStringAsFixed(0)} B per frame shown',
+      );
+    }
+    if (windows.isNotEmpty) {
+      int sum(String key) => windows.fold(0, (total, w) => total + ((w[key] ?? 0) as num).toInt());
+      final frames = sum('flutterFrames');
+      print(
+        'flutter frames  $frames, raster ${(sum('rasterMicros') / max(1, frames) / 1000).toStringAsFixed(2)} ms '
+        'and build ${(sum('buildMicros') / max(1, frames) / 1000).toStringAsFixed(2)} ms on average, longest raster '
+        '${(windows.fold(0, (most, w) => max(most, (w['longestRaster']! as num).toInt())) / 1000).toStringAsFixed(2)} ms',
+      );
+      final footprints = [for (final w in windows) (w['footprint']! as num).toInt()];
+      print(
+        'footprint       ${_mb(footprints.first)} at the start, ${_mb(footprints.reduce(max))} at most, '
+        '${_mb(footprints.last)} at the end${_ios != null ? '' : ' (PSS, as the app reads it)'}',
+      );
+      print(
+        'by minute MB    ${[for (var m = 0; m < footprints.length; m += 60) (footprints[m] / (1 << 20)).round()].join(', ')}',
+      );
+      if (_ios != null) {
+        final graphics = [for (final w in windows) (w['graphics']! as num).toInt()];
+        print(
+          'metal           ${_mb(graphics.first)} at the start, ${_mb(graphics.reduce(max))} at most, ${_mb(graphics.last)} at the end',
+        );
+      }
+      final engine = [
+        for (final w in windows)
+          if (w['textureBytes'] != null) w,
+      ];
+      if (engine.isNotEmpty) {
+        String most(String key) => _mb(engine.fold(0, (m, w) => max(m, (w[key]! as num).toInt())));
+        print(
+          'engine, at most textures ${most('textureBytes')}, meshes ${most('meshBytes')}, sky ${most('skyBytes')}, '
+          'shadows ${most('shadowBytes')}, scene ${most('targetBytes')}, frames ${most('frameBytes')}, '
+          'behind ${most('behindBytes')}, bloom ${most('bloomBytes')}, effects ${most('effectBytes')}',
+        );
+      }
+      if (windows.any((w) => w['thermal'] != null)) {
+        final changes = <String>[];
+        Object? previous;
+        for (final w in windows) {
+          if (w['thermal'] == null || w['thermal'] == previous) continue;
+          previous = w['thermal'];
+          changes.add('${thermalStates[(previous! as num).toInt()]} from ${w['at']}s');
+        }
+        print('thermal         ${changes.join(', ')}');
+      }
+    }
+    if (android.isNotEmpty) {
+      final first = android.first, top = android.reduce((a, b) => a.memory.total >= b.memory.total ? a : b);
+      print('meminfo         ${first.memory} at the start');
+      print('                ${top.memory} at most (${top.at}s)');
+      print('                ${android.last.memory} at the end');
+      final temps = [
+        for (final r in android)
+          if (r.battery != null) r.battery!,
+      ];
+      if (temps.isNotEmpty) {
+        print(
+          'battery         ${temps.first.toStringAsFixed(1)} °C at the start, ${temps.reduce(max).toStringAsFixed(1)} at most, ${temps.last.toStringAsFixed(1)} at the end',
+        );
+      }
+      final statuses = [
+        for (final r in android)
+          if (r.status != null) r.status!,
+      ];
+      if (statuses.isNotEmpty) print('thermal status  ${statuses.reduce(max)} at most (0 none … 6 shutdown)');
+    }
+    if (clocks != null) print('gpu             $clocks');
+  } finally {
+    await app.stop();
+  }
+}
+
+/// One second of [attach]: the busiest view's counts between two reports,
+/// and the memory and heat as of the second.
+Map<String, Object?> _window(Map<String, Object?> before, Map<String, Object?> now, {required int at}) {
+  final seconds = ((now['micros']! as num) - (before['micros']! as num)) / 1e6;
+  int diff(String key) => (now[key]! as num).toInt() - (before[key]! as num).toInt();
+  final window = <String, Object?>{
+    'at': at,
+    'footprint': now['footprint'],
+    'graphics': now['graphics'],
+    'thermal': now['thermal'],
+    'flutterFrames': diff('flutterFrames'),
+    'buildMicros': diff('buildMicros'),
+    'rasterMicros': diff('rasterMicros'),
+    'longestRaster': now['longestRasterMicros'],
+  };
+  final earlier = {for (final v in (before['views']! as List).cast<Map<String, Object?>>()) v['id']: v};
+  Map<String, Object?>? busiest;
+  var most = -1;
+  for (final view in (now['views']! as List).cast<Map<String, Object?>>()) {
+    final then = earlier[view['id']];
+    // A new engine view starts its counts again: this second can't count it.
+    if (then == null) continue;
+    final presented = (view['presented']! as int) - (then['presented']! as int);
+    if (presented <= most) continue;
+    most = presented;
+    busiest = {
+      for (final key in ['posted', 'rendered', 'coalesced', 'skipped', 'presented', 'dropped', 'busyMicros'])
+        key: (view[key]! as int) - (then[key]! as int),
+      for (final key in view.keys)
+        if (key.endsWith('Bytes')) key: view[key],
+      'fresh': presented / seconds,
+      'ticks': ((view['ticks']! as int) - (then['ticks']! as int)) / seconds,
+      'size': '${view['width']}x${view['height']}',
+    };
+  }
+  // A view that drew nothing this second (the app away, the game paused)
+  // isn't a frame rate.
+  if (busiest != null && (busiest['posted']! as int) > 0) window.addAll(busiest);
+  return window;
+}
+
+/// The app in front on the Android device: a run's frames mean little
+/// with another app over it.
+Future<String> _inFront() async {
+  final out = await _adb(['shell', 'dumpsys', 'window']);
+  return RegExp(r'mCurrentFocus=Window\{\S+ \S+ ([^}]+)\}').firstMatch(out)?.group(1) ?? 'unknown';
+}
+
+/// The battery's temperature on the Android device, in °C.
+Future<double?> _battery() async {
+  final out = await _adb(['shell', 'dumpsys', 'battery']);
+  final tenths = RegExp(r'temperature: (\d+)').firstMatch(out);
+  return tenths == null ? null : int.parse(tenths.group(1)!) / 10;
+}
+
+/// Android's thermal status (0 none … 6 shutdown).
+Future<int?> _thermalStatus() async {
+  final out = await _adb(['shell', 'dumpsys', 'thermalservice']);
+  final status = RegExp(r'Thermal Status: (\d+)').firstMatch(out);
+  return status == null ? null : int.parse(status.group(1)!);
 }
 
 /// The app's own timings: it runs them, reports each and marks `done`.
@@ -553,8 +818,10 @@ class _GpuClock {
 
   Future<void> _run() async {
     try {
-      final range = (await _adb(['shell', 'cat /sys/kernel/gpu/gpu_min_clock /sys/kernel/gpu/gpu_max_clock']))
-          .split('\n');
+      final range = (await _adb([
+        'shell',
+        'cat /sys/kernel/gpu/gpu_min_clock /sys/kernel/gpu/gpu_max_clock',
+      ])).split('\n');
       _min = int.parse(range[0].trim()) ~/ 1000;
       _max = int.parse(range[1].trim()) ~/ 1000;
     } on Object {
@@ -699,8 +966,10 @@ class _App {
         throw TimeoutException('no VM service two minutes after the install');
       }),
     );
-    return Future.any([_serviceReady.future, installed])
-        .timeout(_device == null ? const Duration(seconds: 30) : const Duration(minutes: 10));
+    return Future.any([
+      _serviceReady.future,
+      installed,
+    ]).timeout(_device == null ? const Duration(seconds: 30) : const Duration(minutes: 10));
   }
 
   /// flutter run is installing the app on an Android device.
