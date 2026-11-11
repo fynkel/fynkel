@@ -28,6 +28,7 @@ import 'package:fynkel/platform.dart';
 import 'error_panel.dart';
 import 'fynkel_game.dart';
 import 'input_feed.dart';
+import 'inspection.dart' show ViewReading, forget, inspect;
 import 'world_listenables.dart' show WorldTheme;
 import 'world_widget.dart' show FrameTicks, WorldWidgetLayer;
 
@@ -472,11 +473,27 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   int _windowStartMicros = 0, _windowTicks = 0;
   ViewStats _windowStart = const ViewStats();
 
+  // Frames drawn since the view was made, for ext.fynkel.views.
+  int _allTicks = 0;
+
   @override
   void initState() {
     super.initState();
     _ticker; // Starts it.
     WidgetsBinding.instance.addObserver(this);
+    inspect(this, _reading);
+  }
+
+  /// What ext.fynkel.views reads of this view (inspection.dart).
+  ViewReading _reading() {
+    final host = _host;
+    ViewStats? stats;
+    try {
+      stats = host?.view.stats;
+    } on FynkelException {
+      // A view being freed has no counts to give.
+    }
+    return (id: identityHashCode(host), ticks: _allTicks, width: _width, height: _height, stats: stats);
   }
 
   // The world whose clock counts this view.
@@ -850,6 +867,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
 
   @override
   void dispose() {
+    forget(this);
     WidgetsBinding.instance.removeObserver(this);
     _letGo(world);
     _stopHearing();
@@ -932,6 +950,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     }
     widget.onViewStats?.call(view.stats);
 
+    _allTicks++;
     _windowTicks++;
     final onStats = widget.onStats;
     if (onStats != null && micros - _windowStartMicros >= 1000000) {

@@ -15,10 +15,10 @@ dependencies:
     sdk: flutter
   fynkel:
     path: ../fynkel
+  # The app's footprint and heat, for ext.fynkel.views (inspection.dart).
+  ffi: ^2.2.0
 
 dev_dependencies:
-  # The tests check the engine view directly.
-  ffi: ^2.2.0
   lints: ^6.1.0
 
 flutter:

@@ -9,8 +9,10 @@
 library;
 
 export 'src/bench.dart' show bench, castTimes;
-export 'src/footprint.dart' show footprint, physicalFootprint;
+// ignore: implementation_imports
+export 'package:fynkel_flutter/src/footprint.dart' show footprint, physicalFootprint;
 export 'src/measured_app.dart' show MeasuredApp;
 export 'src/measurement.dart';
 export 'src/on_screen.dart' show OnScreenClock;
-export 'src/thermal.dart' show thermalState, thermalStates;
+// ignore: implementation_imports
+export 'package:fynkel_flutter/src/thermal.dart' show thermalState, thermalStates;

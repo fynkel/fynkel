@@ -12,6 +12,7 @@ import 'package:fynkel/src/bindings.g.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 import 'package:fynkel_flutter/src/fynkel_view.dart' show channel, debugAndroid, debugIos, debugViewsOpen, forgetReset;
 import 'package:fynkel_flutter/src/error_panel.dart' show ErrorPanel;
+import 'package:fynkel_flutter/src/inspection.dart' show viewsReport;
 import 'package:fynkel_flutter/src/world_widget.dart' show WorldWidgetLayer, worldWidgetsOf;
 
 /// Whether the engine view at [address] is still alive and answering.
@@ -247,6 +248,38 @@ void main() {
     }
     expect(stats.last.size, const Size(120, 60), reason: 'resized, at scale 1 now');
     expect(calls, hasLength(1), reason: 'a resize keeps the texture');
+  });
+
+  testWidgets("ext.fynkel.views has each view's counts so far and the app's memory, for a tool measuring an app as it is", (
+    tester,
+  ) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    List<Map<String, Object?>> views() => [
+      for (final view in viewsReport()['views']! as List) (view as Map).cast<String, Object?>(),
+    ];
+    expect(views(), isEmpty);
+
+    await tester.pumpWidget(sized(FynkelView.world(world)));
+    for (var i = 0; i < 5; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    final before = views().single;
+    for (var i = 0; i < 10; i++) {
+      await tester.pump(const Duration(milliseconds: 8));
+    }
+    final after = views().single;
+    expect((after['width'], after['height']), (100, 50));
+    expect((after['ticks']! as int) - (before['ticks']! as int), 10);
+    expect((after['posted']! as int) - (before['posted']! as int), 10, reason: 'one engine frame per tick');
+    expect(after.keys, containsAll(['presented', 'dropped', 'busyMicros', 'textureBytes', 'behindBytes']));
+
+    final report = viewsReport();
+    expect(report['footprint'], greaterThan(0));
+    if (Platform.isMacOS) expect(report['thermal'], isNotNull);
+
+    await tester.pumpWidget(const SizedBox());
+    expect(views(), isEmpty, reason: 'a view gone is no longer read');
   });
 
   testWidgets("the world's quality's renderScale sets the size drawn at, from the next frames, without a new layout", (

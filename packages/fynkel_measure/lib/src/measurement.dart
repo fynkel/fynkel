@@ -9,8 +9,11 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
-import 'footprint.dart';
-import 'thermal.dart';
+// The same readings ext.fynkel.views gives, from the engine's package.
+// ignore: implementation_imports
+import 'package:fynkel_flutter/src/footprint.dart';
+// ignore: implementation_imports
+import 'package:fynkel_flutter/src/thermal.dart';
 
 /// What bin/measure.dart asked the app for. Set by the tool, never by
 /// hand: as environment variables on the Mac, and as `--dart-define`s on a
