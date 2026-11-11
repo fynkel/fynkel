@@ -371,6 +371,8 @@ Future<void> _attach(int seconds) async {
         : () async {
             while (clock.elapsed.inSeconds < seconds) {
               final at = clock.elapsed.inSeconds;
+              final front = await _inFront();
+              if (!front.startsWith('$_package/')) stderr.writeln('${at}s: not in front, $front is');
               try {
                 android.add((
                   at: at,
@@ -387,7 +389,7 @@ Future<void> _attach(int seconds) async {
 
     final windows = <Map<String, Object?>>[];
     Map<String, Object?>? last;
-    var unanswered = 0, views = 0;
+    var unanswered = 0, views = 0, idle = 0;
     while (clock.elapsed.inSeconds < seconds) {
       await Future<void>.delayed(const Duration(seconds: 1));
       final Map<String, Object?> now;
@@ -402,6 +404,9 @@ Future<void> _attach(int seconds) async {
         final window = _window(last, now, at: clock.elapsed.inSeconds);
         windows.add(window);
         views = max(views, (now['views']! as List).length);
+        // Said as it happens, so a run that isn't play can be stopped.
+        idle = window['fresh'] == null ? idle + 1 : 0;
+        if (idle == 10) stderr.writeln('${window['at']}s: no view has drawn for 10 s');
       }
       last = now;
       final minutes = clock.elapsed.inSeconds ~/ 60;
