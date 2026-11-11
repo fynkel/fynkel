@@ -200,7 +200,23 @@ Agreed 2026-11-04:
 1. **The order** above, with outlines first.
 2. **Ring Ring Deals runs on the devices** for phase 3, measured only, with no
    change to its code.
-3. **Path finding stays out** of this stage.
+3. **Path finding stays out** of this stage. Revisited 2026-11-11: decided
+   after phase 5 (below), since Ring Ring Deals' teleport timers are a game
+   working around the engine.
+
+Changed 2026-11-11, agreed with the user:
+
+4. **The order from phase 3 on:** 3 (Ring Ring Deals measured), 4 (results
+   that can be trusted), 8 (loading and saving: a swallowed error and a save
+   a crash can damage are steadiness, not depth), 5 (pause under a dialog),
+   then the path finding decision, 6 (animation), 7 (sound), 9 (speed). The
+   phases keep their numbers.
+5. **Phase 4 also takes** the iPad's 300 MB at high that nothing names and
+   the Note10+'s 15 ms on Flutter's raster thread: each explained or put on
+   a later list with a reason.
+6. **After the steadier half**, a small second game in another genre, to
+   find what to deepen next, since one real game is most of the evidence.
+   Proposed, not yet scoped.
 
 ## 6. How it's done
 
