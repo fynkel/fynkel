@@ -200,6 +200,13 @@ class Yard extends GameObject {
 }
 ```
 
+**A subclass shares `GameObject`'s names.** A method or field of yours
+named as one of its own (`rotate`, `find`, `add`, `on`, `wait`,
+`tween`, `bounds`, `animator`, `name`, …) is the analyzer's error or
+warning, which may name a part of `GameObject` you can't look up:
+`isn't a valid override of '_Moving.rotate'` is §7's `rotate`. Give
+yours a name of the game's own (`turnTile`, `label`).
+
 - **`add(child)`** puts an object below this one and returns it, typed:
   `final crate = add(Crate(at));`. The world's root is added with
   `world.add`; `FynkelApp` does that for you. For a component in a
@@ -917,8 +924,9 @@ an iPhone 16 Pro Max made it hot enough within a minute that iOS slowed it
 to about 80; at 60 it holds 60 for 10 minutes and more
 ([the report](iphone-heat-report.md)). For 120 on an iPhone, the app's
 `ios/Runner/Info.plist` needs `CADisableMinimumFrameDurationOnPhone`
-(`true`), as every example has (`flutter create` leaves it out): without
-it, iOS keeps the app's screen at 60, whatever the game asks. Behind a menu, a paused game draws less still
+(`true`), as every example has (a new `flutter create` app has it; an
+older app may not): without it, iOS keeps the app's screen at 60,
+whatever the game asks. Behind a menu, a paused game draws less still
 (`pauseWhenCovered`, §17).
 
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
@@ -2329,7 +2337,10 @@ class Dog extends Behaviour {
 `AudioListener` and `AudioSettings` together: `audio.volume` for
 everything (a settings screen's master volume), `audio.playOneShot(clip)`
 for a sound that belongs to no object (a button's click), `audio.stats`
-(voices, underruns) and `audio.outputError`.
+(voices, underruns) and `audio.outputError`. It's package:fynkel_audio's
+(an extension, `WorldAudio`), so a test that reaches it through a `World`
+imports it: `import 'package:fynkel_audio/fynkel_audio.dart' show
+WorldAudio;`.
 
 - **Pausing.** While the game is paused (`world.paused`, §6) its sounds
   hold where they are, and go on with it. A source with `ignorePause`
@@ -4320,7 +4331,8 @@ class Levels extends GameObject {
 level reached, the best score, the settings (`Controls` has `toJson` and
 `Controls.fromJson`, §17). Write it as JSON to a file in the app's own
 folder, which the app finds with the `path_provider` package
-(`getApplicationSupportDirectory()`) and hands to the game:
+(`getApplicationSupportDirectory()`, a folder that may not be there yet)
+and hands to the game:
 
 ```dart
 // lib/save.dart
@@ -4331,10 +4343,14 @@ import 'dart:io';
 class Save {
   Save({this.level = 1, this.best = 0});
 
+  /// Which shape of save this game writes: a later game that changes it
+  /// reads an older one by this.
+  static const version = 1;
+
   int level;
   int best;
 
-  Map<String, Object?> toJson() => {'level': level, 'best': best};
+  Map<String, Object?> toJson() => {'version': version, 'level': level, 'best': best};
 
   /// Reads [file]; a new save when there's none, or it can't be read
   /// (an older game's, or cut short).
@@ -4347,18 +4363,25 @@ class Save {
     }
   }
 
-  /// Writes it whole: to a file beside [file] first, then renamed over
-  /// it, so a crash halfway leaves the last save, not half of this one.
+  /// Writes it whole: to a file beside [file] first, on the disk before
+  /// it's renamed over it, so a crash or a power cut halfway leaves the
+  /// last save, not half of this one.
   void write(File file) {
+    file.parent.createSync(recursive: true);
     File('${file.path}.new')
-      ..writeAsStringSync(jsonEncode(toJson()))
+      ..writeAsStringSync(jsonEncode(toJson()), flush: true)
       ..renameSync(file.path);
   }
 }
 ```
 
-Save when something worth keeping happens (a level done), not every
-frame: a write is a few milliseconds on a phone.
+Save when something worth keeping happens (a level done) and in
+`onApplicationPause` (§6), as the app may be closed while it's away, not
+every frame: a write is a few milliseconds on a phone. A few settings
+and nothing else can go in `shared_preferences` instead, as
+examples/pocket_hole's level does: simpler, but its writes are queued,
+so one the app is killed in the middle of may be lost; the file above
+says what happens then.
 
 ## 19. Testing a game
 
@@ -4582,6 +4605,24 @@ when a frame is pumped.
 `GameObject.find`: in a game object written in a test, `find('cube')`
 is flutter_test's (`The method 'call' isn't defined for the type
 'CommonFinders'`). Say `this.find('cube')` there.
+
+**The view's shape** is `world.input.width` and `height`, in logical
+pixels: a camera that frames a board to fit reads them. A `FynkelView`
+gives them, and so does a `HeadlessView` (in its pixels) when nothing
+else had; in a test with no view, `world.input.simulate.resize(390,
+844)` sets them. With two views of one world, they're the size of the
+one that takes input.
+
+**Does a level change grow memory?** A test can tell, with a
+`HeadlessView`: switch levels many times, and after each round draw a
+frame (`view.read(view.frame())`) and read what the engine holds for
+drawing, `view.stats.textureBytes` and `meshBytes`, with the number of
+objects, `world.all<GameObject>(includeInactive: true).length`. Each
+the same every time round (from the second: the first may load what
+stays) means nothing piles up: a leak grows them a little each round.
+The process's resident size (`ProcessInfo.currentRss`) isn't one to
+test: it rises for a while as Dart's heap settles, and only a long run
+on a device (§20) tells settling from a leak.
 
 `world.run(seconds)` moves on in whole frames of 1/60 s, so a routine's
 `wait(0.5)` ends on the first frame at or past half a second: test what
@@ -5053,6 +5094,18 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **What playtest games 3 and 4 changed** (2026-11-17):
+  - A joint with a `breakForce` or `breakTorque` breaks from a blow it
+    stops (an impulse, a velocity set), counted as the force that stops
+    it within a step: 10 N·s stopped in a step of 1/50 s is 500 N. It
+    broke only from what it held step after step, so a 200 N hinge
+    survived any impulse; a joint a game kicks may now come off.
+  - A `HeadlessView` gives the world's input its size when nothing else
+    had, so a test's `input.width` and `height` are the view's, not 0;
+    `input.simulate.resize` before making the view still wins.
+  - `GameObject.bounds` is the engine's: a subclass's own `bounds` is
+    the analyzer's warning; rename it.
 
 - **A field named as one of `GameObject`'s own is a warning**
   (2026-11-16): `world`, `loaded`, `assets`, `input`, `debug`, `time`,
