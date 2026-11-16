@@ -93,13 +93,25 @@ final class Assets {
   /// has them at once: models (`.glb`), textures (`.png`, `.jpg`,
   /// `.jpeg`), sky images (`.hdr`), shaders (`.wgsl`), fonts (`.ttf`,
   /// `.otf`, `.ttc`) and the kinds packages added
-  /// ([WorldSystems.addAssetKind]), told apart by their extension. They're held as anything else asked
-  /// for here is.
+  /// ([WorldSystems.addAssetKind]), told apart by their extension.
+  /// They're held as anything else asked for here is.
+  ///
+  /// It needn't be awaited: a game often preloads the next level while
+  /// this one is played. If what holds them goes first (the object is
+  /// destroyed, the world disposed, as when the player leaves the game),
+  /// it ends quietly, whatever happened to the loads.
   Future<void> preload(Iterable<String> names) async {
     final assets = [for (final name in names) _hold(name, _kindOf(name))];
-    await Future.wait([for (final asset in assets) asset.ready]);
-    _stillUsable(assets.map((a) => a.name).join(', '));
+    try {
+      await Future.wait([for (final asset in assets) asset.ready]);
+    } catch (_) {
+      if (_gone) return;
+      rethrow;
+    }
   }
+
+  // Whether what holds what's asked for here is gone.
+  bool get _gone => _world.isDisposed || (_user?._destroyed ?? false);
 
   AssetKind<Object> _kindOf(String name) {
     final lower = name.toLowerCase();
