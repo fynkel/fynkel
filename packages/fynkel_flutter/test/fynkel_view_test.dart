@@ -997,6 +997,47 @@ void main() {
       await tester.pump();
     });
 
+    // A page with a view pushed over a page with a view: both layers lie
+    // under Flutter's view, at the same level, so where they overlap either
+    // might show (on Android, two SurfaceViews' order is undefined: playtest
+    // game 2 asked). Once the new page covers the old, Flutter neither
+    // paints the old one nor runs its tickers, and the old view's layer is
+    // hidden. A dialog covers nothing.
+    testWidgets("a view on a page covered by another page's hides its layer; under a dialog it doesn't", (
+      tester,
+    ) async {
+      final other = World();
+      addTearDown(other.dispose);
+      late BuildContext page;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              page = context;
+              return FynkelView.world(world);
+            },
+          ),
+        ),
+      );
+      await frames(tester);
+      calls.clear();
+      unawaited(showDialog<void>(context: page, builder: (context) => const Text('paused')));
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown')), isEmpty, reason: 'it shows under the dialog');
+      Navigator.of(page).pop();
+      await frames(tester, 60);
+
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (context) => FynkelView.world(other))));
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown 7')), ['shown 7 false']);
+      calls.clear();
+      Navigator.of(page).pop();
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown 7')), ['shown 7 true']);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
     // One world in two views, one of them hidden: the world shows in the
     // other, so it goes on (the audit: a covered view held the world).
     testWidgets('a world is paused only when all its views are hidden or covered', (tester) async {

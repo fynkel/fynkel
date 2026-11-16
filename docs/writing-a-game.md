@@ -3705,8 +3705,12 @@ things differ from the Mac:
   its widget is, each frame); one that fades or zooms in shows the game
   unfaded and at full size, and a view in a scrolling list isn't clipped
   at the list's edges.
-- Two views stack, no more: a minimap over the game. A view lying within
-  another goes over it.
+- Views stack two deep, no more. A view lying within another goes over
+  it (a minimap over the game); any others lie side by side, at the
+  bottom (a split screen, a compare page's two viewers). A third view
+  within the minimap wouldn't show over it.
+  Views on pages under the page shown, or in hidden tabs, don't count:
+  their surfaces are hidden.
 
 Where one of those matters, give that view `directToScreen: false`: it's a
 texture Flutter draws, as on the Mac, slower on some Android phones and
@@ -3965,7 +3969,8 @@ For a game that runs on under a see-through pop-up, give
 **Tabs.** A view in a tab that isn't showing, kept alive by an
 `IndexedStack` (or under a `Visibility.maintain` that hides it), is paused
 the same way, and on a phone its surface is hidden too, so it doesn't show
-through the shown tab's view. A world shown in more than one view is
+through the shown tab's view. So is a view on a page another page covers
+whole, once that page has slid in (not under a dialog, which shows it). A world shown in more than one view is
 paused only when none of them shows it.
 
 **If the view can't draw.** A lost GPU device or a refused surface gets

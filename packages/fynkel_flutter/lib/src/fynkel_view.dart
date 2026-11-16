@@ -564,8 +564,10 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   bool _covered = false, _pausedIt = false;
 
   // Whether a widget above hides it: Visibility.of, which an IndexedStack's
-  // hidden tabs and Visibility say. Laid out but not painted, so on screen
-  // its surface or layer is hidden too.
+  // hidden tabs and Visibility say, or TickerMode.of, which the Navigator
+  // turns off for a page another page covers whole. Not painted, so on
+  // screen its surface or layer is hidden too: under Flutter's view, it
+  // would show where the page over it shows a view.
   bool _hidden = false;
 
   // While the view's pause holds: hears the game set [World.paused]
@@ -580,7 +582,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// hides it, unless it shows in another view, and goes on when it's
   /// uncovered.
   void _cover() {
-    final hidden = !Visibility.of(context);
+    final hidden = !Visibility.of(context) || !TickerMode.valuesOf(context).enabled;
     if (hidden != _hidden) {
       _hidden = hidden;
       // At once, not at the view's next frame: paused, it has few.
