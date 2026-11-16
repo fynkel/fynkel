@@ -121,8 +121,8 @@ String? _rustTriple(OS os, Architecture arch, {IOSSdk? iosSdk}) {
 int? _appleVersion(CodeConfig code) {
   try {
     return switch (code.targetOS) {
-      OS.macOS => code.macOS.targetVersion,
-      OS.iOS => code.iOS.targetVersion,
+      OS.macOS => code.macOS.deploymentVersion.major,
+      OS.iOS => code.iOS.deploymentVersion.major,
       _ => null,
     };
   } on StateError {
