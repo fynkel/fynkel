@@ -3949,6 +3949,12 @@ paused already stays paused.
 For a game that runs on under a see-through pop-up, give
 `FynkelView(pauseWhenCovered: false)`.
 
+**Tabs.** A view in a tab that isn't showing, kept alive by an
+`IndexedStack` (or under a `Visibility.maintain` that hides it), is paused
+the same way, and on a phone its surface is hidden too, so it doesn't show
+through the shown tab's view. A world shown in more than one view is
+paused only when none of them shows it.
+
 **If the view can't draw.** A lost GPU device or a refused surface gets
 a new view by itself, up to three times a minute; after that the view
 gives up, and its place shows an `ErrorWidget` while the world runs on.

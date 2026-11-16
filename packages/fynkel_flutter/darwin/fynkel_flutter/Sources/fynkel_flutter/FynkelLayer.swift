@@ -133,6 +133,13 @@ final class FynkelLayers {
       width: args["width"] as? Int ?? 0, height: args["height"] as? Int ?? 0, scale: view.layer.contentsScale)
   }
 
+  /// Shown, or hidden while a widget above hides its view (an
+  /// IndexedStack's other tab): laid out where the shown one is, it would
+  /// show through that one's view.
+  func shown(_ id: Int64, _ shown: Bool) {
+    live[id]?.isHidden = !shown
+  }
+
   /// Over the other layers (a minimap over the field), or under them.
   func over(_ id: Int64, _ over: Bool) {
     guard let view = live[id], let holder = view.superview, let (flutterView, _) = flutter(),

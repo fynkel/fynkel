@@ -559,8 +559,14 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.deactivate();
   }
 
-  // Whether a route is over the view's, and whether that paused the world.
+  // Whether a route is over the view's, or a widget above hides it (an
+  // IndexedStack's other tab), and whether that paused the world.
   bool _covered = false, _pausedIt = false;
+
+  // Whether a widget above hides it: Visibility.of, which an IndexedStack's
+  // hidden tabs and Visibility say. Laid out but not painted, so on screen
+  // its surface or layer is hidden too.
+  bool _hidden = false;
 
   // While the view's pause holds: hears the game set [World.paused]
   // itself, which makes the pause the game's.
@@ -570,10 +576,21 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// it ([FynkelView.pauseWhenCovered]): enough for a resize to show.
   static const _coveredFrameRate = 10;
 
-  /// Pauses the world when a route covers the view's, and goes on when
-  /// it's uncovered.
+  /// Pauses the world when a route covers the view's or a widget above
+  /// hides it, unless it shows in another view, and goes on when it's
+  /// uncovered.
   void _cover() {
-    final covered = !(ModalRoute.of(context)?.isCurrent ?? true) && widget.pauseWhenCovered;
+    final hidden = !Visibility.of(context);
+    if (hidden != _hidden) {
+      _hidden = hidden;
+      // At once, not at the view's next frame: paused, it has few.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        final host = _host;
+        final texture = host?.texture;
+        if (mounted && host != null && host.onScreen && texture != null) _sendShown(host, texture);
+      });
+    }
+    final covered = (!(ModalRoute.of(context)?.isCurrent ?? true) || _hidden) && widget.pauseWhenCovered;
     if (covered == _covered) return;
     _covered = covered;
     // After this frame: pausing tells widgets, which can't build again in
@@ -582,14 +599,20 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (!mounted || covered != _covered) return;
       final world = this.world;
       if (world.isDisposed) return;
+      final views = _WorldClock.of(world).views;
       if (covered) {
-        if (!world.paused) {
+        // Shown in another view (a minimap on the page over this one), it
+        // goes on.
+        if (!world.paused && views.every((view) => view._covered)) {
           world.paused = true;
           _pausedIt = true;
           _pauseWatch = world.onPausedChanged.listen((_) => _gameTookPause());
         }
       } else {
-        _letGo(world);
+        // Whichever of its views paused it.
+        for (final view in [...views]) {
+          view._letGo(world);
+        }
       }
     });
   }
@@ -1057,6 +1080,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
             ..texture = texture
             ..onScreen = onScreen;
         });
+        // Registered while hidden (a tab not chosen yet).
+        if (onScreen && texture != null) _sendShown(host, texture);
       }
       return texture;
     } on MissingPluginException {
@@ -1128,6 +1153,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         }),
       );
     }
+    _sendShown(host, texture);
     final over = _byTexture.values.any((other) {
       final at = other._host?.sentPlace;
       return other != this && other._host!.onScreen && at != null && at != place && at.expandToInclude(place) == at;
@@ -1136,6 +1162,15 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       host.sentOver = over;
       unawaited(channel.invokeMethod<void>('over', {'texture': texture, 'over': over}));
     }
+  }
+
+  /// On screen: hides the surface or layer while a widget above hides the
+  /// view ([_hidden]), and shows it again after.
+  void _sendShown(_Host host, int texture) {
+    final shown = !_hidden;
+    if (shown == host.sentShown) return;
+    host.sentShown = shown;
+    unawaited(channel.invokeMethod<void>('shown', {'texture': texture, 'shown': shown}));
   }
 
   /// The view can't go on (the plugin couldn't give it a new surface): a
@@ -1363,6 +1398,7 @@ sealed class _Host {
   /// left of Flutter's view, and whether over the other views.
   Rect? sentPlace;
   bool sentOver = false;
+  bool sentShown = true;
 
   /// What the plugin is sent to register it, at [place] when on screen.
   Map<String, Object> arguments(Rect? place);

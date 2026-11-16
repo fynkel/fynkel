@@ -5,6 +5,7 @@ import android.content.ComponentCallbacks2
 import android.content.Context
 import android.content.res.Configuration
 import android.util.Log
+import android.view.View
 import android.view.SurfaceHolder
 import android.view.SurfaceView
 import android.view.ViewGroup
@@ -84,6 +85,7 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
         var width = 1
         var height = 1
         var over = false
+        var shown = true
         var surface: SurfaceView? = null
 
         fun params() = FrameLayout.LayoutParams(frameWidth, frameHeight).also {
@@ -101,6 +103,7 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
             surface.holder.setFixedSize(width, height)
             surface.holder.addCallback(this)
             surface.layoutParams = params()
+            if (!shown) surface.visibility = View.INVISIBLE
             val flutter = (0 until content.childCount).firstOrNull { content.getChildAt(it) is FlutterView }
             content.addView(surface, flutter ?: 0)
             this.surface = surface
@@ -162,7 +165,7 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
         return entry.id
     }
 
-    /** `place`, `over`, `resize` and `unregister` for a view on screen. */
+    /** `place`, `over`, `shown`, `resize` and `unregister` for a view on screen. */
     private fun onScreenCall(entry: OnScreen, call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
             "place" -> {
@@ -180,6 +183,14 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
                     // A SurfaceView's layer is set before it's in a window: a new one.
                     activity?.let { if (entry.surface != null) entry.show(it) }
                 }
+            }
+
+            "shown" -> {
+                // Hidden while a widget above hides its view (an IndexedStack's other tab): laid
+                // out where the shown one is, it would show through that one's view. Hidden, Android
+                // takes its surface away, and the view follows, as for the background.
+                entry.shown = call.argument<Boolean>("shown") ?: true
+                entry.surface?.visibility = if (entry.shown) View.VISIBLE else View.INVISIBLE
             }
 
             "resize" -> {

@@ -77,6 +77,10 @@ public final class FynkelFlutterPlugin: NSObject, FlutterPlugin {
       if let id { layers.over(id, args["over"] as? Bool ?? false) }
       result(nil)
       return
+    case "shown":
+      if let id { layers.shown(id, args["shown"] as? Bool ?? true) }
+      result(nil)
+      return
     case "unregister" where id.map(layers.owns) == true:
       layers.unregister(id!)
       result(nil)

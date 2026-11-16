@@ -923,6 +923,8 @@ void main() {
             return {'id': nextTexture++, 'onScreen': true};
           case 'place':
             calls.add('place ${args['texture']} at ${args['left']},${args['top']} ${args['width']}x${args['height']}');
+          case 'shown':
+            calls.add('shown ${args['texture']} ${args['shown']}');
           case 'resize':
             calls.add('resize ${args['texture']} ${args['width']}x${args['height']}');
           case 'unregister':
@@ -963,6 +965,64 @@ void main() {
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump();
       expect(calls, ['unregister 7']);
+    });
+
+    // An IndexedStack lays out the hidden tabs where the shown one is, and
+    // only doesn't paint them: a hidden tab's layer, under Flutter's view,
+    // still showed through the shown tab's view, or over it (playtest
+    // game 2). Hidden, a view's layer is hidden and its world paused, as a
+    // covered page's is.
+    testWidgets("a view in an IndexedStack's hidden tab hides its layer and pauses", (tester) async {
+      final other = World();
+      addTearDown(other.dispose);
+      Widget tabs(int index) =>
+          sized(IndexedStack(index: index, children: [FynkelView.world(world), FynkelView.world(other)]));
+      await tester.pumpWidget(tabs(0));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), ['shown 8 false']);
+      expect((world.paused, other.paused), (false, true));
+
+      calls.clear();
+      await tester.pumpWidget(tabs(1));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), unorderedEquals(['shown 7 false', 'shown 8 true']));
+      expect((world.paused, other.paused), (true, false));
+
+      calls.clear();
+      await tester.pumpWidget(tabs(0));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), unorderedEquals(['shown 7 true', 'shown 8 false']));
+      expect((world.paused, other.paused), (false, true));
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
+    // One world in two views, one of them hidden: the world shows in the
+    // other, so it goes on (the audit: a covered view held the world).
+    testWidgets('a world is paused only when all its views are hidden or covered', (tester) async {
+      Widget two({required bool hideOne, bool hideBoth = false}) => sized(
+        Row(
+          children: [
+            Expanded(
+              child: Visibility.maintain(visible: !hideOne && !hideBoth, child: FynkelView.world(world)),
+            ),
+            Expanded(
+              child: Visibility.maintain(visible: !hideBoth, child: FynkelView.world(world, input: false)),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(two(hideOne: true));
+      await frames(tester);
+      expect(world.paused, isFalse, reason: 'it shows in the other view');
+      await tester.pumpWidget(two(hideOne: true, hideBoth: true));
+      await frames(tester);
+      expect(world.paused, isTrue, reason: 'shown nowhere');
+      await tester.pumpWidget(two(hideOne: true));
+      await frames(tester);
+      expect(world.paused, isFalse, reason: 'shown again in one');
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
     });
 
     testWidgets('directToScreen: false keeps the texture', (tester) async {
