@@ -392,7 +392,8 @@ final class Orbit extends _Rig {
   double dragSpeed;
 
   /// How much a logical pixel of scroll zooms: the distance grows by
-  /// e^(pixels × scrollSpeed).
+  /// e^(pixels × scrollSpeed) for pixels scrolled down, and shrinks as
+  /// much for pixels up.
   double scrollSpeed;
 
   @override

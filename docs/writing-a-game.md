@@ -3109,6 +3109,19 @@ class CameraRig extends GameObject {
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
   target turns left and right.
+- **`Orbit`'s place is three fields**, for code to set too (a reset
+  button, a turntable: `orbit.yaw += 0.5 * time.delta`): `distance` in
+  metres (8); `yaw` in radians, 0 on the target's +Z side and growing to
+  the right; and `pitch`, 0 level and positive above, looking down
+  (0.4). `minPitch`/`maxPitch` (−0.2, 1.45) and
+  `minDistance`/`maxDistance` (1, 100) clamp them each frame, `offset`
+  moves the point circled off the target's position. The wheel scrolled
+  down moves it away (`input.scroll.y` is positive up; Flutter's
+  `scrollDelta.dy`, and a test's `scrollBy`, positive down).
+- **The rigs run after every `onLateUpdate`** (§6: late updates, then
+  cameras, then drawing), so a camera with a rig is the rig's to place:
+  move it in `onLateUpdate` and the rig puts it back. Change the rig's
+  fields there instead; the rig reads them right after.
 - `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
   told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
