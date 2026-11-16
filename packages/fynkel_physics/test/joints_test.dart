@@ -376,6 +376,28 @@ void main() {
     }
   });
 
+  // Playtest game 3: a box hanging from a 200 N hinge never broke from an
+  // impulse straight down, of 10 N·s or 1000, though the hinge stopped it
+  // dead; a held force or a ball flung at it broke it.
+  test('a blow the joint stops breaks it, as a force held as long would', () {
+    for (final fixedDelta in [1 / 50, 1 / 100]) {
+      for (final (blow, breaks) in [(10.0, true), (1.0, false)]) {
+        final world = newWorld()..time.fixedDelta = fixedDelta;
+        final hinge = HingeJoint(anchor: const Vec3(0, 0.5, 0), axis: const Vec3(0, 0, 1), breakForce: 200);
+        final hanging = world.add(
+          GameObject(
+            transform: Transform(position: const Vec3(0, 2, 0)),
+            components: [BoxCollider(), Rigidbody(), hinge],
+          ),
+        );
+        frames(world, 0.2);
+        hanging.get<Rigidbody>()!.addForce(Vec3(0, -blow, 0), mode: ForceMode.impulse);
+        frames(world, 0.1);
+        expect(hinge.isRemoved, breaks, reason: '$blow N·s at ${fixedDelta * 1000} ms steps');
+      }
+    }
+  });
+
   test('the break force of a swinging, turned and scaled joint changes as it is', () {
     final world = newWorld();
     final joint = HingeJoint(anchor: const Vec3(-0.5, 0, 0), axis: const Vec3(0, 0, 1));

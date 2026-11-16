@@ -259,6 +259,13 @@ pub(crate) struct Joints {
     /// The last step's substeps' time: the joints' impulses are the last
     /// substep's.
     substep: f32,
+    /// The last step's time.
+    dt: f32,
+    /// By handle index, for each joint that can break: the impulse it
+    /// needed at the step's start to stop its bodies moving apart, as a
+    /// blow just made them, and the turning impulse about its anchor
+    /// ([Physics::jolts]).
+    jolts: Vec<[Vector; 2]>,
 }
 
 impl Physics {
@@ -428,6 +435,10 @@ impl Physics {
     pub(crate) fn joints_before_step(&mut self, dt: f32) {
         self.joints.broken.clear();
         self.joints.substep = dt / self.world.integration_parameters.num_solver_iterations as f32;
+        self.joints.dt = dt;
+        if self.joints.breakable > 0 {
+            self.jolts();
+        }
         if self.joints.driven == 0 {
             return;
         }
@@ -495,6 +506,78 @@ impl Physics {
         self.joints.wake = wake;
     }
 
+    /// Before a step, for each joint that can break: the impulse that
+    /// stops its bodies moving apart along the ways it holds them, as a
+    /// blow (an impulse, a velocity set) just made them. Rapier's solver
+    /// stops such a blow within the step's first substep and keeps the
+    /// last substep's impulse, so the joint's [Physics::held] doesn't see
+    /// it: a 200 N hinge never broke from any impulse (playtest game 3).
+    /// Solved for the whole joint at once, as Rapier does, so a blow a
+    /// fixed joint stops by turning counts as torque.
+    fn jolts(&mut self) {
+        let bodies = &self.world.bodies;
+        let jolts = &mut self.joints.jolts;
+        jolts.clear();
+        jolts.resize(self.joints.data.len(), [Vector::ZERO; 2]);
+        for (handle, joint) in self.world.impulse_joints.iter() {
+            let index = handle.into_raw_parts().0 as usize;
+            let Some(Some(data)) = self.joints.data.get(index) else { continue };
+            let spec = &data.spec;
+            if spec.kind == JointKind::Spring || !(spec.break_force.is_finite() || spec.break_torque.is_finite()) {
+                continue;
+            }
+            let (b1, b2) = (&bodies[joint.body1()], &bodies[joint.body2()]);
+            let inverse = |b: &RigidBody| {
+                if b.is_dynamic() {
+                    let m = b.mass_properties();
+                    (m.effective_inv_mass, m.effective_world_inv_inertia)
+                } else {
+                    (Vector::ZERO, Default::default())
+                }
+            };
+            let ((m1, i1), (m2, i2)) = (inverse(b1), inverse(b2));
+            let r1 = b1.position() * joint.data.local_frame1.translation - b1.center_of_mass();
+            let r2 = b2.position() * joint.data.local_frame2.translation - b2.center_of_mass();
+            let frame1 = b1.rotation() * joint.data.local_frame1.rotation;
+            // Each held way: its push on body 2 (body 1 gets the opposite),
+            // and its turn of each body.
+            let mut rows = [(Vector::ZERO, Vector::ZERO, Vector::ZERO); 6];
+            let mut n = 0;
+            let locked = joint.data.locked_axes.bits();
+            for i in 0..6 {
+                if locked & (1 << i) == 0 {
+                    continue;
+                }
+                let axis = frame1 * [Vector::X, Vector::Y, Vector::Z][i % 3];
+                rows[n] = if i < 3 { (axis, r1.cross(axis), r2.cross(axis)) } else { (Vector::ZERO, axis, axis) };
+                n += 1;
+            }
+            // K λ = -c: K = J M⁻¹ Jᵀ, c how fast the bodies move apart.
+            let mut k = [[0.0f32; 7]; 6];
+            for (a, &(lin, ang1, ang2)) in rows[..n].iter().enumerate() {
+                for (b, &(lin_b, ang1_b, ang2_b)) in rows[..n].iter().enumerate() {
+                    k[a][b] = lin.dot((m1 + m2) * lin_b) + ang1.dot(i1 * ang1_b) + ang2.dot(i2 * ang2_b);
+                }
+                k[a][6] = -(lin.dot(b2.linvel() - b1.linvel()) + ang2.dot(b2.angvel()) - ang1.dot(b1.angvel()));
+            }
+            let Some(lambda) = solve(&mut k, n) else { continue };
+            let mut jolt = [Vector::ZERO; 2];
+            for (&(lin, _, ang2), l) in rows[..n].iter().zip(lambda) {
+                if lin == Vector::ZERO {
+                    jolt[1] += ang2 * l;
+                } else {
+                    jolt[0] += lin * l;
+                }
+            }
+            if spec.kind == JointKind::Hinge {
+                // Not about its axis, as [Physics::held].
+                let axis = b2.rotation() * joint.data.local_frame2.rotation * Vector::X;
+                jolt[1] -= axis * jolt[1].dot(axis);
+            }
+            jolts[index] = jolt;
+        }
+    }
+
     /// After a step: the joints that held harder than they can break, and
     /// are removed.
     pub(crate) fn joints_after_step(&mut self) {
@@ -505,7 +588,9 @@ impl Physics {
         for (handle, joint) in self.world.impulse_joints.iter() {
             let Some(Some(data)) = self.joints.data.get(handle.into_raw_parts().0 as usize) else { continue };
             let (force, torque) = self.held(joint, &data.spec);
-            let (force, torque) = (force.length(), torque.length());
+            let [jolt, turn] = self.joints.jolts.get(handle.into_raw_parts().0 as usize).copied().unwrap_or_default();
+            let per = 1.0 / self.joints.dt;
+            let (force, torque) = ((force + jolt * per).length(), (torque + turn * per).length());
             if force > data.spec.break_force || torque > data.spec.break_torque {
                 broken.push((handle, BrokenJoint { key: data.key, force, torque }));
             }
@@ -635,4 +720,30 @@ fn hinge_angle(frame1: Rotation, frame2: Rotation) -> f32 {
     let error = frame1.inverse() * frame2;
     let half = error.x.clamp(-1.0, 1.0).asin() * 2.0;
     if frame1.dot(frame2) < 0.0 { -half } else { half }
+}
+
+/// Solves the first `n` rows of `k`, each `n` coefficients and its right
+/// hand side in column 6, by Gaussian elimination; `None` when nothing in
+/// it can move.
+fn solve(k: &mut [[f32; 7]; 6], n: usize) -> Option<[f32; 6]> {
+    for col in 0..n {
+        let pivot = (col..n).max_by(|&a, &b| k[a][col].abs().total_cmp(&k[b][col].abs()))?;
+        if k[pivot][col].abs() < 1e-9 {
+            return None;
+        }
+        k.swap(col, pivot);
+        for row in col + 1..n {
+            let f = k[row][col] / k[col][col];
+            let top = k[col];
+            for (to, from) in k[row][col..].iter_mut().zip(&top[col..]) {
+                *to -= f * from;
+            }
+        }
+    }
+    let mut x = [0.0; 6];
+    for row in (0..n).rev() {
+        let sum: f32 = (row + 1..n).map(|c| k[row][c] * x[c]).sum();
+        x[row] = (k[row][6] - sum) / k[row][row];
+    }
+    Some(x)
 }
