@@ -4947,6 +4947,13 @@ yet (§21).
 
 For code written before: each change that breaks it, newest first.
 
+- **A `CharacterController` moved up has left the ground** (2026-11-16):
+  after a `move` asked to go up that went up, `isGrounded` is false, as
+  Unity's is, unless it hit something below. It used to read true, so a
+  jump that sets its fall whenever it's grounded (§16's `Walk`) ended
+  after one frame. A game that worked round it (`isGrounded && fall <= 0`)
+  works as before.
+
 - **Stage 14's pass over the public API** (2026-10-31): names,
   defaults and messages, made alike across the packages.
   - Renamed, with no old names kept:

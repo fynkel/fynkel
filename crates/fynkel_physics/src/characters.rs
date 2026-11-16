@@ -193,6 +193,13 @@ impl Physics {
         }
         moved.translation = at.translation - pose.translation;
         moved.grounded |= along.grounded;
+        // A move asked to go up that went up has left the ground, as Unity's
+        // does: both halves start a skin's width over it, so each would
+        // say grounded, and a jump that reads `isGrounded` would end at
+        // once (playtest game 1). What it hits below still says so.
+        if motion.y > 0.0 && moved.translation.y > 0.0 {
+            moved.grounded = false;
+        }
         if settings.mass > 0.0 && !collisions.is_empty() {
             let mut queries = w.broad_phase.as_query_pipeline_mut(
                 w.narrow_phase.query_dispatcher(),

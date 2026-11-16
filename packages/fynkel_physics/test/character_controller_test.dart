@@ -132,6 +132,34 @@ void main() {
     expect(controller.velocity.y, closeTo(0, 0.5), reason: 'on the ground, it doesn\'t fall');
   });
 
+  test("the guide's Walk jumps: a move up leaves the ground", () {
+    // Its jump as the guide writes it (§16): the fall is set again whenever
+    // it's grounded, so a controller still grounded after the jump's first
+    // move ended it at 8 cm (playtest game 1).
+    final world = newWorld();
+    final jumper = world.add(
+      GameObject(
+        name: 'player',
+        transform: Transform(position: const Vec3(0, 1.08, 0)),
+        components: [CharacterController(), _GuideJump()],
+      ),
+    );
+    final controller = jumper.get<CharacterController>()!;
+    run(world, 0.5);
+    expect(controller.isGrounded, isTrue);
+    jumper.get<_GuideJump>()!.jump = true;
+    var peak = 0.0;
+    for (var frame = 0; frame < 90; frame++) {
+      world.update(1 / 60);
+      if (frame == 0) expect(controller.isGrounded, isFalse, reason: 'off the ground after the first move up');
+      peak = math.max(peak, feet(jumper));
+    }
+    // 5 m/s under 9.81 m/s²: 1.27 m, less a frame's worth of steps.
+    expect(peak, closeTo(1.27, 0.08));
+    expect(controller.isGrounded, isTrue);
+    expect(feet(jumper), closeTo(0, 0.02));
+  });
+
   test('it says it stands on the first collider added, too', () {
     final world = newWorld();
     final controller = player(world).get<CharacterController>()!;
@@ -338,5 +366,22 @@ class Coin extends GameObject with Triggers {
   @override
   void onTriggerEnter(Collider other) {
     if (other is CharacterController) entered++;
+  }
+}
+
+/// The guide's `Walk` (§16) standing still, with [jump] for the space bar's
+/// `wasPressed`.
+class _GuideJump extends Behaviour {
+  var jump = false;
+  var fall = 0.0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    final controller = get<CharacterController>()!;
+    if (controller.isGrounded) fall = jump ? 5 : -1;
+    jump = false;
+    fall -= 9.81 * time.delta;
+    controller.move(Vec3(0, fall, 0) * time.delta);
   }
 }
