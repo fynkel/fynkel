@@ -10,8 +10,9 @@
 //! A surface can also die while the engine still holds it: its
 //! `ImageReader` closed by Flutter without telling the plugin (seen once on
 //! a Galaxy Note10+, docs/stage-1.md §3.5). Configuring it again is then a
-//! wgpu validation error, which would panic the render worker; instead the
-//! surface counts as dead and its frames are skipped until the next one.
+//! wgpu validation error, which would panic the render worker; instead,
+//! after a few tries (a configure also fails while another view submits),
+//! the surface counts as dead and its frames are skipped until the next one.
 //!
 //! Frames are presented on a thread of their own, the presenter, which
 //! waits for each frame's GPU work first (see [`Android::finish`]). The
@@ -28,7 +29,7 @@
 
 use std::ffi::{CString, c_char, c_int, c_void};
 use std::ptr::{self, NonNull};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::mpsc::{SyncSender, sync_channel};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, PoisonError};
 use std::thread::JoinHandle;
@@ -93,8 +94,11 @@ struct Live {
     /// Android shows it on screen itself (a `SurfaceView`), not Flutter (a
     /// texture): see [`AndroidPresenter::attach`].
     on_screen: bool,
-    /// It couldn't be configured again: frames to it are skipped.
+    /// It couldn't be configured again, [`TRIES`] times in a row: frames
+    /// to it are skipped.
     dead: AtomicBool,
+    /// Its configures that failed in a row since its last good one.
+    failed: AtomicU32,
     _window: Window,
 }
 
@@ -302,12 +306,19 @@ fn present_one(shared: &Shared, queue: &wgpu::Queue, frame: Submitted) {
         wgpu::CurrentSurfaceTexture::Success(image) | wgpu::CurrentSurfaceTexture::Suboptimal(image) => image,
         wgpu::CurrentSurfaceTexture::Outdated | wgpu::CurrentSurfaceTexture::Lost => {
             // The window changed under the swapchain, or went away: make the
-            // swapchain again and present the next frame. A surface whose
-            // window is gone can't be, and stays dead until the platform side
-            // gives a new one.
-            if let Err(error) = configure(&shared.device, &live.surface, &live.config) {
-                live.dead.store(true, Ordering::Relaxed);
-                warn(&format!("the surface is gone ({error}); frames are skipped until a new one comes"));
+            // swapchain again and present the next frame. A configure also
+            // fails while another view submits (see [`configure_tried`]), so
+            // it's tried again next frame; a surface whose window is gone
+            // can't be configured, and after [`TRIES`] frames stays dead until
+            // the platform side gives a new one.
+            match configure(&shared.device, &live.surface, &live.config) {
+                Ok(()) => live.failed.store(0, Ordering::Relaxed),
+                Err(error) => {
+                    if live.failed.fetch_add(1, Ordering::Relaxed) + 1 >= TRIES {
+                        live.dead.store(true, Ordering::Relaxed);
+                        warn(&format!("the surface is gone ({error}); frames are skipped until a new one comes"));
+                    }
+                }
             }
             shared.free.release(slot);
             return;
@@ -574,12 +585,13 @@ impl AndroidPresenter {
             color_space: wgpu::SurfaceColorSpace::Auto,
             view_formats: vec![],
         };
-        configure(&shared.device, &surface, &config)
+        configure_tried(&shared.device, &surface, &config)
             .map_err(|e| AndroidError(format!("couldn't configure the surface: {e}")))?;
 
         // The old surface and its window go here, after the frame in
         // progress.
-        drop(shared.surface.put(Live { surface, config, on_screen, dead: AtomicBool::new(false), _window: window }));
+        let dead = AtomicBool::new(false);
+        drop(shared.surface.put(Live { surface, config, on_screen, dead, failed: AtomicU32::new(0), _window: window }));
         Ok(())
     }
 
@@ -593,6 +605,32 @@ impl AndroidPresenter {
     /// Frames given to the surface so far.
     pub fn presented(&self) -> u64 {
         self.shared.presented.load(Ordering::Relaxed)
+    }
+}
+
+/// How many times a surface's configure is tried before it's given up on.
+const TRIES: u32 = 5;
+
+/// [`configure`], tried up to [`TRIES`] times, a little longer apart each
+/// time (30 ms in all at most). Configuring waits for the GPU, then fails if
+/// something was submitted meanwhile, which happens while another view's
+/// render thread draws: a view made then failed now and then, and Dart made
+/// it again (the playtest audit; on the Note10+, about one attach in a
+/// hundred while another view submitted every millisecond).
+fn configure_tried(
+    device: &wgpu::Device,
+    surface: &wgpu::Surface<'_>,
+    config: &wgpu::SurfaceConfiguration,
+) -> Result<(), wgpu::Error> {
+    let mut tried = 1;
+    loop {
+        match configure(device, surface, config) {
+            Err(_) if tried < TRIES => {
+                std::thread::sleep(std::time::Duration::from_millis(1 << tried));
+                tried += 1;
+            }
+            done => return done,
+        }
     }
 }
 

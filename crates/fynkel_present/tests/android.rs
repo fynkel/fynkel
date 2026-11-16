@@ -92,6 +92,11 @@ impl Drop for Reader {
 }
 
 fn target() -> (Android, AndroidPresenter, wgpu::Device) {
+    let (target, presenter, device, _) = target_and_queue();
+    (target, presenter, device)
+}
+
+fn target_and_queue() -> (Android, AndroidPresenter, wgpu::Device, wgpu::Queue) {
     // The emulator's driver crashes on object names (fynkel_render's
     // instance_flags).
     let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
@@ -106,7 +111,7 @@ fn target() -> (Android, AndroidPresenter, wgpu::Device) {
     }))
     .expect("a device");
     let (target, presenter) = Android::new(&instance, &adapter, &device, &queue, 64, 64);
-    (target, presenter, device)
+    (target, presenter, device, queue)
 }
 
 /// One frame the way the render worker draws it, cleared. Whether there
@@ -211,6 +216,65 @@ fn a_surface_whose_reader_is_closed_is_skipped_until_a_new_one_comes() {
     unsafe { presenter.attach_window(reader.window(), 48, 48, false) }.expect("a new surface after a dead one");
     assert!(draw(&device, &mut target), "drawing again");
     assert_eq!(target.size(), (48, 48));
+}
+
+// Configuring a surface waits for the GPU, then fails if another thread
+// submitted meanwhile, which another view's render thread does all the
+// time (the iOS layer's freeze, stage 17 phase 2). Attaching a surface on
+// the platform thread (a resize, a rotation, back from the background)
+// failed then, 2 to 7 times in 100 here, and after two tries Dart made the
+// view again. Now a configure that loses the race is tried again a moment
+// later (the playtest audit).
+#[test]
+fn a_surface_attached_while_another_view_submits_is_configured() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    let (mut target, presenter, device, queue) = target_and_queue();
+    let stop = Arc::new(AtomicBool::new(false));
+    let other_view = std::thread::spawn({
+        let (stop, device) = (stop.clone(), device.clone());
+        move || {
+            while !stop.load(Ordering::Relaxed) {
+                let encoder = device.create_command_encoder(&Default::default());
+                queue.submit([encoder.finish()]);
+                // Faster than any view draws.
+                std::thread::sleep(std::time::Duration::from_millis(1));
+            }
+        }
+    });
+    let mut failed = Vec::new();
+    let mut readers = Vec::new();
+    for size in 0..100 {
+        let reader = Reader::new(64 + size, 64);
+        // SAFETY: the reader's window is live until the reader goes.
+        if let Err(error) = unsafe { presenter.attach_window(reader.window(), (64 + size) as u32, 64, false) } {
+            failed.push(error.to_string());
+        }
+        draw(&device, &mut target);
+        reader.consume();
+        readers.push(reader);
+    }
+    stop.store(true, Ordering::Relaxed);
+    other_view.join().unwrap();
+    assert!(failed.is_empty(), "{} of 100 attaches failed: {:?}", failed.len(), failed.first());
+
+    // The other view gone quiet, the last surface is drawn to (a frame
+    // before may still be on its way to it).
+    let reader = readers.last().unwrap();
+    let before = presenter.presented();
+    for _ in 0..5 {
+        assert!(draw(&device, &mut target), "drawing to the last surface");
+        device.poll(wgpu::PollType::wait_indefinitely()).expect("poll");
+        reader.consume();
+    }
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while presenter.presented() < before + 5 && std::time::Instant::now() < deadline {
+        std::thread::sleep(std::time::Duration::from_millis(5));
+        reader.consume();
+    }
+    assert!(presenter.presented() >= before + 5, "every frame reached it");
+    assert_eq!(target.size(), (163, 64));
 }
 
 /// This process's Graphics row in `dumpsys meminfo`, in MB (the test runs
