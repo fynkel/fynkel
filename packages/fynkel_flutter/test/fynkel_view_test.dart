@@ -2397,6 +2397,29 @@ void main() {
       expect(dts, hasLength(120), reason: "paused by the game, at its rate (every frame, here)");
     });
 
+    // The audit: two views of one world share one answer to "is a frame
+    // due", so a covered view, slowed to 10 a second, might hold the view
+    // on the page over it to its rate.
+    testWidgets("a covered view of a world doesn't slow its view on the page over it", (tester) async {
+      final shown = <double>[];
+      await tester.pumpWidget(app());
+      await settle(tester);
+      unawaited(
+        Navigator.of(page).push(
+          MaterialPageRoute<void>(builder: (_) => sized(FynkelView.world(world, onFrame: shown.add, input: false))),
+        ),
+      );
+      await settle(tester);
+      expect(world.paused, isFalse, reason: 'it shows on the page over');
+      shown.clear();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(microseconds: 16667));
+      }
+      expect(shown, hasLength(inInclusiveRange(58, 60)), reason: 'about 60 in a second');
+      Navigator.of(page).pop();
+      await settle(tester);
+    });
+
     testWidgets('a page over a dialog over the view: the game goes on once both are closed', (tester) async {
       await tester.pumpWidget(app());
       unawaited(showDialog<void>(context: page, builder: (_) => const Text('menu')));
