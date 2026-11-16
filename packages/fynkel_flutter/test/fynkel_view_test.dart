@@ -682,6 +682,29 @@ void main() {
       await tester.pump();
     });
 
+    // Flutter's own warning comes for Home too (TRIM_MEMORY_UI_HIDDEN), so
+    // there the plugin's, which knows the level, is the one heard.
+    testWidgets("memory warnings are the plugin's, not Flutter's, which comes on every Home", (tester) async {
+      var told = 0;
+      world.onLowMemory.listen((_) => told++);
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await tester.pump(const Duration(milliseconds: 8));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleMemoryPressure();
+      await tester.idle();
+      expect(told, 0, reason: "Flutter's warning, as Home sends it");
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(const MethodCall('lowMemory', {'level': 40})),
+        (_) {},
+      );
+      await tester.idle();
+      expect(told, 1, reason: "the plugin's: Android short of memory");
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
     testWidgets("the plugin's failure to give a view its new surface brings a new view", (tester) async {
       await tester.pumpWidget(sized(FynkelView.world(world)));
       for (var i = 0; i < 3; i++) {

@@ -1,6 +1,9 @@
 package dev.fynkel.fynkel_flutter
 
 import android.app.Activity
+import android.content.ComponentCallbacks2
+import android.content.Context
+import android.content.res.Configuration
 import android.util.Log
 import android.view.SurfaceHolder
 import android.view.SurfaceView
@@ -47,6 +50,26 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
     private var nextOnScreen = 1L shl 40
     private var activity: Activity? = null
     private var toldNotOnScreen = false
+    private var context: Context? = null
+
+    /**
+     * Android's memory warnings, passed to Dart as `lowMemory`. Flutter's own warning comes for any
+     * level from `TRIM_MEMORY_RUNNING_LOW` up, and so for `TRIM_MEMORY_UI_HIDDEN`, which Android
+     * sends each time the app goes away (Home), short of memory or not: a game told to lower its
+     * quality would lower it on every trip. Dart's views hear these instead on Android.
+     */
+    private val memory = object : ComponentCallbacks2 {
+        override fun onTrimMemory(level: Int) {
+            if (warns(level)) channel.invokeMethod("lowMemory", mapOf("level" to level))
+        }
+
+        @Deprecated("Android's own; onTrimMemory is what's heard")
+        override fun onLowMemory() {
+            channel.invokeMethod("lowMemory", mapOf("level" to ComponentCallbacks2.TRIM_MEMORY_COMPLETE))
+        }
+
+        override fun onConfigurationChanged(newConfig: Configuration) {}
+    }
 
     /**
      * A view drawn straight to the screen: a `SurfaceView` behind Flutter's view, in physical pixels
@@ -186,9 +209,12 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
         textures = binding.textureRegistry
         channel = MethodChannel(binding.binaryMessenger, "fynkel_flutter")
         channel.setMethodCallHandler(this)
+        context = binding.applicationContext.also { it.registerComponentCallbacks(memory) }
     }
 
     override fun onDetachedFromEngine(binding: FlutterPlugin.FlutterPluginBinding) {
+        context?.unregisterComponentCallbacks(memory)
+        context = null
         channel.setMethodCallHandler(null)
         releaseOrphans()
     }
@@ -327,6 +353,15 @@ class FynkelFlutterPlugin : FlutterPlugin, MethodChannel.MethodCallHandler, Acti
 
     private companion object {
         const val TAG = "fynkel_flutter"
+
+        /**
+         * Whether a trim level says the app is short of memory: running low or critical while in
+         * front, or on the list to be killed while away. Not `TRIM_MEMORY_UI_HIDDEN`, which only says
+         * the app went away, nor `TRIM_MEMORY_RUNNING_MODERATE`, which Flutter skips too.
+         */
+        @Suppress("DEPRECATION")
+        fun warns(level: Int): Boolean =
+            level >= ComponentCallbacks2.TRIM_MEMORY_RUNNING_LOW && level != ComponentCallbacks2.TRIM_MEMORY_UI_HIDDEN
     }
 }
 

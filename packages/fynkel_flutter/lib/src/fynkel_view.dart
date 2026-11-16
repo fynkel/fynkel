@@ -86,12 +86,22 @@ void forgetReset() => _resetSent = false;
 final _byTexture = <int, FynkelViewState>{};
 bool _listening = false;
 
+/// The views in the tree, for the plugin's calls about them all.
+final _live = <FynkelViewState>{};
+
 /// Listens for the plugin's calls: `failed` when the Android plugin
-/// couldn't hand a view its new surface.
+/// couldn't hand a view its new surface, and `lowMemory` when Android
+/// says it's short of memory (see [FynkelViewState.didHaveMemoryPressure]).
 void _listenToPlugin() {
   if (_listening) return;
   _listening = true;
   channel.setMethodCallHandler((call) async {
+    if (call.method == 'lowMemory') {
+      for (final view in _live.toList()) {
+        view._lowMemory();
+      }
+      return;
+    }
     if (call.method != 'failed') throw MissingPluginException();
     final args = call.arguments as Map;
     _byTexture[args['texture'] as int]?._replace(
@@ -477,6 +487,9 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.initState();
     _ticker; // Starts it.
     WidgetsBinding.instance.addObserver(this);
+    _live.add(this);
+    // Android's memory warnings come from the plugin (didHaveMemoryPressure).
+    if (_android) _listenToPlugin();
   }
 
   // The world whose clock counts this view.
@@ -616,8 +629,18 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// ([World.onLowMemory]), once for all its views. While the app is away
   /// they let go of the images they draw through too. While it's on screen
   /// they'd only make them again at once, with a slow frame.
+  ///
+  /// On Android this comes from the plugin instead, which hears the
+  /// system's level: Flutter's own warning comes for any level from
+  /// "running low" up, and so for `TRIM_MEMORY_UI_HIDDEN`, which Android
+  /// sends whenever the app goes away (Home), short of memory or not
+  /// (playtest audit).
   @override
   void didHaveMemoryPressure() {
+    if (!_android) _lowMemory();
+  }
+
+  void _lowMemory() {
     final world = widget.world ?? _rootWorld;
     if (world == null || world.isDisposed) return;
     final clock = _WorldClock.of(world);
@@ -851,6 +874,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _live.remove(this);
     _letGo(world);
     _stopHearing();
     _ticker.dispose();
