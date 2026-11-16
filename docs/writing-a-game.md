@@ -3129,7 +3129,9 @@ class CameraRig extends GameObject {
   the right; and `pitch`, 0 level and positive above, looking down
   (0.4). `minPitch`/`maxPitch` (−0.2, 1.45) and
   `minDistance`/`maxDistance` (1, 100) clamp them each frame, `offset`
-  moves the point circled off the target's position. The wheel scrolled
+  moves the point circled off the target's position. `controls = false`
+  stops drags, pinches and the wheel moving it, and `dragSpeed` is how
+  far a drag turns it (radians a logical pixel). The wheel scrolled
   down moves it away (`input.scroll.y` is positive up; Flutter's
   `scrollDelta.dy`, and a test's `scrollBy`, positive down).
 - **The rigs run after every `onLateUpdate`** (§6: late updates, then
@@ -3200,8 +3202,13 @@ scale (a sphere takes the largest axis). Their defaults fit
 `Mesh.cube()`, `Mesh.sphere()` and `Mesh.capsule()`. A collider counts while it's enabled
 and its object shown. Each has a `material`: `PhysicsMaterial(
 dynamicFriction:, bounciness:, frictionCombine:, bounceCombine:)`, Unity's
-0.6 and 0 by default. A collider with no `Rigidbody` is static; a game
-moves it by moving its object.
+0.6 and 0 by default. There's one friction, sliding or not: no
+`staticFriction`. Two touching colliders' values are put together by the
+`PhysicsMaterialCombine` of either (`average` unless set; `minimum`,
+`multiply`, `maximum`, the higher in that order wins): ice that stays
+slippery against anything is `PhysicsMaterial(dynamicFriction: 0,
+frictionCombine: PhysicsMaterialCombine.minimum)`. A collider with no
+`Rigidbody` is static; a game moves it by moving its object.
 
 **A `MeshCollider`** takes a mesh's own shape: `MeshCollider(mesh:)`, or
 with no mesh its object's `MeshRenderer`'s. Its triangles suit the ground
@@ -3234,9 +3241,17 @@ body's mass is spread over them. It has Unity's `mass`, `useGravity`,
 `isKinematic`, `linearDamping`, `angularDamping`, `linearVelocity`,
 `angularVelocity`, `centerOfMass`, `maxAngularVelocity`, `constraints`
 (`RigidbodyConstraints.freezeRotation | .freezePositionY`, …),
-`interpolation` and `collisionDetectionMode`. Push it with `addForce`
-(and its `ForceMode`s), `addTorque`, `addRelativeForce`,
-`addForceAtPosition` and `addExplosionForce`, in `onFixedUpdate`:
+`interpolation` and `collisionDetectionMode`. Push it with `addForce`,
+`addTorque`, `addRelativeForce`, `addForceAtPosition` and
+`addExplosionForce`, in `onFixedUpdate`. Each takes a `ForceMode`:
+`force` (newtons over the next step, the default), `acceleration` (the
+same, whatever its mass), `impulse` (newton seconds, at once: a kick or a
+jump) and `velocityChange` (the same, whatever its mass).
+`addExplosionForce(force, position, radius, upwardsModifier:, mode:)`
+pushes each body it's called on away from `position`, `force` strong
+there, less in a straight line out to nothing at `radius` (the same
+everywhere with 0); `upwardsModifier` puts the blast that far below, so
+it lifts too. Call it on each body in reach (`physics.overlapSphere`):
 
 ```dart
 // lib/ball.dart
@@ -3287,13 +3302,16 @@ pass through a thin one between steps: Rapier sweeps every fast body
 against static colliders, and `CollisionDetectionMode.continuous` sweeps
 it against bodies too. `physics.gravity`, `defaultSolverIterations` and
 `sleepThreshold` are the world's settings; a new `gravity` wakes every
-body, so sleeping ones fall the new way. `sleep()` and `wakeUp()` do
-nothing for a body not in the world yet, and what can't be done there
-says why (no object yet, not enabled, not shown, destroyed).
+body, so sleeping ones fall the new way. `isSleeping` says whether a
+body sleeps; `sleep()` and `wakeUp()` do nothing for a body not in the
+world yet, and what can't be done there says why (no object yet, not
+enabled, not shown, destroyed). `physics.rigidbodyCount` and
+`colliderCount` count what's in the world, for a HUD or a test.
 
 **Moving a kinematic body by hand** (a platform, a door, a bullet that's a
-trigger): `movePosition` and `moveRotation` in `onFixedUpdate`. It goes
-there over the next step, so it pushes what's in the way, carries what
+trigger): `movePosition` and `moveRotation`, in `onFixedUpdate` or from
+a finger's event (the Dragger below): called more than once before a
+step, the last one counts. It goes there over the next step, so it pushes what's in the way, carries what
 stands on it, and is drawn smoothly when interpolated. Setting `position`
 (or the transform) teleports it, as in Unity: right for a respawn, wrong
 for a move. Either way a trigger sees only what it overlaps at the end
@@ -3490,8 +3508,10 @@ holds them as one, `HingeJoint` lets them turn about an `axis` (with
 `limits`, a `motor` and a `spring`, in radians, each on with `useLimits`,
 `useMotor`, `useSpring`), `CharacterJoint` lets them turn every way, as
 a ball in a socket (twisting about its `axis` within `lowTwistLimit` and
-`highTwistLimit`, and swinging within `swing1Limit` and `swing2Limit`,
-each a `SoftJointLimit`; `180.deg` frees it), and `SpringJoint`
+`highTwistLimit`, and swinging within `swing1Limit` about its
+`swingAxis` and `swing2Limit` about the axis square to both, each a
+`SoftJointLimit`; `180.deg` frees it; the swing axis is Y unless given,
+or X when `axis` is along Y, as a chain link's), and `SpringJoint`
 pulls them back together when they are further apart than `maxDistance`. A joint is a behaviour on
 the object with the rigidbody; `connectedBody` is the other one (none for
 the world), and `anchor` is where it holds, in the object's own space,
@@ -3546,7 +3566,9 @@ class Door extends GameObject with JointBreaks {
 `PhysicsMaterial` are values, as Unity's structs are; to change one part,
 copy it with `copyWith`: `hinge.motor = hinge.motor.copyWith(targetVelocity:
 3)` turns a wheel faster with the same force, where `JointMotor(targetVelocity:
-3)` would have none.
+3)` would have none. A hinge's motor turns at `targetVelocity` radians a
+second with no more than `force` newton metres, and `hinge.angle` says
+how far it has turned from where it was joined, in radians.
 
 **Bullets** can be done two ways. A bullet that's an object, with a
 small trigger collider and a kinematic rigidbody moved with
@@ -3687,7 +3709,11 @@ class Dragger extends GameObject {
 ```
 
 The lab's "Joints: a chain and a weight" scene does this, and works out
-the spring from the weight it lifts.
+the spring from the weight it lifts. With an `Orbit` on the camera
+(§15), a drag that carries a body turns the camera as well, and the body
+runs away under the finger: set `orbit.controls = false` in `_grab` when
+a body is caught, and back to true in `_let`, so a drag on nothing still
+turns it.
 
 ## 17. Flutter around the game
 

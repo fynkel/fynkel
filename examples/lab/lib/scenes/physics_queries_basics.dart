@@ -34,13 +34,12 @@ class PhysicsQueriesBasicsScene extends LabScene {
     ball = add(
       shape('ball', Mesh.sphere(), const Color(0xFF3A8EE0), at: Vec3(0, 0.5, 0), components: [SphereCollider()]),
     );
-    // No capsule mesh: a stretched sphere shows where the pill is.
     pill = add(
       GameObject(
         name: 'pill',
         transform: Transform(position: Vec3(2, 1, 0)),
         components: [CapsuleCollider(radius: 0.5, height: 2)],
-        children: [shape('pill mesh', Mesh.sphere(), const Color(0xFF4CC26B), size: Vec3(1, 2, 1))],
+        children: [shape('pill mesh', Mesh.capsule(), const Color(0xFF4CC26B))],
       ),
     );
   }
