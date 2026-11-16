@@ -477,9 +477,6 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// widget test), or the view failed ([_error]). The world still runs.
   bool _noPicture = false;
 
-  // Whether the world was paused at the last frame.
-  bool _wasPaused = false;
-
   // When the view's own frame last reported an error, so one that comes
   // every frame is reported once a second.
   int? _reportedMicros;
@@ -931,10 +928,6 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
     widget.onFrame?.call(dt);
     if (!world.isDisposed) {
-      // A pause let go of every key: those still down are held again.
-      final paused = world.paused;
-      if (_wasPaused && !paused && _focus.hasFocus) _input.holdKeys();
-      _wasPaused = paused;
       clock.update(world);
     }
     _ticks.tick();

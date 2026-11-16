@@ -427,6 +427,7 @@ final class World implements Finalizable {
     _paused = value;
     input._paused = value;
     input._pausing = value;
+    input._resuming = !value;
     time._paused = value;
     if (!value) time._skip = true;
     _emit(onPausedChanged, value);
