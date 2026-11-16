@@ -1,6 +1,7 @@
 // Stage 14's GT10: every example's widget tests wrote their own `wait` (15
 // copies) and dug the game out of the tree by hand.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -138,6 +139,24 @@ void main() {
     await expectLater(tester.loaded(), throwsA(isA<PathNotFoundException>()));
     // The view says so too, as it does every error of the game's.
     expect(tester.takeException(), isA<PathNotFoundException>());
+  });
+
+  // Playtest game 4: its next level, made by a button and loaded inside
+  // the game, was no object a test could give loaded(); the test copied
+  // loaded()'s loop to wait for it.
+  testWidgets('until runs the game until something it loads is there', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FynkelGame(GameObject.new, source: _testAsset, builder: _view),
+      ),
+    );
+    final game = tester.game<GameObject>();
+    // The button's tap: the game adds what loads, and nothing holds it.
+    game.add(_Loads()..name = 'level 2');
+    await tester.until(() => game.find('level 2')?.find('box') != null);
+    expect(game.find('level 2')!.find('box'), isNotNull);
+    final waited = tester.until(() => false, timeout: const Duration(milliseconds: 50));
+    await expectLater(waited, throwsA(isA<TimeoutException>()));
   });
 }
 

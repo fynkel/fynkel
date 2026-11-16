@@ -4531,7 +4531,10 @@ not a few frames.
 reads them in real time, which a widget test's frames don't move:
 `await tester.loaded()` waits for the game on screen to load, pumping
 frames meanwhile, and throws if its load failed (`tester.loaded(level)`
-waits for another object). `await tester.runAsync(() => game.loaded)`
+waits for another object). What the test can't reach, as a level a
+button makes inside the game, is waited for by what it changes:
+`await tester.until(() => game.level.value == 2)` runs the game the
+same way until that holds. `await tester.runAsync(() => game.loaded)`
 would wait for ever: the game's `onLoad` goes on after each `await` only
 when a frame is pumped.
 
