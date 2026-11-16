@@ -519,6 +519,18 @@ void main() {
     await expectLater(world.assets.preload(['nothing.png']), throwsA(isA<FileSystemException>()));
   });
 
+  // Playtest game 4: levels as JSON files would have been read with
+  // rootBundle in the app and File in its tests, beside the world's own
+  // source, which a game couldn't reach.
+  test("a game reads its own files through the world's source", () async {
+    final bytes = await world.source!('grid.png');
+    expect(bytes, File.fromUri(_assets.resolve('grid.png')).readAsBytesSync());
+    expect(source.reads, ['grid.png']);
+    final bare = World();
+    addTearDown(bare.dispose);
+    expect(bare.source, isNull);
+  });
+
   test('asking for assets needs a source, an added object, and one kind per name', () async {
     final bare = World();
     addTearDown(bare.dispose);

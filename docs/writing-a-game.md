@@ -1418,6 +1418,15 @@ class Tree extends GameObject {
 - Each file is loaded once, off the UI thread, and shared. It's freed when
   the last object that asked for it is destroyed.
 - `assets.preload([...])` loads ahead, so a level appears at once later.
+  What's preloaded counts as asked for by the object whose `assets` it
+  is, and stays until that object goes: preload the next level from the
+  level that's on (as §18 does), not from the root, or the root ends up
+  holding every level it ever preloaded. It needn't be awaited; if its
+  object goes first, it ends quietly.
+- A file of the game's own, as a level's JSON, is read through the
+  world's source, so a test reads it as the app does:
+  `jsonDecode(utf8.decode(await world.source!('levels/1.json')))`.
+  It's read each time, not kept.
 - A package can add a kind of asset of its own (a sound package's `.wav`):
   it's loaded, preloaded, shared and freed in the same way.
 - A level that's `async` in `onLoad` appears only when all of it is there:
