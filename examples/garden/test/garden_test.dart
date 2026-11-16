@@ -24,6 +24,14 @@ void main() {
     return (view.stats.textureBytes, view.stats.meshBytes);
   }
 
+  // Playtest game 1: every load printed "character.glb: unlit materials
+  // are drawn lit", which is what the garden wants; a new user can't tell.
+  test('the character loads with nothing to say', () async {
+    final model = await Model.load(File('assets/character.glb').readAsBytesSync());
+    addTearDown(model.dispose);
+    expect(model.warnings, isEmpty);
+  });
+
   test('the garden loads; the character idles, walks where the ground is tapped, and picks up when tapped', () async {
     await garden.loaded;
     final character = world.first<Character>()!;

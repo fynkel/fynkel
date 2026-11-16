@@ -12,9 +12,10 @@ selection.
   pack's GLB points at its texture as a separate file, which Model.load
   can't fetch (it takes one file's bytes), so the PNG is put inside.
   The file also lists KHR_materials_unlit as *required*, which glTF says
-  a reader without unlit must refuse; it's moved to the used extensions,
-  so the character is drawn lit by the garden's sun, as Kenney's own
-  previews show it. Nothing else changes.
+  a reader without unlit must refuse; it's taken off, so the character is
+  drawn lit by the garden's sun, as Kenney's own previews show it (left on
+  as a used extension, every load said "unlit materials are drawn lit":
+  playtest game 1). Nothing else changes.
 - props/*.glb: Nature Kit models with their colours fixed. Their files
   hold the palette's sRGB values (0.886, 0.514, 0.341 is #E28357, the
   kit's orange) where glTF wants linear ones, and call every colour bare
@@ -65,7 +66,7 @@ def write_glb(document, blob):
 
 def self_contained(path):
     """The GLB at `path` with every image file it points at put inside, and
-    KHR_materials_unlit no longer required."""
+    KHR_materials_unlit taken off."""
     document, blob = read_glb(path.read_bytes())
     blob = bytearray(blob)
     for image in document.get("images", []):
@@ -80,12 +81,24 @@ def self_contained(path):
         image["mimeType"] = "image/png" if uri.lower().endswith(".png") else "image/jpeg"
     blob += b"\0" * (-len(blob) % 4)
     document["buffers"] = [{"byteLength": len(blob)}]
-    required = [e for e in document.get("extensionsRequired", []) if e != "KHR_materials_unlit"]
-    if required:
-        document["extensionsRequired"] = required
-    else:
-        document.pop("extensionsRequired", None)
-    return write_glb(document, bytes(blob))
+    return write_glb(lit(document), bytes(blob))
+
+
+def lit(document):
+    """`document` with KHR_materials_unlit taken off its materials and its
+    lists of extensions."""
+    for material in document.get("materials", []):
+        extensions = material.get("extensions", {})
+        extensions.pop("KHR_materials_unlit", None)
+        if not extensions:
+            material.pop("extensions", None)
+    for key in ("extensionsUsed", "extensionsRequired"):
+        left = [e for e in document.get(key, []) if e != "KHR_materials_unlit"]
+        if left:
+            document[key] = left
+        else:
+            document.pop(key, None)
+    return document
 
 
 def srgb_to_linear(c):
