@@ -4961,6 +4961,13 @@ yet (§21).
 
 For code written before: each change that breaks it, newest first.
 
+- **A field named as one of `GameObject`'s own is a warning**
+  (2026-11-16): `world`, `loaded`, `assets`, `input`, `debug`, `time`,
+  `parent`, `children`, `name`, `worldTransform`, `animator` and
+  `transform` can't be overridden. A `Player` with its own `animator`
+  field hid the engine's from everyone else who asked, quietly; rename
+  yours (`moves`, `label`).
+
 - **A `CharacterController` moved up has left the ground** (2026-11-16):
   after a `move` asked to go up that went up, `isGrounded` is false, as
   Unity's is, unless it hit something below. It used to read true, so a
