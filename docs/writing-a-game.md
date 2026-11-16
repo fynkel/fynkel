@@ -3305,7 +3305,12 @@ were written to at the start of the frame.
 **Queries** are on `physics`, which every object and behaviour has:
 `raycast`, `sphereCast`, `boxCast`, `capsuleCast` (and `…All`, nearest
 first), `overlapSphere`, `overlapBox`, `overlapCapsule`, and `checkSphere`,
-`checkBox`, `checkCapsule`. Each takes `layers:` and `triggers:`
+`checkBox`, `checkCapsule`. They take what Unity's take, in its order:
+`sphereCast(ray, radius, maxDistance:)`, `boxCast(center, halfExtents,
+direction, orientation:, maxDistance:)`, `capsuleCast(point1, point2,
+radius, direction, maxDistance:)` (`point1` and `point2` the centres of
+its ends), `overlapSphere(center, radius)`. A `Ray`'s direction is made
+unit length for you. Each takes `layers:` and `triggers:`
 (`QueryTriggers.ignore` goes through triggers), and sees colliders where
 their objects are now, moved this frame or not:
 
@@ -3419,7 +3424,10 @@ they hit.
 (`height:`, `radius:`, `center:`) that the game moves with
 `move(motion)`, and that goes as far as the world lets it. It slides
 along walls, walks up steps up to `stepOffset` (0.3 m) and slopes up to
-`slopeLimit` (`45.deg`), and stops at anything higher or steeper. Gravity is
+`slopeLimit` (`45.deg`), and stops at anything higher or steeper. It
+keeps `skinWidth` (8 cm, as Unity's) between itself and what it meets,
+so it stands that far above the ground: lower the model under it by as
+much (a child at `Vec3(0, -0.08, 0)`), or its feet float. Gravity is
 the game's to add, as in Unity, or `simpleMove(speed)` adds it. `move`
 returns `CollisionFlags`: `flags.has(CollisionFlags.below)` (the
 ground), `.sides`, `.above`; `isGrounded` and `velocity` say how the last
