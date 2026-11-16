@@ -24,4 +24,23 @@ void main() {
     final texture = await Texture2D.load(png);
     expect((texture.width, texture.height), (256, 128));
   });
+
+  // Playtest game 1: every 960 × 540 shot was 2 MB, whatever was in it, as
+  // the pixels went in uncompressed; macOS's sips made the same one 118 KB.
+  test('HeadlessView.png is compressed', () {
+    final world = World();
+    addTearDown(world.dispose);
+    world.add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 0, 4)),
+        components: [Camera()],
+      ),
+    );
+    world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A)))]));
+    final view = HeadlessView(world, width: 960, height: 540);
+    addTearDown(view.dispose);
+    world.update(1 / 60);
+    final png = view.png();
+    expect(png.length, lessThan(300 * 1000), reason: '${png.length} bytes; the pixels alone are ${960 * 540 * 4}');
+  });
 }

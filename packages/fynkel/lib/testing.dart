@@ -93,7 +93,7 @@ void expectImage(
   final file = File(path);
   if (bless ?? Platform.environment['FYNKEL_BLESS'] == '1') {
     file.parent.createSync(recursive: true);
-    file.writeAsBytesSync(encodePng(width, height, rgba, compress: true));
+    file.writeAsBytesSync(encodePng(width, height, rgba));
     return;
   }
   if (!file.existsSync()) {
@@ -122,8 +122,8 @@ void expectImage(
   if (off * 1000 <= width * height) return;
   final name = file.uri.pathSegments.last.replaceFirst(RegExp(r'\.png$'), '');
   final out = Directory(failures)..createSync(recursive: true);
-  File('${out.path}/$name.actual.png').writeAsBytesSync(encodePng(width, height, rgba, compress: true));
-  File('${out.path}/$name.diff.png').writeAsBytesSync(encodePng(width, height, diff, compress: true));
+  File('${out.path}/$name.actual.png').writeAsBytesSync(encodePng(width, height, rgba));
+  File('${out.path}/$name.diff.png').writeAsBytesSync(encodePng(width, height, diff));
   throw ImageDiffers(
     '$path: $off of ${width * height} pixels differ by more than 2/255 (4 near black), the worst by $worst; '
     'this picture and the difference are in ${out.path}',
