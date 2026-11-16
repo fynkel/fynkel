@@ -447,6 +447,84 @@ final class Ray {
   String toString() => 'Ray($origin, $direction)';
 }
 
+/// A box lined up with the axes, from its lowest corner [min] to its
+/// highest [max], as Unity's `Bounds`: what [Mesh.bounds] and
+/// [GameObject.bounds] give, to size a model or place it.
+final class Bounds {
+  /// The box from [min] to [max]; throws an [ArgumentError] when [min] is
+  /// past [max] on any axis.
+  factory Bounds(Vec3 min, Vec3 max) {
+    if (min.x > max.x || min.y > max.y || min.z > max.z) {
+      throw ArgumentError('Bounds: min $min is past max $max');
+    }
+    return Bounds._(min, max);
+  }
+
+  /// The box round [points]; throws an [ArgumentError] when there are
+  /// none.
+  factory Bounds.around(Iterable<Vec3> points) {
+    final iterator = points.iterator;
+    if (!iterator.moveNext()) throw ArgumentError('Bounds.around: no points');
+    var (lx, ly, lz) = (iterator.current.x, iterator.current.y, iterator.current.z);
+    var (hx, hy, hz) = (lx, ly, lz);
+    while (iterator.moveNext()) {
+      final p = iterator.current;
+      lx = math.min(lx, p.x);
+      ly = math.min(ly, p.y);
+      lz = math.min(lz, p.z);
+      hx = math.max(hx, p.x);
+      hy = math.max(hy, p.y);
+      hz = math.max(hz, p.z);
+    }
+    return Bounds._(Vec3(lx, ly, lz), Vec3(hx, hy, hz));
+  }
+
+  const Bounds._(this.min, this.max);
+
+  /// The lowest x, y and z.
+  final Vec3 min;
+
+  /// The highest x, y and z.
+  final Vec3 max;
+
+  /// Its middle.
+  Vec3 get center => (min + max) * 0.5;
+
+  /// How big it is along each axis.
+  Vec3 get size => max - min;
+
+  /// Its eight corners.
+  List<Vec3> get corners => [
+    for (final x in [min.x, max.x])
+      for (final y in [min.y, max.y])
+        for (final z in [min.z, max.z]) Vec3(x, y, z),
+  ];
+
+  /// Whether [point] is in it, or on its surface.
+  bool contains(Vec3 point) =>
+      point.x >= min.x &&
+      point.x <= max.x &&
+      point.y >= min.y &&
+      point.y <= max.y &&
+      point.z >= min.z &&
+      point.z <= max.z;
+
+  /// The box round this one and [other].
+  Bounds union(Bounds other) => Bounds._(
+    Vec3(math.min(min.x, other.min.x), math.min(min.y, other.min.y), math.min(min.z, other.min.z)),
+    Vec3(math.max(max.x, other.max.x), math.max(max.y, other.max.y), math.max(max.z, other.max.z)),
+  );
+
+  @override
+  bool operator ==(Object other) => other is Bounds && other.min == min && other.max == max;
+
+  @override
+  int get hashCode => Object.hash(min, max);
+
+  @override
+  String toString() => 'Bounds($min, $max)';
+}
+
 /// A flat surface without end, as Unity's `Plane`: the points [p] where
 /// `normal.dot(p) + distance == 0`.
 final class Plane {

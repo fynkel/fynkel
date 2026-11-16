@@ -1415,6 +1415,11 @@ class Tree extends GameObject {
 - `assets.instantiate(name)` gives a new copy of the model, a tree of objects
   sharing its meshes and textures with every other copy. Find its parts by
   name.
+- `copy.bounds` is the box in the world round what it draws: its `size`
+  is the model's size, to scale it to fit (`Vec3.all(1 / size.y)` makes
+  it a metre high), and its `center` less `copy.position` is how far its
+  middle is from its pivot, which a model needn't have in its middle.
+  `mesh.bounds` is a mesh's, in its own space.
 - Each file is loaded once, off the UI thread, and shared. It's freed when
   the last object that asked for it is destroyed.
 - `assets.preload([...])` loads ahead, so a level appears at once later.

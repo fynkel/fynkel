@@ -737,6 +737,16 @@ final class Mesh implements Finalizable {
     return scratch.count.value;
   }
 
+  /// The box round its positions, in its own space (Unity's
+  /// `Mesh.bounds`): a model's size, and where its pivot is in it. An
+  /// empty mesh's is nothing at the origin. [GameObject.bounds] gives an
+  /// object's in the world.
+  Bounds get bounds {
+    check(fy_mesh_bounds(_live, scratch.vec3, scratch.vec3b));
+    final (min, max) = (scratch.vec3.ref, scratch.vec3b.ref);
+    return Bounds(Vec3(min.x, min.y, min.z), Vec3(max.x, max.y, max.z));
+  }
+
   /// Three per triangle.
   int get indexCount {
     check(fy_mesh_counts(_live, scratch.count, scratch.count2));

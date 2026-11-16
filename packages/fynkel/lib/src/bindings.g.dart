@@ -266,6 +266,9 @@ external int fy_material_values_set(
 @ffi.Native<ffi.Int32 Function(ffi.Pointer<FyWorld>, ffi.Pointer<FyMesh>, ffi.Pointer<ffi.Uint64>)>(isLeaf: true)
 external int fy_mesh_add(ffi.Pointer<FyWorld> world, ffi.Pointer<FyMesh> mesh, ffi.Pointer<ffi.Uint64> out);
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyMesh>, ffi.Pointer<FyVec3>, ffi.Pointer<FyVec3>)>(isLeaf: true)
+external int fy_mesh_bounds(ffi.Pointer<FyMesh> mesh, ffi.Pointer<FyVec3> out_min, ffi.Pointer<FyVec3> out_max);
+
 @ffi.Native<
   ffi.Int32 Function(
     ffi.Pointer<ffi.Pointer<FyMesh>>,
@@ -999,7 +1002,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 55;
+const int FY_ABI_VERSION = 56;
 
 const int FY_APPLE_MORE = 2;
 

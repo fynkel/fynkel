@@ -722,6 +722,29 @@ class GameObject with _Moving {
     return _worldTransform = above._then(local);
   }
 
+  /// The box in the world round what it and its shown children draw:
+  /// each [MeshRenderer]'s [Mesh.bounds], turned, scaled and placed as
+  /// its object is (Unity's `Renderer.bounds`, put together). Its size is
+  /// a model's size; its [Bounds.center] less [position], how far the
+  /// middle is from the pivot. Null when nothing there draws a mesh. A
+  /// skinned mesh counts as it is at rest. Worked out each time it's read.
+  @nonVirtual
+  Bounds? get bounds {
+    Bounds? all;
+    void visit(GameObject object) {
+      if (object.get<MeshRenderer>() case MeshRenderer(enabled: true, :final mesh?)) {
+        final placed = Bounds.around(mesh.bounds.corners.map(object.transformPoint));
+        all = all?.union(placed) ?? placed;
+      }
+      for (final child in object.children) {
+        if (child.active) visit(child);
+      }
+    }
+
+    visit(this);
+    return all;
+  }
+
   /// What plays the model's clips on this copy of it ([Animator]): for an
   /// object made by [Model.instantiate] (or [Assets.instantiate]) from a
   /// model with clips, once it's added; null for any other object, and
