@@ -57,6 +57,29 @@ void main() {
     expect(frame.rgba[i], greaterThan(frame.rgba[i + 2]), reason: 'the orange cube in the middle');
   });
 
+  // Playtest game 4: a game that frames its camera to the view's shape
+  // reads world.input's size, which FynkelView gives; a HeadlessView left
+  // it 0 × 0.
+  test("a headless view gives the world's input its size, unless something else did", () {
+    final world = World();
+    addTearDown(world.dispose);
+    final view = HeadlessView(world, width: 390, height: 844);
+    addTearDown(view.dispose);
+    expect((world.input.width, world.input.height), (390, 844));
+    view.resize(844, 390);
+    expect((world.input.width, world.input.height), (844, 390), reason: 'turned on its side');
+
+    // A world sized by its view on screen keeps that size when a headless
+    // one draws it too, as for a picture of it.
+    final shown = World();
+    addTearDown(shown.dispose);
+    shown.input.simulate.resize(400, 300);
+    final picture = HeadlessView(shown, width: 64, height: 64);
+    addTearDown(picture.dispose);
+    picture.resize(32, 32);
+    expect((shown.input.width, shown.input.height), (400, 300));
+  });
+
   test("a view draws from its own camera, and black while it's gone", () {
     final scene = stage1();
     final world = scene.world;
