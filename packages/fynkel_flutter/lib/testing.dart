@@ -12,8 +12,11 @@
 ///
 /// A game's frames go on for ever, so `pumpAndSettle` never settles while
 /// one is on screen: [FynkelTester.frames] and [FynkelTester.run] pump
-/// frames of a 60th of a second instead.
+/// frames of a 60th of a second instead. A game that loads files is
+/// waited for with [FynkelTester.loaded].
 library;
+
+import 'dart:async';
 
 import 'package:flutter/widgets.dart' show StatefulElement;
 import 'package:flutter_test/flutter_test.dart';
@@ -22,7 +25,7 @@ import 'package:fynkel/fynkel.dart';
 import 'src/fynkel_game.dart';
 import 'src/fynkel_view.dart';
 
-/// [frames], [run] and [game] on a [WidgetTester].
+/// [frames], [run], [loaded] and [game] on a [WidgetTester].
 extension FynkelTester on WidgetTester {
   /// Pumps [count] frames, a 60th of a second each: the world runs as on a
   /// 60 Hz display, so once a frame at its default `targetFrameRate` of
@@ -37,6 +40,41 @@ extension FynkelTester on WidgetTester {
   /// Pumps [seconds] of frames, 60 a second, rounded as `world.run`
   /// rounds them.
   Future<void> run(double seconds) => frames((seconds * 60).round());
+
+  /// Waits until [object] (the [game] on screen unless given) has loaded
+  /// what its `onLoad` loads, and everything added then, and throws its
+  /// load's error if it failed: `await tester.loaded()`. The files are
+  /// read in real time, which a widget test's frames don't move, so it
+  /// waits a little in real time and pumps a frame, over and over: the
+  /// game runs meanwhile, as it would. Throws a [TimeoutException] after
+  /// [timeout] of real time.
+  ///
+  /// `await tester.runAsync(() => game.loaded)` would wait for ever: the
+  /// game's `onLoad` goes on after each `await` only when a frame is
+  /// pumped.
+  Future<void> loaded([GameObject? object, Duration timeout = const Duration(seconds: 30)]) async {
+    final target = object ?? game<GameObject>();
+    (Object, StackTrace)? failed;
+    var done = false;
+    unawaited(
+      target.loaded.then(
+        (_) => done = true,
+        onError: (Object error, StackTrace stack) {
+          failed = (error, stack);
+          done = true;
+        },
+      ),
+    );
+    final waited = Stopwatch()..start();
+    while (!done) {
+      if (waited.elapsed > timeout) {
+        throw TimeoutException('$target had not loaded after ${timeout.inSeconds} s', timeout);
+      }
+      await runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
+      await frames();
+    }
+    if (failed case (final error, final stack)) Error.throwWithStackTrace(error, stack);
+  }
 
   /// The game of the first [FynkelView] on screen, as a [T]: the root it
   /// shows ([FynkelViewState.root]), made by the game's `FynkelApp` or

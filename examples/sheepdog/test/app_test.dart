@@ -16,15 +16,8 @@ void main() {
     expect(find.text('Sheepdog'), findsOneWidget);
     await tester.tap(find.text('Play'));
     await tester.run(0.5);
-    // The sheep and the dog load their models: files read outside the
-    // test's clock, and the objects appearing in the world's frames.
-    var loaded = false;
-    tester.game<SheepdogGame>().loaded.then((_) => loaded = true);
-    for (var i = 0; !loaded && i < 100; i++) {
-      await tester.runAsync(() => Future<void>.delayed(const Duration(milliseconds: 20)));
-      await tester.pump(const Duration(microseconds: 16667));
-    }
-    expect(loaded, isTrue, reason: 'the models loaded');
+    // The sheep and the dog load their models.
+    await tester.loaded();
     await tester.run(0.5);
     expect(find.byType(FynkelView), findsNWidgets(2), reason: 'the game and its minimap');
   }

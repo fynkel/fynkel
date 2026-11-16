@@ -3802,6 +3802,9 @@ class TeamChip extends StatelessWidget {
 ```
 
 A test sets the theme itself: `world.theme = gameTheme(Brightness.dark)`.
+`world.theme` is package:fynkel_flutter's (an extension, `WorldTheme`),
+so a test of a plain `World` imports it:
+`import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldTheme;`.
 
 **Widgets in the world.** A health bar over an enemy, a name tag, a
 damage number or a "press E" hint is a Flutter widget on the object: a
@@ -4497,6 +4500,19 @@ the next frame, as on a device: a tap reaches the game in the frame after
 it. A page that slides in or out (a settings page, a dialog) takes about
 a third of a second, so `tester.run(0.5)` after opening or closing one,
 not a few frames.
+
+**A game that loads files** (`assets.instantiate`, a texture, a sound)
+reads them in real time, which a widget test's frames don't move:
+`await tester.loaded()` waits for the game on screen to load, pumping
+frames meanwhile, and throws if its load failed (`tester.loaded(level)`
+waits for another object). `await tester.runAsync(() => game.loaded)`
+would wait for ever: the game's `onLoad` goes on after each `await` only
+when a frame is pumped.
+
+**flutter_test has a `find` of its own**, and in a test file it hides
+`GameObject.find`: in a game object written in a test, `find('cube')`
+is flutter_test's (`The method 'call' isn't defined for the type
+'CommonFinders'`). Say `this.find('cube')` there.
 
 `world.run(seconds)` moves on in whole frames of 1/60 s, so a routine's
 `wait(0.5)` ends on the first frame at or past half a second: test what
