@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 54
+#define FY_ABI_VERSION 55
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -2712,6 +2712,16 @@ FyStatus fy_view_lose_device(const struct FyView *view);
 //
 // `view` is null or live.
 FyStatus fy_view_fail_worker(const struct FyView *view);
+
+// For tests only: makes the view's next `fy_view_frame` panic while it
+// copies the world, as a bug in the extract would; that frame returns
+// `FY_STATUS_PANIC`. Runs only in a test process (`FLUTTER_TEST` or
+// `FYNKEL_TEST_HOOKS` set); `FY_STATUS_UNSUPPORTED` otherwise.
+//
+// # Safety
+//
+// `view` is null or live.
+FyStatus fy_view_panic_extract(const struct FyView *view);
 
 // Lets go of the images `view` draws through, between frames and without
 // waiting for one, for when the system is short of memory and the view

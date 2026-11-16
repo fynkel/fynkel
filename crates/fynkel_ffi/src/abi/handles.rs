@@ -94,6 +94,8 @@ impl FyView {
 pub(super) struct Clock {
     pub(super) extract: Extract,
     pub(super) last_number: u64,
+    /// For tests (`fy_view_panic_extract`): the next extract panics.
+    pub(super) panic_next: bool,
 }
 
 /// `p` as a reference, or an error when it's null.

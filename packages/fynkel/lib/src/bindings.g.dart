@@ -914,6 +914,9 @@ external int fy_view_new_headless(
   ffi.Pointer<ffi.Pointer<FyView>> out,
 );
 
+@ffi.Native<ffi.Int32 Function(ffi.Pointer<FyView>)>(isLeaf: true)
+external int fy_view_panic_extract(ffi.Pointer<FyView> view);
+
 @ffi.Native<
   ffi.Int32 Function(
     ffi.Pointer<FyView>,
@@ -996,7 +999,7 @@ external int fy_world_transform_get_many(
   ffi.Pointer<FyTransform> out,
 );
 
-const int FY_ABI_VERSION = 54;
+const int FY_ABI_VERSION = 55;
 
 const int FY_APPLE_MORE = 2;
 
