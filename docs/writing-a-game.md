@@ -3933,7 +3933,9 @@ A page pushed over this one with `Navigator` (or a dialog) isn't below
 its `FynkelGame`, so `FynkelGame.of` there doesn't find it: give the page
 the game (`SettingsPage(game)`). A `FynkelGame` keeps the game it
 started with when it's built again with another `make`; give it a `Key`
-to start another (`key: ValueKey(level)`).
+to start another (`key: ValueKey(level)`). Nothing warns you: a closure
+made again in a build (`() => Level(number: level)`) is a new function
+every time, whether or not it makes something else.
 
 Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
@@ -4165,8 +4167,14 @@ shows the name tags placed by its own camera. The lab's "Minimap" and
   now: a new root, a new world. That's how a changed `onLoad`, field or
   routine takes effect, in a second, without restarting the app.
 - On a phone, which has no F5, `FynkelApp(Game.new, restartOnReload:
-  true)` makes every hot reload start the game over.
-- **Hot restart** (`R`) starts the whole app again.
+  true)` makes every hot reload start the game over; a `FynkelGame` (§17)
+  takes `restartOnReload: true` too.
+- **Hot restart** (`R`) starts the whole app again. What the engine
+  holds for the old app is freed, except a load in progress at that
+  moment (`assets.instantiate`, `preload`, a texture or sound): its
+  native memory stays until the app stops. Only a debug build hot
+  restarts, so a shipped game never meets this; on a phone, restarting
+  in the middle of a big `preload` again and again adds up.
 
 **Starting a level over** inside the game (a "try again" button) needs
 no new world: destroy the object the level hangs from and add a new one,

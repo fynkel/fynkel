@@ -47,8 +47,12 @@ import 'world_listenables.dart' show WorldTheme;
 /// page, unless the game is a [FynkelApp]'s, whose pages all reach it.
 ///
 /// It keeps the game it started with when it's built again with another
-/// [make] (a debug build says so): give it a new `key` to start another,
-/// or [FynkelGameState.restart] it.
+/// [make]: give it a new `key` to start another (`key:
+/// ValueKey(product.id)`), or [FynkelGameState.restart] it. A debug build
+/// says so only for a [make] of another root type (`Level2.new` for
+/// `Level1.new`): a closure made again in a build (`() =>
+/// Level(number: 3)`) is a new function each time, so a change of what it
+/// makes can't be told from no change.
 class FynkelGame<T extends GameObject> extends StatefulWidget {
   /// A game whose root [make] makes, shown by what [builder] builds.
   const FynkelGame(this.make, {super.key, required this.builder, this.source, this.restartOnReload = false});
