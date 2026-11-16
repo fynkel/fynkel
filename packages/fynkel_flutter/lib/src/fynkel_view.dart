@@ -86,6 +86,21 @@ void forgetReset() => _resetSent = false;
 final _byTexture = <int, FynkelViewState>{};
 bool _listening = false;
 
+/// Sets [world]'s [World.applicationPaused] for the app's [state]: away
+/// when hidden or paused, back when resumed. Inactive (on the way) and
+/// detached (gone) leave it as it was. Not exported.
+void tellLifecycle(World world, AppLifecycleState? state) {
+  if (world.isDisposed) return;
+  switch (state) {
+    case AppLifecycleState.hidden || AppLifecycleState.paused:
+      world.applicationPaused = true;
+    case AppLifecycleState.resumed:
+      world.applicationPaused = false;
+    case AppLifecycleState.inactive || AppLifecycleState.detached || null:
+      break;
+  }
+}
+
 /// The views in the tree, for the plugin's calls about them all.
 final _live = <FynkelViewState>{};
 
@@ -613,16 +628,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final world = widget.world ?? _rootWorld;
-    if (world == null || world.isDisposed) return;
-    switch (state) {
-      case AppLifecycleState.hidden || AppLifecycleState.paused:
-        world.applicationPaused = true;
-      case AppLifecycleState.resumed:
-        world.applicationPaused = false;
-      case AppLifecycleState.inactive || AppLifecycleState.detached:
-        // On the way, or gone: what it was stays.
-        break;
-    }
+    if (world != null) tellLifecycle(world, state);
   }
 
   /// The system is short of memory: the world's told

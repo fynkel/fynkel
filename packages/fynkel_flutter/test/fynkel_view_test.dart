@@ -435,6 +435,21 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  // A game whose view is gone for now (a loading page, a shop pushed in its
+  // place) still hears the app go: its music stops and onApplicationPause
+  // saves (playtest audit).
+  testWidgets("a FynkelGame showing no view hears the app go away and come back", (tester) async {
+    final binding = tester.binding;
+    await tester.pumpWidget(FynkelGame(Tiny.new, builder: (context, game) => const SizedBox()));
+    final world = tester.state<FynkelGameState<Tiny>>(find.byType(FynkelGame<Tiny>)).world;
+    expect(world.applicationPaused, isFalse);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(world.applicationPaused, isTrue);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(world.applicationPaused, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a memory warning tells the world once, and views let go of their images only while away', (
     tester,
   ) async {

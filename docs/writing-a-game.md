@@ -890,7 +890,7 @@ Each object and behaviour gets these calls, in the order they were added:
 | `onLateUpdate` | Every frame, after every `onUpdate`, the routines and the tweens: for what follows where things ended up. |
 | `onDisable` | Each time it stops being shown, and before `onDestroy`. |
 | `onDestroy` | Once, when it's destroyed. |
-| `onApplicationPause` | When the app goes to the background (`true`) and comes back (`false`): save here, as the app may be closed while it's away. `world.applicationPaused` says which. |
+| `onApplicationPause` | When the app goes to the background (`true`) and comes back (`false`): save here, as the app may be closed while it's away. `world.applicationPaused` says which. A `FynkelApp`'s or `FynkelGame`'s world hears it even while none of its views is showing; a `World` you make yourself hears it only while a `FynkelView` shows it. |
 
 A frame goes: input → starts → fixed steps → updates → routines and
 tweens → late updates → cameras → drawing. This order is fixed and
