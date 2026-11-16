@@ -2014,9 +2014,12 @@ this (examples/lab/lib/scenes/flat_text.dart and sprites.dart).
 
 ## 13. Animation
 
-A model's animations come with it: `model.clips` lists them, and each
-copy's `animator` plays them, as Unity gives a model its Animator. Which
-clip plays when is the game's code, not a state-machine file.
+A model's animations come with it: each copy's `animator` plays them,
+as Unity gives a model its Animator, and `animator.clipNames` lists
+them (a name it hasn't got throws, listing them too). Which clip plays
+when is the game's code, not a state-machine file. The examples here
+use examples/garden's `character.glb`, whose clips are `idle`, `walk`,
+`sprint`, `pick-up`, `emote-yes` and more.
 
 ### Playing clips
 
@@ -2034,9 +2037,9 @@ class Hero extends GameObject {
     _animator.at('walk', 0.3, () => print('step')); // a footstep
   }
 
-  void jump() {
+  void pickUp() {
     _animator
-      ..crossFade('jump', seconds: 0.1, loop: false)
+      ..crossFade('pick-up', seconds: 0.1, loop: false)
       ..onEnd = (clip) => _animator.crossFade('idle');
   }
 
@@ -2044,7 +2047,7 @@ class Hero extends GameObject {
   void onUpdate() {
     super.onUpdate();
     position += _velocity * time.delta;
-    if (_animator.current != 'jump') {
+    if (_animator.current != 'pick-up') {
       _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', seconds: 0.2);
     }
   }
@@ -2054,7 +2057,7 @@ class Hero extends GameObject {
 - `play(name)` starts a clip at once; `crossFade(name, seconds:)` fades
   to it from what plays. Asking for the clip that's already playing
   changes nothing, so an update can say what it wants every frame.
-- `loop: false` holds a clip's last pose at its end (a jump, a fall) and
+- `loop: false` holds a clip's last pose at its end (a pick-up, a fall) and
   calls `onEnd`; clips loop unless told not to.
 - `speed` (1 as made, 0 paused, negative backwards), `time`, `length`,
   `current` (a clip's name or a blend's), `isPlaying(name)` and
@@ -2164,7 +2167,7 @@ class Runner extends GameObject {
 
 Put together, a character is a blend for its legs and a layer or two
 over it. This one walks where it's told: it runs to a place far away,
-slows to a walk near it and stands there, and waves from the waist up
+slows to a walk near it and stands there, and nods yes from the waist up
 without stopping. examples/coins's player is the same, with a coin in
 its hand:
 
@@ -2189,7 +2192,7 @@ class Farmer extends GameObject {
 
   void walkTo(Vec3 point) => _goal = point.flat;
 
-  void wave() => _animator.layer(1).crossFade('wave', seconds: 0.1, loop: false);
+  void nod() => _animator.layer(1).crossFade('emote-yes', seconds: 0.1, loop: false);
 
   @override
   void onUpdate() {
@@ -2200,13 +2203,18 @@ class Farmer extends GameObject {
     _speed += (wanted - _speed) * (6 * time.delta).clamp(0, 1);
     if (distance >= 0.05) {
       final step = to.normalized * (_speed * time.delta).clamp(0, distance);
-      transform = Transform(position: transform.position + step, rotation: Quat.lookRotation(to));
+      // A glTF model faces +Z, and lookRotation turns -Z (forward) the way
+      // given: so the other way.
+      transform = Transform(position: transform.position + step, rotation: Quat.lookRotation(-to));
     }
     _animator.blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: _speed);
   }
 }
 ```
 
+- **A model faces +Z**, as glTF files are made, while an object's
+  forward is −Z (§7): `Quat.lookRotation(-to)` turns its face to `to`.
+  With `lookRotation(to)` it walks backwards.
 - The speed it moves at is the number the blend gets, and the
   thresholds are the speeds the clips' feet go: the feet don't slide at
   any speed between.
