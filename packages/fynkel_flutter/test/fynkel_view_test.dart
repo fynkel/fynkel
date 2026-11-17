@@ -2451,6 +2451,32 @@ void main() {
       await settle(tester);
     });
 
+    // Game 7: a pause button pauses the game at once, then pushes its page;
+    // under it the game was drawn at its full rate, 54 a second on a phone.
+    testWidgets('a game that paused itself before a page covered it is drawn 10 times a second under it', (
+      tester,
+    ) async {
+      final dts = <double>[];
+      await tester.pumpWidget(app(onFrame: dts.add));
+      await settle(tester);
+      world.paused = true;
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (_) => const Text('menu'))));
+      await settle(tester);
+      dts.clear();
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(inInclusiveRange(9, 11)), reason: 'about 10 in a second');
+      Navigator.of(page).pop();
+      await settle(tester);
+      expect(world.paused, isTrue, reason: "the pause is the game's");
+      dts.clear();
+      for (var i = 0; i < 120; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(dts, hasLength(120), reason: 'uncovered, paused by the game, at its rate');
+    });
+
     // The audit: two views of one world share one answer to "is a frame
     // due", so a covered view, slowed to 10 a second, might hold the view
     // on the page over it to its rate.

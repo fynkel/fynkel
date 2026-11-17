@@ -970,10 +970,11 @@ class FynkelViewState extends State<FynkelView> with WidgetsBindingObserver {
     // Not one of the world's frames ([World.targetFrameRate]): nothing runs
     // or is drawn, and the last picture stays. Paused under a menu, the
     // picture doesn't change, so it's drawn only [_coveredFrameRate] times
-    // a second.
+    // a second, whoever paused it: the view, or the game before the menu
+    // came.
     if (!world.isDisposed) {
       final rate = world.targetFrameRate;
-      final covered = _pausedIt && world.paused && (rate == 0 || rate > _coveredFrameRate);
+      final covered = _covered && world.paused && (rate == 0 || rate > _coveredFrameRate);
       if (!clock.due(covered ? _coveredFrameRate : rate)) return;
     }
     final last = _lastMicros;
