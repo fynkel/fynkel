@@ -312,8 +312,9 @@ pub struct Quality {
 }
 
 impl Quality {
-    /// The cheapest: straight to the screen, hard shadows from the sun and
-    /// one spot light, no effects.
+    /// The cheapest: straight to the screen, soft shadows from the sun to
+    /// 20 m and from one spot light, no effects. One map of 1024 over 40 m
+    /// gave walls saw-toothed shadows (playtest game 7b).
     pub const LOW: Self = Self {
         samples: 4,
         hdr: false,
@@ -324,10 +325,10 @@ impl Quality {
         shadows: Some(ShadowLevel {
             cascades: 1,
             map_size: 1024,
-            filter: ShadowFilter::Hard,
+            filter: ShadowFilter::Soft,
             spot_maps: 1,
             spot_map_size: 512,
-            distance: 40.0,
+            distance: 20.0,
         }),
     };
 

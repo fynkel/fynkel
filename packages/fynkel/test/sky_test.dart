@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:fynkel/fynkel.dart';
@@ -30,13 +31,35 @@ List<int> pixel(({int number, Uint8List rgba}) frame, int x, int y) {
 void main() {
   const blue = Color.rgb(0.2, 0.4, 0.8);
 
+  test('a new world has a daylight sky, blue above and pale at the horizon, that lights it', () {
+    final world = World();
+    addTearDown(world.dispose);
+    expect(world.sky, same(Sky.daylight), reason: 'as a new scene in Unity has a sky');
+    world.add(GameObject(transform: Transform.lookAt(Vec3(0, 0.3, 0), Vec3(0, 0.6, -1)), components: [Camera()]));
+    final view = HeadlessView(world, width: 64, height: 64);
+    addTearDown(view.dispose);
+    final frame = view.read(view.frame());
+    final (top, low) = (pixel(frame, 32, 0), pixel(frame, 32, 63));
+    expect(top[2], greaterThan(top[0] + 40), reason: 'blue overhead: $top');
+    expect(low.reduce(math.min), greaterThan(top.reduce(math.min)), reason: 'paler toward the horizon: $low, $top');
+
+    // What the sun misses is lit by the sky, not black.
+    world.add(GameObject(components: [MeshRenderer(Mesh.cube(), Material(color: Color.white))]));
+    world.camera!.gameObject.transform = Transform.lookAt(Vec3(0, 0, 3), Vec3.zero);
+    final lit = pixel(view.read(view.frame()), 32, 32);
+    expect(lit.reduce(math.min), greaterThan(60), reason: 'a white cube with no light but the sky: $lit');
+
+    world.sky = null;
+    final dark = pixel(view.read(view.frame()), 32, 32);
+    expect(dark.reduce(math.max), lessThan(10), reason: 'and none without it: $dark');
+  });
+
   test('a sky is behind everything unless the camera leaves it out', () {
     final world = stage1().world;
     final view = HeadlessView(world, width: 64, height: 64);
     addTearDown(view.dispose);
     addTearDown(world.dispose);
 
-    expect(world.sky, isNull, reason: 'none in a new world: the camera\'s clear colour');
     final sky = Sky.gradient(zenith: blue, horizon: blue, ground: blue);
     world.sky = sky;
     expect(world.sky, same(sky));

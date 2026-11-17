@@ -8,7 +8,8 @@ import 'golden.dart';
 
 /// The stage 1 scene, written the way a game writes it.
 ({World world, GameObject cube, Material orange}) stage1([World? into]) {
-  final world = into ?? World();
+  // As the Rust tests' world: no sky, and a sun without shadows.
+  final world = (into ?? World())..sky = null;
   world.add(
     GameObject(
       transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
@@ -19,7 +20,7 @@ import 'golden.dart';
   world.add(
     GameObject(
       transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-      components: [Light.sun()],
+      components: [Light.sun(shadows: false)],
     ),
   );
   world.add(GameObject(components: [Light.ambient(intensity: 0.15)]));
@@ -72,7 +73,7 @@ void main() {
   test('an inactive object and everything below it are missing from the picture', () {
     // A rig made first, so its camera would win, with a cube right in front
     // of the stage 1 camera, then the stage 1 scene around it.
-    final world = World();
+    final world = World()..sky = null;
     final rig = world.add(GameObject()..active = false);
     rig
       ..add(
@@ -101,7 +102,7 @@ void main() {
 
   test('a lamp and a spotlight light what they reach, in colour, and a lamp moved away lights nothing', () {
     // A grey wall facing the camera, dark but for the lights put in.
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(
@@ -149,7 +150,7 @@ void main() {
   });
 
   test('a sun with shadows darkens the floor under a cube, unless the cube casts none or the floor takes none', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(
@@ -204,7 +205,7 @@ void main() {
   });
 
   test("every light's shadows turned off while drawing, then on again, between frames", () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(

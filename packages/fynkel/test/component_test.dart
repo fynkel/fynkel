@@ -191,6 +191,13 @@ void main() {
     expect(said[0], allOf(contains('turned'), contains('5 suns')));
   });
 
+  test('a sun casts shadows unless told not to; lamps and spots only when asked', () {
+    expect(Light.sun().shadows, isTrue, reason: "as a new scene's sun in Unity does");
+    expect(Light.sun(shadows: false).shadows, isFalse);
+    expect(Light.spot().shadows, isFalse);
+    expect(Light.point().shadows, isFalse);
+  });
+
   test('a spot light wider than 150° is refused shadows, saying why', () {
     // Hardening R7: its map can't be wider than 160°, and outside it a
     // surface would be lit as if nothing stood in the way.

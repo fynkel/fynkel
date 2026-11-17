@@ -16,7 +16,7 @@ void main() {
   late World world;
   late HeadlessView view;
   setUp(() {
-    world = World();
+    world = World()..sky = null;
     world.add(
       GameObject(
         transform: Transform(position: Vec3(0, 0, 5)),
@@ -126,7 +126,7 @@ void main() {
   });
 
   test('a font serves texts in two worlds', () {
-    final other = World();
+    final other = World()..sky = null;
     addTearDown(other.dispose);
     world.add(GameObject(components: [TextRenderer('a', font: font)]));
     other.add(GameObject(components: [TextRenderer('b', font: font)]));

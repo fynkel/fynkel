@@ -8,7 +8,7 @@ import 'model_test.dart' show glb;
 
 /// A grey wall facing a camera at 3 m, lit by [lights], drawn 64 × 64.
 ({World world, GameObject wall, List<int> Function() centre}) wall(List<Light> lights) {
-  final world = World();
+  final world = World()..sky = null;
   addTearDown(world.dispose);
   world.add(
     GameObject(
@@ -80,7 +80,7 @@ void main() {
   });
 
   test('a camera turned off draws nothing: the next one draws, and turned on it draws again', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final red = Camera(clearColor: Color.rgb(1, 0, 0));
     final blue = Camera(clearColor: Color.rgb(0, 0, 1));
@@ -100,7 +100,7 @@ void main() {
   });
 
   test("a model part's renderer can be changed and turned off and on, and still draws its mesh", () async {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final model = await Model.load(glb('Box.glb'));
     final box = world.add(model.instantiate());

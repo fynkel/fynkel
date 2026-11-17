@@ -140,10 +140,12 @@ class Scale extends GameObject {
         components: [Camera()],
       ),
     );
+    // As when its numbers were first taken: no sky, a sun without shadows.
+    world.sky = null;
     add(
       GameObject(
         name: 'sun',
-        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))],
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3), shadows: false)],
       ),
     );
     add(GameObject(name: 'sky', components: [Light.ambient(intensity: 0.3)]));

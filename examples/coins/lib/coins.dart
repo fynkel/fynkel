@@ -132,9 +132,12 @@ class Level extends GameObject {
       return Vec3(math.cos(angle) * radius, 0, math.sin(angle) * radius);
     }
 
+    // Its own look, from before a new world had a sky and a sun shadows:
+    // the camera's clear colour behind, an ambient light, no shadows.
+    world.sky = null;
     add(
       GameObject(
-        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3), color: sun, intensity: 2.5)],
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.3), color: sun, intensity: 2.5, shadows: false)],
       ),
     );
     add(GameObject(components: [Light.ambient(color: sky, intensity: 0.6)]));

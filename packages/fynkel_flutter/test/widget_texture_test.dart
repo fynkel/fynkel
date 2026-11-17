@@ -11,7 +11,7 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 void main() {
   /// [texture] on a sprite filling a 64 × 32 view, drawn: its pixels.
   List<int> drawn(Texture2D texture) {
-    final world = World();
+    final world = World()..sky = null;
     world.add(
       GameObject(
         transform: Transform(position: Vec3(0, 0, 5)),

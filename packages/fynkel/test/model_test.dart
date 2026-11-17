@@ -21,7 +21,7 @@ double f32(int bits) => (ByteData(4)..setUint32(0, bits)).getFloat32(0);
 /// centre from [from], far enough to fit the bounding sphere, under a sun
 /// from over its left shoulder.
 Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) async {
-  final world = World();
+  final world = World()..sky = null;
   addTearDown(world.dispose);
   final model = await Model.load(glb(name));
   world.add(model.instantiate());
@@ -49,7 +49,7 @@ Future<Uint8List> render(String name, Vec3 centre, double radius, Vec3 from) asy
   world.add(
     GameObject(
       transform: Transform(rotation: Quat.lookRotation(-shoulder)),
-      components: [Light.sun()],
+      components: [Light.sun(shadows: false)],
     ),
   );
   world.add(GameObject(components: [Light.ambient(intensity: 0.25)]));
@@ -113,7 +113,7 @@ void main() {
   });
 
   test('a spawned model is a tree of named objects drawing its meshes and materials', () async {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final truck = await Model.load(glb('CesiumMilkTruck.glb'));
     final root = world.add(truck.instantiate(transform: Transform(position: Vec3(2, 0, 0))));
@@ -128,7 +128,7 @@ void main() {
   });
 
   test('a model\'s parts given behaviours update in their places, children last whatever the order put on', () async {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final truck = await Model.load(glb('CesiumMilkTruck.glb'));
     final root = world.add(truck.instantiate());
@@ -144,7 +144,7 @@ void main() {
   });
 
   test('copies of a model share its GPU data and its materials', () async {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(

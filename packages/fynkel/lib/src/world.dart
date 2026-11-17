@@ -61,6 +61,7 @@ final class World implements Finalizable {
     ensureEngine();
     _pointer = fy_world_new();
     _finalizer.attach(this, _pointer.cast(), detach: this);
+    sky = Sky.daylight;
   }
 
   static final _finalizer = NativeFinalizer(
@@ -535,11 +536,15 @@ final class World implements Finalizable {
   // doesn't draw what was asked ([_checkEffects]).
   var _bloomAsked = false, _aoAsked = false, _viewed = false, _onScreen = false;
   var _warnedBloom = false, _warnedAo = false;
+  // What's been said in this run, by effect and quality name: a test file
+  // making a world at low for each test says it once, not once a test.
+  static final _said = <String>{};
 
   /// Says once, in a debug build, for each of bloom and ambient occlusion,
   /// when a camera asks for it and the quality drawn doesn't draw it: the
-  /// world's own, or else the device's level's. Only once a view draws it:
-  /// a test's world, drawn by none, stays quiet.
+  /// world's own, or else the device's level's. Once a world, and once a
+  /// run for each quality. Only once a view draws it: a test's world, drawn
+  /// by none, stays quiet.
   void _checkEffects() {
     if (const bool.fromEnvironment('dart.vm.product')) return;
     final bloom = _bloomAsked && !_warnedBloom, ao = _aoAsked && !_warnedAo;
@@ -551,18 +556,19 @@ final class World implements Finalizable {
         'purpose; to draw it, use a quality with $field: true.';
     if (bloom && !quality.bloom) {
       _warnedBloom = true;
-      print(says('bloom', 'bloom'));
+      if (_said.add('bloom ${quality.name}')) print(says('bloom', 'bloom'));
     }
     if (ao && !quality.ambientOcclusion) {
       _warnedAo = true;
-      print(says('ambient occlusion', 'ambientOcclusion'));
+      if (_said.add('ambient occlusion ${quality.name}')) print(says('ambient occlusion', 'ambientOcclusion'));
     }
   }
 
   Quality? _quality;
 
-  /// What's behind everything, and the light it gives ([Sky]): null, as a
-  /// new world has, for none, so the camera's [Camera.clearColor] shows.
+  /// What's behind everything, and the light it gives ([Sky]): a new world
+  /// has [Sky.daylight]; null for none, so the camera's [Camera.clearColor]
+  /// shows and only the lights light the scene.
   /// From the views' next frame; a new gradient or image costs each view
   /// a few milliseconds of GPU work, once.
   Sky? get sky => _sky;
@@ -1064,9 +1070,9 @@ final class Quality {
   });
 
   /// The cheapest, for slow GPUs and ones not known: drawn straight to the
-  /// screen, at three quarters of its pixels across, hard shadows from the
-  /// sun and one spot light, no bloom, no ambient occlusion, lamps without
-  /// highlights.
+  /// screen, at three quarters of its pixels across, soft shadows from the
+  /// sun to 20 m and from one spot light, no bloom, no ambient occlusion,
+  /// lamps without highlights.
   static const low = Quality(
     name: 'low',
     hdr: false,
@@ -1074,8 +1080,7 @@ final class Quality {
     lampHighlights: false,
     shadowCascades: 1,
     shadowResolution: 1024,
-    shadowSoftness: ShadowSoftness.hard,
-    shadowDistance: 40,
+    shadowDistance: 20,
     spotShadows: 1,
     spotShadowResolution: 512,
     renderScale: 0.75,
@@ -1154,7 +1159,9 @@ final class Quality {
   final ShadowSoftness shadowSoftness;
 
   /// How far from the camera the sun's shadows reach, in metres (or the
-  /// camera's far plane, if nearer). They fade out before it.
+  /// camera's far plane, if nearer). They fade out before it. Their
+  /// sharpness is the map's texels spread over it: half the distance,
+  /// twice as sharp. Keep it to what the game needs to see shadowed.
   final double shadowDistance;
 
   /// The most spot lights casting shadows in a frame, 0 to 4: the ones

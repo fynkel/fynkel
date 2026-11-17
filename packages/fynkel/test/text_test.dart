@@ -75,7 +75,7 @@ void main() {
   });
 
   test('text in a scene', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(
@@ -86,7 +86,7 @@ void main() {
     world.add(
       GameObject(
         transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.6))),
-        components: [Light.sun()],
+        components: [Light.sun(shadows: false)],
       ),
     );
     world.add(GameObject(components: [Light.ambient(intensity: 0.2)]));
