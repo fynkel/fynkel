@@ -483,7 +483,9 @@ fn the_garden_characters_clips_move_its_parts() {
     );
     assert!((clip("idle").length - 4.0 / 3.0).abs() < 1e-3, "{}", clip("idle").length);
     assert!(parts("walk").contains(&("root", Property::Translation)));
-    assert_eq!(model.warnings(), ["unlit materials are drawn lit"]);
+    // The file asked for unlit materials, which are drawn lit, so every
+    // load warned; it no longer asks (playtest game 1).
+    assert!(model.warnings().is_empty(), "{:?}", model.warnings());
 }
 
 #[test]
