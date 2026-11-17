@@ -494,4 +494,36 @@ void main() {
     frames(1);
     expect(negative, throwsArgumentError);
   });
+
+  test("a motion's .then given in a routine that's stopped neither fails nor runs; its onComplete runs", () async {
+    // Game 6: a building's routine sent a crate (the farm's) on a trip,
+    // `trip.then(...)` not awaited; the building sold mid-trip gave an
+    // uncaught RoutineStopped.
+    final crate = world.add(GameObject());
+    var then = 0, completed = 0;
+    final routine = object.startRoutine(() async {
+      await nextFrame;
+      crate.moveTo(const Vec3(5, 0, 0), seconds: 1, onComplete: () => completed++).then((_) => then++);
+      await wait(10);
+    });
+    frames(2);
+    routine.stop();
+    frames(8);
+    await pumpEventQueue();
+    expect(crate.position.x, closeTo(5, 1e-9), reason: "the crate is the farm's: it goes on");
+    expect(completed, 1);
+    expect(then, 0, reason: 'nothing of a stopped routine runs again');
+  });
+
+  test('the same when the world is disposed mid-trip', () async {
+    final other = World();
+    final crate = other.add(GameObject());
+    other.add(GameObject()).startRoutine(() async {
+      crate.moveTo(const Vec3(5, 0, 0), seconds: 1).then((_) {});
+      await wait(10);
+    });
+    other.update(0.25);
+    other.dispose();
+    await pumpEventQueue();
+  });
 }

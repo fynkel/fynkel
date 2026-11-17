@@ -370,7 +370,10 @@ class FynkelView extends StatefulWidget {
   /// [World.paused] itself meanwhile (a game over under the settings page),
   /// which it keeps. Covered, the view gets no taps or keys either, and,
   /// as nothing in it moves, it's drawn only 10 times a second, which keeps
-  /// a phone cool behind a menu.
+  /// a phone cool behind a menu. Under a page that covers it whole, or in
+  /// a hidden tab, the world runs the same 10 frames a second, its
+  /// unscaled time going on, and nothing is drawn; with this false, it
+  /// runs on at its rate there, unseen.
   ///
   /// The cover's pause is [World.paused] itself, so a game that sets it to
   /// true while the cover holds it (true already) changes nothing the view
@@ -420,7 +423,7 @@ class FynkelView extends StatefulWidget {
 
 /// A [FynkelView]'s state: its [world], for code outside the game, such
 /// as a HUD (`GlobalKey<FynkelViewState>().currentState!.world`).
-class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMixin, WidgetsBindingObserver {
+class FynkelViewState extends State<FynkelView> with WidgetsBindingObserver {
   // The root's world, and the root shown in it.
   World? _rootWorld;
   GameObject? _root;
@@ -438,7 +441,12 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// given by hand ([FynkelView.world]).
   GameObject? get root => _root;
 
-  late final Ticker _ticker = createTicker(_tick)..start();
+  // Its own, not muted by TickerMode as a State's would be: under a page
+  // that covers it whole, or in a hidden tab, the world goes on being
+  // paused at 10 frames a second, as under a dialog (or runs on, with
+  // pauseWhenCovered: false), drawing nothing. A muted ticker stopped it
+  // dead, and its unscaled time with it.
+  late final Ticker _ticker = Ticker(_tick, debugLabel: 'FynkelView')..start();
   // Moves the world widgets, after each update.
   final _ticks = FrameTicks();
   int? _lastMicros;
@@ -960,6 +968,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     _settle();
     // Nothing to draw before there is a size (on Android, before the
     // window has one): no view yet, and no surface.
+    // Nor while hidden: nothing would show it.
     if (_noPicture || _width == 0 || _height == 0) return;
 
     final host = _host ?? _open();
@@ -972,6 +981,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (texture == null) return;
       if (host is _Surfaced) _sendSize(host, texture);
       if (host.onScreen) _sendPlace(host, texture);
+      // Hidden, nothing would show what it drew.
+      if (_hidden) return;
       view.frame();
     } on FynkelException catch (error, stack) {
       if (error.status != FynkelStatus.deviceLost && error.status != FynkelStatus.workerFailed) rethrow;

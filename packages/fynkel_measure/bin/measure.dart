@@ -124,8 +124,13 @@ Future<void> main(List<String> args) async {
   for (var i = 0; i < args.length - 1; i++) {
     if (args[i] == '--define') _defines.add('--dart-define=${args[i + 1]}');
   }
+  final mode = args.isEmpty || args.first.startsWith('--') ? 'rate' : args.first;
+  // Asked how, or asked wrong: said before building anything.
+  if (args.contains('--help') || args.contains('-h') || !const {'rate', 'lifecycle', 'bench'}.contains(mode)) {
+    stderr.writeln(_usage);
+    exit(args.contains('--help') || args.contains('-h') ? 0 : 2);
+  }
   if (_device == null) await _buildMac();
-  final mode = args.isEmpty ? 'rate' : args.first;
   final fullscreen = args.contains('--fullscreen');
   final secondsAt = args.indexOf('--seconds');
   final seconds = secondsAt < 0 ? 60 : int.parse(args[secondsAt + 1]);
@@ -139,13 +144,12 @@ Future<void> main(List<String> args) async {
       await _lifecycle(cyclesAt < 0 ? 10 : int.parse(args[cyclesAt + 1]));
     case 'bench':
       await _bench();
-    default:
-      stderr.writeln(
-        'usage: dart run fynkel_measure:measure rate [--seconds N] [--warmup N] [--fullscreen] | lifecycle [--cycles N] | bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]',
-      );
-      exit(2);
   }
 }
+
+const _usage =
+    'usage: dart run fynkel_measure:measure rate [--seconds N] [--warmup N] [--fullscreen] | lifecycle [--cycles N] | '
+    'bench  [--define KEY=VALUE] [--baseline] [--ios <device> | --android <device>] [--debug]';
 
 /// The Mac's profile build of [_target], so the run is of the code as it
 /// is now. A phone's is built by `flutter run`.

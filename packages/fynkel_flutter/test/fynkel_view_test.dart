@@ -2397,6 +2397,34 @@ void main() {
       expect(dts, hasLength(120), reason: "paused by the game, at its rate (every frame, here)");
     });
 
+    // Game 6: an idle game earns on unscaled time while paused, but a page
+    // over the view stopped its world dead (Flutter mutes tickers under a
+    // page that covers another whole), even with pauseWhenCovered: false.
+    testWidgets(
+      'under a page, as under a dialog, the world runs 10 frames a second, or on with pauseWhenCovered: false',
+      (tester) async {
+        for (final pause in [true, false]) {
+          final dts = <double>[];
+          await tester.pumpWidget(app(pauseWhenCovered: pause, onFrame: dts.add));
+          await settle(tester);
+          unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (_) => const Text('shop'))));
+          await settle(tester);
+          expect(world.paused, pause);
+          dts.clear();
+          final before = world.time.unscaledSinceStart;
+          for (var i = 0; i < 120; i++) {
+            await tester.pump(const Duration(microseconds: 8333));
+          }
+          expect(dts, hasLength(pause ? inInclusiveRange(9, 11) : 120), reason: 'pauseWhenCovered: $pause');
+          expect(world.time.unscaledSinceStart - before, closeTo(1, 0.15), reason: 'its unscaled time goes on');
+          Navigator.of(page).pop();
+          await settle(tester);
+          await tester.pumpWidget(const SizedBox());
+          await tester.pump();
+        }
+      },
+    );
+
     // The audit: two views of one world share one answer to "is a frame
     // due", so a covered view, slowed to 10 a second, might hold the view
     // on the page over it to its rate.
