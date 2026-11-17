@@ -23,12 +23,12 @@ fn scene() -> RenderScene {
     scene
 }
 
-/// Draws up to 30 frames, waiting for the GPU after each, till `frames`
+/// Draws up to 100 frames, waiting for the GPU after each, till `frames`
 /// of them are timed.
 fn draw(gpu: &Gpu, r: &mut Renderer, frames: u64) -> GpuTimes {
     let scene = scene();
     let mut times = GpuTimes::default();
-    for _ in 0..30 {
+    for _ in 0..100 {
         render(gpu, r, &scene, 128, 128);
         gpu.device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
         times = r.gpu_times();
@@ -51,8 +51,10 @@ fn each_part_of_a_frame_is_timed_on_the_gpu() {
     }
     let mut r = renderer(&gpu, SRGB);
     r.set_gpu_timing(true);
-    let times = draw(&gpu, &mut r, 3);
-    assert!(times.frames >= 3, "frames are timed: {times:?}");
+    // 20 frames, not 3: a GPU shared with other apps (as the CI Mac's is)
+    // leaves a pass's clocks unread now and then, a few in a row at times.
+    let times = draw(&gpu, &mut r, 20);
+    assert!(times.frames >= 20, "frames are timed: {times:?}");
     for (part, nanos) in [
         ("shadows", times.shadows),
         ("ambient occlusion", times.ambient_occlusion),

@@ -15,9 +15,9 @@ fn stats(view: &View) -> FyViewStats {
     stats
 }
 
-/// Draws and reads back frames till `frames` are timed, or 30 are drawn.
+/// Draws and reads back frames till `frames` are timed, or 100 are drawn.
 fn draw(view: &View, frames: u64) -> FyViewStats {
-    for _ in 0..30 {
+    for _ in 0..100 {
         view.read(view.frame(), 64, 64);
         if stats(view).gpu_frames >= frames {
             break;
@@ -35,10 +35,12 @@ fn a_views_frames_are_timed_on_the_gpu_when_asked() {
     assert_eq!((off.gpu_frames, off.gpu_scene_micros), (0, 0), "nothing timed unless asked");
 
     fy_gpu_timing_set(true);
-    let on = draw(&view, 3);
+    // 20 frames, not 3: a GPU shared with other apps (as the CI Mac's is)
+    // leaves a pass's clocks unread now and then, a few in a row at times.
+    let on = draw(&view, 20);
     fy_gpu_timing_set(false);
     if cfg!(target_os = "macos") {
-        assert!(on.gpu_frames >= 3, "a Mac's GPU times its frames: {on:?}");
+        assert!(on.gpu_frames >= 20, "a Mac's GPU times its frames: {on:?}");
         assert!(on.gpu_untimed_passes < on.gpu_frames, "the passes' clocks are read: {on:?}");
     }
     if on.gpu_frames > 0 {

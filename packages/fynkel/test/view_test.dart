@@ -154,11 +154,13 @@ void main() {
     expect(view.stats.gpu, const GpuTimes(), reason: 'nothing timed unless asked');
     WorldView.timeGpu = true;
     final before = view.stats;
-    for (var i = 0; i < 30 && (view.stats - before).gpu.frames < 3; i++) {
+    // 20 frames, not 3: a GPU shared with other apps (as the CI Mac's is)
+    // leaves a pass's clocks unread now and then, a few in a row at times.
+    for (var i = 0; i < 100 && (view.stats - before).gpu.frames < 20; i++) {
       view.read(view.frame());
     }
     final gpu = (view.stats - before).gpu;
-    if (Platform.isMacOS) expect(gpu.frames, greaterThanOrEqualTo(3), reason: "a Mac's GPU times its frames");
+    if (Platform.isMacOS) expect(gpu.frames, greaterThanOrEqualTo(20), reason: "a Mac's GPU times its frames");
     if (gpu.frames > 0) {
       expect(gpu.scene + gpu.finish, greaterThan(Duration.zero), reason: '$gpu');
       expect(gpu + gpu - gpu, gpu);
