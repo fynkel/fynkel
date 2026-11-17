@@ -1,6 +1,7 @@
 //! Views: what a world is drawn into, headless, on Apple and on Android.
 
 use std::ffi::c_void;
+use std::panic::{self, AssertUnwindSafe};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::Duration;
 
@@ -266,11 +267,25 @@ pub unsafe extern "C" fn fy_view_frame(view: *const FyView, out_number: *mut u64
                 return Err(error);
             }
         };
-        if let Err(message) = clock.extract.run_shared(&world, &mut scene, &mut view.gpu.ledger()) {
-            view.worker.recycle(scene);
-            return Err(Error::new(FyStatus::InvalidValue, message));
-        }
+        // The extract only reads the world: a panic in it (a bug) is caught
+        // while the world's lock is held, so the lock isn't poisoned and the
+        // game and its other views go on. It goes on unwinding after, past
+        // this view's clock alone, which it poisons: the view fails.
+        let panic_next = std::mem::take(&mut clock.panic_next);
+        let extracted = panic::catch_unwind(AssertUnwindSafe(|| {
+            let mut ledger = view.gpu.ledger();
+            assert!(!panic_next, "a test made the extract panic");
+            clock.extract.run_shared(&world, &mut scene, &mut ledger)
+        }));
         drop(world);
+        match extracted {
+            Ok(Ok(())) => {}
+            Ok(Err(message)) => {
+                view.worker.recycle(scene);
+                return Err(Error::new(FyStatus::InvalidValue, message));
+            }
+            Err(payload) => panic::resume_unwind(payload),
+        }
         let number = clock.last_number + 1;
         view.worker.post(number, scene, &mut Vec::new())?;
         clock.last_number = number;
@@ -411,6 +426,25 @@ pub unsafe extern "C" fn fy_view_fail_worker(view: *const FyView) -> FyStatus {
         // SAFETY: per this function's contract.
         let view = unsafe { handle(view, "view") }?;
         view.worker.panic();
+        Ok(())
+    })
+}
+
+/// For tests only: makes the view's next `fy_view_frame` panic while it
+/// copies the world, as a bug in the extract would; that frame returns
+/// `FY_STATUS_PANIC`. Runs only in a test process (`FLUTTER_TEST` or
+/// `FYNKEL_TEST_HOOKS` set); `FY_STATUS_UNSUPPORTED` otherwise.
+///
+/// # Safety
+///
+/// `view` is null or live.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_view_panic_extract(view: *const FyView) -> FyStatus {
+    guard(|| {
+        test_hooks()?;
+        // SAFETY: per this function's contract.
+        let view = unsafe { handle(view, "view") }?;
+        view.clock.lock().map_err(|_| Error::new(FyStatus::Poisoned, "the view's clock panicked"))?.panic_next = true;
         Ok(())
     })
 }

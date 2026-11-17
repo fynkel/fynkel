@@ -1,6 +1,9 @@
 // Stage 14's GT10: every example's widget tests wrote their own `wait` (15
 // copies) and dug the game out of the tree by hand.
 
+import 'dart:io';
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart' hide Transform;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
@@ -20,6 +23,26 @@ class _Root extends GameObject {
 class _Level extends _Root {}
 
 class _Other extends GameObject {}
+
+/// Loads a model in its onLoad.
+class _Loads extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    add(await assets.instantiate('Box.glb')).name = 'box';
+  }
+}
+
+/// Its load fails.
+class _Fails extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await assets.instantiate('missing.glb');
+  }
+}
+
+Future<Uint8List> _testAsset(String name) => File('../../tests/assets/gltf/$name').readAsBytes();
 
 /// Makes a new root each time it builds: a slip that's easy to write.
 class _Rebuilt extends StatefulWidget {
@@ -91,4 +114,31 @@ void main() {
       throwsA(isA<StateError>().having((e) => e.message, 'message', contains('no FynkelView'))),
     );
   });
+
+  // Both playtest games: a widget test whose game loads a model couldn't
+  // wait for it. `tester.runAsync(() => game.loaded)` hung, as what comes
+  // after each await in onLoad waits in the test's fake time for a pump;
+  // each game copied a loop from the examples' tests.
+  testWidgets('loaded waits for the game to load what it loads', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FynkelGame(_Loads.new, source: _testAsset, builder: _view),
+      ),
+    );
+    await tester.loaded();
+    expect(tester.game<_Loads>().find('box'), isNotNull);
+  });
+
+  testWidgets("loaded throws the load's error", (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: FynkelGame(_Fails.new, source: _testAsset, builder: _view),
+      ),
+    );
+    await expectLater(tester.loaded(), throwsA(isA<PathNotFoundException>()));
+    // The view says so too, as it does every error of the game's.
+    expect(tester.takeException(), isA<PathNotFoundException>());
+  });
 }
+
+Widget _view(BuildContext context, GameObject game) => FynkelView.world(game.world);

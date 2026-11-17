@@ -92,11 +92,37 @@ void main() {
 
     world.paused = false;
     world.update(0.1);
-    expect(input.isPressed(KeyCode.space), isFalse, reason: 'dropped, not kept for later');
+    // Its events were dropped, but W and space are still down: they're
+    // held again, as the guide says (§11) and the view does with the real
+    // keyboard. Before, only the view did, so a test of a game's pause
+    // saw its keys let go for good (playtest game 1).
+    expect(input.isPressed(KeyCode.w), isTrue, reason: 'held through the pause');
+    expect(input.isPressed(KeyCode.space), isTrue, reason: 'pressed while paused, and still down');
+    expect(jump.wasPressed, isTrue, reason: 'held again: pressed this frame');
+    expect(input.axis2('move'), Vec2(0, 1));
+    expect(input.fingers, isEmpty, reason: 'fingers are not: a touch is gone with its gesture');
     expect(input.axis2('steer'), Vec2(1, 0), reason: 'the stick is still where it was');
-    input.simulate.keyDown(KeyCode.space);
+  });
+
+  test('a key let go during the pause is not held again', () {
+    final input = world.input;
+    input.simulate.keyDown(KeyCode.w);
     world.update(0.1);
-    expect(jump.wasPressed, isTrue);
+    world.paused = true;
+    world.update(0.1);
+    input.simulate.keyUp(KeyCode.w);
+    world.update(0.1);
+    world.paused = false;
+    world.update(0.1);
+    expect(input.isPressed(KeyCode.w), isFalse);
+    input.simulate
+      ..keyDown(KeyCode.a)
+      ..releaseKeys();
+    world.paused = true;
+    world.update(0.1);
+    world.paused = false;
+    world.update(0.1);
+    expect(input.isPressed(KeyCode.a), isFalse, reason: 'focus lost: its keys went up');
   });
 
   test('onPausedChanged tells each change, at once, and nothing when it stays', () {

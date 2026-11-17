@@ -162,6 +162,7 @@ class GameObject with _Moving {
 
   /// The world the object was added to. Throws a [StateError] before it's
   /// added.
+  @nonVirtual
   World get world => _world ?? (throw _notAdded('it has no world'));
 
   /// The engine's id: never 0, and never reused. Throws a [StateError]
@@ -213,6 +214,7 @@ class GameObject with _Moving {
   ///
   /// To keep one level on screen until the next is ready:
   /// `final forest = world.add(Forest()); await forest.loaded; garden.destroy();`.
+  @nonVirtual
   Future<void> get loaded {
     if (_appeared) return Future.value();
     if (_loadFailure case (final error, final stack)) return Future.error(error, stack);
@@ -228,18 +230,22 @@ class GameObject with _Moving {
 
   /// The world's assets, loaded for this object: each one it asks for is
   /// held until it's destroyed, and freed then if no one else holds it.
+  @nonVirtual
   Assets get assets => _assets ??= Assets._(_world ?? (throw _notAdded('it has no assets')), this);
 
   // --- The loop ---
 
   /// What the player did since the last frame: the world's [World.input].
+  @nonVirtual
   Input get input => world.input;
 
   /// The world's [World.debug]: lines drawn over the scene.
+  @nonVirtual
   Debug get debug => world.debug;
 
   /// The world's clock: `time.delta` is the seconds this frame counts for.
   /// See [Time].
+  @nonVirtual
   Time get time => world.time;
 
   /// Starts a routine: runs [body] now, up to its first wait, and returns
@@ -530,11 +536,13 @@ class GameObject with _Moving {
   ///
   /// Setting it is [setParent] with the object staying where it is in the
   /// world, as Unity's `transform.parent =`.
+  @nonVirtual
   GameObject? get parent {
     _engine('its parent can\'t be read');
     return _parent;
   }
 
+  @nonVirtual
   set parent(GameObject? value) => setParent(value);
 
   // Its parent; before it's added, what it was added to.
@@ -559,6 +567,7 @@ class GameObject with _Moving {
 
   /// The objects whose [parent] is this one, in the order they were added.
   /// A new list each time.
+  @nonVirtual
   List<GameObject> get children {
     _engine('its children can\'t be read');
     return List.unmodifiable(_children ?? const <GameObject>[]);
@@ -634,6 +643,7 @@ class GameObject with _Moving {
 
   /// The object's name, or null. Names needn't be unique; setting '' is
   /// the same as null.
+  @nonVirtual
   String? get name {
     if (_described case final d?) return d.name;
     final w = _engine('its name can\'t be read');
@@ -657,6 +667,7 @@ class GameObject with _Moving {
   String? _name;
   bool _nameKnown = false;
 
+  @nonVirtual
   set name(String? value) {
     if (_described case final d?) {
       d.name = value == '' ? null : value;
@@ -694,6 +705,7 @@ class GameObject with _Moving {
   /// the object's, as Unity's. The scale is approximate when a parent with
   /// an uneven scale has a rotated child: the result is then skewed, which
   /// no position, rotation and scale can describe (Unity's "lossy" scale).
+  @nonVirtual
   Transform get worldTransform {
     if (_described != null) {
       final up = _queuedIn;
@@ -714,6 +726,7 @@ class GameObject with _Moving {
   /// object made by [Model.instantiate] (or [Assets.instantiate]) from a
   /// model with clips, once it's added; null for any other object, and
   /// for a model's parts.
+  @nonVirtual
   Animator? get animator {
     if (_animator case final a?) return a;
     if (_described != null) throw _notAdded('it has no animator');
@@ -1057,6 +1070,7 @@ class GameObject with _Moving {
   /// [worldTransform]). It reads back exactly as it was set; the engine
   /// keeps it in 32-bit floats, so what it draws may differ in the last
   /// digits.
+  @nonVirtual
   Transform get transform {
     if (_described case final d?) return d.transform;
     final w = _engine('its transform can\'t be read');
@@ -1066,6 +1080,7 @@ class GameObject with _Moving {
     return _transform = Transform._(t.position.read(), t.rotation.read(), t.scale.read());
   }
 
+  @nonVirtual
   set transform(Transform value) {
     if (_described case final d?) {
       _check(value, this);

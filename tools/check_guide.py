@@ -8,7 +8,8 @@ package:fynkel and ValueNotifier. Then `flutter analyze` and `flutter test`
 there: the guide's own tests, and test/guide_runs_test.dart, made here,
 which adds each game object and behaviour the guide writes (those made
 with no arguments) to a world of its own with a camera, runs it for a
-second and expects no errors. Run it from anywhere:
+second and expects no errors, and tools/guide_checks_test.dart, which
+checks that some of them do what the guide says. Run it from anywhere:
 python3 tools/check_guide.py [--keep]
 """
 
@@ -43,6 +44,7 @@ def main() -> int:
             shared.append(block)
     files['lib/game.dart'] = HEADER + '\n'.join(shared)
     files['test/guide_runs_test.dart'] = runs_test(files)
+    files['test/guide_checks_test.dart'] = (ROOT / 'tools' / 'guide_checks_test.dart').read_text()
     for path, text in files.items():
         (app / path).parent.mkdir(parents=True, exist_ok=True)
         (app / path).write_text(text)

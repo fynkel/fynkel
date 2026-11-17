@@ -86,12 +86,37 @@ void forgetReset() => _resetSent = false;
 final _byTexture = <int, FynkelViewState>{};
 bool _listening = false;
 
+/// Sets [world]'s [World.applicationPaused] for the app's [state]: away
+/// when hidden or paused, back when resumed. Inactive (on the way) and
+/// detached (gone) leave it as it was. Not exported.
+void tellLifecycle(World world, AppLifecycleState? state) {
+  if (world.isDisposed) return;
+  switch (state) {
+    case AppLifecycleState.hidden || AppLifecycleState.paused:
+      world.applicationPaused = true;
+    case AppLifecycleState.resumed:
+      world.applicationPaused = false;
+    case AppLifecycleState.inactive || AppLifecycleState.detached || null:
+      break;
+  }
+}
+
+/// The views in the tree, for the plugin's calls about them all.
+final _live = <FynkelViewState>{};
+
 /// Listens for the plugin's calls: `failed` when the Android plugin
-/// couldn't hand a view its new surface.
+/// couldn't hand a view its new surface, and `lowMemory` when Android
+/// says it's short of memory (see [FynkelViewState.didHaveMemoryPressure]).
 void _listenToPlugin() {
   if (_listening) return;
   _listening = true;
   channel.setMethodCallHandler((call) async {
+    if (call.method == 'lowMemory') {
+      for (final view in _live.toList()) {
+        view._lowMemory();
+      }
+      return;
+    }
     if (call.method != 'failed') throw MissingPluginException();
     final args = call.arguments as Map;
     _byTexture[args['texture'] as int]?._replace(
@@ -452,9 +477,6 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// widget test), or the view failed ([_error]). The world still runs.
   bool _noPicture = false;
 
-  // Whether the world was paused at the last frame.
-  bool _wasPaused = false;
-
   // When the view's own frame last reported an error, so one that comes
   // every frame is reported once a second.
   int? _reportedMicros;
@@ -477,6 +499,9 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.initState();
     _ticker; // Starts it.
     WidgetsBinding.instance.addObserver(this);
+    _live.add(this);
+    // Android's memory warnings come from the plugin (didHaveMemoryPressure).
+    if (_android) _listenToPlugin();
   }
 
   // The world whose clock counts this view.
@@ -534,8 +559,16 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     super.deactivate();
   }
 
-  // Whether a route is over the view's, and whether that paused the world.
+  // Whether a route is over the view's, or a widget above hides it (an
+  // IndexedStack's other tab), and whether that paused the world.
   bool _covered = false, _pausedIt = false;
+
+  // Whether a widget above hides it: Visibility.of, which an IndexedStack's
+  // hidden tabs and Visibility say, or TickerMode.of, which the Navigator
+  // turns off for a page another page covers whole. Not painted, so on
+  // screen its surface or layer is hidden too: under Flutter's view, it
+  // would show where the page over it shows a view.
+  bool _hidden = false;
 
   // While the view's pause holds: hears the game set [World.paused]
   // itself, which makes the pause the game's.
@@ -545,10 +578,21 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   /// it ([FynkelView.pauseWhenCovered]): enough for a resize to show.
   static const _coveredFrameRate = 10;
 
-  /// Pauses the world when a route covers the view's, and goes on when
-  /// it's uncovered.
+  /// Pauses the world when a route covers the view's or a widget above
+  /// hides it, unless it shows in another view, and goes on when it's
+  /// uncovered.
   void _cover() {
-    final covered = !(ModalRoute.of(context)?.isCurrent ?? true) && widget.pauseWhenCovered;
+    final hidden = !Visibility.of(context) || !TickerMode.valuesOf(context).enabled;
+    if (hidden != _hidden) {
+      _hidden = hidden;
+      // At once, not at the view's next frame: paused, it has few.
+      SchedulerBinding.instance.addPostFrameCallback((_) {
+        final host = _host;
+        final texture = host?.texture;
+        if (mounted && host != null && host.onScreen && texture != null) _sendShown(host, texture);
+      });
+    }
+    final covered = (!(ModalRoute.of(context)?.isCurrent ?? true) || _hidden) && widget.pauseWhenCovered;
     if (covered == _covered) return;
     _covered = covered;
     // After this frame: pausing tells widgets, which can't build again in
@@ -557,14 +601,20 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       if (!mounted || covered != _covered) return;
       final world = this.world;
       if (world.isDisposed) return;
+      final views = _WorldClock.of(world).views;
       if (covered) {
-        if (!world.paused) {
+        // Shown in another view (a minimap on the page over this one), it
+        // goes on.
+        if (!world.paused && views.every((view) => view._covered)) {
           world.paused = true;
           _pausedIt = true;
           _pauseWatch = world.onPausedChanged.listen((_) => _gameTookPause());
         }
       } else {
-        _letGo(world);
+        // Whichever of its views paused it.
+        for (final view in [...views]) {
+          view._letGo(world);
+        }
       }
     });
   }
@@ -600,24 +650,25 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final world = widget.world ?? _rootWorld;
-    if (world == null || world.isDisposed) return;
-    switch (state) {
-      case AppLifecycleState.hidden || AppLifecycleState.paused:
-        world.applicationPaused = true;
-      case AppLifecycleState.resumed:
-        world.applicationPaused = false;
-      case AppLifecycleState.inactive || AppLifecycleState.detached:
-        // On the way, or gone: what it was stays.
-        break;
-    }
+    if (world != null) tellLifecycle(world, state);
   }
 
   /// The system is short of memory: the world's told
   /// ([World.onLowMemory]), once for all its views. While the app is away
   /// they let go of the images they draw through too. While it's on screen
   /// they'd only make them again at once, with a slow frame.
+  ///
+  /// On Android this comes from the plugin instead, which hears the
+  /// system's level: Flutter's own warning comes for any level from
+  /// "running low" up, and so for `TRIM_MEMORY_UI_HIDDEN`, which Android
+  /// sends whenever the app goes away (Home), short of memory or not
+  /// (playtest audit).
   @override
   void didHaveMemoryPressure() {
+    if (!_android) _lowMemory();
+  }
+
+  void _lowMemory() {
     final world = widget.world ?? _rootWorld;
     if (world == null || world.isDisposed) return;
     final clock = _WorldClock.of(world);
@@ -851,6 +902,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _live.remove(this);
     _letGo(world);
     _stopHearing();
     _ticker.dispose();
@@ -901,10 +953,6 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
     final dt = last == null ? 0.0 : (micros - last) / 1e6;
     widget.onFrame?.call(dt);
     if (!world.isDisposed) {
-      // A pause let go of every key: those still down are held again.
-      final paused = world.paused;
-      if (_wasPaused && !paused && _focus.hasFocus) _input.holdKeys();
-      _wasPaused = paused;
       clock.update(world);
     }
     _ticks.tick();
@@ -1034,6 +1082,8 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
             ..texture = texture
             ..onScreen = onScreen;
         });
+        // Registered while hidden (a tab not chosen yet).
+        if (onScreen && texture != null) _sendShown(host, texture);
       }
       return texture;
     } on MissingPluginException {
@@ -1105,6 +1155,7 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
         }),
       );
     }
+    _sendShown(host, texture);
     final over = _byTexture.values.any((other) {
       final at = other._host?.sentPlace;
       return other != this && other._host!.onScreen && at != null && at != place && at.expandToInclude(place) == at;
@@ -1113,6 +1164,15 @@ class FynkelViewState extends State<FynkelView> with SingleTickerProviderStateMi
       host.sentOver = over;
       unawaited(channel.invokeMethod<void>('over', {'texture': texture, 'over': over}));
     }
+  }
+
+  /// On screen: hides the surface or layer while a widget above hides the
+  /// view ([_hidden]), and shows it again after.
+  void _sendShown(_Host host, int texture) {
+    final shown = !_hidden;
+    if (shown == host.sentShown) return;
+    host.sentShown = shown;
+    unawaited(channel.invokeMethod<void>('shown', {'texture': texture, 'shown': shown}));
   }
 
   /// The view can't go on (the plugin couldn't give it a new surface): a
@@ -1340,6 +1400,7 @@ sealed class _Host {
   /// left of Flutter's view, and whether over the other views.
   Rect? sentPlace;
   bool sentOver = false;
+  bool sentShown = true;
 
   /// What the plugin is sent to register it, at [place] when on screen.
   Map<String, Object> arguments(Rect? place);

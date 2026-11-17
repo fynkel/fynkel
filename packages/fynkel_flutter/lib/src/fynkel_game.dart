@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:fynkel/fynkel.dart' show AssetSource, GameObject, ObjectError, World;
 
-import 'fynkel_view.dart' show bundleSource, resetPlugin;
+import 'fynkel_view.dart' show bundleSource, resetPlugin, tellLifecycle;
 import 'world_listenables.dart' show WorldTheme;
 
 /// Makes a game's root with [make] and builds what shows it, so the game
@@ -47,8 +47,12 @@ import 'world_listenables.dart' show WorldTheme;
 /// page, unless the game is a [FynkelApp]'s, whose pages all reach it.
 ///
 /// It keeps the game it started with when it's built again with another
-/// [make] (a debug build says so): give it a new `key` to start another,
-/// or [FynkelGameState.restart] it.
+/// [make]: give it a new `key` to start another (`key:
+/// ValueKey(product.id)`), or [FynkelGameState.restart] it. A debug build
+/// says so only for a [make] of another root type (`Level2.new` for
+/// `Level1.new`): a closure made again in a build (`() =>
+/// Level(number: 3)`) is a new function each time, so a change of what it
+/// makes can't be told from no change.
 class FynkelGame<T extends GameObject> extends StatefulWidget {
   /// A game whose root [make] makes, shown by what [builder] builds.
   const FynkelGame(this.make, {super.key, required this.builder, this.source, this.restartOnReload = false});
@@ -103,7 +107,7 @@ class FynkelGame<T extends GameObject> extends StatefulWidget {
 }
 
 /// A [FynkelGame]'s state: its [game] and [world], and [restart].
-class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
+class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> with WidgetsBindingObserver {
   // What it was made for, as asked for in FynkelGame.of.
   Type get _made => T;
 
@@ -136,6 +140,10 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
       final app = context.getInheritedWidgetOfExactType<AppGameScope>()?.holder;
       if (app != null && app.state == null) _app = app..state = this;
       unawaited(resetPlugin());
+      // Its views tell its world too, but a game may show none for a while
+      // (a loading page, a page pushed in its place) and still has to hear
+      // the app go: its music stops, and onApplicationPause saves.
+      WidgetsBinding.instance.addObserver(this);
       _start();
     } else {
       _world.theme = Theme.of(context);
@@ -184,7 +192,11 @@ class FynkelGameState<T extends GameObject> extends State<FynkelGame<T>> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) => tellLifecycle(_world, state);
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     // What was built of it, the view first, is gone already.
     if (_app case final app? when app.state == this) app.state = null;
     _errorsHeard?.cancel();

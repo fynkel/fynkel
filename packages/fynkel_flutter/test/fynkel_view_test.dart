@@ -435,6 +435,21 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  // A game whose view is gone for now (a loading page, a shop pushed in its
+  // place) still hears the app go: its music stops and onApplicationPause
+  // saves (playtest audit).
+  testWidgets("a FynkelGame showing no view hears the app go away and come back", (tester) async {
+    final binding = tester.binding;
+    await tester.pumpWidget(FynkelGame(Tiny.new, builder: (context, game) => const SizedBox()));
+    final world = tester.state<FynkelGameState<Tiny>>(find.byType(FynkelGame<Tiny>)).world;
+    expect(world.applicationPaused, isFalse);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+    expect(world.applicationPaused, isTrue);
+    binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+    expect(world.applicationPaused, isFalse);
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a memory warning tells the world once, and views let go of their images only while away', (
     tester,
   ) async {
@@ -682,6 +697,29 @@ void main() {
       await tester.pump();
     });
 
+    // Flutter's own warning comes for Home too (TRIM_MEMORY_UI_HIDDEN), so
+    // there the plugin's, which knows the level, is the one heard.
+    testWidgets("memory warnings are the plugin's, not Flutter's, which comes on every Home", (tester) async {
+      var told = 0;
+      world.onLowMemory.listen((_) => told++);
+      await tester.pumpWidget(sized(FynkelView.world(world)));
+      await tester.pump(const Duration(milliseconds: 8));
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.hidden);
+      tester.binding.handleMemoryPressure();
+      await tester.idle();
+      expect(told, 0, reason: "Flutter's warning, as Home sends it");
+      await TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger.handlePlatformMessage(
+        channel.name,
+        channel.codec.encodeMethodCall(const MethodCall('lowMemory', {'level': 40})),
+        (_) {},
+      );
+      await tester.idle();
+      expect(told, 1, reason: "the plugin's: Android short of memory");
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
     testWidgets("the plugin's failure to give a view its new surface brings a new view", (tester) async {
       await tester.pumpWidget(sized(FynkelView.world(world)));
       for (var i = 0; i < 3; i++) {
@@ -885,6 +923,8 @@ void main() {
             return {'id': nextTexture++, 'onScreen': true};
           case 'place':
             calls.add('place ${args['texture']} at ${args['left']},${args['top']} ${args['width']}x${args['height']}');
+          case 'shown':
+            calls.add('shown ${args['texture']} ${args['shown']}');
           case 'resize':
             calls.add('resize ${args['texture']} ${args['width']}x${args['height']}');
           case 'unregister':
@@ -925,6 +965,105 @@ void main() {
       await tester.pumpWidget(sized(const SizedBox()));
       await tester.pump();
       expect(calls, ['unregister 7']);
+    });
+
+    // An IndexedStack lays out the hidden tabs where the shown one is, and
+    // only doesn't paint them: a hidden tab's layer, under Flutter's view,
+    // still showed through the shown tab's view, or over it (playtest
+    // game 2). Hidden, a view's layer is hidden and its world paused, as a
+    // covered page's is.
+    testWidgets("a view in an IndexedStack's hidden tab hides its layer and pauses", (tester) async {
+      final other = World();
+      addTearDown(other.dispose);
+      Widget tabs(int index) =>
+          sized(IndexedStack(index: index, children: [FynkelView.world(world), FynkelView.world(other)]));
+      await tester.pumpWidget(tabs(0));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), ['shown 8 false']);
+      expect((world.paused, other.paused), (false, true));
+
+      calls.clear();
+      await tester.pumpWidget(tabs(1));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), unorderedEquals(['shown 7 false', 'shown 8 true']));
+      expect((world.paused, other.paused), (true, false));
+
+      calls.clear();
+      await tester.pumpWidget(tabs(0));
+      await frames(tester);
+      expect(calls.where((c) => c.startsWith('shown')), unorderedEquals(['shown 7 true', 'shown 8 false']));
+      expect((world.paused, other.paused), (false, true));
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
+    });
+
+    // A page with a view pushed over a page with a view: both layers lie
+    // under Flutter's view, at the same level, so where they overlap either
+    // might show (on Android, two SurfaceViews' order is undefined: playtest
+    // game 2 asked). Once the new page covers the old, Flutter neither
+    // paints the old one nor runs its tickers, and the old view's layer is
+    // hidden. A dialog covers nothing.
+    testWidgets("a view on a page covered by another page's hides its layer; under a dialog it doesn't", (
+      tester,
+    ) async {
+      final other = World();
+      addTearDown(other.dispose);
+      late BuildContext page;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Builder(
+            builder: (context) {
+              page = context;
+              return FynkelView.world(world);
+            },
+          ),
+        ),
+      );
+      await frames(tester);
+      calls.clear();
+      unawaited(showDialog<void>(context: page, builder: (context) => const Text('paused')));
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown')), isEmpty, reason: 'it shows under the dialog');
+      Navigator.of(page).pop();
+      await frames(tester, 60);
+
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (context) => FynkelView.world(other))));
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown 7')), ['shown 7 false']);
+      calls.clear();
+      Navigator.of(page).pop();
+      await frames(tester, 60);
+      expect(calls.where((c) => c.startsWith('shown 7')), ['shown 7 true']);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pump();
+    });
+
+    // One world in two views, one of them hidden: the world shows in the
+    // other, so it goes on (the audit: a covered view held the world).
+    testWidgets('a world is paused only when all its views are hidden or covered', (tester) async {
+      Widget two({required bool hideOne, bool hideBoth = false}) => sized(
+        Row(
+          children: [
+            Expanded(
+              child: Visibility.maintain(visible: !hideOne && !hideBoth, child: FynkelView.world(world)),
+            ),
+            Expanded(
+              child: Visibility.maintain(visible: !hideBoth, child: FynkelView.world(world, input: false)),
+            ),
+          ],
+        ),
+      );
+      await tester.pumpWidget(two(hideOne: true));
+      await frames(tester);
+      expect(world.paused, isFalse, reason: 'it shows in the other view');
+      await tester.pumpWidget(two(hideOne: true, hideBoth: true));
+      await frames(tester);
+      expect(world.paused, isTrue, reason: 'shown nowhere');
+      await tester.pumpWidget(two(hideOne: true));
+      await frames(tester);
+      expect(world.paused, isFalse, reason: 'shown again in one');
+      await tester.pumpWidget(sized(const SizedBox()));
+      await tester.pump();
     });
 
     testWidgets('directToScreen: false keeps the texture', (tester) async {
@@ -2256,6 +2395,29 @@ void main() {
         await tester.pump(const Duration(microseconds: 8333));
       }
       expect(dts, hasLength(120), reason: "paused by the game, at its rate (every frame, here)");
+    });
+
+    // The audit: two views of one world share one answer to "is a frame
+    // due", so a covered view, slowed to 10 a second, might hold the view
+    // on the page over it to its rate.
+    testWidgets("a covered view of a world doesn't slow its view on the page over it", (tester) async {
+      final shown = <double>[];
+      await tester.pumpWidget(app());
+      await settle(tester);
+      unawaited(
+        Navigator.of(page).push(
+          MaterialPageRoute<void>(builder: (_) => sized(FynkelView.world(world, onFrame: shown.add, input: false))),
+        ),
+      );
+      await settle(tester);
+      expect(world.paused, isFalse, reason: 'it shows on the page over');
+      shown.clear();
+      for (var i = 0; i < 60; i++) {
+        await tester.pump(const Duration(microseconds: 16667));
+      }
+      expect(shown, hasLength(inInclusiveRange(58, 60)), reason: 'about 60 in a second');
+      Navigator.of(page).pop();
+      await settle(tester);
     });
 
     testWidgets('a page over a dialog over the view: the game goes on once both are closed', (tester) async {

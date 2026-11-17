@@ -270,6 +270,9 @@ void main() {
     world.input.simulate.keyDown(KeyCode.p);
     frames(1);
     expect(world.paused, isTrue, reason: 'paused, the game hears no keys');
+    // Let go before the banner's tap: a key still down when a pause ends
+    // is pressed again then, and P would pause it again.
+    world.input.simulate.keyUp(KeyCode.p);
     world.paused = false; // the banner's tap
     frames(1);
     expect(banner, [true, false]);

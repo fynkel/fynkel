@@ -890,7 +890,7 @@ Each object and behaviour gets these calls, in the order they were added:
 | `onLateUpdate` | Every frame, after every `onUpdate`, the routines and the tweens: for what follows where things ended up. |
 | `onDisable` | Each time it stops being shown, and before `onDestroy`. |
 | `onDestroy` | Once, when it's destroyed. |
-| `onApplicationPause` | When the app goes to the background (`true`) and comes back (`false`): save here, as the app may be closed while it's away. `world.applicationPaused` says which. |
+| `onApplicationPause` | When the app goes to the background (`true`) and comes back (`false`): save here, as the app may be closed while it's away. `world.applicationPaused` says which. A `FynkelApp`'s or `FynkelGame`'s world hears it even while none of its views is showing; a `World` you make yourself hears it only while a `FynkelView` shows it. |
 
 A frame goes: input → starts → fixed steps → updates → routines and
 tweens → late updates → cameras → drawing. This order is fixed and
@@ -2014,9 +2014,12 @@ this (examples/lab/lib/scenes/flat_text.dart and sprites.dart).
 
 ## 13. Animation
 
-A model's animations come with it: `model.clips` lists them, and each
-copy's `animator` plays them, as Unity gives a model its Animator. Which
-clip plays when is the game's code, not a state-machine file.
+A model's animations come with it: each copy's `animator` plays them,
+as Unity gives a model its Animator, and `animator.clipNames` lists
+them (a name it hasn't got throws, listing them too). Which clip plays
+when is the game's code, not a state-machine file. The examples here
+use examples/garden's `character.glb`, whose clips are `idle`, `walk`,
+`sprint`, `pick-up`, `emote-yes` and more.
 
 ### Playing clips
 
@@ -2034,9 +2037,9 @@ class Hero extends GameObject {
     _animator.at('walk', 0.3, () => print('step')); // a footstep
   }
 
-  void jump() {
+  void pickUp() {
     _animator
-      ..crossFade('jump', seconds: 0.1, loop: false)
+      ..crossFade('pick-up', seconds: 0.1, loop: false)
       ..onEnd = (clip) => _animator.crossFade('idle');
   }
 
@@ -2044,7 +2047,7 @@ class Hero extends GameObject {
   void onUpdate() {
     super.onUpdate();
     position += _velocity * time.delta;
-    if (_animator.current != 'jump') {
+    if (_animator.current != 'pick-up') {
       _animator.crossFade(_velocity.length > 0.1 ? 'walk' : 'idle', seconds: 0.2);
     }
   }
@@ -2054,7 +2057,7 @@ class Hero extends GameObject {
 - `play(name)` starts a clip at once; `crossFade(name, seconds:)` fades
   to it from what plays. Asking for the clip that's already playing
   changes nothing, so an update can say what it wants every frame.
-- `loop: false` holds a clip's last pose at its end (a jump, a fall) and
+- `loop: false` holds a clip's last pose at its end (a pick-up, a fall) and
   calls `onEnd`; clips loop unless told not to.
 - `speed` (1 as made, 0 paused, negative backwards), `time`, `length`,
   `current` (a clip's name or a blend's), `isPlaying(name)` and
@@ -2164,7 +2167,7 @@ class Runner extends GameObject {
 
 Put together, a character is a blend for its legs and a layer or two
 over it. This one walks where it's told: it runs to a place far away,
-slows to a walk near it and stands there, and waves from the waist up
+slows to a walk near it and stands there, and nods yes from the waist up
 without stopping. examples/coins's player is the same, with a coin in
 its hand:
 
@@ -2189,7 +2192,7 @@ class Farmer extends GameObject {
 
   void walkTo(Vec3 point) => _goal = point.flat;
 
-  void wave() => _animator.layer(1).crossFade('wave', seconds: 0.1, loop: false);
+  void nod() => _animator.layer(1).crossFade('emote-yes', seconds: 0.1, loop: false);
 
   @override
   void onUpdate() {
@@ -2200,13 +2203,18 @@ class Farmer extends GameObject {
     _speed += (wanted - _speed) * (6 * time.delta).clamp(0, 1);
     if (distance >= 0.05) {
       final step = to.normalized * (_speed * time.delta).clamp(0, distance);
-      transform = Transform(position: transform.position + step, rotation: Quat.lookRotation(to));
+      // A glTF model faces +Z, and lookRotation turns -Z (forward) the way
+      // given: so the other way.
+      transform = Transform(position: transform.position + step, rotation: Quat.lookRotation(-to));
     }
     _animator.blend('move', const ['idle', 'walk', 'sprint'], thresholds: const [0, walk, run], at: _speed);
   }
 }
 ```
 
+- **A model faces +Z**, as glTF files are made, while an object's
+  forward is −Z (§7): `Quat.lookRotation(-to)` turns its face to `to`.
+  With `lookRotation(to)` it walks backwards.
 - The speed it moves at is the number the blend gets, and the
   thresholds are the speeds the clips' feet go: the feet don't slide at
   any speed between.
@@ -3101,6 +3109,19 @@ class CameraRig extends GameObject {
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
   target turns left and right.
+- **`Orbit`'s place is three fields**, for code to set too (a reset
+  button, a turntable: `orbit.yaw += 0.5 * time.delta`): `distance` in
+  metres (8); `yaw` in radians, 0 on the target's +Z side and growing to
+  the right; and `pitch`, 0 level and positive above, looking down
+  (0.4). `minPitch`/`maxPitch` (−0.2, 1.45) and
+  `minDistance`/`maxDistance` (1, 100) clamp them each frame, `offset`
+  moves the point circled off the target's position. The wheel scrolled
+  down moves it away (`input.scroll.y` is positive up; Flutter's
+  `scrollDelta.dy`, and a test's `scrollBy`, positive down).
+- **The rigs run after every `onLateUpdate`** (§6: late updates, then
+  cameras, then drawing), so a camera with a rig is the rig's to place:
+  move it in `onLateUpdate` and the rig puts it back. Change the rig's
+  fields there instead; the rig reads them right after.
 - `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
   told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
@@ -3284,7 +3305,12 @@ were written to at the start of the frame.
 **Queries** are on `physics`, which every object and behaviour has:
 `raycast`, `sphereCast`, `boxCast`, `capsuleCast` (and `…All`, nearest
 first), `overlapSphere`, `overlapBox`, `overlapCapsule`, and `checkSphere`,
-`checkBox`, `checkCapsule`. Each takes `layers:` and `triggers:`
+`checkBox`, `checkCapsule`. They take what Unity's take, in its order:
+`sphereCast(ray, radius, maxDistance:)`, `boxCast(center, halfExtents,
+direction, orientation:, maxDistance:)`, `capsuleCast(point1, point2,
+radius, direction, maxDistance:)` (`point1` and `point2` the centres of
+its ends), `overlapSphere(center, radius)`. A `Ray`'s direction is made
+unit length for you. Each takes `layers:` and `triggers:`
 (`QueryTriggers.ignore` goes through triggers), and sees colliders where
 their objects are now, moved this frame or not:
 
@@ -3398,7 +3424,10 @@ they hit.
 (`height:`, `radius:`, `center:`) that the game moves with
 `move(motion)`, and that goes as far as the world lets it. It slides
 along walls, walks up steps up to `stepOffset` (0.3 m) and slopes up to
-`slopeLimit` (`45.deg`), and stops at anything higher or steeper. Gravity is
+`slopeLimit` (`45.deg`), and stops at anything higher or steeper. It
+keeps `skinWidth` (8 cm, as Unity's) between itself and what it meets,
+so it stands that far above the ground: lower the model under it by as
+much (a child at `Vec3(0, -0.08, 0)`), or its feet float. Gravity is
 the game's to add, as in Unity, or `simpleMove(speed)` adds it. `move`
 returns `CollisionFlags`: `flags.has(CollisionFlags.below)` (the
 ground), `.sides`, `.above`; `isGrounded` and `velocity` say how the last
@@ -3697,8 +3726,12 @@ things differ from the Mac:
   its widget is, each frame); one that fades or zooms in shows the game
   unfaded and at full size, and a view in a scrolling list isn't clipped
   at the list's edges.
-- Two views stack, no more: a minimap over the game. A view lying within
-  another goes over it.
+- Views stack two deep, no more. A view lying within another goes over
+  it (a minimap over the game); any others lie side by side, at the
+  bottom (a split screen, a compare page's two viewers). A third view
+  within the minimap wouldn't show over it.
+  Views on pages under the page shown, or in hidden tabs, don't count:
+  their surfaces are hidden.
 
 Where one of those matters, give that view `directToScreen: false`: it's a
 texture Flutter draws, as on the Mac, slower on some Android phones and
@@ -3794,6 +3827,9 @@ class TeamChip extends StatelessWidget {
 ```
 
 A test sets the theme itself: `world.theme = gameTheme(Brightness.dark)`.
+`world.theme` is package:fynkel_flutter's (an extension, `WorldTheme`),
+so a test of a plain `World` imports it:
+`import 'package:fynkel_flutter/fynkel_flutter.dart' show WorldTheme;`.
 
 **Widgets in the world.** A health bar over an enemy, a name tag, a
 damage number or a "press E" hint is a Flutter widget on the object: a
@@ -3933,7 +3969,9 @@ A page pushed over this one with `Navigator` (or a dialog) isn't below
 its `FynkelGame`, so `FynkelGame.of` there doesn't find it: give the page
 the game (`SettingsPage(game)`). A `FynkelGame` keeps the game it
 started with when it's built again with another `make`; give it a `Key`
-to start another (`key: ValueKey(level)`).
+to start another (`key: ValueKey(level)`). Nothing warns you: a closure
+made again in a build (`() => Level(number: level)`) is a new function
+every time, whether or not it makes something else.
 
 Leaving the page, or starting over, destroys the game as a scene unloads
 in Unity: every object gets `onDisable` and `onDestroy`, so clean-up and
@@ -3948,6 +3986,13 @@ score wait where they were, and, as nothing in it moves, it's drawn only
 paused already stays paused.
 For a game that runs on under a see-through pop-up, give
 `FynkelView(pauseWhenCovered: false)`.
+
+**Tabs.** A view in a tab that isn't showing, kept alive by an
+`IndexedStack` (or under a `Visibility.maintain` that hides it), is paused
+the same way, and on a phone its surface is hidden too, so it doesn't show
+through the shown tab's view. So is a view on a page another page covers
+whole, once that page has slid in (not under a dialog, which shows it). A world shown in more than one view is
+paused only when none of them shows it.
 
 **If the view can't draw.** A lost GPU device or a refused surface gets
 a new view by itself, up to three times a minute; after that the view
@@ -4159,8 +4204,14 @@ shows the name tags placed by its own camera. The lab's "Minimap" and
   now: a new root, a new world. That's how a changed `onLoad`, field or
   routine takes effect, in a second, without restarting the app.
 - On a phone, which has no F5, `FynkelApp(Game.new, restartOnReload:
-  true)` makes every hot reload start the game over.
-- **Hot restart** (`R`) starts the whole app again.
+  true)` makes every hot reload start the game over; a `FynkelGame` (§17)
+  takes `restartOnReload: true` too.
+- **Hot restart** (`R`) starts the whole app again. What the engine
+  holds for the old app is freed, except a load in progress at that
+  moment (`assets.instantiate`, `preload`, a texture or sound): its
+  native memory stays until the app stops. Only a debug build hot
+  restarts, so a shipped game never meets this; on a phone, restarting
+  in the middle of a big `preload` again and again adds up.
 
 **Starting a level over** inside the game (a "try again" button) needs
 no new world: destroy the object the level hangs from and add a new one,
@@ -4475,6 +4526,19 @@ the next frame, as on a device: a tap reaches the game in the frame after
 it. A page that slides in or out (a settings page, a dialog) takes about
 a third of a second, so `tester.run(0.5)` after opening or closing one,
 not a few frames.
+
+**A game that loads files** (`assets.instantiate`, a texture, a sound)
+reads them in real time, which a widget test's frames don't move:
+`await tester.loaded()` waits for the game on screen to load, pumping
+frames meanwhile, and throws if its load failed (`tester.loaded(level)`
+waits for another object). `await tester.runAsync(() => game.loaded)`
+would wait for ever: the game's `onLoad` goes on after each `await` only
+when a frame is pumped.
+
+**flutter_test has a `find` of its own**, and in a test file it hides
+`GameObject.find`: in a game object written in a test, `find('cube')`
+is flutter_test's (`The method 'call' isn't defined for the type
+'CommonFinders'`). Say `this.find('cube')` there.
 
 `world.run(seconds)` moves on in whole frames of 1/60 s, so a routine's
 `wait(0.5)` ends on the first frame at or past half a second: test what
@@ -4946,6 +5010,20 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **A field named as one of `GameObject`'s own is a warning**
+  (2026-11-16): `world`, `loaded`, `assets`, `input`, `debug`, `time`,
+  `parent`, `children`, `name`, `worldTransform`, `animator` and
+  `transform` can't be overridden. A `Player` with its own `animator`
+  field hid the engine's from everyone else who asked, quietly; rename
+  yours (`moves`, `label`).
+
+- **A `CharacterController` moved up has left the ground** (2026-11-16):
+  after a `move` asked to go up that went up, `isGrounded` is false, as
+  Unity's is, unless it hit something below. It used to read true, so a
+  jump that sets its fall whenever it's grounded (§16's `Walk`) ended
+  after one frame. A game that worked round it (`isGrounded && fall <= 0`)
+  works as before.
 
 - **Stage 14's pass over the public API** (2026-10-31): names,
   defaults and messages, made alike across the packages.

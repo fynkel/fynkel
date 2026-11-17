@@ -26,7 +26,8 @@ part of 'world.dart';
 ///
 /// While the world is paused ([World.paused]) it takes nothing: what was
 /// held is let go when the pause starts, and what comes meanwhile is
-/// dropped.
+/// dropped. When it ends, the keys still down are held again (and pressed
+/// that frame).
 final class Input {
   /// An input of its own, with no world: for tests of input alone, driven
   /// by [update]. A world makes its own.
@@ -123,6 +124,12 @@ final class Input {
   // to let go of what's held.
   bool _paused = false;
   bool _pausing = false;
+  bool _resuming = false;
+
+  // The keys the feed says are down, as it says so: those a pause let go
+  // of, still down when it ends, are held again (the guide's §11). Kept
+  // as the events come, as those while paused are dropped from the queue.
+  final _keyboard = <KeyCode>{};
 
   /// What feeds this input: the view's real touches and keys, or a
   /// test's. Named for the test, the one a game writes; the view goes the
@@ -422,6 +429,15 @@ final class Input {
       _padScale = 1;
       _padTwist = 0;
       return;
+    }
+    if (_resuming) {
+      _resuming = false;
+      for (final key in _keyboard) {
+        if (!_keys.add(key)) continue;
+        _pressedKeys.add(key);
+        _fixedPressedKeys.add(key);
+        _emit(onKeyDown, KeyPress._(key, _keys));
+      }
     }
     // Events a handler feeds meanwhile wait for the next frame.
     final n = _queue.length;
@@ -1364,12 +1380,14 @@ final class InputSimulation {
   /// [key] went down. Returns whether the view should claim it from
   /// Flutter: the game uses it ([Input.usesKey]) and isn't paused.
   bool keyDown(KeyCode key) {
+    _input._keyboard.add(key);
     _input._queue.add(_Raw(_RawKind.keyDown, 0, 0, 0, key: key));
     return claims(key);
   }
 
   /// [key] went up. Returns whether the view should claim it, as [keyDown].
   bool keyUp(KeyCode key) {
+    _input._keyboard.remove(key);
     _input._queue.add(_Raw(_RawKind.keyUp, 0, 0, 0, key: key));
     return claims(key);
   }
@@ -1380,7 +1398,10 @@ final class InputSimulation {
 
   /// The view lost focus: its keys won't come up here, so each held one
   /// goes up.
-  void releaseKeys() => _input._queue.add(_Raw(_RawKind.release, 0, 0, 0));
+  void releaseKeys() {
+    _input._keyboard.clear();
+    _input._queue.add(_Raw(_RawKind.release, 0, 0, 0));
+  }
 }
 
 /// What the input step reaches through the world: what's under a finger,

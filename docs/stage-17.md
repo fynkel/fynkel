@@ -141,7 +141,11 @@ be unpaused wrongly, against `pauseWhenCovered`'s doc. The one audit bug left.
 
 **Bar:** a failing test, then fixed. In the same phase, the audit rows already
 fixed are marked done: BR2, AU-new, AU5, RN1, BR5, RN3, AU7, BR7, PH6, PH7,
-DF13, WO10, RN8, BR10, DC5.
+DF13, WO10, RN8, BR10, DC5, and AU6 and AU8 (checked on the phones,
+dbdd176c). BR6 and RN9 stay half done (the rest is in
+`stage-16-report.md`'s Left open). RN5 is checked first: its code looks
+fixed, but `stage-16-report.md` still lists Android's full path (the
+playtest audit, 2026-11-16).
 
 ## 3. Deeper
 

@@ -113,8 +113,9 @@ class InputFeed {
   /// The view lost focus: its keys won't come up here, so they're let go.
   void releaseKeys() => _input().simulate.releaseKeys();
 
-  /// Holds the keys the keyboard holds now: after a pause, or when the view
-  /// gets focus back, those still down weren't told again.
+  /// Holds the keys the keyboard holds now: when the view gets focus back,
+  /// those still down weren't told again. (After a pause the input holds
+  /// them again itself.)
   void holdKeys() {
     final input = _input().simulate;
     for (final physical in HardwareKeyboard.instance.physicalKeysPressed) {

@@ -157,6 +157,24 @@ fn it_knows_when_it_is_grounded_and_what_is_above() {
     assert!(character.feet().abs() < 0.02, "feet at {}", character.feet());
 }
 
+/// A jump's first move takes it off the ground, so it isn't grounded after
+/// it, as in Unity: the guide's `Walk` (§16) sets its fall again whenever it's
+/// grounded, and so rose 8 cm instead of 1.27 m (playtest game 1).
+#[test]
+fn a_move_up_off_the_ground_is_not_grounded() {
+    let mut physics = floor();
+    let mut character = Character::new(&mut physics, 0.0, 0.0);
+    assert_eq!(character.go(&mut physics, Vector::new(0.0, -0.1, 0.0)).flags, COLLIDED_BELOW);
+    // 5 m/s up for a frame, standing still and walking.
+    for along in [0.0, 0.05] {
+        let jumped = character.go(&mut physics, Vector::new(along, 5.0 * DT, 0.0));
+        assert!(jumped.translation.y > 0.08, "along {along}: up {}", jumped.translation.y);
+        assert_eq!(jumped.flags & COLLIDED_BELOW, 0, "along {along}: grounded after a move up");
+        character.walk(&mut physics, Vector::ZERO, 1.0);
+        assert!(character.feet().abs() < 0.02, "along {along}: landed at {}", character.feet());
+    }
+}
+
 #[test]
 fn it_pushes_a_dynamic_body_and_a_massless_one_pushes_nothing() {
     for mass in [70.0, 0.0] {
