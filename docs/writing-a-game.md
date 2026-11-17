@@ -133,6 +133,9 @@ class Cube extends GameObject {
 - **An object has a transform** (where it is, relative to its parent) and
   **components**: a `Camera` to see from, a `Light`, a `MeshRenderer` to
   be drawn.
+- **A new world is a clear day**: a sky that lights what the sun misses,
+  and the sun casts shadows. The cube stands in daylight with three
+  lines. §5's 'Making it look good' goes on from there.
 - **`onLoad`** is where an object adds what it's made of. **`onUpdate`**
   runs every frame. `time.delta` is the frame's time in seconds, so the
   cube turns one radian a second whatever the frame rate.
@@ -507,7 +510,13 @@ class Beacon extends GameObject {
   change. To change one object alone, give its renderer a `color` of its
   own (Unity's `MaterialPropertyBlock`): it replaces the material's color
   for that object, and `null` gives it back. `material.copy()` makes a
-  material of its own to change every value. A material can also take a
+  material of its own to change every value. **Textures** go in
+  `baseColorTexture`, `normalTexture`, `metallicRoughnessTexture`
+  (metallic in blue, roughness in green), `occlusionTexture` and
+  `emissiveTexture`; each multiplies its value. They repeat:
+  `uvScale: Vec2(8, 8)` tiles one eight times each way across a plane
+  (grass, bricks, a carpet), and `uvOffset` slides it (a conveyor belt,
+  tweened). A material can also take a
   `shader` of your own, a `.wgsl` file, for what these values can't do:
   grass in the wind, water, a dissolve, a toon look; and an `outline`
   round its objects (§14).
@@ -548,8 +557,8 @@ from:
 | `lampHighlights`: lamps give shiny surfaces a highlight | no | yes | yes |
 | `shadows` | yes | yes | yes |
 | `shadowCascades`, `shadowResolution` | 1 × 1024 | 2 × 2048 | 3 × 2048 |
-| `shadowSoftness` | hard | soft | softer |
-| `shadowDistance` | 40 m | 60 m | 100 m |
+| `shadowSoftness` | soft | soft | softer |
+| `shadowDistance` | 20 m | 60 m | 100 m |
 | `spotShadows`, `spotShadowResolution` | 1 × 512 | 2 × 1024 | 4 × 1024 |
 | `renderScale`: pixels drawn per pixel of the screen | 0.75 | 1 | 1 |
 | `antiAliasing`: samples a pixel, smoothing edges (MSAA) | 4 | 4 | 4 |
@@ -627,8 +636,10 @@ or leave it to the player's settings page.
   occlusion (below) are drawn only where the quality has them on, so a
   cheaper quality for older phones can turn bloom off without touching
   the cameras. A debug build says once when a camera asks for one that
-  the quality drawn leaves out; for a cheaper quality chosen on purpose,
-  that's expected, and there's nothing to change.
+  the quality drawn leaves out (once a run for each quality, so a test
+  file making a world at low for each test says it once); for a cheaper
+  quality chosen on purpose, that's expected, and there's nothing to
+  change.
 - **Qualities compare by value**: `world.quality` gives back what was
   set, and `Quality.medium.copyWith(bloom: false) ==
   Quality.medium.copyWith(bloom: false)`. Give your own a `name` (in the
@@ -680,13 +691,13 @@ GameObject handTorch() => GameObject(
 
 ### Shadows
 
-A sun or a spotlight casts shadows when asked; every object then casts
-them and has them fall on it, unless its renderer says not, as in Unity:
+A sun casts shadows unless it's made with `shadows: false`, as a new
+scene's sun does in Unity; a spotlight casts them when asked. Every
+object casts them and has them fall on it, unless its renderer says not:
 
 ```dart
 /// A low evening sun, casting long shadows.
-GameObject eveningSun() =>
-    GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.5, -0.4), intensity: 2, shadows: true)]);
+GameObject eveningSun() => GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.5, -0.4), intensity: 2)]);
 
 /// A spotlight 4 m up, pointing straight down, casting shadows.
 GameObject stallLight() => GameObject(
@@ -701,9 +712,19 @@ MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..cas
 - **The sun's shadows** reach the quality's `shadowDistance` from the
   camera and fade out there (less if the camera's `far` is nearer).
   They're drawn into `shadowCascades` maps seen from the sun, with
-  `shadowSoftness` edges: at low one map with hard edges, at medium two
-  with soft ones, at high three softer ones. With more than one, the
-  nearest covers least, so shadows near the camera are sharpest. A
+  `shadowSoftness` edges: at low one map with soft edges, at medium two,
+  at high three with softer ones. With more than one, the nearest covers
+  least, so shadows near the camera are sharpest.
+- **How sharp they are** is the map's texels spread over the distance it
+  covers: halve `shadowDistance` and they're twice as sharp. Keep it to
+  what the game needs shadowed. A table-top game seen from 2–3 m wants
+  10–20 m; an open field, 60 or more with cascades. Low's single 1024 map
+  over 20 m keeps a wall's shadow smooth on a phone; over 40 m (low's
+  until game 7b) it was saw-toothed. A bigger map is sharper too, at four
+  times the memory each step: `shadowResolution: 2048` is 8 MB a map, 1024
+  2 MB.
+  Soft edges cost the Note10+ about 1 ms of GPU a frame over hard ones,
+  and a 2018 iPad about 2 (stage 14). A
   quality with `shadows: false` draws none, whatever the lights ask. The maps move with the camera
   a whole texel at a time, so a still shadow's edge doesn't crawl as the
   camera moves. Only the first sun with `shadows` casts them.
@@ -726,7 +747,10 @@ MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..cas
 ### The sky and fog
 
 `world.sky` is what's behind everything, and it lights the scene. A new
-world has none: the camera's `clearColor` shows.
+world has `Sky.daylight`, a clear day's gradient much like the one
+below, with a grey ground. `world.sky = null` takes it away: then the camera's
+`clearColor` shows, and only the lights light the scene, so the sides the
+sun misses are black without a `Light.ambient`.
 
 ```dart
 /// A clear day: deep blue overhead, pale at the horizon, the far field
@@ -775,7 +799,8 @@ Future<void> photographedSky(World world) async {
   ball in a room still mirrors the sky outside.
 - **`camera.showSky = false`** keeps a camera's `clearColor` behind
   everything (a minimap looking down on the field), while the sky still
-  lights what it shows.
+  lights what it shows. For a background of one colour with no sky light
+  at all, `world.sky = null` and the camera's `clearColor`.
 
 **Fog** fades what's further than `start` metres from the camera into
 its `color`, all of it by `end`. Without a `color` it's the sky's
@@ -869,7 +894,11 @@ void dreamy(Camera camera) {
   so a lit white wall doesn't glow but the sun's glint on it may.
 - **`AmbientOcclusion(intensity:, radius:)`**: `intensity` 1 is as dark
   as a corner is closed in, up to 4; `radius` is how far, in metres, a
-  surface darkens one near it (half a metre unless given).
+  surface darkens one near it (half a metre unless given). Pick it for
+  the scene's size: half a metre suits people and rooms; for small
+  things, a table-top game or a mini-golf course with a 14 cm ball, 0.1 to
+  0.2 m. Too big a radius puts a dark smudge on a wall behind anything
+  near it (game 7b's windmill blades, 6 cm off their wall, did at 0.3).
 - **Colours shown as picked don't glow:** the camera's `clearColor` and
   a `Sky.gradient`, however bright. A `Sky.image` is light, and its sun
   glows.
@@ -883,6 +912,79 @@ void dreamy(Camera camera) {
   before the Android frame pacing work). If your
   game runs on phones like it, use a quality without bloom there
   (`Quality.medium.copyWith(bloom: false)`), or `low`.
+
+## 5b. Making it look good
+
+A new world is a clear day: `Sky.daylight` behind everything, lighting
+what the sun misses, and a sun that casts soft shadows. Hello's cube
+stands in daylight without a line about light. The rest is a few
+choices, each in its own part of §5 and §14. What follows gathers them,
+with what each cost game 7b's mini-golf on a Galaxy Note10+ at low.
+
+```dart
+// lib/look.dart
+import 'package:fynkel/fynkel.dart';
+
+/// A late afternoon over a small scene seen from a few metres: a warm
+/// low sun, a sky of the game's own, haze far off, and the shadows kept
+/// near so they're sharp.
+void lateAfternoon(World world) {
+  world.sky = Sky.gradient(
+    zenith: Color.rgb(0.32, 0.52, 0.82),
+    horizon: Color.rgb(0.95, 0.86, 0.72),
+    ground: Color.rgb(0.40, 0.36, 0.30),
+  );
+  world.fog = const Fog(start: 15, end: 60);
+  world.quality = (world.quality ?? Quality.device).copyWith(shadowDistance: 15);
+  world.add(
+    GameObject(components: [Light.sun(direction: Vec3(-0.6, -0.55, -0.4), color: Color.rgb(1, 0.92, 0.8), intensity: 2)]),
+  );
+}
+
+/// Glow and contact, for the levels that draw them.
+Camera lookingCamera() => Camera(bloom: const Bloom(strength: 0.5), ambientOcclusion: const AmbientOcclusion(radius: 0.15));
+```
+
+- **The sun** does most of it. A low one (its `direction`'s y well
+  short of −1) gives long shadows and lights the sides of things; a
+  colour a little warm or cool sets the time of day. Intensity 1 to 2.5
+  against a sky's light.
+- **The sky** lights the scene as well as filling the back
+  (§5 'The sky and fog'): pick its `ground` darker than its `horizon` so
+  undersides aren't lit as brightly as tops. A sky of the game's own
+  replaces the light of `Sky.daylight`, so a scene that also has a
+  `Light.ambient` wants that dimmer. Its light is worked out once, on the
+  GPU, when it's set; drawn, it's where nothing else is.
+- **Shadows** are sharpest with `shadowDistance` no longer than the game
+  needs (§5 'Shadows'). Game 7b's course is a few metres across and
+  seen from 2–3 m: 14 m at a 2048 map with soft edges looked as medium
+  does, for about 5 % more GPU work than low's.
+- **Fog** fades the far edge of the world into the sky, and costs almost
+  nothing.
+- **Colour and roughness**: a few colours that go together, and
+  `roughness` 0.6–0.9 for most things (grass, wood, stone, cloth) so the
+  sun's glint is kept for what should shine. Textures that repeat
+  (`uvScale`, §5) or a pattern from the world position in a shader of
+  your own (§14) keep big surfaces from looking flat.
+- **Outlines** (§14) give a toy or cartoon look: 8–12 mm round game 7b's
+  boards and props cost about 6 % of its GPU work, as every outlined
+  object is drawn twice.
+- **Bloom and ambient occlusion** are drawn at medium and high only;
+  phones get low, so plan the look without them there. A shadow that
+  stays on one side of a wall leaves its other side's foot without
+  contact at low: game 7b laid a strip of transparent black along each
+  wall's foot instead.
+- **Screen effects** (§14) cost a full-screen pass each: game 7b's
+  colour grade was about 5 % of its GPU work and 0.6 ms of the render
+  thread, and the user preferred the game without it on a phone.
+
+All of game 7b's look together cost the Note10+ three times the GPU work
+of the plain look it started from: the same 60 fps, but the GPU's clock
+from 179 to 571 MHz, and its chip 6 °C warmer (35–36 to 41–42 °C). Most of
+that was its own shaders (a fifth) and its garden of hundreds of small
+objects (an eighth), not the engine's settings. On a phone, measure a
+look by the GPU's clock and how busy it is, not by its milliseconds a
+frame (§20).
 
 ## 6. The frame, the lifecycle and time
 
@@ -2902,6 +3004,10 @@ class LavaPool extends GameObject {
 }
 ```
 
+- **A shader in the code**, rather than a file: `Shader(source)` compiles
+  a WGSL string (a `const` in a Dart file) the same way, and throws a
+  `ShaderError` saying where it's wrong. Handy for a short one, or one put
+  together from parts.
 - `surface` returns what the surface is (colour, roughness, glow...), and
   the engine lights it. `standard(in)` is the material as the engine has
   it, its textures and colour in, so a shader changes one thing and keeps
@@ -3014,7 +3120,11 @@ fn light(in: LightInput) -> vec3<f32> {
 
 - **Outlines** are a material's: `material.outline = Outline(width: 0.02,
   color: Color(0xFF181410))`, on any opaque material, with a shader or
-  not, skinned and moved meshes too. Where an object stands on the
+  not, skinned and moved meshes too. The width is in metres, so it thins
+  with distance as the object does: 1–2 cm for things a metre or two
+  away. Each outlined object is drawn twice, its mesh again inside out
+  behind it; game 7b's 8–12 mm outlines on a whole course cost the
+  Note10+ about 6 % of its GPU work. Where an object stands on the
   ground, the ground hides its outline's lower edge.
 - **The pixel look**: `camera.pixels = 240` draws the game 240 pixels
   high and enlarges it with hard edges. The camera keeps to whole pixels,
@@ -4860,7 +4970,14 @@ What keeps a game fast:
   adds them up; subtract an earlier one and divide by its `frames` for a
   frame's. It's for measuring: off, it costs nothing; on, a little GPU
   time. The parts never overlap, and say where the time goes rather than
-  to the tenth of a millisecond.
+  to the tenth of a millisecond. **On a phone they can't compare two
+  looks**: its GPU slows its clock until it's nearly full, so a frame
+  takes about as long whatever it draws, and the cost shows as clock,
+  power and heat. Game 7b's plain look and its full one both read about
+  13.5 ms a frame on the Note10+, at 179 and 571 MHz. Compare the clock
+  times how busy it is (on the Note10+, `adb shell cat
+  /sys/kernel/gpu/gpu_clock /sys/kernel/gpu/gpu_busy`), or the phone's
+  temperature over ten minutes.
 
 ## 20b. Your own systems and packages
 
@@ -5221,6 +5338,21 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **What playtest game 7b changed** (2026-11-17), how a world looks
+  out of the box:
+  - A new world has `Sky.daylight`, which shows behind everything and
+    lights the scene; it had no sky, so the camera's `clearColor` showed
+    and only the lights lit. A game that relied on that sets
+    `world.sky = null`. One that had a `Light.ambient` is now lit by it
+    and the sky both, and may want it dimmer or gone.
+  - `Light.sun` casts shadows unless made with `shadows: false`; it cast
+    none unless asked. Lamps and spotlights are as they were.
+  - `Quality.low` draws the sun's shadows with soft edges to 20 m; they
+    were hard, to 40 m, and saw-toothed on a phone. The same map, so no
+    more memory; soft edges cost a phone about 1 ms of GPU a frame.
+  - "A camera asks for bloom, but the quality drawn doesn't draw it" is
+    said once a run for each quality, not once for each world.
 
 - **What playtest game 7 and the phone checks changed** (2026-11-17): a
   page pushed over the view pauses the game once it has slid in, not as

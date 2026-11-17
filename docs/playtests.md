@@ -63,6 +63,7 @@ can be wrong.
 | 5 | Effects arcade | Particles, sound, shaders, bloom |
 | 6 | Idle game left running | Memory over an hour, background and back |
 | 7 | Mini-golf made for phones, played on one | Touch, turning the phone, safe areas, background mid-roll, 15 minutes on the Note10+ |
+| 7b | Game 7 again, to look its best on a phone | Light, sky, shadows, materials, shaders, outlines, what each costs on the Note10+; then the user's own round on the iPhone |
 
 1 and 2 first, to see how useful the logs are, then the rest.
 
@@ -98,9 +99,11 @@ checked.
 Games 1 and 2 and the audit, 2026-11-16, fixed on the `playtest-fixes`
 branch; games 3 and 4, 2026-11-16, fixed on `playtest-fixes-2` the next
 day; games 5 and 6, 2026-11-17, on `playtest-fixes-3`; game 7 the same
-day on `playtest-fixes-4`. Each bug got a failing test first, and each
-game's own repro was run against the fix. All seven games found engine
-bugs, so the stop rule's count hasn't started.
+day on `playtest-fixes-4`; game 7b the same day on `playtest-fixes-5`.
+Each bug got a failing test first, and each game's own repro was run
+against the fix. All seven games found engine bugs, so the stop rule's
+count hasn't started. Game 7b is game 7 again, not a game of its own for
+the count.
 
 | From | What | Settled |
 |---|---|---|
@@ -145,6 +148,12 @@ bugs, so the stop rule's count hasn't started.
 | Game 7 | The pocket_hole example's Android activity was a `FlutterActivity`, where §1 says a game's is a `FynkelActivity` | Now a `FynkelActivity` |
 | Game 7 | Nothing on turning the phone: `fovY` is top to bottom, Android's cutout band in landscape, `SafeArea` | §17 "Turning the phone" |
 | Game 7 | On the Note10+: every hole, the best total kept, the same swipe the same result, turned mid-putt, Home mid-roll (the ball where it was), 15 minutes at 59.9 fps median, 253 MB | No finding |
+| Game 7b | A new world was a dark grey void: no sky, the sides the sun missed black, no shadows | A new world has `Sky.daylight`; a sun casts shadows unless told not to (tests; examples keep their own look; §2, §5, §5b, §23) |
+| Game 7b | Saw-toothed shadows at low: one 1024 map spread over 40 m | Low draws soft shadows to 20 m, the same map (Dart and Rust tests; the low goldens; §5) |
+| Game 7b | "A camera asks for bloom…" said once a world: 40 lines in one test file | Once a run for each quality (test; §5) |
+| Game 7b (the user's round) | A fast ball jumped mid-roll: Rapier kicks a ball up where it crosses from one collider to the next | A floor a ball rolls fast on is one `MeshCollider` whose pieces share whole edges; walls without friction (physics test; §16) |
+| Game 7b | Sharpness is resolution over distance; AO's radius for a small scene; outlines in metres and drawn twice; `Shader(source)`; `uvScale` and the texture slots; what a sphere cast's hit says; a phone's GPU ms can't compare two looks; the look scattered through §5 | §5, §5b (new: making it look good, with costs), §14, §16, §20 |
+| Game 7b | On the Note10+: 59.9 fps with the full look; GPU work ×3 over the plain look (clock 179 → 571 MHz), mostly its own shaders and garden; the user's round 2 (no screen effects) 5 % lighter | No finding |
 
 ### Missing, until a second game asks
 
@@ -168,6 +177,16 @@ bugs, so the stop rule's count hasn't started.
   cheapest of these to build (a soft knee on the master, a few lines in
   the mixer) and it ends a whole class of crackle; worth doing at the
   next ask, or sooner if a device check hears it.
+- **Contact darkening at low** (game 7b): ambient occlusion is drawn at
+  high only, so on a phone a wall's foot on the side away from the sun
+  has no contact; the game laid strips of transparent black along each
+  wall. *Recommendation:* wait for a second ask; Unity's answer is baked
+  light, which Fynkel doesn't have. A cheap AO at low (half size, fewer
+  samples) is the likelier build.
+- **Model vertex colours, a mesh's surface as a particle shape, wind**
+  (game 7b; all in §21 already): its garden was made of primitives in a
+  `MeshBuilder` and stood still. *Recommendation:* each waits for its
+  second ask.
 - **Two fingers on a phone by script** (game 7): `adb shell input` has
   one finger and the Note10+'s SELinux refuses `sendevent`, so pinch and
   twist were checked in a world test with `input.simulate` and by hand.
