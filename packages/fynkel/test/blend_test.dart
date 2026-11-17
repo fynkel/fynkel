@@ -12,7 +12,7 @@ const half = 0.7354;
 /// A wall glowing [wall], 5 m in front of a camera, and a square in front
 /// of it, 1 m nearer, of [glass]: no lights, so each shows its glow alone.
 World scene(Material glass, {Color wall = const Color.rgb(half, 0, 0)}) {
-  final world = World();
+  final world = World()..sky = null;
   world.add(
     GameObject(
       transform: Transform(position: Vec3(0, 0, 5)),

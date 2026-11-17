@@ -34,7 +34,7 @@ class DrawerBehaviour extends Behaviour {
 
 void main() {
   late World world;
-  setUp(() => world = World());
+  setUp(() => world = World()..sky = null);
   tearDown(() => world.dispose());
 
   test('lines drawn in a frame are drawn over it, and gone the frame after', () {
@@ -181,7 +181,7 @@ void main() {
   });
 
   test('a world disposed with lines left frees them', () {
-    final other = World();
+    final other = World()..sky = null;
     other.debug.line(Vec3.zero, Vec3.up, seconds: 1);
     other.update(0);
     other.dispose();
@@ -189,7 +189,7 @@ void main() {
   });
 
   test("drawing in a disposed world throws, and doesn't write into freed memory", () {
-    final other = World();
+    final other = World()..sky = null;
     other.debug.line(Vec3.zero, Vec3.up);
     other.update(1 / 60);
     other.dispose();

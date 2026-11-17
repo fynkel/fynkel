@@ -16,7 +16,7 @@ void main() {
   late World world;
   late HeadlessView view;
   setUp(() {
-    world = World();
+    world = World()..sky = null;
     world.add(
       GameObject(
         transform: Transform(position: Vec3(0, 0, 5)),

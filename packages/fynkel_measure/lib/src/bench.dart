@@ -214,7 +214,8 @@ List<String> _extract() {
     ('100 chains 100 deep', (int i) => i % 100 == 0 ? null : i - 1),
     ('no tree', (int i) => null),
   ]) {
-    final world = World();
+    // No sky, a sun without shadows: as when stage 16's budgets were set.
+    final world = World()..sky = null;
     world.add(
       GameObject(
         transform: Transform(position: Vec3(0, 1, 4), rotation: Quat.lookRotation(Vec3(0, -1, -4))),
@@ -224,7 +225,7 @@ List<String> _extract() {
     world.add(
       GameObject(
         transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
-        components: [Light.sun()],
+        components: [Light.sun(shadows: false)],
       ),
     );
     final cube = Mesh.cube(), material = Material();

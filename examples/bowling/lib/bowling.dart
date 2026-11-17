@@ -65,7 +65,10 @@ class BowlingGame extends GameObject {
     // 100 steps a second: a ball rolling at 9 m/s turns 80 times a second,
     // and physics turns a body no more than a quarter turn a step.
     time.fixedDelta = 1 / 100;
-    add(GameObject(components: [Light.sun(direction: Vec3(0.3, -1, -0.5), intensity: 2.5)]));
+    // Its own look, from before a new world had a sky and a sun shadows:
+    // the camera's clear colour behind, an ambient light, no shadows.
+    world.sky = null;
+    add(GameObject(components: [Light.sun(direction: Vec3(0.3, -1, -0.5), intensity: 2.5, shadows: false)]));
     add(GameObject(components: [Light.ambient(color: Color.rgb(0.75, 0.8, 1), intensity: 0.7)]));
     add(Alley());
     add(ChaseCamera(this));

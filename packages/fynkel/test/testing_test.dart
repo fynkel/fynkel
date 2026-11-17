@@ -105,7 +105,9 @@ void main() {
     });
 
     test("a view's frame is checked as it draws: expectFrame", () {
-      final drawn = World()..add(GameObject(components: [Camera(clearColor: const Color.rgb(0.2, 0.4, 0.6))]));
+      final drawn = World()
+        ..sky = null
+        ..add(GameObject(components: [Camera(clearColor: const Color.rgb(0.2, 0.4, 0.6))]));
       addTearDown(drawn.dispose);
       final HeadlessView view;
       try {

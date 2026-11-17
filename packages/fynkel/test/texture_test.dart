@@ -95,7 +95,7 @@ void main() {
   });
 
   test('a mesh in use cannot be disposed; a built-in shape never can', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final mesh = Mesh.custom(positions: const [Vec3(0, 0, 0), Vec3(1, 0, 0), Vec3(0, 1, 0)], indices: const [0, 1, 2]);
     final object = world.add(GameObject(components: [MeshRenderer(mesh, Material())]));
@@ -112,11 +112,11 @@ void main() {
   });
 
   test('a material in use cannot be disposed; once free of objects it can, and so can its textures', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     final red = Texture2D.rgba(1, 1, Uint8List.fromList([255, 0, 0, 255]));
     final material = Material(name: 'paint', baseColorTexture: red);
-    final other = World();
+    final other = World()..sky = null;
     addTearDown(other.dispose);
     final object = world.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
     final elsewhere = other.add(GameObject(components: [MeshRenderer(Mesh.cube(), material)]));
@@ -168,7 +168,7 @@ void main() {
   });
 
   test('a UV scale and offset pick part of a texture, and a double-sided plane shows its back', () {
-    final world = World();
+    final world = World()..sky = null;
     addTearDown(world.dispose);
     world.add(
       GameObject(

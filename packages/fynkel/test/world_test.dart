@@ -96,7 +96,7 @@ void main() {
   test('shadow settings go in, and an engine-made renderer reads back casting and receiving them', () async {
     final sun = Light.sun(shadows: true);
     final spot = Light.spot(shadows: true);
-    expect((sun.shadows, spot.shadows, Light.sun().shadows, Light.point().shadows), (true, true, false, false));
+    expect((sun.shadows, spot.shadows, Light.sun().shadows, Light.point().shadows), (true, true, true, false));
     expect(sun.toString(), contains('shadows: true'));
     world.add(GameObject(components: [sun]));
     world.add(GameObject(components: [spot]));

@@ -282,7 +282,8 @@ fn a_world_takes_a_quality_of_its_own() {
     // SAFETY: a local out-value.
     ok(unsafe { fy_quality_preset(FY_QUALITY_LOW, &mut low) });
     assert_eq!((low.hdr, low.bloom, low.ambient_occlusion, low.shadows), (false, false, false, true));
-    assert_eq!((low.shadow_cascades, low.shadow_resolution, low.shadow_softness), (1, 1024, FY_SHADOWS_HARD));
+    assert_eq!((low.shadow_cascades, low.shadow_resolution, low.shadow_softness), (1, 1024, FY_SHADOWS_SOFT));
+    assert_eq!(low.shadow_distance, 20.0, "a phone's shadows sharp enough to read");
     let mine = FyQuality { bloom: true, ambient_occlusion: true, shadows: false, ..low };
     // SAFETY: a live world, a local value.
     ok(unsafe { fy_world_quality_set(world.0, &mine) });

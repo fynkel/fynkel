@@ -6,7 +6,7 @@ import 'package:test/test.dart';
 
 void main() {
   late World world;
-  setUp(() => world = World());
+  setUp(() => world = World()..sky = null);
   tearDown(() => world.dispose());
 
   test('a raycast finds the closest object, where and how far', () {

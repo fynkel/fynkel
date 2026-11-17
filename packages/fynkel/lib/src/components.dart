@@ -711,8 +711,9 @@ final class Light extends Component {
   /// Shines along the object's [GameObject.forward]. Given a [direction],
   /// it turns the object it's put on to shine that way:
   /// `GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))])`.
-  /// With [shadows], what it shines on casts shadows (see [Light.shadows]).
-  factory Light.sun({Vec3? direction, Color color = Color.white, double intensity = 1, bool shadows = false}) {
+  /// What it shines on casts shadows unless [shadows] is false (see
+  /// [Light.shadows]), as a new scene's sun does in Unity.
+  factory Light.sun({Vec3? direction, Color color = Color.white, double intensity = 1, bool shadows = true}) {
     final facing = direction == null ? null : Quat.lookRotation(direction);
     return Light._(LightKind.sun, color, intensity, 10, 30 * math.pi / 180, 0.2, shadows).._facing = facing;
   }
@@ -856,7 +857,8 @@ final class Light extends Component {
     }
   }
 
-  /// Whether what it shines on casts shadows: false unless set, and only
+  /// Whether what it shines on casts shadows: a sun's do unless it's made
+  /// with `shadows: false`, other lights' only when set; and only
   /// where the world's [Quality.shadows] is on. A sun's reach
   /// [Quality.shadowDistance] from the camera and fade out there; only
   /// the first sun made with shadows casts them. A spot light's reach its

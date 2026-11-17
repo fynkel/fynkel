@@ -9,7 +9,9 @@ import 'package:test/test.dart';
 /// A square glowing [glow] times white, a fifth of a 64 × 64 view across,
 /// on black, seen at [quality] by a camera with [bloom].
 ({World world, HeadlessView view, Camera camera}) glowing(double glow, Quality quality) {
-  final world = World()..quality = quality;
+  final world = World()
+    ..quality = quality
+    ..sky = null;
   final camera = Camera(clearColor: Color.black);
   world.add(
     GameObject(
@@ -116,6 +118,10 @@ void main() {
       (false, false, true),
     );
     expect(Quality.levels, contains(Quality.device));
+    // A phone's shadows sharp enough to read: one 1024 map spread over 40 m
+    // gave walls saw-toothed shadows (playtest game 7b).
+    expect((Quality.low.shadowDistance, Quality.low.shadowResolution), (20, 1024));
+    expect(Quality.low.shadowSoftness, ShadowSoftness.soft);
     // Written twice, here and in the renderer: the same.
     for (final (i, level) in Quality.levels.indexed) {
       using((arena) {
@@ -147,7 +153,7 @@ void main() {
   });
 
   test('a world nothing draws says nothing about effects it would leave out (a test at low stays quiet)', () {
-    final world = World()..quality = Quality.low;
+    final world = World()..quality = Quality.low.copyWith(name: 'quiet');
     addTearDown(world.dispose);
     var lines = printed(() => world.add(GameObject(components: [Camera(bloom: const Bloom())])));
     expect(lines, isEmpty, reason: 'no view draws it');
@@ -156,14 +162,14 @@ void main() {
   });
 
   test('a debug build says once when the quality drawn leaves out what a camera asks for', () {
-    final (:view, :camera, :world) = glowing(8, Quality.low);
+    final (:view, :camera, :world) = glowing(8, Quality.low.copyWith(name: 'cheap'));
     var lines = printed(() {
       camera.bloom = const Bloom();
       camera.bloom = const Bloom(strength: 2);
       camera.ambientOcclusion = const AmbientOcclusion();
     });
     expect(lines, hasLength(2));
-    expect(lines[0], contains('asks for bloom, but the quality drawn (low)'));
+    expect(lines[0], contains('asks for bloom, but the quality drawn (cheap)'));
     expect(lines[1], contains('ambientOcclusion: true'));
     lines = printed(() => world.quality = Quality.medium.copyWith(bloom: false));
     expect(lines, isEmpty, reason: 'once each');
@@ -179,5 +185,18 @@ void main() {
     expect(lines, Quality.device.ambientOcclusion ? isEmpty : hasLength(1));
     lines = printed(() => other.quality = Quality.high);
     expect(lines, isEmpty, reason: 'high draws both');
+  });
+
+  test('a quality that leaves an effect out says so once in a run, not once a world (a test file at low)', () {
+    final quality = Quality.low.copyWith(name: 'each test');
+    final lines = printed(() {
+      for (var i = 0; i < 3; i++) {
+        final (:view, :camera, :world) = glowing(8, quality);
+        camera.bloom = const Bloom();
+        view.dispose();
+        world.dispose();
+      }
+    });
+    expect(lines, hasLength(1), reason: '$lines');
   });
 }

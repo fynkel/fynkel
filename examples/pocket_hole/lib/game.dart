@@ -73,7 +73,8 @@ class PocketGame extends GameObject {
         components: [Camera(orthographic: true, orthographicSize: 8.3, clearColor: Color(0xFFE7E9FF), showSky: false)],
       ),
     );
-    add(GameObject(components: [Light.sun(direction: Vec3(-.5, -1, -.4), intensity: 2, shadows: true)]));
+    world.sky = null; // its clear colour behind, and only its own lights
+    add(GameObject(components: [Light.sun(direction: Vec3(-.5, -1, -.4), intensity: 2)]));
     add(GameObject(components: [Light.ambient(intensity: .8)]));
     shape(Vec3(0, -.32, 0), Vec3(6.8, .6, 12.3), 0xFFB69AE5);
     shape(Vec3(0, -.025, 0), Vec3(6.65, .06, 12.1), 0xFFD6B7F5);

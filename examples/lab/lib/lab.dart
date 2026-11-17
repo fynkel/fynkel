@@ -54,6 +54,7 @@ abstract class LabScene extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
+    world.sky = null; // the lab's own: its camera's clear colour; a scene sets one
     // Heard a little later: by then the object may be destroyed, and its
     // name gone with it.
     world.errors.listen((e) {
@@ -71,7 +72,9 @@ abstract class LabScene extends GameObject {
     add(
       GameObject(
         name: 'sun',
-        components: [Light.sun(direction: Vec3(-0.4, -1, -0.5), intensity: 2.5)],
+        // Each scene sets its own sky and shadows; the lab's own look has
+        // neither.
+        components: [Light.sun(direction: Vec3(-0.4, -1, -0.5), intensity: 2.5, shadows: false)],
       ),
     );
     add(GameObject(name: 'ambient', components: [Light.ambient(intensity: 0.5)]));

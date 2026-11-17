@@ -22,6 +22,16 @@ sealed class Sky {
   /// turned [rotation] radians to the right.
   factory Sky.image(SkyImage image, {double intensity, double rotation, double lighting}) = ImageSky;
 
+  /// The sky a new [World] has: a clear day's, deep blue overhead, pale at
+  /// the horizon and a soft grey below it, lighting what the sun misses as
+  /// a new scene's sky does in Unity. `world.sky = null` takes it away, for
+  /// the camera's [Camera.clearColor].
+  static final Sky daylight = Sky.gradient(
+    zenith: const Color.rgb(0.25, 0.49, 0.78),
+    horizon: const Color.rgb(0.83, 0.89, 0.94),
+    ground: const Color.rgb(0.45, 0.45, 0.45),
+  );
+
   /// What the light the sky gives is multiplied by: 0 for none, 1 unless
   /// given. What's seen of it is unchanged. 0 or more; NaN throws a
   /// [RangeError].

@@ -52,7 +52,10 @@ class ArenaGame extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(GameObject(components: [Light.sun(direction: Vec3(-0.3, -1, -0.5), intensity: 2.5)]));
+    // Its own look, from before a new world had a sky and a sun shadows:
+    // the camera's clear colour behind, an ambient light, no shadows.
+    world.sky = null;
+    add(GameObject(components: [Light.sun(direction: Vec3(-0.3, -1, -0.5), intensity: 2.5, shadows: false)]));
     add(GameObject(components: [Light.ambient(intensity: 0.5)]));
     round = add(Round(math.Random(seed)));
     camera = add(ArenaCamera(round.player));
