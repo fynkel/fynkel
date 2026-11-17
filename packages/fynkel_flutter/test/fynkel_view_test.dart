@@ -2425,6 +2425,32 @@ void main() {
       },
     );
 
+    // The phones: while a page slid in over the view, the game, still in
+    // sight, was already paused at 10 a second, so it stuttered.
+    testWidgets('while a page slides over the view, or back off, the game goes on at its rate', (tester) async {
+      final dts = <double>[];
+      await tester.pumpWidget(app(onFrame: dts.add));
+      await settle(tester);
+      unawaited(Navigator.of(page).push(MaterialPageRoute<void>(builder: (_) => const Text('shop'))));
+      dts.clear();
+      // Within the page's 300 ms slide.
+      for (var i = 0; i < 24; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(world.paused, isFalse, reason: 'the page is still sliding in');
+      expect(dts, hasLength(greaterThanOrEqualTo(23)), reason: 'every frame while it slides');
+      await settle(tester);
+      expect(world.paused, isTrue, reason: 'slid in, it covers the view');
+      Navigator.of(page).pop();
+      dts.clear();
+      for (var i = 0; i < 24; i++) {
+        await tester.pump(const Duration(microseconds: 8333));
+      }
+      expect(world.paused, isFalse, reason: 'sliding off, the view shows again');
+      expect(dts, hasLength(greaterThanOrEqualTo(22)), reason: 'every frame while it slides off');
+      await settle(tester);
+    });
+
     // The audit: two views of one world share one answer to "is a frame
     // due", so a covered view, slowed to 10 a second, might hold the view
     // on the page over it to its rate.

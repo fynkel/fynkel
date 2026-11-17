@@ -600,7 +600,12 @@ class FynkelViewState extends State<FynkelView> with WidgetsBindingObserver {
         if (mounted && host != null && host.onScreen && texture != null) _sendShown(host, texture);
       });
     }
-    final covered = (!(ModalRoute.of(context)?.isCurrent ?? true) || _hidden) && widget.pauseWhenCovered;
+    final route = ModalRoute.of(context);
+    _watchSlide(route?.secondaryAnimation);
+    // While a page slides in over the view's, or back off, the view still
+    // shows: it's covered once the page is all in.
+    final sliding = route?.secondaryAnimation?.isAnimating ?? false;
+    final covered = ((!(route?.isCurrent ?? true) && !sliding) || _hidden) && widget.pauseWhenCovered;
     if (covered == _covered) return;
     _covered = covered;
     // After this frame: pausing tells widgets, which can't build again in
@@ -625,6 +630,20 @@ class FynkelViewState extends State<FynkelView> with WidgetsBindingObserver {
         }
       }
     });
+  }
+
+  // The route's animation for a page sliding in over it, or back off,
+  // heard to cover the view once a page is all in.
+  Animation<double>? _slide;
+
+  void _watchSlide(Animation<double>? slide) {
+    if (identical(slide, _slide)) return;
+    _slide?.removeStatusListener(_slid);
+    _slide = slide?..addStatusListener(_slid);
+  }
+
+  void _slid(AnimationStatus _) {
+    if (mounted) _cover();
   }
 
   /// The game set [World.paused] while the view's pause held: from then on
@@ -910,6 +929,7 @@ class FynkelViewState extends State<FynkelView> with WidgetsBindingObserver {
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    _watchSlide(null);
     _live.remove(this);
     _letGo(world);
     _stopHearing();
