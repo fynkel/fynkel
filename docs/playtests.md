@@ -62,8 +62,16 @@ can be wrong.
 | 4 | Puzzle with levels | Loading and unloading, saving by hand, hot reload |
 | 5 | Effects arcade | Particles, sound, shaders, bloom |
 | 6 | Idle game left running | Memory over an hour, background and back |
+| 7 | Mini-golf made for phones, played on one | Touch, turning the phone, safe areas, background mid-roll, 15 minutes on the Note10+ |
 
 1 and 2 first, to see how useful the logs are, then the rest.
+
+**From game 7 on, a phone too.** The bugs that got past games 1–6 were
+found on phones (a hidden tab showing through, a stutter as a page slid
+in), so game 7's agent also played its game on the Note10+ over adb:
+taps and swipes by script, the phone turned, Home and back, screenshots
+and the log, and a 15-minute run. What only an eye can judge it lists
+for the user, who plays it on the iPhone.
 
 **Stop rule:** when three games in a row find no new engine bug, this ends
 and publishing work starts.
@@ -89,10 +97,10 @@ checked.
 
 Games 1 and 2 and the audit, 2026-11-16, fixed on the `playtest-fixes`
 branch; games 3 and 4, 2026-11-16, fixed on `playtest-fixes-2` the next
-day; games 5 and 6, 2026-11-17, on `playtest-fixes-3`. Each bug got a
-failing test first, and each game's own repro was run against the fix.
-All six games found engine bugs, so the stop rule's count hasn't
-started.
+day; games 5 and 6, 2026-11-17, on `playtest-fixes-3`; game 7 the same
+day on `playtest-fixes-4`. Each bug got a failing test first, and each
+game's own repro was run against the fix. All seven games found engine
+bugs, so the stop rule's count hasn't started.
 
 | From | What | Settled |
 |---|---|---|
@@ -129,13 +137,21 @@ started.
 | Game 6 | A tween's `.then`, given in a routine that was then stopped (its object sold, the world disposed), failed with an uncaught `RoutineStopped` | Fixed: it hangs quietly, as the rest of a stopped routine; `onComplete` runs (test; §9, §23) |
 | Game 6 | Under a page that covers it whole, or in a hidden tab, the world stopped dead, unscaled time too, even with `pauseWhenCovered: false`: Flutter muted the view's ticker | Fixed: its own ticker; paused there, 10 frames a second as under a dialog, nothing drawn (widget test; Note10+; §17, §23) |
 | Game 6 | `Mesh.plane()` is 1 × 1, testing `onApplicationPause`, `measure --help` built the app first, measure's modes | §5, §19; `--help` says so at once |
+| iPhone check | While a page slid in over the view, the game, still in sight, was already paused and drawn 10 times a second: it stuttered | Fixed (#207): covered once the page is all in (widget test; iPhone; §17, §23) |
 | Game 6 | An hour on the Mac: footprint flat at 433–437 MB, 60 fps, 18 KB a frame; 24 game hours in a test flat; 30 of 30 `kill -9`s mid-save loaded | No finding. About 194 MB of GPU memory unnamed, as stage 17 knows |
+
+| Game 7 | A game that paused itself, then pushed its pause page, was drawn at its full rate under it (54 fps on the Note10+, not 10) | Fixed: covered and paused, by whoever, is 10 a second (widget test; the game's repro; §17, §23). Unpaused by the game under the page, it runs: by design, §17 says so |
+| Game 7 | `limitVelocity` takes a `LimitVelocity`; `GameObject.bounds` can be null | §13c, §12 |
+| Game 7 | The pocket_hole example's Android activity was a `FlutterActivity`, where §1 says a game's is a `FynkelActivity` | Now a `FynkelActivity` |
+| Game 7 | Nothing on turning the phone: `fovY` is top to bottom, Android's cutout band in landscape, `SafeArea` | §17 "Turning the phone" |
+| Game 7 | On the Note10+: every hole, the best total kept, the same swipe the same result, turned mid-putt, Home mid-roll (the ball where it was), 15 minutes at 59.9 fps median, 253 MB | No finding |
 
 ### Missing, until a second game asks
 
-- **Camera collision** (game 1): an orbit or follow camera goes through
+- **Camera collision** (games 1 and 7): an orbit or follow camera goes through
   walls, and a game can't fix it after the rig, which runs after every
-  `onLateUpdate`. Game 1 sphere-cast itself and set `orbit.distance`.
+  `onLateUpdate`. Game 1 sphere-cast itself and set `orbit.distance`;
+  game 7 raised its own camera over a wall or windmill in the way.
   *Recommendation:* the most likely to be asked for again; every
   third-person game needs it. A rig option in fynkel_physics (the casts
   live there), Cinemachine's Deoccluder as the model: cast from the
@@ -152,6 +168,11 @@ started.
   cheapest of these to build (a soft knee on the master, a few lines in
   the mixer) and it ends a whole class of crackle; worth doing at the
   next ask, or sooner if a device check hears it.
+- **Two fingers on a phone by script** (game 7): `adb shell input` has
+  one finger and the Note10+'s SELinux refuses `sendevent`, so pinch and
+  twist were checked in a world test with `input.simulate` and by hand.
+  Not the engine's; the next phone game could use a test build with
+  Flutter's `integration_test` instead.
 - **3D pictures in lists** (game 2): thumbnails of models for a grid.
   One `World` and a `HeadlessView` drawing each model and keeping its
   `png()` worked on the Mac (10 in 237 ms), but `HeadlessView` says it's
