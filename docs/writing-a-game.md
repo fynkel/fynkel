@@ -4076,7 +4076,9 @@ saving there run, and then the engine's memory is freed.
 **Menus, pop-ups and pages** are Flutter's own: `showDialog`,
 `Navigator.push`, `PopScope`. Whatever covers the view's page pauses the
 game (`world.paused`), so it hears no taps or keys, and closing the last
-one goes on. The game stays alive behind it: its objects, routines and
+one goes on. A page pauses it once it has slid in all the way, and as it
+starts to slide back off the game goes on: while it slides, the game still
+shows and runs at its rate. The game stays alive behind it: its objects, routines and
 score wait where they were, and, as nothing in it moves, it's drawn only
 10 times a second, which keeps a phone cool behind a menu. A game that was
 paused already stays paused.
