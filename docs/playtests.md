@@ -89,9 +89,10 @@ checked.
 
 Games 1 and 2 and the audit, 2026-11-16, fixed on the `playtest-fixes`
 branch; games 3 and 4, 2026-11-16, fixed on `playtest-fixes-2` the next
-day; game 5, 2026-11-17, on `playtest-fixes-3`. Each bug got a failing
-test first, and each game's own repro was run against the fix. All five
-games found engine bugs, so the stop rule's count hasn't started.
+day; games 5 and 6, 2026-11-17, on `playtest-fixes-3`. Each bug got a
+failing test first, and each game's own repro was run against the fix.
+All six games found engine bugs, so the stop rule's count hasn't
+started.
 
 | From | What | Settled |
 |---|---|---|
@@ -125,6 +126,10 @@ games found engine bugs, so the stop rule's count hasn't started.
 | Game 5 | In a test, frames and `audio.render` both move the sound on | §13b: `render` is the clock; listen instead of running frames |
 | Game 5 | The mix is cut flat at full scale: four sounds at half volume crackle | §13b says leave room; a limiter listed below and in §21 |
 | Game 5 | `Texture2D.rgba`, `ColorBySpeed`'s arguments, the music's `clip`/`isPlaying`/`volume`, the sound stats | §12, §13b, §13c |
+| Game 6 | A tween's `.then`, given in a routine that was then stopped (its object sold, the world disposed), failed with an uncaught `RoutineStopped` | Fixed: it hangs quietly, as the rest of a stopped routine; `onComplete` runs (test; §9, §23) |
+| Game 6 | Under a page that covers it whole, or in a hidden tab, the world stopped dead, unscaled time too, even with `pauseWhenCovered: false`: Flutter muted the view's ticker | Fixed: its own ticker; paused there, 10 frames a second as under a dialog, nothing drawn (widget test; Note10+; §17, §23) |
+| Game 6 | `Mesh.plane()` is 1 × 1, testing `onApplicationPause`, `measure --help` built the app first, measure's modes | §5, §19; `--help` says so at once |
+| Game 6 | An hour on the Mac: footprint flat at 433–437 MB, 60 fps, 18 KB a frame; 24 game hours in a test flat; 30 of 30 `kill -9`s mid-save loaded | No finding. About 194 MB of GPU memory unnamed, as stage 17 knows |
 
 ### Missing, until a second game asks
 
