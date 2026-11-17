@@ -394,10 +394,14 @@ sealed class Motion implements Future<void> {
     if (routine != null && isRunning && identical(routine._world, _world)) {
       // One of the routine's waits: it goes on in the routines step, and a
       // stopped routine unwinds from it.
+      // An `await` gives an onError, and unwinds the routine from it. A
+      // plain `.then` gives none: when the routine stops, what's chained
+      // on it waits for ever, as the rest of a stopped routine does,
+      // rather than failing with RoutineStopped where no one catches it.
       return _addWait(
         (r, frame) => _Wait(r, frame, test: () => !isRunning),
         'a motion',
-      ).then(onValue, onError: onError);
+      ).then(onValue, onError: onError ?? _hangIfStopped);
     }
     return _done.future.then(onValue, onError: onError);
   }
@@ -1116,6 +1120,11 @@ Vec3 _axis(Vec3 axis, String call) {
   if (l < 1e-12 || !l.isFinite) throw ArgumentError('$call: axis is $axis; it needs a direction to turn about');
   return axis / l;
 }
+
+// What a plain `.then` on a motion in a routine does when the routine
+// stops: waits for ever. Any other error goes on.
+Future<Never> _hangIfStopped(Object error, StackTrace stack) =>
+    error is RoutineStopped ? _never : Future<Never>.error(error, stack);
 
 // Where the punches and the shakes running on an object rest: one that
 // begins while another of its kind runs on the object takes that one's
