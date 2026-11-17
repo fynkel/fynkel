@@ -1430,7 +1430,8 @@ class Tree extends GameObject {
 - `assets.instantiate(name)` gives a new copy of the model, a tree of objects
   sharing its meshes and textures with every other copy. Find its parts by
   name.
-- `copy.bounds` is the box in the world round what it draws: its `size`
+- `copy.bounds` is the box in the world round what it draws (null when
+  nothing in it draws a mesh, so `copy.bounds!` for a model): its `size`
   is the model's size, to scale it to fit (`Vec3.all(1 / size.y)` makes
   it a metre high), and its `center` less `copy.position` is how far its
   middle is from its pivot, which a model needn't have in its middle.
@@ -2695,8 +2696,8 @@ ParticleSystem fire(Texture2D flames) => ParticleSystem(
   particle keeps its own place between the two for its whole life.
 - **Movement.** `velocityOverLifetime` (a `ParticleVector`, x, y and z
   curves, in local or world space) is added to how it moves;
-  `forceOverLifetime` speeds it up; `limitVelocity` holds its speed to a
-  `limit` (by `dampen`, 0 to 1, a second) and slows it by `drag`;
+  `forceOverLifetime` speeds it up; `limitVelocity` (a `LimitVelocity`,
+  no `Particle` in its name) holds its speed to a `limit` (by `dampen`, 0 to 1, a second) and slows it by `drag`;
   `rotationOverLifetime` turns it, radians a second; `noise` pushes it
   about in a field that moves with `scrollSpeed` (`octaves` up to 4, each
   costing about as much again).
@@ -4081,9 +4082,26 @@ starts to slide back off the game goes on: while it slides, the game still
 shows and runs at its rate. The game stays alive behind it: its objects, routines and
 score wait where they were, and, as nothing in it moves, it's drawn only
 10 times a second, which keeps a phone cool behind a menu. A game that was
-paused already stays paused.
+paused already stays paused: a pause button can set `world.paused = true`
+to stop the game the moment it's tapped and then push its page, and under
+the page it's drawn 10 times a second all the same; on Resume, close the
+page and unpause it. Unpaused by the game while the page is over it, it
+runs there: the game's word goes.
 For a game that runs on under a see-through pop-up, give
 `FynkelView(pauseWhenCovered: false)`.
+
+**Turning the phone.** The view takes its new size and the game goes on:
+`input.width` and `height` change, and a drag held through the turn goes
+on. A camera's `fovY` is the angle top to bottom whatever the shape, so
+turned on its side a view shows as much height and more width; to frame
+the same in both, set `fovY` from `input.width / input.height` when it
+changes. On Android, `flutter create`'s styles keep the app out of the
+camera's cutout in landscape, which leaves a black band down that side:
+add `<item name="android:windowLayoutInDisplayCutoutMode">shortEdges</item>`
+to `LaunchTheme` and `NormalTheme` in `android/app/src/main/res/values*/styles.xml`
+so the view fills the screen. Put the HUD in a `SafeArea` so its buttons
+stay clear of the notch, the cutout and the home bar; the view itself
+can go under them.
 
 **Tabs.** A view in a tab that isn't showing, kept alive by an
 `IndexedStack` (or under a `Visibility.maintain` that hides it), is paused
@@ -5154,6 +5172,13 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **What playtest game 7 and the phone checks changed** (2026-11-17): a
+  page pushed over the view pauses the game once it has slid in, not as
+  it starts to, and the game goes on as it starts to slide back off. A
+  game paused by itself before a page covered it is drawn 10 times a
+  second under the page, as one the page paused; it used to be drawn at
+  its full rate there.
 
 - **What playtest game 6 changed** (2026-11-17): a view under a page
   that covers it whole, or in a hidden tab, runs its paused world at 10
