@@ -3298,8 +3298,12 @@ the seam can catch the edge of the next and hop (as in Unity): a ball at
 the engine smooths the edges between its triangles, so build such a
 floor's collider from its top faces only, flats and slopes alike, with
 `Mesh.combine` of `Mesh.plane`s, and keep boxes, if you like their
-look, for the `MeshRenderer`s alone. Combining whole boxes doesn't help:
-the faces where they touch stay inside the mesh and bump it worse.
+look, for the `MeshRenderer`s alone. The pieces must meet edge to edge,
+sharing each edge whole: where one piece's edge meets the middle of
+another's (a T), or two meet at a sharp crest, the ball still hops, so
+split a long piece where a shorter one meets it, and round a crest.
+Combining whole boxes doesn't help: the faces where they touch stay
+inside the mesh and bump it worse.
 
 ```dart
 // lib/green.dart
@@ -3441,7 +3445,12 @@ radius, direction, maxDistance:)` (`point1` and `point2` the centres of
 its ends), `overlapSphere(center, radius)`. A `Ray`'s direction is made
 unit length for you. Each takes `layers:` and `triggers:`
 (`QueryTriggers.ignore` goes through triggers), and sees colliders where
-their objects are now, moved this frame or not:
+their objects are now, moved this frame or not. A cast's hit has the
+`distance` its shape's centre went before it touched (so the ball's
+centre is at `ray.origin + direction * distance` then), and a `point` on
+the surface it touched; a shape that starts touching or inside a
+collider doesn't hit it, as in Unity, so start a ball's cast a hair
+above the ground it sits on:
 
 ```dart
 // lib/sight.dart
