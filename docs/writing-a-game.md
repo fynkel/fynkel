@@ -3291,6 +3291,46 @@ class Rock extends GameObject {
 }
 ```
 
+**A floor a ball rolls across fast is one mesh.** Where two colliders
+meet edge to edge, a box beside a box or a ramp, a fast ball crossing
+the seam can catch the edge of the next and hop (as in Unity): a ball at
+5 m/s across two flat boxes jumps at 0.7 m/s. Within one `MeshCollider`
+the engine smooths the edges between its triangles, so build such a
+floor's collider from its top faces only, flats and slopes alike, with
+`Mesh.combine` of `Mesh.plane`s, and keep boxes, if you like their
+look, for the `MeshRenderer`s alone. Combining whole boxes doesn't help:
+the faces where they touch stay inside the mesh and bump it worse.
+
+```dart
+// lib/green.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+/// A green of two flats and a ramp up between them, as one collider.
+class Green extends GameObject {
+  @override
+  void onLoad() {
+    super.onLoad();
+    final ground = Mesh.combine([
+      CombineInstance(Mesh.plane(), position: Vec3(0, 0, -0.6), scale: Vec3(1.6, 1, 2.8)),
+      CombineInstance(
+        Mesh.plane(),
+        position: Vec3(0, 0.1, -2.9),
+        rotation: Quat.axisAngle(Vec3.right, 0.2 / 1.8),
+        scale: Vec3(1.6, 1, 1.81),
+      ),
+      CombineInstance(Mesh.plane(), position: Vec3(0, 0.2, -4.5), scale: Vec3(1.6, 1, 1.4)),
+    ]);
+    add(GameObject(components: [MeshCollider(mesh: ground)]));
+  }
+}
+```
+
+
+A ball that hits a wall while it rolls climbs it a little, its spin
+against the wall's friction; give walls a `PhysicsMaterial` with no
+friction if it shouldn't.
+
 **A `Rigidbody`** makes its object move with physics, as Unity's: give it
 a collider and it falls, tumbles and lands. Colliders on its children
 that have no rigidbody of their own are part of the same body, and the

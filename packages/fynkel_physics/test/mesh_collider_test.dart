@@ -165,6 +165,59 @@ void main() {
     physics.drawColliders = false;
   });
 
+  // Game 7b: a fast putt jumped where the green's boxes met. Separate
+  // colliders edge to edge bump a ball crossing the seam (as in Unity);
+  // one mesh of the floor's top faces doesn't, its inner edges smoothed.
+  test('a fast ball rolls across a floor of combined planes without a bump; across two boxes it bumps', () {
+    double bump(void Function(World) floor) {
+      final world = newWorld();
+      floor(world);
+      final ball = world.add(
+        GameObject(
+          transform: Transform(position: const Vec3(0, 0.067, 1.8), scale: Vec3.all(0.134)),
+          components: [SphereCollider(), Rigidbody(mass: 0.05)],
+        ),
+      );
+      final body = ball.get<Rigidbody>()!;
+      run(world, 0.2);
+      body.linearVelocity = const Vec3(0, 0, -5);
+      var up = 0.0;
+      for (var t = 0.0; t < 0.6; t += 1 / 60) {
+        world.update(1 / 60);
+        if (body.linearVelocity.y > up) up = body.linearVelocity.y;
+      }
+      expect(ball.position.z, lessThan(-0.1), reason: 'it crossed the seam at z = 0');
+      return up;
+    }
+
+    final planes = bump(
+      (world) => world.add(
+        GameObject(
+          components: [
+            MeshCollider(
+              mesh: Mesh.combine([
+                CombineInstance(Mesh.plane(), position: const Vec3(0, 0, 1), scale: const Vec3(2, 1, 2)),
+                CombineInstance(Mesh.plane(), position: const Vec3(0, 0, -1), scale: const Vec3(2, 1, 2)),
+              ]),
+            ),
+          ],
+        ),
+      ),
+    );
+    expect(planes, lessThan(0.1), reason: 'one mesh: no bump at the seam');
+    final boxes = bump((world) {
+      for (final z in [1.0, -1.0]) {
+        world.add(
+          GameObject(
+            transform: Transform(position: Vec3(0, -0.05, z), scale: const Vec3(2, 0.1, 2)),
+            components: [BoxCollider()],
+          ),
+        );
+      }
+    });
+    expect(boxes, greaterThan(0.3), reason: 'two boxes bump; if this stops, the guide (§16) can say so');
+  });
+
   group('a mesh that changes', () {
     /// A flat square 4 m across at [y], in a mesh that can change.
     Mesh ground(double y) => Mesh()
