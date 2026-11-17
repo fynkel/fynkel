@@ -89,9 +89,9 @@ checked.
 
 Games 1 and 2 and the audit, 2026-11-16, fixed on the `playtest-fixes`
 branch; games 3 and 4, 2026-11-16, fixed on `playtest-fixes-2` the next
-day. Each bug got a failing test first, and each game's own repro was run
-against the fix. All four games found engine bugs, so the stop rule's
-count hasn't started.
+day; game 5, 2026-11-17, on `playtest-fixes-3`. Each bug got a failing
+test first, and each game's own repro was run against the fix. All five
+games found engine bugs, so the stop rule's count hasn't started.
 
 | From | What | Settled |
 |---|---|---|
@@ -121,6 +121,10 @@ count hasn't started.
 | Game 4 | A widget test couldn't wait for a level a button makes | `tester.until(condition)` |
 | Game 4 | JSON levels couldn't be read through the world's source | `World.source` |
 | Game 4 | Who holds a preload, a memory test, saving safely, `world.audio`'s import, `_Moving` in an error, the iOS 120 Hz key | §3, §6, §12, §13b, §18, §19 |
+| Game 5 | A `punchScale` or `shake` given while one ran walked the object away (a recoil every shot: a negative scale) | Fixed: they share the first one's rest (test; §8, §23) |
+| Game 5 | In a test, frames and `audio.render` both move the sound on | §13b: `render` is the clock; listen instead of running frames |
+| Game 5 | The mix is cut flat at full scale: four sounds at half volume crackle | §13b says leave room; a limiter listed below and in §21 |
+| Game 5 | `Texture2D.rgba`, `ColorBySpeed`'s arguments, the music's `clip`/`isPlaying`/`volume`, the sound stats | §12, §13b, §13c |
 
 ### Missing, until a second game asks
 
@@ -137,6 +141,12 @@ count hasn't started.
   a Unity user looks for two. §16 says there's one. *Recommendation:*
   leave it unless a game needs a body that sticks until pushed hard and
   then slides; Rapier has one friction too.
+- **A limiter on the mix** (game 5): sounds together past full scale
+  are cut flat, so 32 voices can crackle; the game guessed volumes of
+  0.3–0.5 by hand. Unity doesn't limit either. *Recommendation:* the
+  cheapest of these to build (a soft knee on the master, a few lines in
+  the mixer) and it ends a whole class of crackle; worth doing at the
+  next ask, or sooner if a device check hears it.
 - **3D pictures in lists** (game 2): thumbnails of models for a grid.
   One `World` and a `HeadlessView` drawing each model and keeping its
   `png()` worked on the Mac (10 in 237 ms), but `HeadlessView` says it's
