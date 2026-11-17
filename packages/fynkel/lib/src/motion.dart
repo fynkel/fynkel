@@ -993,7 +993,9 @@ mixin _Moving {
   /// Swells the object's scale by [punch] and springs it back, [vibrato]
   /// swings that fade over [seconds], ending at the scale it began with:
   /// a hit, or a pickup. `punchScale(Vec3.one * 0.3, seconds: 0.4)`. It
-  /// takes [seconds] only, no `speed:`.
+  /// takes [seconds] only, no `speed:`. One given while another is still
+  /// punching the object springs about, and ends at, the scale the first
+  /// began with, so a punch every shot never grows the object.
   Motion punchScale(
     Vec3 punch, {
     required double seconds,
@@ -1004,9 +1006,10 @@ mixin _Moving {
     void Function()? onComplete,
   }) {
     var base = Vec3.one;
-    return _value<double>(
+    late final Motion motion;
+    return motion = _value<double>(
       () {
-        base = _self.transform.scale;
+        base = _Rest.begin(_punchRests, _self, motion, _self.transform.scale);
         return 0.0;
       },
       (_) => 1.0,
@@ -1028,7 +1031,9 @@ mixin _Moving {
   /// axis, [frequency] times a second, fading over [seconds] (0.4 unless
   /// given, as [Cameras.shake]) and ending where it began. [seed] makes
   /// the same shake each time. It takes [seconds] only, no `speed:`.
-  /// [strength] and [frequency] are 0 or more.
+  /// [strength] and [frequency] are 0 or more. One given while another is
+  /// still shaking the object shakes about, and ends at, where the first
+  /// began.
   Motion shake(
     double strength, {
     double seconds = 0.4,
@@ -1044,9 +1049,10 @@ mixin _Moving {
     final phase = Vec3(random.nextDouble(), random.nextDouble(), random.nextDouble()) * (2 * math.pi);
     var base = Vec3.zero;
     final turns = 2 * math.pi * frequency * seconds;
-    return _value<double>(
+    late final Motion motion;
+    return motion = _value<double>(
       () {
-        base = _self.transform.position;
+        base = _Rest.begin(_shakeRests, _self, motion, _self.transform.position);
         return 0.0;
       },
       (_) => 1.0,
@@ -1109,4 +1115,24 @@ Vec3 _axis(Vec3 axis, String call) {
   final l = axis.length;
   if (l < 1e-12 || !l.isFinite) throw ArgumentError('$call: axis is $axis; it needs a direction to turn about');
   return axis / l;
+}
+
+// Where the punches and the shakes running on an object rest: one that
+// begins while another of its kind runs on the object takes that one's
+// rest, rather than the swollen or shaken place it finds.
+final _punchRests = Expando<_Rest>();
+final _shakeRests = Expando<_Rest>();
+
+class _Rest {
+  _Rest(this.at);
+  final Vec3 at;
+  final running = <Motion>[];
+
+  static Vec3 begin(Expando<_Rest> rests, GameObject object, Motion motion, Vec3 now) {
+    var rest = rests[object];
+    rest?.running.removeWhere((m) => !m.isRunning);
+    if (rest == null || rest.running.isEmpty) rest = rests[object] = _Rest(now);
+    rest.running.add(motion);
+    return rest.at;
+  }
 }

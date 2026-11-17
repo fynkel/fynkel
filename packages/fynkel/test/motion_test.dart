@@ -674,6 +674,33 @@ void main() {
       expectVec(a.last, const Vec3(1, 2, 3));
     });
 
+    test('punches and shakes given before the last ends all end where the first began', () {
+      // Game 5: a recoil punch every shot, and a shake every hit, each
+      // read the swollen or shaken place as where to end, and the barrel
+      // grew to cover the screen.
+      thing.localScale = const Vec3(2, 2, 2);
+      thing.localPosition = const Vec3(1, 2, 3);
+      Motion? punch, shake;
+      for (var i = 0; i < 72; i++) {
+        punch = thing.punchScale(const Vec3(0.5, 0.5, 2), seconds: 0.3);
+        shake = thing.shake(0.3, seconds: 0.4, seed: i);
+        frame(1 / 30);
+      }
+      frames(40);
+      expect(punch!.isCompleted && shake!.isCompleted, isTrue);
+      expectVec(thing.localScale, const Vec3(2, 2, 2));
+      expectVec(thing.localPosition, const Vec3(1, 2, 3));
+    });
+
+    test('a punch after one has ended begins from where it was left', () {
+      thing.punchScale(const Vec3(1, 1, 1), seconds: 0.25);
+      frames(20);
+      thing.localScale = const Vec3(3, 3, 3);
+      thing.punchScale(const Vec3(1, 1, 1), seconds: 0.25);
+      frames(20);
+      expectVec(thing.localScale, const Vec3(3, 3, 3));
+    });
+
     test("a game's own field named like a helper's value doesn't change what the helper moves", () {
       final o = world.add(_OwnPosition());
       o.moveTo(const Vec3(2, 0, 0), seconds: 0.5, ease: Ease.linear);

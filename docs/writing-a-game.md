@@ -1091,7 +1091,9 @@ class Door extends GameObject {
   `scaleTo` sets `localScale`, and `rotateBy` turns about the object's own
   axis. `colorTo` changes the renderer's own `color` (§5), so other
   objects sharing its material don't flash too; give it `material:` to
-  change a material.
+  change a material. A `punchScale` or `shake` given while one is still
+  going on the object ends where the first began: a recoil every shot
+  never grows the barrel.
 - **`tween(from, to, …, onUpdate:)`** for any value: `double`, `Vec2`,
   `Vec3`, `Quat`, `Color`, or anything with a `lerp:` you give.
 - **Options**: `ease:` (`Ease.outQuad` by default; any `double
@@ -1428,6 +1430,29 @@ class Tree extends GameObject {
   it a metre high), and its `center` less `copy.position` is how far its
   middle is from its pivot, which a model needn't have in its middle.
   `mesh.bounds` is a mesh's, in its own space.
+- **A texture made in code**, rather than a file: `Texture2D.rgba(width,
+  height, pixels)`, 8-bit RGBA, rows from the top. A soft dot for sparks,
+  say, or a colour grade's table (§14):
+
+```dart
+// lib/textures.dart
+import 'dart:typed_data';
+
+import 'package:fynkel/fynkel.dart';
+
+Texture2D softDot([int size = 32]) {
+  final pixels = Uint8List(size * size * 4);
+  for (var y = 0; y < size; y++) {
+    for (var x = 0; x < size; x++) {
+      final d = Vec2((x + 0.5) / size * 2 - 1, (y + 0.5) / size * 2 - 1).length;
+      final a = (255 * (1 - d).clamp(0.0, 1.0)).round();
+      pixels.setAll((y * size + x) * 4, [255, 255, 255, a]);
+    }
+  }
+  return Texture2D.rgba(size, size, pixels);
+}
+```
+
 - Each file is loaded once, off the UI thread, and shared. It's freed when
   the last object that asked for it is destroyed.
 - `assets.preload([...])` loads ahead, so a level appears at once later.
@@ -2337,7 +2362,9 @@ class Dog extends Behaviour {
 `AudioListener` and `AudioSettings` together: `audio.volume` for
 everything (a settings screen's master volume), `audio.playOneShot(clip)`
 for a sound that belongs to no object (a button's click), `audio.stats`
-(voices, underruns) and `audio.outputError`. It's package:fynkel_audio's
+(`voices` playing now, `stolen` that gave way to more important
+sounds, `refused` not played, `underruns` for crackles, `starved` for
+streams) and `audio.outputError`. It's package:fynkel_audio's
 (an extension, `WorldAudio`), so a test that reaches it through a `World`
 imports it: `import 'package:fynkel_audio/fynkel_audio.dart' show
 WorldAudio;`.
@@ -2451,6 +2478,8 @@ as the last fades out, and `stop(fadeOut:)` ends it. `playTime` is where
 the track is, as a source's: set it to seek, or, before `play`, to start
 partway in (say, where a track was left before a scene change). Its
 `onEnd` is called when a track that doesn't `loop` reaches its end.
+`clip` is the track playing (the one faded to, in a cross-fade),
+`isPlaying` whether one is, and `volume` the music's own.
 
 **A long clip streams.** A file over 10 seconds is decoded as it plays,
 a second ahead, on a thread of its own, so a three-minute song takes its
@@ -2510,6 +2539,16 @@ file that's no longer sound keeps the old, and the error goes to
 
 In a test, `audio.render(frames)` makes the mix as a speaker would have
 played it, left and right, to check what plays and where it's heard.
+It's the sound's clock while it listens: the sound moves on by what it
+makes. Frames run (`world.update`) move it on too, and what they played
+was heard by no one, so listen *instead of* running frames: play the
+sound, then `render` the 48,000ths you want to hear.
+
+**Loud together.** The sounds playing at once add up, and the mix is cut
+flat at full scale, as Unity's is: four sounds at half volume together
+are already too loud, and crackle. Leave room: effects at 0.3 to 0.5,
+the music under them, and a group's `volume` for the rest.
+`render` shows it in a test (samples at ±1.0 are cut).
 
 Values out of range (a volume over 1, a pitch of 0) throw an
 `ArgumentError`; a file that isn't sound throws a `FormatException` with
@@ -2658,7 +2697,8 @@ ParticleSystem fire(Texture2D flames) => ParticleSystem(
   costing about as much again).
 - **By speed.** `sizeBySpeed` and `colorBySpeed` scale its size and
   colour from `minSpeed` to `maxSpeed`: sparks white when fast, red as
-  they slow.
+  they slow, `colorBySpeed: ColorBySpeed(ColorGradient([...]), maxSpeed:
+  6)` (the curve or the gradient comes first, without a name).
 - **Texture sheets.** `textureSheet` splits the base colour texture into
   `columns × rows` frames, played over each life (`frameOverTime`,
   `cycles`), from a `startFrame`, or one row each (`randomRow`): flames,
@@ -4909,8 +4949,9 @@ yet (§21).
   (by direction and speed), root motion, IK (feet on slopes, a look
   beyond a turned head), clips moved from one skeleton to another
   (Unity's Humanoid), and clips made in code.
-- **Sound** (§13b): effects on the sound (reverb, echo, a low-pass for
-  under water), Doppler, 3D over headphones (HRTF), a custom rolloff
+- **Sound** (§13b): a limiter on the mix (sounds together past full
+  scale are cut flat: leave room, §13b), effects on the sound (reverb,
+  echo, a low-pass for under water), Doppler, 3D over headphones (HRTF), a custom rolloff
   curve, sound blocked by walls, ducking by itself (a group's `fade` does
   it by hand), the microphone, and sound made in code as it plays. A
   one-shot gives nothing back to stop it alone or hear of its end (a
@@ -5094,6 +5135,13 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **What playtest game 5 changed** (2026-11-17): a `punchScale` or an
+  object's `shake` given while another is still going ends at the scale
+  or place the first began from, not where it found the object
+  mid-swing. Punches given quickly used to walk the object away (a
+  recoil every shot grew a barrel to a negative scale); a game that
+  `complete()`d the last before the next works as before.
 
 - **What playtest games 3 and 4 changed** (2026-11-17):
   - A joint with a `breakForce` or `breakTorque` breaks from a blow it
