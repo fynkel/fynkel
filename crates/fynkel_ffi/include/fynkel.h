@@ -10,7 +10,7 @@
 #include <stdlib.h>
 
 // Bumped on any change to the functions or types in this file.
-#define FY_ABI_VERSION 55
+#define FY_ABI_VERSION 56
 
 // `FyLight::kind`.
 #define FY_LIGHT_DIRECTIONAL 0
@@ -1834,6 +1834,15 @@ void fy_mesh_free(struct FyMesh *mesh);
 //
 // `mesh` is null or live; the outs are null or writable.
 FyStatus fy_mesh_counts(const struct FyMesh *mesh, size_t *out_vertices, size_t *out_indices);
+
+// Writes the box round the mesh's positions, in its own space: its
+// lowest and highest x, y and z. An empty mesh's is nothing at the
+// origin.
+//
+// # Safety
+//
+// `mesh` is null or live; the outs are null or writable.
+FyStatus fy_mesh_bounds(const struct FyMesh *mesh, struct FyVec3 *out_min, struct FyVec3 *out_max);
 
 // Copies the mesh's vertex positions, three floats each, to `positions`
 // and its indices to `indices`: `vertex_count` and `index_count` must be

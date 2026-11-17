@@ -87,9 +87,11 @@ checked.
 
 ## 3. What came back
 
-Games 1 and 2 and the audit, 2026-11-16; fixed on the `playtest-fixes`
-branch, each bug with a failing test first. Both games found engine bugs,
-so the stop rule's count hasn't started.
+Games 1 and 2 and the audit, 2026-11-16, fixed on the `playtest-fixes`
+branch; games 3 and 4, 2026-11-16, fixed on `playtest-fixes-2` the next
+day. Each bug got a failing test first, and each game's own repro was run
+against the fix. All four games found engine bugs, so the stop rule's
+count hasn't started.
 
 | From | What | Settled |
 |---|---|---|
@@ -109,6 +111,16 @@ so the stop rule's count hasn't started.
 | Audit | A panic while drawing poisoned the whole world | Only that view's clock |
 | Audit | Android: a surface attached while another view drew failed now and then | Configure tried again |
 | Audit | Hot restart during a load leaks it | Written down (§18): debug builds only |
+| Game 3 | A joint never broke from an impulse, however big: Rapier keeps the last substep's impulse, after the blow was stopped | Fixed: each breakable joint solves for the blow before a step (Rust and Dart tests; §23) |
+| Game 3 | `CharacterJoint(axis: up)`, a chain link, threw: the swing axis was up too | The swing axis is X when the axis is along Y |
+| Game 3 | Dragger and Orbit fight; `isSleeping`, explosions, ForceModes, combines, motor units, `swingAxis`, `movePosition` from an event, one friction | §15, §16 |
+| Game 3 | The lab's "no capsule mesh" | The pill is a capsule |
+| Game 4 | An unawaited `preload` threw, uncaught, when the game was left during it | Fixed: it ends quietly when its holder is gone |
+| Game 4 | Model bounds, the second ask (game 2's) | `Mesh.bounds`, `GameObject.bounds`, `Bounds` (ABI 56) |
+| Game 4 | A `HeadlessView` left the input 0 × 0 | It sizes it, unless something had |
+| Game 4 | A widget test couldn't wait for a level a button makes | `tester.until(condition)` |
+| Game 4 | JSON levels couldn't be read through the world's source | `World.source` |
+| Game 4 | Who holds a preload, a memory test, saving safely, `world.audio`'s import, `_Moving` in an error, the iOS 120 Hz key | §3, §6, §12, §13b, §18, §19 |
 
 ### Missing, until a second game asks
 
@@ -120,12 +132,11 @@ so the stop rule's count hasn't started.
   live there), Cinemachine's Deoccluder as the model: cast from the
   target to where the rig put the camera, and pull it in. Needs the rigs
   to let a package adjust the place they computed. Medium.
-- **Model bounds** (game 2): no `Renderer.bounds` or `Mesh.bounds`, so a
-  model can't be centred on a plinth or framed by a camera without
-  numbers by hand. *Recommendation:* small, as the engine has each mesh's
-  box for culling already: `Mesh.bounds` and a world-space
-  `GameObject.bounds` over the renderers below it. Worth doing at the next
-  ask, or as part of publishing work.
+- ~~**Model bounds**~~ (games 2 and 4): built at the second ask, above.
+- **`PhysicsMaterial.staticFriction`** (game 3): one friction serves both;
+  a Unity user looks for two. §16 says there's one. *Recommendation:*
+  leave it unless a game needs a body that sticks until pushed hard and
+  then slides; Rapier has one friction too.
 - **3D pictures in lists** (game 2): thumbnails of models for a grid.
   One `World` and a `HeadlessView` drawing each model and keeping its
   `png()` worked on the Mac (10 in 237 ms), but `HeadlessView` says it's

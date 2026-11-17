@@ -321,6 +321,13 @@ final class World implements Finalizable {
   final AssetSource? _source;
   final _assets = <String, _Asset>{};
 
+  /// Where its assets come from (`World(source: ...)`; the app's bundle
+  /// in a `FynkelApp`), or null. A game reads its own files through it
+  /// too, as a level's JSON, so its tests read them as the app does:
+  /// `jsonDecode(utf8.decode(await world.source!('levels/1.json')))`.
+  /// What it reads isn't kept: read once, keep what you need.
+  AssetSource? get source => _source;
+
   /// Assets held by the world itself, for as long as it lives: what
   /// `world.assets.preload` loads stays. Objects use their own
   /// [GameObject.assets], so what they load goes with them.

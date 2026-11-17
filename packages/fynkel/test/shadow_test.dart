@@ -20,6 +20,7 @@ const shortcuts = {
   'worldTransform': 'Transform',
   'animator': 'Animator?',
   'transform': 'Transform',
+  'bounds': 'Bounds?',
 };
 
 void main() {

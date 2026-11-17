@@ -13,7 +13,8 @@
 /// A game's frames go on for ever, so `pumpAndSettle` never settles while
 /// one is on screen: [FynkelTester.frames] and [FynkelTester.run] pump
 /// frames of a 60th of a second instead. A game that loads files is
-/// waited for with [FynkelTester.loaded].
+/// waited for with [FynkelTester.loaded], and anything else it does that
+/// takes files with [FynkelTester.until].
 library;
 
 import 'dart:async';
@@ -25,7 +26,7 @@ import 'package:fynkel/fynkel.dart';
 import 'src/fynkel_game.dart';
 import 'src/fynkel_view.dart';
 
-/// [frames], [run], [loaded] and [game] on a [WidgetTester].
+/// [frames], [run], [loaded], [until] and [game] on a [WidgetTester].
 extension FynkelTester on WidgetTester {
   /// Pumps [count] frames, a 60th of a second each: the world runs as on a
   /// 60 Hz display, so once a frame at its default `targetFrameRate` of
@@ -65,15 +66,25 @@ extension FynkelTester on WidgetTester {
         },
       ),
     );
+    await _until(() => done, timeout, () => '$target had not loaded after ${timeout.inSeconds} s');
+    if (failed case (final error, final stack)) Error.throwWithStackTrace(error, stack);
+  }
+
+  /// Runs the game until [condition] holds, as [loaded] does: a little
+  /// real time for files to be read, then a frame, over and over. For
+  /// what [loaded] can't be given, as a level a button makes inside the
+  /// game: `await tester.until(() => game.level == 2)`. Throws a
+  /// [TimeoutException] after [timeout] of real time.
+  Future<void> until(bool Function() condition, {Duration timeout = const Duration(seconds: 30)}) =>
+      _until(condition, timeout, () => 'what until waited for was not so after ${timeout.inMilliseconds} ms');
+
+  Future<void> _until(bool Function() condition, Duration timeout, String Function() failed) async {
     final waited = Stopwatch()..start();
-    while (!done) {
-      if (waited.elapsed > timeout) {
-        throw TimeoutException('$target had not loaded after ${timeout.inSeconds} s', timeout);
-      }
+    while (!condition()) {
+      if (waited.elapsed > timeout) throw TimeoutException(failed(), timeout);
       await runAsync(() => Future<void>.delayed(const Duration(milliseconds: 5)));
       await frames();
     }
-    if (failed case (final error, final stack)) Error.throwWithStackTrace(error, stack);
   }
 
   /// The game of the first [FynkelView] on screen, as a [T]: the root it

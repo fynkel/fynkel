@@ -501,6 +501,52 @@ fn removing_a_body_removes_its_joints_and_bad_joints_are_refused() {
 }
 
 #[test]
+fn a_blow_the_joint_stops_breaks_it_as_hard_as_it_holds() {
+    // Playtest game 3: a 1 kg box hanging from a 200 N hinge never broke
+    // from an impulse straight down, however big: the hinge stops the blow
+    // within the step's first substep, and Rapier keeps the last one's
+    // impulse. Stopped within a step, 10 N·s is 500 N at 50 steps a second,
+    // 1000 at 100; 1 N·s is 50 or 100 N.
+    for dt in [DT, 1.0 / 100.0] {
+        for (blow, breaks) in [(10.0, true), (1.0, false)] {
+            let mut physics = Physics::new();
+            let hanging = cube(&mut physics, 1, Vector::new(0.0, 5.0, 0.0));
+            let spec = JointSpec {
+                anchor: Vector::new(0.0, 0.25, 0.0),
+                axis: Vector::Z,
+                break_force: 200.0,
+                ..JointSpec::new(JointKind::Hinge, hanging)
+            };
+            physics.add_joint(1, spec).unwrap();
+            for _ in 0..10 {
+                physics.step(dt).unwrap();
+            }
+            physics
+                .push(hanging, Push::Force { force: Vector::new(0.0, -blow, 0.0), mode: ForceMode::Impulse })
+                .unwrap();
+            physics.step(dt).unwrap();
+            let broken = physics.broken_joints().to_vec();
+            assert_eq!(broken.len(), breaks as usize, "{blow} N·s at {dt} s: {broken:?}");
+            if breaks {
+                let expected = blow / dt;
+                assert!((broken[0].force - expected).abs() < expected * 0.2, "{blow} N·s at {dt} s: {broken:?}");
+            }
+        }
+    }
+    // A blow that turns it about a fixed joint's anchor breaks it by its
+    // torque: 1 N·s at the end of a 1 m arm, stopped, is 50 N·m.
+    let mut physics = Physics::new();
+    let held = cube(&mut physics, 1, Vector::new(1.0, 5.0, 0.0));
+    let spec =
+        JointSpec { anchor: Vector::new(-1.0, 0.0, 0.0), break_torque: 30.0, ..JointSpec::new(JointKind::Fixed, held) };
+    physics.add_joint(1, spec).unwrap();
+    run(&mut physics, 0.2);
+    physics.push(held, Push::Force { force: Vector::new(0.0, 0.0, 1.0), mode: ForceMode::Impulse }).unwrap();
+    physics.step(DT).unwrap();
+    assert_eq!(physics.broken_joints().len(), 1, "{:?}", physics.broken_joints());
+}
+
+#[test]
 fn a_joint_says_the_force_it_holds_with_and_the_torque_about_its_anchor() {
     // 1 kg held 1 m to the side: 9.81 N up, 9.81 N·m about Z.
     let mut physics = Physics::new();

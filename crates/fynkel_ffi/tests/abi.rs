@@ -684,6 +684,37 @@ impl Drop for Mesh {
     }
 }
 
+/// A mesh's bounds are the box round its positions, in its own space,
+/// and follow positions set later; an empty mesh's are nothing at the
+/// origin. Playtest games 2 and 4 needed a model's size and found it by
+/// reading the .glb.
+#[test]
+fn a_mesh_says_its_bounds() {
+    let positions = [[-1.0, 0.0, 0.5], [2.0, 0.25, 0.5], [0.0, 3.0, -0.5]];
+    let mesh = Mesh::new(&custom(&positions, &[0, 1, 2])).unwrap();
+    let bounds = |mesh: *const FyMesh| {
+        let (mut min, mut max) = (FyVec3 { x: 9.0, y: 9.0, z: 9.0 }, FyVec3 { x: 9.0, y: 9.0, z: 9.0 });
+        // SAFETY: a live mesh and pointers to locals.
+        ok(unsafe { fy_mesh_bounds(mesh, &mut min, &mut max) });
+        ([min.x, min.y, min.z], [max.x, max.y, max.z])
+    };
+    assert_eq!(bounds(mesh.0), ([-1.0, 0.0, -0.5], [2.0, 3.0, 0.5]));
+    let moved: [[f32; 3]; 3] = [[0.0, 0.0, 0.0], [1.0, 1.0, 1.0], [0.5, -4.0, 0.0]];
+    // SAFETY: a live mesh and an array of its vertex count.
+    ok(unsafe { fy_mesh_set_positions(mesh.0, moved.as_ptr().cast(), moved.len()) });
+    assert_eq!(bounds(mesh.0), ([0.0, -4.0, 0.0], [1.0, 1.0, 1.0]));
+    let mut empty = ptr::null_mut();
+    // SAFETY: a pointer to a local.
+    ok(unsafe { fy_mesh_new_empty(&mut empty) });
+    assert_eq!(bounds(empty), ([0.0; 3], [0.0; 3]));
+    // SAFETY: made above, not used again; null pointers are refused.
+    unsafe {
+        let mut min = FyVec3 { x: 0.0, y: 0.0, z: 0.0 };
+        assert_eq!(fy_mesh_bounds(empty, &mut min, ptr::null_mut()), FyStatus::NullPointer);
+        fy_mesh_free(empty);
+    }
+}
+
 /// A mesh's positions and indices read back give the triangles it was
 /// made of; wrong counts are refused.
 #[test]

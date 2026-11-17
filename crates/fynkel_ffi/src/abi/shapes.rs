@@ -900,6 +900,27 @@ pub unsafe extern "C" fn fy_mesh_counts(
     })
 }
 
+/// Writes the box round the mesh's positions, in its own space: its
+/// lowest and highest x, y and z. An empty mesh's is nothing at the
+/// origin.
+///
+/// # Safety
+///
+/// `mesh` is null or live; the outs are null or writable.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn fy_mesh_bounds(mesh: *const FyMesh, out_min: *mut FyVec3, out_max: *mut FyVec3) -> FyStatus {
+    guard(|| {
+        // SAFETY: per this function's contract.
+        let mesh = unsafe { handle(mesh, "mesh") }?;
+        let (min, max) = mesh.0.bounds();
+        // SAFETY: per this function's contract.
+        unsafe {
+            write(out_min, min.into(), "out_min")?;
+            write(out_max, max.into(), "out_max")
+        }
+    })
+}
+
 /// Copies the mesh's vertex positions, three floats each, to `positions`
 /// and its indices to `indices`: `vertex_count` and `index_count` must be
 /// `fy_mesh_counts`' numbers. A null array (with its count 0) is skipped.

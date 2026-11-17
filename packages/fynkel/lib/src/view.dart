@@ -396,6 +396,11 @@ final class HeadlessView extends WorldView {
   /// own render worker. Throws an [ArgumentError] for a
   /// size of 0, and a [FynkelException] when there's no GPU or the worker
   /// won't start. Dispose of it when done.
+  ///
+  /// It gives the world's input its size ([Input.width], in pixels here,
+  /// and [resize] changes it), as `FynkelView` does, unless something had
+  /// already given it one, as a view on screen does: a picture of a game
+  /// that's shown doesn't change what the game reads of its view.
   HeadlessView(World world, {required int width, required int height})
     : super._(
         world,
@@ -405,7 +410,15 @@ final class HeadlessView extends WorldView {
         finalize: true,
       ) {
     _allocatePixels();
+    final input = world.input;
+    if (input.width == 0 && input.height == 0) {
+      _sizesInput = true;
+      input.simulate.resize(width.toDouble(), height.toDouble());
+    }
   }
+
+  // Whether it gave the input its size, so a resize changes it.
+  bool _sizesInput = false;
 
   static final _pixelsFinalizer = NativeFinalizer(malloc.nativeFree);
 
@@ -441,7 +454,10 @@ final class HeadlessView extends WorldView {
   @override
   void resize(int width, int height) {
     if (width == this.width && height == this.height) return;
+    final input = _world.input;
+    final sized = _sizesInput && (input.width, input.height) == (this.width.toDouble(), this.height.toDouble());
     super.resize(width, height);
+    if (sized) input.simulate.resize(width.toDouble(), height.toDouble());
     _freePixels();
     _allocatePixels();
   }

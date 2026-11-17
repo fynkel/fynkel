@@ -529,7 +529,7 @@ final class CharacterJoint extends Joint {
     super.anchor,
     super.connectedAnchor,
     this._axis = const Vec3(1, 0, 0),
-    this._swingAxis = const Vec3(0, 1, 0),
+    Vec3? swingAxis,
     this._lowTwistLimit = const SoftJointLimit(limit: -20 * _degree),
     this._highTwistLimit = const SoftJointLimit(limit: 70 * _degree),
     this._swing1Limit = const SoftJointLimit(limit: 40 * _degree),
@@ -537,31 +537,38 @@ final class CharacterJoint extends Joint {
     super.enableCollision,
     super.breakForce,
     super.breakTorque,
-  }) {
+  }) : _givenSwingAxis = swingAxis {
     _check();
   }
 
   /// The axis it twists about, in its object's space: X unless set. One
-  /// that's (0, 0, 0), not finite, or along [swingAxis] throws an
+  /// that's (0, 0, 0), not finite, or along a [swingAxis] given throws an
   /// [ArgumentError].
   Vec3 get axis => _axis;
   set axis(Vec3 value) {
-    _checkAxes(value, _swingAxis);
+    _checkAxes(value, _givenSwingAxis ?? _swingAxisFor(value));
     _rejoin(() => _axis = value);
   }
 
   Vec3 _axis;
 
   /// The axis it swings about by [swing1Limit], in its object's space:
-  /// made square to [axis]. Y unless set; one that's (0, 0, 0), not
+  /// made square to [axis]. Unless set, Y (Unity's), or X when [axis] is
+  /// along Y, as a chain's or a rope's link is. One that's (0, 0, 0), not
   /// finite, or along [axis] throws an [ArgumentError].
-  Vec3 get swingAxis => _swingAxis;
+  Vec3 get swingAxis => _givenSwingAxis ?? _swingAxisFor(_axis);
   set swingAxis(Vec3 value) {
     _checkAxes(_axis, value);
-    _rejoin(() => _swingAxis = value);
+    _rejoin(() => _givenSwingAxis = value);
   }
 
-  Vec3 _swingAxis;
+  Vec3? _givenSwingAxis;
+
+  static Vec3 _swingAxisFor(Vec3 axis) {
+    // Not normalized: a bad axis is said to be bad by the check after.
+    final along = axis.cross(const Vec3(0, 1, 0)).length < 1e-3 * axis.length;
+    return along ? const Vec3(1, 0, 0) : const Vec3(0, 1, 0);
+  }
 
   /// How far it twists back about [axis], from where it was joined, in
   /// radians: -pi to [highTwistLimit] (-20.deg unless set).
@@ -600,7 +607,7 @@ final class CharacterJoint extends Joint {
 
   @override
   void _check() {
-    _checkAxes(_axis, _swingAxis);
+    _checkAxes(_axis, swingAxis);
     final (low, high) = (_lowTwistLimit.limit, _highTwistLimit.limit);
     if (!(low >= -_halfTurn && high <= _halfTurn && low <= high)) {
       throw ArgumentError.value(
@@ -619,7 +626,7 @@ final class CharacterJoint extends Joint {
     super._writeSpec(spec, body);
     final scale = body.gameObject.worldTransform.scale;
     spec.axis.set(Joint._scaled(_axis, scale).normalized);
-    spec.swing_axis.set(Joint._scaled(_swingAxis, scale).normalized);
+    spec.swing_axis.set(Joint._scaled(swingAxis, scale).normalized);
     spec
       ..use_limits = 1
       ..limit_min = _lowTwistLimit.limit

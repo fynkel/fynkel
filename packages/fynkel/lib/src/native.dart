@@ -99,6 +99,7 @@ final class Scratch {
   final ray = malloc<FyRay>();
   final rayHit = malloc<FyRayHit>();
   final vec3 = malloc<FyVec3>();
+  final vec3b = malloc<FyVec3>();
   final number = malloc<Float>();
   // Two numbers for a call that takes them through a pointer.
   final numbers = malloc<Float>(2);
@@ -125,7 +126,7 @@ final class Scratch {
   /// Frees it all. Nothing may use it after.
   void free() {
     final all = [id, transform, camera, light, meshRenderer, material, viewStats, count, count2, mesh, texture];
-    all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, _ids, _bytes, _transforms]);
+    all.addAll([model, modelCounts, width, height, flag, ray, rayHit, vec3, vec3b, _ids, _bytes, _transforms]);
     all.addAll([number, numbers, animatorState, _events, shader, particleSettings, particleState, _particleEvents]);
     all.addAll([trailSettings, textSettings, spriteSettings]);
     all.forEach(malloc.free);

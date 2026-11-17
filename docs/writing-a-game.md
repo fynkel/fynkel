@@ -200,6 +200,13 @@ class Yard extends GameObject {
 }
 ```
 
+**A subclass shares `GameObject`'s names.** A method or field of yours
+named as one of its own (`rotate`, `find`, `add`, `on`, `wait`,
+`tween`, `bounds`, `animator`, `name`, …) is the analyzer's error or
+warning, which may name a part of `GameObject` you can't look up:
+`isn't a valid override of '_Moving.rotate'` is §7's `rotate`. Give
+yours a name of the game's own (`turnTile`, `label`).
+
 - **`add(child)`** puts an object below this one and returns it, typed:
   `final crate = add(Crate(at));`. The world's root is added with
   `world.add`; `FynkelApp` does that for you. For a component in a
@@ -917,8 +924,9 @@ an iPhone 16 Pro Max made it hot enough within a minute that iOS slowed it
 to about 80; at 60 it holds 60 for 10 minutes and more
 ([the report](iphone-heat-report.md)). For 120 on an iPhone, the app's
 `ios/Runner/Info.plist` needs `CADisableMinimumFrameDurationOnPhone`
-(`true`), as every example has (`flutter create` leaves it out): without
-it, iOS keeps the app's screen at 60, whatever the game asks. Behind a menu, a paused game draws less still
+(`true`), as every example has (a new `flutter create` app has it; an
+older app may not): without it, iOS keeps the app's screen at 60,
+whatever the game asks. Behind a menu, a paused game draws less still
 (`pauseWhenCovered`, §17).
 
 **Fixed steps** cut the game's time into equal steps of `time.fixedDelta`
@@ -1415,9 +1423,23 @@ class Tree extends GameObject {
 - `assets.instantiate(name)` gives a new copy of the model, a tree of objects
   sharing its meshes and textures with every other copy. Find its parts by
   name.
+- `copy.bounds` is the box in the world round what it draws: its `size`
+  is the model's size, to scale it to fit (`Vec3.all(1 / size.y)` makes
+  it a metre high), and its `center` less `copy.position` is how far its
+  middle is from its pivot, which a model needn't have in its middle.
+  `mesh.bounds` is a mesh's, in its own space.
 - Each file is loaded once, off the UI thread, and shared. It's freed when
   the last object that asked for it is destroyed.
 - `assets.preload([...])` loads ahead, so a level appears at once later.
+  What's preloaded counts as asked for by the object whose `assets` it
+  is, and stays until that object goes: preload the next level from the
+  level that's on (as §18 does), not from the root, or the root ends up
+  holding every level it ever preloaded. It needn't be awaited; if its
+  object goes first, it ends quietly.
+- A file of the game's own, as a level's JSON, is read through the
+  world's source, so a test reads it as the app does:
+  `jsonDecode(utf8.decode(await world.source!('levels/1.json')))`.
+  It's read each time, not kept.
 - A package can add a kind of asset of its own (a sound package's `.wav`):
   it's loaded, preloaded, shared and freed in the same way.
 - A level that's `async` in `onLoad` appears only when all of it is there:
@@ -2315,7 +2337,10 @@ class Dog extends Behaviour {
 `AudioListener` and `AudioSettings` together: `audio.volume` for
 everything (a settings screen's master volume), `audio.playOneShot(clip)`
 for a sound that belongs to no object (a button's click), `audio.stats`
-(voices, underruns) and `audio.outputError`.
+(voices, underruns) and `audio.outputError`. It's package:fynkel_audio's
+(an extension, `WorldAudio`), so a test that reaches it through a `World`
+imports it: `import 'package:fynkel_audio/fynkel_audio.dart' show
+WorldAudio;`.
 
 - **Pausing.** While the game is paused (`world.paused`, §6) its sounds
   hold where they are, and go on with it. A source with `ignorePause`
@@ -3115,7 +3140,9 @@ class CameraRig extends GameObject {
   the right; and `pitch`, 0 level and positive above, looking down
   (0.4). `minPitch`/`maxPitch` (−0.2, 1.45) and
   `minDistance`/`maxDistance` (1, 100) clamp them each frame, `offset`
-  moves the point circled off the target's position. The wheel scrolled
+  moves the point circled off the target's position. `controls = false`
+  stops drags, pinches and the wheel moving it, and `dragSpeed` is how
+  far a drag turns it (radians a logical pixel). The wheel scrolled
   down moves it away (`input.scroll.y` is positive up; Flutter's
   `scrollDelta.dy`, and a test's `scrollBy`, positive down).
 - **The rigs run after every `onLateUpdate`** (§6: late updates, then
@@ -3186,8 +3213,13 @@ scale (a sphere takes the largest axis). Their defaults fit
 `Mesh.cube()`, `Mesh.sphere()` and `Mesh.capsule()`. A collider counts while it's enabled
 and its object shown. Each has a `material`: `PhysicsMaterial(
 dynamicFriction:, bounciness:, frictionCombine:, bounceCombine:)`, Unity's
-0.6 and 0 by default. A collider with no `Rigidbody` is static; a game
-moves it by moving its object.
+0.6 and 0 by default. There's one friction, sliding or not: no
+`staticFriction`. Two touching colliders' values are put together by the
+`PhysicsMaterialCombine` of either (`average` unless set; `minimum`,
+`multiply`, `maximum`, the higher in that order wins): ice that stays
+slippery against anything is `PhysicsMaterial(dynamicFriction: 0,
+frictionCombine: PhysicsMaterialCombine.minimum)`. A collider with no
+`Rigidbody` is static; a game moves it by moving its object.
 
 **A `MeshCollider`** takes a mesh's own shape: `MeshCollider(mesh:)`, or
 with no mesh its object's `MeshRenderer`'s. Its triangles suit the ground
@@ -3220,9 +3252,17 @@ body's mass is spread over them. It has Unity's `mass`, `useGravity`,
 `isKinematic`, `linearDamping`, `angularDamping`, `linearVelocity`,
 `angularVelocity`, `centerOfMass`, `maxAngularVelocity`, `constraints`
 (`RigidbodyConstraints.freezeRotation | .freezePositionY`, …),
-`interpolation` and `collisionDetectionMode`. Push it with `addForce`
-(and its `ForceMode`s), `addTorque`, `addRelativeForce`,
-`addForceAtPosition` and `addExplosionForce`, in `onFixedUpdate`:
+`interpolation` and `collisionDetectionMode`. Push it with `addForce`,
+`addTorque`, `addRelativeForce`, `addForceAtPosition` and
+`addExplosionForce`, in `onFixedUpdate`. Each takes a `ForceMode`:
+`force` (newtons over the next step, the default), `acceleration` (the
+same, whatever its mass), `impulse` (newton seconds, at once: a kick or a
+jump) and `velocityChange` (the same, whatever its mass).
+`addExplosionForce(force, position, radius, upwardsModifier:, mode:)`
+pushes each body it's called on away from `position`, `force` strong
+there, less in a straight line out to nothing at `radius` (the same
+everywhere with 0); `upwardsModifier` puts the blast that far below, so
+it lifts too. Call it on each body in reach (`physics.overlapSphere`):
 
 ```dart
 // lib/ball.dart
@@ -3273,13 +3313,16 @@ pass through a thin one between steps: Rapier sweeps every fast body
 against static colliders, and `CollisionDetectionMode.continuous` sweeps
 it against bodies too. `physics.gravity`, `defaultSolverIterations` and
 `sleepThreshold` are the world's settings; a new `gravity` wakes every
-body, so sleeping ones fall the new way. `sleep()` and `wakeUp()` do
-nothing for a body not in the world yet, and what can't be done there
-says why (no object yet, not enabled, not shown, destroyed).
+body, so sleeping ones fall the new way. `isSleeping` says whether a
+body sleeps; `sleep()` and `wakeUp()` do nothing for a body not in the
+world yet, and what can't be done there says why (no object yet, not
+enabled, not shown, destroyed). `physics.rigidbodyCount` and
+`colliderCount` count what's in the world, for a HUD or a test.
 
 **Moving a kinematic body by hand** (a platform, a door, a bullet that's a
-trigger): `movePosition` and `moveRotation` in `onFixedUpdate`. It goes
-there over the next step, so it pushes what's in the way, carries what
+trigger): `movePosition` and `moveRotation`, in `onFixedUpdate` or from
+a finger's event (the Dragger below): called more than once before a
+step, the last one counts. It goes there over the next step, so it pushes what's in the way, carries what
 stands on it, and is drawn smoothly when interpolated. Setting `position`
 (or the transform) teleports it, as in Unity: right for a respawn, wrong
 for a move. Either way a trigger sees only what it overlaps at the end
@@ -3476,8 +3519,10 @@ holds them as one, `HingeJoint` lets them turn about an `axis` (with
 `limits`, a `motor` and a `spring`, in radians, each on with `useLimits`,
 `useMotor`, `useSpring`), `CharacterJoint` lets them turn every way, as
 a ball in a socket (twisting about its `axis` within `lowTwistLimit` and
-`highTwistLimit`, and swinging within `swing1Limit` and `swing2Limit`,
-each a `SoftJointLimit`; `180.deg` frees it), and `SpringJoint`
+`highTwistLimit`, and swinging within `swing1Limit` about its
+`swingAxis` and `swing2Limit` about the axis square to both, each a
+`SoftJointLimit`; `180.deg` frees it; the swing axis is Y unless given,
+or X when `axis` is along Y, as a chain link's), and `SpringJoint`
 pulls them back together when they are further apart than `maxDistance`. A joint is a behaviour on
 the object with the rigidbody; `connectedBody` is the other one (none for
 the world), and `anchor` is where it holds, in the object's own space,
@@ -3532,7 +3577,9 @@ class Door extends GameObject with JointBreaks {
 `PhysicsMaterial` are values, as Unity's structs are; to change one part,
 copy it with `copyWith`: `hinge.motor = hinge.motor.copyWith(targetVelocity:
 3)` turns a wheel faster with the same force, where `JointMotor(targetVelocity:
-3)` would have none.
+3)` would have none. A hinge's motor turns at `targetVelocity` radians a
+second with no more than `force` newton metres, and `hinge.angle` says
+how far it has turned from where it was joined, in radians.
 
 **Bullets** can be done two ways. A bullet that's an object, with a
 small trigger collider and a kinematic rigidbody moved with
@@ -3673,7 +3720,11 @@ class Dragger extends GameObject {
 ```
 
 The lab's "Joints: a chain and a weight" scene does this, and works out
-the spring from the weight it lifts.
+the spring from the weight it lifts. With an `Orbit` on the camera
+(§15), a drag that carries a body turns the camera as well, and the body
+runs away under the finger: set `orbit.controls = false` in `_grab` when
+a body is caught, and back to true in `_let`, so a drag on nothing still
+turns it.
 
 ## 17. Flutter around the game
 
@@ -4280,7 +4331,8 @@ class Levels extends GameObject {
 level reached, the best score, the settings (`Controls` has `toJson` and
 `Controls.fromJson`, §17). Write it as JSON to a file in the app's own
 folder, which the app finds with the `path_provider` package
-(`getApplicationSupportDirectory()`) and hands to the game:
+(`getApplicationSupportDirectory()`, a folder that may not be there yet)
+and hands to the game:
 
 ```dart
 // lib/save.dart
@@ -4291,10 +4343,14 @@ import 'dart:io';
 class Save {
   Save({this.level = 1, this.best = 0});
 
+  /// Which shape of save this game writes: a later game that changes it
+  /// reads an older one by this.
+  static const version = 1;
+
   int level;
   int best;
 
-  Map<String, Object?> toJson() => {'level': level, 'best': best};
+  Map<String, Object?> toJson() => {'version': version, 'level': level, 'best': best};
 
   /// Reads [file]; a new save when there's none, or it can't be read
   /// (an older game's, or cut short).
@@ -4307,18 +4363,25 @@ class Save {
     }
   }
 
-  /// Writes it whole: to a file beside [file] first, then renamed over
-  /// it, so a crash halfway leaves the last save, not half of this one.
+  /// Writes it whole: to a file beside [file] first, on the disk before
+  /// it's renamed over it, so a crash or a power cut halfway leaves the
+  /// last save, not half of this one.
   void write(File file) {
+    file.parent.createSync(recursive: true);
     File('${file.path}.new')
-      ..writeAsStringSync(jsonEncode(toJson()))
+      ..writeAsStringSync(jsonEncode(toJson()), flush: true)
       ..renameSync(file.path);
   }
 }
 ```
 
-Save when something worth keeping happens (a level done), not every
-frame: a write is a few milliseconds on a phone.
+Save when something worth keeping happens (a level done) and in
+`onApplicationPause` (§6), as the app may be closed while it's away, not
+every frame: a write is a few milliseconds on a phone. A few settings
+and nothing else can go in `shared_preferences` instead, as
+examples/pocket_hole's level does: simpler, but its writes are queued,
+so one the app is killed in the middle of may be lost; the file above
+says what happens then.
 
 ## 19. Testing a game
 
@@ -4531,7 +4594,10 @@ not a few frames.
 reads them in real time, which a widget test's frames don't move:
 `await tester.loaded()` waits for the game on screen to load, pumping
 frames meanwhile, and throws if its load failed (`tester.loaded(level)`
-waits for another object). `await tester.runAsync(() => game.loaded)`
+waits for another object). What the test can't reach, as a level a
+button makes inside the game, is waited for by what it changes:
+`await tester.until(() => game.level.value == 2)` runs the game the
+same way until that holds. `await tester.runAsync(() => game.loaded)`
 would wait for ever: the game's `onLoad` goes on after each `await` only
 when a frame is pumped.
 
@@ -4539,6 +4605,24 @@ when a frame is pumped.
 `GameObject.find`: in a game object written in a test, `find('cube')`
 is flutter_test's (`The method 'call' isn't defined for the type
 'CommonFinders'`). Say `this.find('cube')` there.
+
+**The view's shape** is `world.input.width` and `height`, in logical
+pixels: a camera that frames a board to fit reads them. A `FynkelView`
+gives them, and so does a `HeadlessView` (in its pixels) when nothing
+else had; in a test with no view, `world.input.simulate.resize(390,
+844)` sets them. With two views of one world, they're the size of the
+one that takes input.
+
+**Does a level change grow memory?** A test can tell, with a
+`HeadlessView`: switch levels many times, and after each round draw a
+frame (`view.read(view.frame())`) and read what the engine holds for
+drawing, `view.stats.textureBytes` and `meshBytes`, with the number of
+objects, `world.all<GameObject>(includeInactive: true).length`. Each
+the same every time round (from the second: the first may load what
+stays) means nothing piles up: a leak grows them a little each round.
+The process's resident size (`ProcessInfo.currentRss`) isn't one to
+test: it rises for a while as Dart's heap settles, and only a long run
+on a device (§20) tells settling from a leak.
 
 `world.run(seconds)` moves on in whole frames of 1/60 s, so a routine's
 `wait(0.5)` ends on the first frame at or past half a second: test what
@@ -5010,6 +5094,18 @@ yet (§21).
 ## 23. What changed
 
 For code written before: each change that breaks it, newest first.
+
+- **What playtest games 3 and 4 changed** (2026-11-17):
+  - A joint with a `breakForce` or `breakTorque` breaks from a blow it
+    stops (an impulse, a velocity set), counted as the force that stops
+    it within a step: 10 N·s stopped in a step of 1/50 s is 500 N. It
+    broke only from what it held step after step, so a 200 N hinge
+    survived any impulse; a joint a game kicks may now come off.
+  - A `HeadlessView` gives the world's input its size when nothing else
+    had, so a test's `input.width` and `height` are the view's, not 0;
+    `input.simulate.resize` before making the view still wins.
+  - `GameObject.bounds` is the engine's: a subclass's own `bounds` is
+    the analyzer's warning; rename it.
 
 - **A field named as one of `GameObject`'s own is a warning**
   (2026-11-16): `world`, `loaded`, `assets`, `input`, `debug`, `time`,

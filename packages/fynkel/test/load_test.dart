@@ -492,6 +492,45 @@ void main() {
     expect(() => world.assets.preload(['notes.txt']), throwsArgumentError);
   });
 
+  // Playtest game 4: §18's level preloads the next one without awaiting
+  // it; leaving the game while it loaded failed later, uncaught: "Levels#1
+  // was destroyed, so it can't load props/log.glb".
+  test("a preload whose holder goes before it's done ends quietly", () async {
+    final gate = source.gates['Box.glb'] = Completer<void>();
+    final level = world.add(_PreloadsLater());
+    await level.loaded;
+    level.destroy();
+    gate.complete();
+    await level.preloading;
+
+    final other = Source();
+    final otherGate = other.gates['Box.glb'] = Completer<void>();
+    final left = World(source: other.call);
+    final held = left.add(_PreloadsLater());
+    await held.loaded;
+    final byWorld = left.assets.preload(['grid.png', 'Box.glb']);
+    left.dispose();
+    otherGate.complete();
+    await held.preloading;
+    await byWorld;
+  });
+
+  test('a preload that fails while its holder is there still throws', () async {
+    await expectLater(world.assets.preload(['nothing.png']), throwsA(isA<FileSystemException>()));
+  });
+
+  // Playtest game 4: levels as JSON files would have been read with
+  // rootBundle in the app and File in its tests, beside the world's own
+  // source, which a game couldn't reach.
+  test("a game reads its own files through the world's source", () async {
+    final bytes = await world.source!('grid.png');
+    expect(bytes, File.fromUri(_assets.resolve('grid.png')).readAsBytesSync());
+    expect(source.reads, ['grid.png']);
+    final bare = World();
+    addTearDown(bare.dispose);
+    expect(bare.source, isNull);
+  });
+
   test('asking for assets needs a source, an added object, and one kind per name', () async {
     final bare = World();
     addTearDown(bare.dispose);
@@ -565,6 +604,17 @@ class _Preloads extends GameObject {
   Future<void> onLoad() async {
     await super.onLoad();
     await assets.preload(['Box.glb', 'grid.png']);
+  }
+}
+
+/// Preloads in its load without waiting for it, as §18's level does.
+class _PreloadsLater extends GameObject {
+  late final Future<void> preloading;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    preloading = assets.preload(['Box.glb']);
   }
 }
 
