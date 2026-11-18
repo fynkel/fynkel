@@ -30,7 +30,7 @@ import 'world_listenables.dart' show WorldTheme;
 /// (`world.theme`, from `Theme.of(context)` here) from before the root is
 /// added, and hears when it changes (`world.onThemeChanged`).
 ///
-/// [restart] destroys everything [builder] built, and the world, and
+/// [FynkelGameState.restart] destroys everything [builder] built, and the world, and
 /// builds it again around a new root in a new world. That runs the game's code as
 /// it is now, so after a hot reload it's how changed field initializers,
 /// `onLoad` and `onStart` take effect (a hot reload alone changes only the

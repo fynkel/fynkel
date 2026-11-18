@@ -23,3 +23,6 @@ pnpm-debug.log*
 # made from docs/writing-a-game.md by scripts/guide.mjs
 src/content/docs/guide/
 src/content/docs/tutorials/
+
+# made by scripts/api.mjs (npm run api)
+public/api/

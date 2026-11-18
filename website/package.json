@@ -8,7 +8,8 @@
     "prebuild": "node scripts/guide.mjs",
     "build": "astro build",
     "preview": "astro preview",
-    "astro": "astro"
+    "astro": "astro",
+    "api": "node scripts/api.mjs"
   },
   "dependencies": {
     "@astrojs/starlight": "0.43.1",

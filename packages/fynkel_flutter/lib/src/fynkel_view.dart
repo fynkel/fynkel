@@ -166,7 +166,7 @@ class FynkelViewStats {
       'size=${size.width.toInt()}x${size.height.toInt()} $view';
 }
 
-/// The bytes of asset [name] from the app's bundle, under `assets/`:
+/// An [AssetSource] that reads each asset from the app's bundle, under `assets/`:
 /// `character.glb` is `assets/character.glb`, listed in the app's
 /// pubspec.yaml. A [FynkelView] with a [FynkelView.root] uses it unless
 /// given another [FynkelView.source].

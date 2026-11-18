@@ -27,6 +27,15 @@ export default defineConfig({
           ],
         },
         { label: 'The guide', items: [{ autogenerate: { directory: 'guide' } }] },
+        {
+          label: 'API reference',
+          items: [
+            { label: 'fynkel', link: '/api/fynkel/' },
+            { label: 'fynkel_flutter', link: '/api/fynkel_flutter/' },
+            { label: 'fynkel_physics', link: '/api/fynkel_physics/' },
+            { label: 'fynkel_audio', link: '/api/fynkel_audio/' },
+          ],
+        },
       ],
     }),
   ],

@@ -151,7 +151,7 @@ final class SplineInstantiate extends Behaviour {
     _checkSettings();
   }
 
-  /// Makes copy [i] (from 0, along the spline): a new object each time,
+  /// Makes copy `i` (from 0, along the spline): a new object each time,
   /// not yet added.
   GameObject Function(int i) make;
 

@@ -448,7 +448,7 @@ final class World implements Finalizable {
   /// `world.pausedListenable` from `fynkel_flutter`).
   final onPausedChanged = Signal<bool>();
 
-  /// Whether the app is away: in the background, or hidden. [FynkelView]
+  /// Whether the app is away: in the background, or hidden. `FynkelView`
   /// sets it from the app's lifecycle; a test can set it. When it changes,
   /// the [WorldSystem]s' `applicationPause`, then every shown object's
   /// [GameObject.onApplicationPause] and its enabled behaviours',
@@ -486,7 +486,7 @@ final class World implements Finalizable {
   var _applicationPaused = false;
 
   /// Tells [onLowMemory]'s listeners that the system is short of memory.
-  /// [FynkelView] calls it when the system says so; a test can call it.
+  /// `FynkelView` calls it when the system says so; a test can call it.
   void lowMemory() {
     if (isDisposed) return;
     _emit(onLowMemory, null);

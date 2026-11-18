@@ -645,7 +645,7 @@ final class ParticleRenderMode {
 /// [subEmitters]; null (or empty) is a module turned off.
 ///
 /// The engine moves them, once a frame, after the animators and before
-/// [Behaviour.lateUpdate]; Dart only sends the settings when they change.
+/// [Behaviour.onLateUpdate]; Dart only sends the settings when they change.
 /// A system pauses with the world and follows [Time.scale], unless
 /// [useUnscaledTime]. Its numbers are as Unity's main module's, with its
 /// defaults: five seconds looping, ten a second living five seconds each,

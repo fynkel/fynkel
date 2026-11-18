@@ -525,7 +525,7 @@ final class Bounds {
   String toString() => 'Bounds($min, $max)';
 }
 
-/// A flat surface without end, as Unity's `Plane`: the points [p] where
+/// A flat surface without end, as Unity's `Plane`: the points `p` where
 /// `normal.dot(p) + distance == 0`.
 final class Plane {
   /// The plane through [point] facing [normal] (made unit length).

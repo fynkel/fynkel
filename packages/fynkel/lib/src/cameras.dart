@@ -169,7 +169,7 @@ sealed class _Rig extends Behaviour {
 /// they were enabled.
 abstract class CameraExtension extends Behaviour {
   /// Changes where the rigs put this object this frame (its position and
-  /// rotation). [dt] is the frame's game time ([Time.deltaTime]), 0 while
+  /// rotation). [dt] is the frame's game time ([Time.delta]), 0 while
   /// paused.
   void adjust(double dt);
 
