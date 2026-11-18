@@ -1244,6 +1244,7 @@ final class ParticleSystem extends Component {
   void simulate(double seconds) {
     final object = _command(-1, 0);
     if (object == null) return;
+    object.world._sendTransforms();
     scratch.number.value = seconds;
     check(fy_particles_simulate(object.world.pointer, object.id, scratch.number));
   }
@@ -1280,7 +1281,12 @@ final class ParticleSystem extends Component {
       throw StateError('this ParticleSystem is on no object in a world yet: add it before playing it');
     }
     if (!_enabledFlag) return null;
-    if (command >= 0) check(fy_particles_command(object.world.pointer, object.id, command, count));
+    if (command >= 0) {
+      // Where it is now, not at the last frame: emit right after a move
+      // makes them at its new place (playtest game 10).
+      object.world._sendTransforms();
+      check(fy_particles_command(object.world.pointer, object.id, command, count));
+    }
     return object;
   }
 
@@ -1570,7 +1576,12 @@ extension _Particles on World {
       } else {
         switch (action) {
           case FY_PARTICLE_STOP_DISABLE:
-            object.active = false;
+            // One of a pool's goes back to it, for the next get (game 10).
+            if (object._pooled == _PoolState.out) {
+              object._pool!.release(object);
+            } else {
+              object.active = false;
+            }
           case FY_PARTICLE_STOP_DESTROY:
             object.destroy();
           case FY_PARTICLE_STOP_CALLBACK:

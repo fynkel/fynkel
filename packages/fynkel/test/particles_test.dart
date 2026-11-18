@@ -4,6 +4,7 @@
 // numbers are the engine's tests (crates/fynkel_world/src/particles/tests.rs).
 
 import 'package:fynkel/fynkel.dart';
+import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 const dt = 1 / 60;
@@ -412,5 +413,88 @@ void main() {
       );
       expect(Quality.low.copyWith(softParticles: true).softParticles, isTrue);
     });
+  });
+
+  // Playtest game 10: a pooled burst that turned itself off stayed "out",
+  // so each get made a new one, for ever.
+  test('StopAction.disable on a pooled object gives it back to its pool', () {
+    final root = world.add(GameObject());
+    final pool = Pool(
+      root,
+      () => GameObject(components: [burst(count: 5, lifetime: 0.3, stopAction: StopAction.disable)]),
+    );
+    for (var i = 0; i < 5; i++) {
+      final puff = pool.get();
+      frames(world, 1.5);
+      expect(puff.active, isFalse);
+    }
+    expect((pool.countActive, pool.countInactive), (0, 1), reason: 'one puff at a time needs one object');
+    // Handed out again, it plays from the start.
+    final again = pool.get();
+    world.update(dt);
+    expect(again.get<ParticleSystem>()!.particleCount, 5);
+  });
+
+  // Playtest game 10: emit right after a move made the particles where the
+  // emitter had been, as the move hadn't reached the engine yet.
+  test('emit and play right after a move make the particles where the emitter is now', () {
+    final drawn = World()
+      ..sky = null
+      ..input.simulate.resize(90, 30)
+      ..add(
+        GameObject(
+          transform: Transform(position: const Vec3(0, 0, 8)),
+          components: [Camera(clearColor: Color.black)],
+        ),
+      );
+    addTearDown(drawn.dispose);
+    final HeadlessView view;
+    try {
+      view = HeadlessView(drawn, width: 90, height: 30);
+    } on FynkelException {
+      markTestSkipped('no GPU');
+      return;
+    }
+    addTearDown(view.dispose);
+    ParticleSystem still() => ParticleSystem(
+      looping: false,
+      playOnAwake: false,
+      startSpeed: Range(0),
+      startLifetime: Range(5),
+      startSize: Range(1),
+      simulationSpace: ParticleSpace.world,
+      emission: Emission(rateOverTime: 0, bursts: [Burst(count: Range(10))]),
+      shape: ParticleShape.point(),
+      material: Material(color: Color.white, blending: Blending.additive),
+    );
+    final emitted = drawn.add(
+      GameObject(
+        transform: Transform(position: const Vec3(-8, 0, 0)),
+        components: [still()],
+      ),
+    );
+    final played = drawn.add(
+      GameObject(
+        transform: Transform(position: const Vec3(-8, 0, 0)),
+        components: [still()],
+      ),
+    );
+    drawn.update(dt);
+    emitted.position = const Vec3(8, 0, 0);
+    emitted.get<ParticleSystem>()!.emit(10);
+    played.position = const Vec3(8, 0, 0);
+    played.get<ParticleSystem>()!.play();
+    drawn.update(dt);
+    final rgba = view.read(view.frame()).rgba;
+    var (left, right) = (0, 0);
+    for (var y = 0; y < 30; y++) {
+      for (var x = 0; x < 90; x++) {
+        final red = rgba[(y * 90 + x) * 4];
+        if (x < 30) left += red;
+        if (x >= 60) right += red;
+      }
+    }
+    expect(left, 0, reason: 'nothing where they were; right $right');
+    expect(right, greaterThan(0));
   });
 }

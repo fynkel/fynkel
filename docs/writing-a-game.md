@@ -1409,7 +1409,10 @@ class Button3D extends GameObject {
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
-  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`.
+  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`. A pinch's
+  fingers drag too: `onDrag` comes for each of them, so a
+  camera that pans on a drag and zooms on a pinch skips the drags while
+  `input.fingers.length > 1`.
 - **On objects**: `onPointerDown`, `onPointerUp`, `onPointerEnter`,
   `onPointerExit`, `onClick`, `onLongPress`, `onDragStart`, `onDrag`,
   `onDragEnd`, on behaviours too. They go to the object under the finger,
@@ -2769,8 +2772,10 @@ class Fountain extends GameObject {
   clears; on again, it plays from the start.
 - **When it's done**, its last particle gone and not looping,
   `stopAction` does what Unity's does: `destroy` destroys its object (a
-  one-off explosion), `disable` turns it off (one from a pool, §7, which
-  plays again when it's turned on), `callback` calls `onStopped`.
+  one-off explosion), `disable` turns it off (and one from a pool, §7,
+  goes back to it, to play again from the start when `get` hands it
+  out), `callback` calls `onStopped`. `emit` and `play` right after a
+  move make the particles at the new place.
 - **Time.** It goes with the game's time: it holds while the game is
   paused and follows `time.scale`; one with `useUnscaledTime` goes on,
   for a pause menu's.
@@ -5243,7 +5248,8 @@ void main() {
 
   Override the ones you need, and call `super`. `order` puts it before
   (lower) or after (higher) other systems. `name` is what `world.profile`
-  shows, with the time its hooks took (`frameTime`).
+  shows, with the time its hooks took: `system.frameTime` on the system,
+  and `time` in each of `world.profile.systems`' `(name:, time:)`.
 - **Its components are behaviours.** One joins its system in `onEnable`
   and leaves in `onDisable`, as a collider does. So one that's off, or
   on an object that's off, costs the system nothing. To watch components

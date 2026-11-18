@@ -65,6 +65,8 @@ can be wrong.
 | 7 | Mini-golf made for phones, played on one | Touch, turning the phone, safe areas, background mid-roll, 15 minutes on the Note10+ |
 | 7b | Game 7 again, to look its best on a phone | Light, sky, shadows, materials, shaders, outlines, what each costs on the Note10+; then the user's own round on the iPhone |
 | 8 | Third-person adventure in three places (Hollow), from a fresh clone and the README alone | Setup as a stranger meets it, loading between places, camera collision in a cave, saving, hot reload |
+| 9 | Kart racer (Kart), from a fresh clone | A track swept along a spline, arcade handling with drift, AI karts, laps, two-player split screen, a minimap, sound |
+| 10 | Portrait tower defence (Towers), from a fresh clone | Many enemies, path finding round towers, pooled effects, touch pan and pinch, saving |
 
 1 and 2 first, to see how useful the logs are, then the rest.
 
@@ -161,6 +163,11 @@ the count.
 | Game 8 | `CARGO_TARGET_DIR` ignored: 750 MB built into the clone, unsaid | The hook runner passes it on to no one; the hook now sets it itself, and §1 says where the build goes |
 | Game 8 | README's section numbers one off; §1 without the physics and audio packages; saving with no `main`; the controller's default capsule; the toy character 2.7 m tall; the sky lights a cave; a covered Mac window gets no frames; children load alongside their parent | README, §1, §3/§6, §5, §13, §16, §18 |
 | Game 8 | From a fresh clone: first build 1 min 46 s on an Apple-silicon Mac, a 3-place game with HUD, saves, 14 tests in one sitting; camera never in a wall in 160 placements | No finding |
+| Game 10 | `emit(n)` right after moving a world-space emitter made the particles where it had been | The move hadn't reached the engine: `emit`, `play` and `simulate` send the moved transforms first (test; §13c) |
+| Game 10 | A pooled burst with `StopAction.disable` turned off but stayed "out" of its pool, so each `get` made a new one, for ever | `disable` on a pooled object releases it to its pool (test; §13c) |
+| Game 10 | A pinch's fingers also drag; §20b's `frameTime` is `time` in `profile.systems` | §11, §20b |
+| Game 10 | No path finding (§21 says so); no recipe for drag-panning a camera over the ground; doc comments read in lib/src for `Pool`, `ObjectHandle`, inline `Shader`, `TextRenderer`, camera point methods | Asked once: path finding is stage 17's decision; the API reference on the website answers the rest |
+| Game 10 | 75 enemies, 48 towers, 141 damage numbers: 0.29 ms median frame on a Mac | No finding |
 
 ### Missing, until a second game asks
 
