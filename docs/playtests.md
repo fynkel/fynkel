@@ -178,6 +178,11 @@ the count.
 | Game 9 | Spline track, drift, three AI karts, laps, split screen, minimap, sound, 13 tests: no engine bug | No finding |
 | Game 11 | A character controller pushed into a wall while it fell slowly hung in the air: the move along the wall rose 1e-10 m, and anything that rose skipped its fall | Fixed: it must rise more than float noise (Rust test; the game's repro) |
 | Game 11 | `bindAxis2`'s and `bindAction`'s arguments; `find` on a model before it's added; a character with jump clips (the lab's KayKit); a blend past its last threshold; `world.physics` in a plain `World` test; assets in a widget test; `Stick`'s doc named a pad | §11, §12, §13, §13b, §16, §19; `Stick`'s doc |
+| Game 12 | Kept to a plane (frozen along Z, turning only about Z), a body had no friction: Rapier 0.36 solves friction's two directions together, and the inverse it took of a singular matrix was zero | Fixed in Rapier, patched in `third_party/rapier3d`: a pseudo-inverse there (Rust test) |
+| Game 12 | A loop of hinges on bodies frozen along Z gained energy from nothing and came apart: a hinge row made of the others ended as float noise, and Rapier divided by it | Fixed in the same patch: such a row is left out (Rust test) |
+| Game 12 | A box dropped on a stack sprang 0.46 m back up: the push out of the floor (up to 3 m/s) stayed in it as speed | Fixed: three stabilization passes a step, not one, at 40 % more physics time in a landing pile (Rust test) |
+| Game 12 | `Pinch.twist` is clockwise; whether physics repeats; what `onCollisionEnter` sees; what solver iterations are for | §11, §16 |
+| Game 12 | No sweep of a whole body (Unity's `Rigidbody.SweepTest`); no cylinder collider (Unity has none) | Asked once each |
 | Game 13 | The guide's HUD over the view drew Flutter's debug text under a bare `FynkelGame` | §17's example wraps its overlay in `Material` (`FynkelApp` already does) |
 | Game 13 | `input.stick()` reads a mouse drag as a stick; `Controls` keeps one key an action and rebinds all of them; `input.mousePosition`; a loading screen; profile spikes land in whichever part ran; 3D sound heard from a camera high above | §6, §11, §13b, §14; the API reference answers the doc comments it read |
 | Game 13 | 300 enemies, 144 shots: 0.43 ms median `world.update` in a debug test; 15 voices, 0 underruns | No finding |

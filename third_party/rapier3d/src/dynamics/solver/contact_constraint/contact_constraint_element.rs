@@ -35,6 +35,31 @@ pub(crate) struct ContactConstraintTangentPart<N: ScalarType> {
     pub r: [N; DIM],
 }
 
+/// `K⁻¹·dvel` for the symmetric positive semi-definite tangent block
+/// `K = [[k11, k12], [k12, k22]]`.
+///
+/// Fynkel's patch: a body that can be neither pushed nor turned along one
+/// tangent (its position frozen on that axis and its rotations about the
+/// other two, a body kept to a plane) makes `K` singular. Its inverse was
+/// then taken as zero, which took away the friction along both tangents.
+/// A singular `K` of rank 1 is `trace · u·uᵀ`, whose pseudo-inverse is
+/// `K / trace²`: the friction the body can feel, along the tangent it can.
+#[cfg(feature = "dim3")]
+#[inline]
+fn solve_tangent_block<N: ScalarType>(k11: N, k22: N, k12: N, dvel_0: N, dvel_1: N) -> na::Vector2<N> {
+    let det = k11 * k22 - k12 * k12;
+    let trace = k11 + k22;
+    let trace2 = trace * trace;
+    let singular = det.simd_le(trace2 * N::splat(1.0e-5));
+    let inv_det = crate::utils::simd_inv(det);
+    let inv_trace2 = crate::utils::simd_inv(trace2);
+    let full0 = (k22 * dvel_0 - k12 * dvel_1) * inv_det;
+    let full1 = (k11 * dvel_1 - k12 * dvel_0) * inv_det;
+    let pseudo0 = (k11 * dvel_0 + k12 * dvel_1) * inv_trace2;
+    let pseudo1 = (k12 * dvel_0 + k22 * dvel_1) * inv_trace2;
+    na::vector![pseudo0.select(singular, full0), pseudo1.select(singular, full1)]
+}
+
 impl<N: ScalarType> ContactConstraintTangentPart<N> {
     pub fn zero() -> Self {
         Self {
@@ -146,11 +171,7 @@ impl<N: ScalarType> ContactConstraintTangentPart<N> {
             let k11 = self.r[0];
             let k22 = self.r[1];
             let k12 = self.r[2] * N::splat(0.5);
-            let inv_det = crate::utils::simd_inv(k11 * k22 - k12 * k12);
-            let delta_impulse = na::vector![
-                (k22 * dvel_0 - k12 * dvel_1) * inv_det,
-                (k11 * dvel_1 - k12 * dvel_0) * inv_det
-            ];
+            let delta_impulse = solve_tangent_block(k11, k22, k12, dvel_0, dvel_1);
             let new_impulse = self.impulse - delta_impulse;
             let new_impulse = {
                 let _disable_fe_except =
@@ -679,11 +700,7 @@ where
         let k11 = self.r[0];
         let k22 = self.r[1];
         let k12 = self.r[2] * N::splat(0.5);
-        let inv_det = crate::utils::simd_inv(k11 * k22 - k12 * k12);
-        let delta_impulse = na::vector![
-            (k22 * dvel_0 - k12 * dvel_1) * inv_det,
-            (k11 * dvel_1 - k12 * dvel_0) * inv_det
-        ];
+        let delta_impulse = solve_tangent_block(k11, k22, k12, dvel_0, dvel_1);
         let new_impulse = self.impulse - delta_impulse;
         let new_impulse = {
             let _disable_fe_except =

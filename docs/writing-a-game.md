@@ -1420,7 +1420,12 @@ class Button3D extends GameObject {
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
-  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`. A pinch's
+  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`. `onPinch`
+  and `onTwist` are given a `Pinch`: its `scale` is how much further apart
+  the fingers are than last frame (zoom by it), and its `twist` how far
+  they turned, in radians, **clockwise** on the view, where the world's
+  angles turn the other way: with the camera looking along -Z,
+  `rotate(Vec3(0, 0, 1), -pinch.twist)` turns an object with the fingers. A pinch's
   fingers drag too: `onDrag` comes for each of them, so a
   camera that pans on a drag and zooms on a pinch skips the drags while
   `input.fingers.length > 1`.
@@ -3620,7 +3625,11 @@ controller riding an interpolated platform (`moveWithGround`) goes with
 the platform's steps. A small, fast body can
 pass through a thin one between steps: Rapier sweeps every fast body
 against static colliders, and `CollisionDetectionMode.continuous` sweeps
-it against bodies too. `physics.gravity`, `defaultSolverIterations` and
+it against bodies too. **The same steps give the same world**: the same
+game, pushed the same way, ends with its bodies in the same places to
+the bit, at 60 fps or 120 (the fixed step hides the frame rate), so a
+test can count on it; across devices or engine versions, no promise.
+`physics.gravity`, `defaultSolverIterations` and
 `sleepThreshold` are the world's settings; a new `gravity` wakes every
 body, so sleeping ones fall the new way. `isSleeping` says whether a
 body sleeps; `sleep()` and `wakeUp()` do nothing for a body not in the
@@ -3733,7 +3742,10 @@ wall it hits each hear `onCollisionEnter`, with the other in
 lower `gameObject.id` (every object's own number, unique in its world),
 say.
 Between frames, they come at the start of the next frame, before
-`onFixedUpdate`. What a callback throws goes to `world.errors`:
+`onFixedUpdate`. So a body read in `onCollisionEnter` is where the step
+left it, after the touch: a box landing at 6 m/s is a few centimetres
+past where it first met the other, as in Unity; `collision`'s contacts
+say where they met. What a callback throws goes to `world.errors`:
 
 ```dart
 // lib/pickups.dart
@@ -5104,6 +5116,13 @@ What keeps a game fast:
   longer a step is: `time.fixedDelta = 1 / 100` (or 1 / 120) where a
   game needs it, in its root's `onLoad`. Keep a joint's two bodies within 10 times each other's
   mass, as Unity advises.
+- **More solver iterations for tall stacks.** Each step, physics goes
+  round the touching bodies `physics.defaultSolverIterations` times (6,
+  Unity's default), each time pushing every pair a little closer to
+  right. A tower of many boxes, or a heavy one landing on a light one,
+  needs more rounds for the push to get from top to bottom: 10 to 16
+  for a stacking game, with `time.fixedDelta = 1 / 100` if pieces still
+  sink into each other. More costs about as much more physics time.
 - **Short-reaching lamps.** A lamp costs something for each object it
   reaches, and the pixels it lights; one that reaches no further than it
   needs to costs least. Turn a lamp off with `enabled = false`: it's

@@ -73,3 +73,8 @@ unreachable_pub = "warn"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
+
+# Rapier 0.36.1 with two fixes for bodies with frozen axes (playtest game 12):
+# third_party/rapier3d/FYNKEL.md says what and why.
+[patch.crates-io]
+rapier3d = { path = "third_party/rapier3d" }

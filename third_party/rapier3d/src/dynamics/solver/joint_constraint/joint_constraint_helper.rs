@@ -682,15 +682,32 @@ impl<N: ScalarType> JointConstraintHelper<N> {
 
         let imsum = constraints[0].im1 + constraints[0].im2;
 
+        // Fynkel's patch: each row's size before the others are taken out
+        // of it. A row made of the rows before it (a hinge's along-Z row on
+        // bodies frozen along Z, which then moves them only by turning them
+        // about X and Y, as the hinge's two turn rows do) ends as float
+        // noise; dividing by that noise kicked the bodies from nothing.
+        // Such a row asks nothing the others don't, so it's left out.
+        const SIZES: usize = 12;
+        let mut sizes = [N::zero(); SIZES];
+        for (size, c) in sizes.iter_mut().zip(constraints.iter()) {
+            *size = c.lin_jac.gdot(imsum.component_mul(&c.lin_jac))
+                + c.ii_ang_jac1.gdot(c.ang_jac1)
+                + c.ii_ang_jac2.gdot(c.ang_jac2);
+        }
+
         // Use the modified Gram-Schmidt orthogonalization.
         for j in 0..len {
             let c_j = &mut constraints[j];
             let dot_jj = c_j.lin_jac.gdot(imsum.component_mul(&c_j.lin_jac))
                 + c_j.ii_ang_jac1.gdot(c_j.ang_jac1)
                 + c_j.ii_ang_jac2.gdot(c_j.ang_jac2);
+            let size = if j < SIZES { sizes[j] } else { N::zero() };
+            let redundant = dot_jj.simd_le(size * N::splat(1.0e-4));
             let cfm_gain = dot_jj * c_j.cfm_coeff + c_j.cfm_gain;
-            let inv_dot_jj = crate::utils::simd_inv(dot_jj);
-            c_j.inv_lhs = crate::utils::simd_inv(dot_jj + cfm_gain); // Don’t forget to update the inv_lhs.
+            let inv_dot_jj = N::zero().select(redundant, crate::utils::simd_inv(dot_jj));
+            // Don’t forget to update the inv_lhs.
+            c_j.inv_lhs = N::zero().select(redundant, crate::utils::simd_inv(dot_jj + cfm_gain));
             c_j.cfm_gain = cfm_gain;
 
             if c_j.impulse_bounds != [-N::splat(Real::MAX), N::splat(Real::MAX)] {
