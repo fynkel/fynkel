@@ -4,7 +4,6 @@
 // numbers are the engine's tests (crates/fynkel_world/src/particles/tests.rs).
 
 import 'package:fynkel/fynkel.dart';
-import 'package:fynkel/testing.dart';
 import 'package:test/test.dart';
 
 const dt = 1 / 60;
