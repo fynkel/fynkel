@@ -77,6 +77,20 @@ void main() {
     expect(camera.position.z, closeTo(2.7, 1e-3));
   });
 
+  test('with dampingIn it comes in over its seconds; distance says how near it is', () {
+    final collision = CameraCollision(radius: 0.2, dampingIn: 1);
+    wall.position = const Vec3(50, 0, 3);
+    final camera = orbitCamera(collision);
+    frames(1);
+    expect(collision.distance, closeTo(6, 1e-3));
+    wall.position = const Vec3(0, 0, 3);
+    frames(4);
+    // 99 % of the way from 6 in to 2.7 in 1 s.
+    expect(camera.position.z, closeTo(6 - 3.3 * 0.99, 1e-3));
+    expect(collision.distance, closeTo(6 - 3.3 * 0.99, 1e-3));
+    expect(collision.isPulledIn, isTrue);
+  });
+
   test('only the layers given; never the target, its children or a trigger', () {
     wall.layer = 3;
     final collision = CameraCollision(radius: 0.2, layers: LayerMask.except([3]));

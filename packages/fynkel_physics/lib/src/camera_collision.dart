@@ -15,8 +15,9 @@ part of 'physics.dart';
 /// ])
 /// ```
 ///
-/// It comes in at once and goes back out over [damping], so it doesn't
-/// pop back and forth past a post. It never stops at the target's own
+/// It comes in at once (or over [dampingIn]) and goes back out over
+/// [damping], so it doesn't pop back and forth past a post. Pulled in
+/// close, the player fills the view: hide it below a [distance]. It never stops at the target's own
 /// colliders (those on it and its children), nor at a trigger; leave out
 /// more with [layers]. The rig keeps its own distance: an [Orbit]'s
 /// [Orbit.distance] is still what the player zoomed to.
@@ -31,6 +32,7 @@ final class CameraCollision extends CameraExtension {
     this.layers = LayerMask.all,
     this.minDistance = 0.3,
     this.damping = 0.3,
+    this.dampingIn = 0,
   });
 
   /// The object kept in sight. Null, unless set, takes the rig's on the
@@ -54,8 +56,19 @@ final class CameraCollision extends CameraExtension {
   double minDistance;
 
   /// Seconds it takes to go 99 % of the way back out once the view is
-  /// clear; 0 goes straight back. It always comes in at once.
+  /// clear; 0 goes straight back.
   double damping;
+
+  /// Seconds it takes to come 99 % of the way in when something gets in
+  /// the way: 0, unless set, comes in at once. More is smoother as a post
+  /// passes, but for that moment the post can hide the target, or the
+  /// camera see into it.
+  double dampingIn;
+
+  /// How far the camera is from the point it keeps in sight, as this put
+  /// it last frame: to hide the player when the camera comes too near
+  /// (`model.enabled = collision.distance > 0.8`).
+  double get distance => _shown ?? 0;
 
   /// Whether something is in the way now, so the camera is nearer than
   /// its rig put it.
@@ -119,13 +132,15 @@ final class CameraCollision extends CameraExtension {
       break;
     }
     final shown = _shown;
-    final next = shown == null || clear <= shown ? clear : shown + (clear - shown) * _back(dt);
+    final next = shown == null
+        ? clear
+        : shown + (clear - shown) * (clear < shown ? _damp(dampingIn, dt) : _damp(damping, dt));
     _shown = math.min(next, full);
     _pulledIn = _shown! < full - 1e-4;
     if (_pulledIn) position = point + direction * _shown!;
   }
 
-  double _back(double dt) => damping > 0 ? 1 - math.pow(0.01, dt / damping).toDouble() : 1;
+  static double _damp(double seconds, double dt) => seconds > 0 ? 1 - math.pow(0.01, dt / seconds).toDouble() : 1;
 
   static bool _isOf(GameObject hit, GameObject target) {
     for (GameObject? o = hit; o != null; o = o.parent) {

@@ -1,6 +1,7 @@
 // Hardening G8: package:fynkel/testing.dart, what each example's tests
 // wrote for themselves.
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
@@ -40,6 +41,35 @@ void main() {
     expect(() => bare.tap(1, 1), throwsA(isStateError.having((e) => e.message, 'message', contains('resize'))));
     expect(() => bare.viewPoint(1, 1), throwsStateError);
   });
+  // Playtest game 8: an onLoad that awaits a routine goes on only in a
+  // frame, so `await game.loaded` with none run waited for ever.
+  group('untilLoaded', () {
+    test('loads a game whose onLoad awaits a routine, running frames as the app would', () async {
+      final game = world.add(_Fades());
+      await world.untilLoaded(game);
+      expect(game.faded, isTrue);
+      // The fade's 0.4 s ran as frames, and not many more.
+      expect(world.time.sinceStart, inInclusiveRange(0.4, 0.5));
+    });
+
+    test('a game that loads without frames is ready as soon as it has, a frame each 5 ms meanwhile', () async {
+      final game = world.add(_Plain());
+      await world.untilLoaded(game);
+      expect(game.child, isNotNull);
+      // 20 ms of reading: about 4 frames, as the app would have drawn.
+      expect(world.time.frame, lessThan(10));
+    });
+
+    test('throws what the load threw, and a TimeoutException for a load that never ends', () async {
+      world.errors.listen((_) {}); // the failed load is the world's error too
+      await expectLater(world.untilLoaded(world.add(_Broken())), throwsA(isA<StateError>()));
+      await expectLater(
+        world.untilLoaded(world.add(_Forever()), timeout: const Duration(milliseconds: 200)),
+        throwsA(isA<TimeoutException>().having((e) => e.message, 'message', contains('_Forever'))),
+      );
+    });
+  });
+
   // Stage 14's GT11: the golden check was copied into the lab; a game had none.
   group('expectImage', () {
     late Directory dir;
@@ -135,5 +165,48 @@ class _Counter extends GameObject {
   void onUpdate() {
     super.onUpdate();
     tick();
+  }
+}
+
+/// Fades in before it's ready, as a game with levels does.
+class _Fades extends GameObject {
+  var faded = false;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await startRoutine(() async {
+      await wait(0.4);
+      faded = true;
+    });
+  }
+}
+
+/// Reads a file, as it were, and adds what it read.
+class _Plain extends GameObject {
+  GameObject? child;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await Future<void>.delayed(const Duration(milliseconds: 20));
+    child = add(GameObject());
+  }
+}
+
+class _Broken extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await Future<void>.delayed(const Duration(milliseconds: 1));
+    throw StateError('no level file');
+  }
+}
+
+class _Forever extends GameObject {
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await Completer<void>().future;
   }
 }

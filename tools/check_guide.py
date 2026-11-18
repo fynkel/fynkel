@@ -64,6 +64,7 @@ dependencies:
     path: {ROOT / 'packages' / 'fynkel_physics'}
   fynkel_audio:
     path: {ROOT / 'packages' / 'fynkel_audio'}
+  path_provider: ^2.1.5
 dev_dependencies:
   flutter_test:
     sdk: flutter
