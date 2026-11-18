@@ -1,0 +1,24 @@
+name: starfall
+description: Starfall, the website's second tutorial (website/tutorials/starfall.md) - a portrait phone game of falling stars, with touch, pooling, particles, Flutter screens and a saved best score.
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../packages/fynkel
+  fynkel_flutter:
+    path: ../../packages/fynkel_flutter
+  shared_preferences: ^2.5.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
+
+flutter:
+  uses-material-design: true

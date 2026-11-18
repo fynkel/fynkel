@@ -21,7 +21,10 @@ export default defineConfig({
         },
         {
           label: 'Tutorials',
-          items: [{ label: 'Your first game: Roll', slug: 'tutorials/roll' }],
+          items: [
+            { label: 'Your first game: Roll', slug: 'tutorials/roll' },
+            { label: 'A phone game: Starfall', slug: 'tutorials/starfall' },
+          ],
         },
         { label: 'The guide', items: [{ autogenerate: { directory: 'guide' } }] },
       ],

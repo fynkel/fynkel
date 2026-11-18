@@ -12,6 +12,7 @@ folder.
 | --- | --- |
 | [hello](https://github.com/mooumari/fynkel/tree/main/examples/hello) | One turning cube: the code on the front page |
 | [roll](https://github.com/mooumari/fynkel/tree/main/examples/roll) | Roll a ball, take the gems: physics, a camera kept out of walls and a HUD ([the tutorial](/tutorials/roll/)) |
+| [starfall](https://github.com/mooumari/fynkel/tree/main/examples/starfall) | A portrait phone game: catch falling stars by touch, pooled objects and sparks, Flutter screens, a saved best score ([the tutorial](/tutorials/starfall/)) |
 | [pocket_hole](https://github.com/mooumari/fynkel/tree/main/examples/pocket_hole) | A portrait block-collecting game with touch controls, progression and mobile projects |
 | [garden](https://github.com/mooumari/fynkel/tree/main/examples/garden) | A character in a garden, loaded from models; an orbit camera |
 | [coins](https://github.com/mooumari/fynkel/tree/main/examples/coins) | Walk about picking up coins, level after level; triggers and a Flutter HUD |
