@@ -11,4 +11,4 @@ PRODUCT_NAME = bowling
 PRODUCT_BUNDLE_IDENTIFIER = dev.fynkel.bowling
 
 // The copyright displayed in application information
-PRODUCT_COPYRIGHT = Copyright © 2026 mooumari. MIT licence.
+PRODUCT_COPYRIGHT = Copyright © 2026 Mohammad Oumari. MIT licence.
