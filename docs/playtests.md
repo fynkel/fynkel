@@ -67,6 +67,9 @@ can be wrong.
 | 8 | Third-person adventure in three places (Hollow), from a fresh clone and the README alone | Setup as a stranger meets it, loading between places, camera collision in a cave, saving, hot reload |
 | 9 | Kart racer (Kart), from a fresh clone | A track swept along a spline, arcade handling with drift, AI karts, laps, two-player split screen, a minimap, sound |
 | 10 | Portrait tower defence (Towers), from a fresh clone | Many enemies, path finding round towers, pooled effects, touch pan and pinch, saving |
+| 11 | Third-person platformer (Hopper), from a fresh clone | A character controller on moving, turning and falling platforms, coyote time, animation, touch controls, a best time |
+| 12 | Stacking puzzle (Stacker), from a fresh clone | Many resting bodies, stacking, sleeping, levels |
+| 13 | Top-down twin-stick shooter (Blaster), from a fresh clone | Mouse aim, hundreds of enemies and shots, effects, bloom, sound groups, rebindable keys, a loading screen |
 
 1 and 2 first, to see how useful the logs are, then the rest.
 
@@ -173,12 +176,23 @@ the count.
 | Game 9 | `Follow` with `targetYaw` on a body with locked rotation never turns; whether `cullingMask` hides shadows; `HeadlessView.camera`; an old `dart` on the PATH reports false errors | §15, §19, §1 |
 | Game 9 | A minimap view over two side-by-side views: right on macOS, phones unchecked | To check on a phone |
 | Game 9 | Spline track, drift, three AI karts, laps, split screen, minimap, sound, 13 tests: no engine bug | No finding |
+| Game 11 | A character controller pushed into a wall while it fell slowly hung in the air: the move along the wall rose 1e-10 m, and anything that rose skipped its fall | Fixed: it must rise more than float noise (Rust test; the game's repro) |
+| Game 11 | `bindAxis2`'s and `bindAction`'s arguments; `find` on a model before it's added; a character with jump clips (the lab's KayKit); a blend past its last threshold; `world.physics` in a plain `World` test; assets in a widget test; `Stick`'s doc named a pad | §11, §12, §13, §13b, §16, §19; `Stick`'s doc |
+| Game 13 | The guide's HUD over the view drew Flutter's debug text under a bare `FynkelGame` | §17's example wraps its overlay in `Material` (`FynkelApp` already does) |
+| Game 13 | `input.stick()` reads a mouse drag as a stick; `Controls` keeps one key an action and rebinds all of them; `input.mousePosition`; a loading screen; profile spikes land in whichever part ran; 3D sound heard from a camera high above | §6, §11, §13b, §14; the API reference answers the doc comments it read |
+| Game 13 | 300 enemies, 144 shots: 0.43 ms median `world.update` in a debug test; 15 voices, 0 underruns | No finding |
 
 ### Missing, until a second game asks
 
 - ~~**Camera collision**~~ (games 1 and 7): built at the second ask,
   above.
 - ~~**Model bounds**~~ (games 2 and 4): built at the second ask, above.
+- **Gamepads** (games 11 and 13, though both briefs asked for them):
+  each bridged the pub `gamepads` plugin to `input.setAxis2` and
+  `action(...).press()` in about 50 lines, untested on a real pad.
+  *Recommendation:* the second ask, so build it: a small bridge in
+  fynkel_flutter (sticks to `move`/`look`, buttons to actions, a dead
+  zone), checked with a real pad on the Mac and a phone.
 - **`PhysicsMaterial.staticFriction`** (game 3): one friction serves both;
   a Unity user looks for two. §16 says there's one. *Recommendation:*
   leave it unless a game needs a body that sticks until pushed hard and

@@ -1109,7 +1109,11 @@ system's work isn't counted in the part it runs in), and they add up to
 `profile.total`. It's the last finished frame's, always on, and costs
 nothing you'd see; `print(world.profile)` lists it all. One frame's
 numbers are uneven, so take the median of a second's worth: the lab's
-"The frame, part by part" does, for every scene. What the engine does
+"The frame, part by part" does, for every scene. The parts are
+`Duration`s. A pause in Dart itself (a garbage collection, or in debug
+code being compiled) lands in whichever part was running, so one frame's
+spike in `input` or `Cameras` says only that something paused: the
+median says where the time goes. What the engine does
 to draw the frame runs on the view's own thread: `ViewStats.busy`, from
 a `FynkelView`'s `onStats` (`stats.view.busy`, for about a second).
 
@@ -1409,6 +1413,10 @@ class Button3D extends GameObject {
   `isDragging`, and `over` (what's under it in the world: `gameObject`,
   `point`, `normal`). `input.fingers` lists them. `position` is a
   `ViewPoint`, for `screenPointToRay`; `position.toVec2()` for a `Vec2`.
+  **Where the mouse is**, pressed or not, is `input.mousePosition` (or
+  else the first finger down; null with neither): aiming at it is
+  `camera.screenPointToPlane(input.mousePosition!, Plane(Vec3.up, Vec3(0, y, 0)))`.
+  In a test, `input.simulate.hover(id, x, y)` moves it.
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
@@ -1448,7 +1456,11 @@ half), and a tap there with no drag still reaches the game. A widget of
 your own calls `input.setAxis2('move', Vec2(x, y))` (it adds to the keys,
 and stays until set again), and a button calls `input.action('jump')
 .press()` when it goes down and `.release()` when it comes up (or both at
-once for a tap).
+once for a tap). With no widget, `input.stick()` reads a finger dragging
+alone as a stick: `input.stick() ?? input.axis2('move')`. A mouse held
+down drags it too, so a phone game plays on a Mac; a game whose mouse
+aims and fires leaves it out (`input.fingers.any((f) => f.kind ==
+FingerKind.mouse) ? null : input.stick()`).
 
 ```dart
 // lib/walk_page.dart
@@ -1555,7 +1567,8 @@ class Tree extends GameObject {
 
 - `assets.instantiate(name)` gives a new copy of the model, a tree of objects
   sharing its meshes and textures with every other copy. Find its parts by
-  name.
+  name once it's added (`add(copy)` first): `find` throws on an object
+  not in a world yet.
 - `copy.bounds` is the box in the world round what it draws (null when
   nothing in it draws a mesh, so `copy.bounds!` for a model): its `size`
   is the model's size, to scale it to fit (`Vec3.all(1 / size.y)` makes
@@ -2273,7 +2286,10 @@ A skinned character, one whose mesh bends with a skeleton (Mixamo's,
 KayKit's, most from Blender), needs nothing more: its joints are its
 copy's objects, the clips move them, and the engine bends the mesh to
 them on the GPU, its shadow too. Every copy bends with its own joints.
-So holding something is the same as for a model whose parts move whole:
+So holding something is the same as for a model whose parts move whole
+(`knight.glb`, `rogue.glb` and `sword.glb` are in examples/lab/assets/kaykit,
+CC0; the knight and rogue have walk, run and jump clips, `Jump_Start`,
+`Jump_Idle`, `Jump_Land`):
 
 ```dart
 class Rogue extends GameObject {
@@ -2334,7 +2350,9 @@ class Runner extends GameObject {
   call: each clip at its threshold (0, 1, 2… if left out), and `at`
   mixes the two around it. The clips keep one pace, each as far through
   itself, so the feet land together at any mix; with thresholds at the
-  speeds the clips' feet go, they don't slide. Call it every frame with
+  speeds the clips' feet go, they don't slide. Past the last threshold
+  the last clip plays at its own pace, so feet faster than it slide: set
+  the animator's `speed` to `at / last threshold` there. Call it every frame with
   the number: it's made the first time, and fades in (`seconds:`) only
   when something else was playing.
 - `layer(1…7, mask:, additive:, strength:)` plays over the layers below
@@ -2443,7 +2461,8 @@ the pubspec, next to `fynkel`, and a game without it ships none of it:
 ```
 
 **A clip** is a sound file, `.wav`, `.ogg` or `.mp3`, loaded by name as
-any asset is (§12): `await assets.audio('bark.ogg')`. It's decoded once,
+any asset is (§12): `await assets.audio('bark.ogg')` (the names here are
+your own files'; the examples ship only the lab's music). It's decoded once,
 off the UI thread, shared, and freed when the last object that asked for
 it is destroyed. `AudioClip.fromSamples(samples, rate:, channels:)`
 makes one from numbers, freed when nothing reaches it, or at once with
@@ -2507,7 +2526,9 @@ sounds, `refused` not played, `underruns` for crackles, `starved` for
 streams) and `audio.outputError`. It's package:fynkel_audio's
 (an extension, `WorldAudio`), so a test that reaches it through a `World`
 imports it: `import 'package:fynkel_audio/fynkel_audio.dart' show
-WorldAudio;`.
+WorldAudio;`. Physics is the same: `world.physics` is
+package:fynkel_physics' `WorldPhysics`, and any object's `physics` is
+the same thing.
 
 - **Pausing.** While the game is paused (`world.paused`, §6) its sounds
   hold where they are, and go on with it. A source with `ignorePause`
@@ -3254,7 +3275,11 @@ keeps it, and others pay nothing. The lab's effects page has both.
   by the system for every run after. A view on screen doesn't wait for
   it: it draws without those objects for those frames. Behind a loading
   screen, let the view draw the level and `await world.shadersReady()`,
-  so nothing pops in when the game shows.
+  so nothing pops in when the game shows. The loading screen is your
+  widget: a `ValueNotifier<bool> ready` the game sets after
+  `await world.shadersReady(timeout: const Duration(seconds: 3))` in a
+  routine started in `onStart`, and a panel over the view until it's
+  true.
 
 ### What shaders cost
 
@@ -4271,7 +4296,7 @@ start it over, and a **`FynkelView`**, which shows it:
 
 ```dart
 // lib/play_page.dart
-import 'package:flutter/widgets.dart';
+import 'package:flutter/material.dart';
 import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 import 'game.dart';
@@ -4283,19 +4308,24 @@ class PlayPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) => FynkelGame(
     Score.new,
-    builder: (context, game) => Stack(
-      fit: StackFit.expand,
-      children: [
-        FynkelView(root: game),
-        ScoreHud(game),
-        Align(
-          alignment: Alignment.bottomCenter,
-          child: GestureDetector(
-            onTap: () => FynkelGame.maybeOf(context)?.restart(),
-            child: const Text('again'),
+    // Text needs a Material above it, as anywhere outside a Scaffold:
+    // without one, it's red with a yellow underline.
+    builder: (context, game) => Material(
+      type: MaterialType.transparency,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          FynkelView(root: game),
+          ScoreHud(game),
+          Align(
+            alignment: Alignment.bottomCenter,
+            child: GestureDetector(
+              onTap: () => FynkelGame.maybeOf(context)?.restart(),
+              child: const Text('again'),
+            ),
           ),
-        ),
-      ],
+        ],
+      ),
     ),
   );
 }
@@ -4491,7 +4521,11 @@ class _JumpKeyState extends State<JumpKey> {
 A real game keeps its keys in a `ChangeNotifier` the settings page and
 the game share, and the game binds them again when it changes:
 `on(controls.changed, (_) => controls.bindTo(input))`
-(`examples/sheepdog/lib/game.dart`).
+(`examples/sheepdog/lib/game.dart`). `Controls` keeps one key for each
+name, keys only, and the arrow keys always move too. `bindTo` binds every
+action again from it, so a mouse button or a second key for an action is
+bound after it, each time: `input.bindAction('fire', [controls['fire'],
+MouseButton.left])`.
 
 **Several views of one world**: a minimap, split screen. Each is a
 `FynkelView` of the same game, with a `camera:` of its own; without one,
@@ -4977,7 +5011,8 @@ a third of a second, so `tester.run(0.5)` after opening or closing one,
 not a few frames.
 
 **A game that loads files** (`assets.instantiate`, a texture, a sound)
-reads them in real time, which a widget test's frames don't move:
+reads them from the app's own bundle in a widget test too, as listed in
+pubspec.yaml, with nothing to set up. It reads them in real time, which a widget test's frames don't move:
 `await tester.loaded()` waits for the game on screen to load, pumping
 frames meanwhile, and throws if its load failed (`tester.loaded(level)`
 waits for another object). What the test can't reach, as a level a

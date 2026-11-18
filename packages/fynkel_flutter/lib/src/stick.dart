@@ -6,7 +6,7 @@ import 'package:fynkel/fynkel.dart' show Input, Vec2;
 /// [input]'s [axis] follows, -1 to 1 each way, up the screen being +y;
 /// let go and it's zero. `Stick(game.world.input)`, placed where it goes
 /// (`Positioned(left: 24, bottom: 24, child: ...)`), walks a player that
-/// reads `input.axis2('move')`; the keys' and a pad's move it too.
+/// reads `input.axis2('move')`; the keys move it too.
 ///
 /// [floating], it isn't drawn till a thumb comes down anywhere in its
 /// area, and appears under it (Unity's dynamic origin): give it the area
