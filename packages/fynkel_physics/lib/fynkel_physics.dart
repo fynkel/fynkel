@@ -14,6 +14,7 @@ export 'src/physics.dart'
     show
         BehaviourPhysics,
         BoxCollider,
+        CameraCollision,
         CapsuleCollider,
         CapsuleDirection,
         CharacterController,

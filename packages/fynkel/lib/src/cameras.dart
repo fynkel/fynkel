@@ -147,6 +147,45 @@ sealed class _Rig extends Behaviour {
   }
 }
 
+/// A behaviour that changes where the camera rigs put its object, each
+/// frame after they have ([Follow] and [Orbit], then [LookAt]) and before
+/// the view's camera goes where a [VirtualCamera] on it is: Cinemachine's
+/// extensions. A game can't do this in [GameObject.onLateUpdate], which
+/// runs before the rigs. `CameraCollision` in fynkel_physics is one; a
+/// game makes its own by overriding [adjust]:
+///
+/// ```dart
+/// /// Keeps the camera above the water.
+/// class AboveWater extends CameraExtension {
+///   @override
+///   void adjust(double dt) {
+///     if (position.y < 0.2) position = Vec3(position.x, 0.2, position.z);
+///   }
+/// }
+/// ```
+///
+/// A rig starts again each frame from where it would be, so what [adjust]
+/// changes lasts the frame only. Several on the cameras run in the order
+/// they were enabled.
+abstract class CameraExtension extends Behaviour {
+  /// Changes where the rigs put this object this frame (its position and
+  /// rotation). [dt] is the frame's game time ([Time.deltaTime]), 0 while
+  /// paused.
+  void adjust(double dt);
+
+  @override
+  void onEnable() {
+    super.onEnable();
+    world.cameras._extensions.add(this);
+  }
+
+  @override
+  void onDisable() {
+    world.cameras._extensions.remove(this);
+    super.onDisable();
+  }
+}
+
 bool _present(GameObject o) => o._world != null && !o._gone;
 
 /// Throws for a shake that [Cameras.shake] or [GameObject.shake] can't
@@ -450,6 +489,7 @@ final class Cameras {
   final World _world;
   final _virtual = <VirtualCamera>[];
   final _rigs = <_Rig>[];
+  final _extensions = <CameraExtension>[];
   final _blends = <(VirtualCamera?, VirtualCamera?, Blend)>[];
 
   /// How the view goes from one virtual camera to another, unless
@@ -547,7 +587,14 @@ final class Cameras {
   void _run() {
     // Nothing to do, and nothing made: a frame without cameras allocates
     // nothing.
-    if (_rigs.isEmpty && _virtual.isEmpty && _live == null && _shakes.isEmpty && _shaken == null) return;
+    if (_rigs.isEmpty &&
+        _extensions.isEmpty &&
+        _virtual.isEmpty &&
+        _live == null &&
+        _shakes.isEmpty &&
+        _shaken == null) {
+      return;
+    }
     final time = _world.time;
     final dt = time._delta;
     final rigs = _rigs;
@@ -558,6 +605,15 @@ final class Cameras {
     for (var i = 0; i < rigs.length; i++) {
       final rig = rigs[i];
       if (rig._aims) _safely(rig, dt);
+    }
+    final extensions = _extensions;
+    for (var i = 0; i < extensions.length; i++) {
+      final extension = extensions[i];
+      try {
+        extension.adjust(dt);
+      } catch (error, stack) {
+        _world._report(extension._owner, error, stack);
+      }
     }
     if (_virtual.isEmpty && _live == null && _shakes.isEmpty && _shaken == null) return;
 

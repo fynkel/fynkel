@@ -154,18 +154,12 @@ the count.
 | Game 7b (the user's round) | A fast ball jumped mid-roll: Rapier kicks a ball up where it crosses from one collider to the next | A floor a ball rolls fast on is one `MeshCollider` whose pieces share whole edges; walls without friction (physics test; §16) |
 | Game 7b | Sharpness is resolution over distance; AO's radius for a small scene; outlines in metres and drawn twice; `Shader(source)`; `uvScale` and the texture slots; what a sphere cast's hit says; a phone's GPU ms can't compare two looks; the look scattered through §5 | §5, §5b (new: making it look good, with costs), §14, §16, §20 |
 | Game 7b | On the Note10+: 59.9 fps with the full look; GPU work ×3 over the plain look (clock 179 → 571 MHz), mostly its own shaders and garden; the user's round 2 (no screen effects) 5 % lighter | No finding |
+| Games 1 and 7 | An orbit or follow camera went through walls, and a game couldn't move it after the rig | `CameraCollision` in fynkel_physics (Cinemachine's Deoccluder), on a new `CameraExtension` that runs after the rigs (tests; §15) |
 
 ### Missing, until a second game asks
 
-- **Camera collision** (games 1 and 7): an orbit or follow camera goes through
-  walls, and a game can't fix it after the rig, which runs after every
-  `onLateUpdate`. Game 1 sphere-cast itself and set `orbit.distance`;
-  game 7 raised its own camera over a wall or windmill in the way.
-  *Recommendation:* the most likely to be asked for again; every
-  third-person game needs it. A rig option in fynkel_physics (the casts
-  live there), Cinemachine's Deoccluder as the model: cast from the
-  target to where the rig put the camera, and pull it in. Needs the rigs
-  to let a package adjust the place they computed. Medium.
+- ~~**Camera collision**~~ (games 1 and 7): built at the second ask,
+  above.
 - ~~**Model bounds**~~ (games 2 and 4): built at the second ask, above.
 - **`PhysicsMaterial.staticFriction`** (game 3): one friction serves both;
   a Unity user looks for two. §16 says there's one. *Recommendation:*

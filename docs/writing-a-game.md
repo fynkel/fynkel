@@ -3305,6 +3305,23 @@ class CameraRig extends GameObject {
   cameras, then drawing), so a camera with a rig is the rig's to place:
   move it in `onLateUpdate` and the rig puts it back. Change the rig's
   fields there instead; the rig reads them right after.
+- **A camera that doesn't go through walls**: add `CameraCollision()`
+  (fynkel_physics) beside the rig. Each frame, after the rig, it casts a
+  sphere from the point the camera looks at out to the camera, and
+  brings the camera in front of the first collider in the way, on the
+  same line, so it still looks at the target. It comes in at once and
+  goes back out over `damping` (0.3 s); it never stops at the target's
+  own colliders or at a trigger, and `layers:` leaves out more (glass, a
+  bush). `radius` (0.2 m) is the room it keeps; `minDistance` (0.3 m) the
+  nearest it comes; `isPulledIn` says whether something's in the way (to
+  fade the player, say). The point is the rig's: an `Orbit`'s target
+  plus its `offset`, a `LookAt`'s, or a `Follow`'s target, unless
+  `target:` and `offset:` are given. An `Orbit`'s `distance` stays what
+  the player zoomed to. There's an example after this list. It's a `CameraExtension`: a behaviour whose `adjust(dt)` runs after the
+  rigs and before the view goes where the virtual camera is. Make your
+  own for anything else a camera must keep to (above the water, inside
+  the level's bounds): change `position` and `rotation` there; the rig
+  starts again from its own place next frame.
 - `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
   told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
@@ -3325,6 +3342,32 @@ class CameraRig extends GameObject {
   and the camera moves smoothly, so the body seems to jitter. Give the
   body `interpolation: RigidbodyInterpolation.interpolate` (§16), as in
   Unity.
+
+A third-person camera that keeps out of walls, and a camera extension of
+the game's own:
+
+```dart
+// lib/follow_camera.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+GameObject followCamera(GameObject player) => GameObject(
+  components: [
+    Camera(),
+    Orbit(player, distance: 6, offset: Vec3(0, 1.5, 0)),
+    CameraCollision(layers: LayerMask.except([5])), // 5: the glass
+    AboveWater(),
+  ],
+);
+
+/// Keeps the camera above the water, at y 0.
+class AboveWater extends CameraExtension {
+  @override
+  void adjust(double dt) {
+    if (position.y < 0.2) position = Vec3(position.x, 0.2, position.z);
+  }
+}
+```
 
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
 camera's `cullingMask` leaves layers undrawn, `world.raycast(ray,
@@ -5216,6 +5259,7 @@ yet (§21).
 | `Input.GetKeyDown(KeyCode.Space)`, `Input.GetKey` | `input.wasPressed(KeyCode.space)`, `input.isPressed` |
 | `IPointerClickHandler` | `onClick` |
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
+| Cinemachine's Deoccluder (a camera kept out of walls), an extension | `CameraCollision` (fynkel_physics), `CameraExtension` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
 | `new Mesh()`, `SetVertices`, `SetTriangles`, `MarkDynamic` | `Mesh()`, `setPositions`, `setTriangles`, `markDynamic()` (§12b) |
 | ProBuilder's shapes with settings | `Mesh.box`, `grid`, `sphere`, `cylinder`, `cone`, `torus`, `disc`, `capsule` with sizes and segments |
