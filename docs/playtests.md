@@ -168,6 +168,11 @@ the count.
 | Game 10 | A pinch's fingers also drag; §20b's `frameTime` is `time` in `profile.systems` | §11, §20b |
 | Game 10 | No path finding (§21 says so); no recipe for drag-panning a camera over the ground; doc comments read in lib/src for `Pool`, `ObjectHandle`, inline `Shader`, `TextRenderer`, camera point methods | Asked once: path finding is stage 17's decision; the API reference on the website answers the rest |
 | Game 10 | 75 enemies, 48 towers, 141 damage numbers: 0.29 ms median frame on a Mac | No finding |
+| Game 9 | A spline's up leans a level road where it climbs as it bends, and round a closed loop (9.5° in its repro) | Not a bug: up is rotation-minimising, as §12b said. A world-up mode asked once; §12b warns and gives the roll fix |
+| Game 9 | No WheelCollider or vehicle advice | Asked once (an arcade kart on a sphere body worked) |
+| Game 9 | `Follow` with `targetYaw` on a body with locked rotation never turns; whether `cullingMask` hides shadows; `HeadlessView.camera`; an old `dart` on the PATH reports false errors | §15, §19, §1 |
+| Game 9 | A minimap view over two side-by-side views: right on macOS, phones unchecked | To check on a phone |
+| Game 9 | Spline track, drift, three AI karts, laps, split screen, minimap, sound, 13 tests: no engine bug | No finding |
 
 ### Missing, until a second game asks
 

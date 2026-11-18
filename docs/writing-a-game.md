@@ -49,7 +49,10 @@ dependencies:
 
 The engine is built into `target/` in the repository (about 750 MB after
 the first build), and every game made from that copy of it shares it.
-`CARGO_TARGET_DIR` doesn't move it.
+`CARGO_TARGET_DIR` doesn't move it. Run `flutter analyze` and `flutter
+test`, or Flutter's own `dart`: Fynkel needs Dart 3.13, and an older
+`dart` found first on the PATH (a Homebrew one) reports Fynkel's named
+parameters as errors that aren't there.
 
 Some Flutter versions' `--empty` leaves out Material's icons, so every
 `Icon` shows as a box. If the game's Flutter side uses them, check that
@@ -1921,7 +1924,12 @@ final road = Mesh.sweep(river, Shape2D.rect(4, 0.3), segmentsPerMetre: 2);
   round.
 - **Up** turns as little as it can along the curve (a rotation-minimising
   frame), so a tube doesn't twist where it bends; it starts as +Y, and a
-  knot's `roll` turns it, clockwise seen going along: a banked turn.
+  knot's `roll` turns it, clockwise seen going along: a banked turn. It
+  keeps no world up, as Unity's knots do: where the curve climbs as it
+  bends, and round a closed loop, up comes out rolled a few degrees, so a
+  road swept along it leans. For a level road, measure each knot's lean
+  (the angle between `upAt` and world up, both square to `directionAt`)
+  and set the knots again with `roll:` minus it.
 - **Changing it**: `spline[i] = Knot(...)`, `add`, `insert`, `removeAt`,
   or `setPositions(floats)` for every knot at once; `version` goes up
   each time. `mesh.setSweep(spline, shape)` sweeps again into the same
@@ -3315,7 +3323,9 @@ class CameraRig extends GameObject {
   the world unless `space:` says otherwise, as Cinemachine's binding
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
-  target turns left and right.
+  target turns left and right. They follow the target's own rotation: a
+  car whose body has its rotation locked, turning only its model, is
+  followed by the model.
 - **`Orbit`'s place is three fields**, for code to set too (a reset
   button, a turntable: `orbit.yaw += 0.5 * time.delta`): `distance` in
   metres (8); `yaw` in radians, 0 on the target's +Z side and growing to
@@ -3400,7 +3410,8 @@ class AboveWater extends CameraExtension {
 ```
 
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
-camera's `cullingMask` leaves layers undrawn, `world.raycast(ray,
+camera's `cullingMask` leaves layers undrawn, their shadows too in that
+camera's picture, `world.raycast(ray,
 layers:)` goes through some, and `input.layers` makes taps go through
 some (sparks and other effects):
 
@@ -4797,7 +4808,8 @@ the world as it is now and gives it as a PNG, and
 `File('shot.png').writeAsBytesSync(view.png())` saves it to look at, which
 finds an unlit side or a camera too far fast. To check pixels in a test,
 `view.read(view.frame()).rgba` draws a frame and gives its pixels: RGBA,
-a byte each, rows from the top. Dispose of the view when done
+a byte each, rows from the top. It draws from the world's main camera
+unless `view.camera` names another (each half of a split screen). Dispose of the view when done
 (`addTearDown(view.dispose)`):
 
 ```dart
