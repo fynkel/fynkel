@@ -140,6 +140,12 @@ jobs:
           flutter analyze --fatal-infos
           flutter test
           flutter build macos --debug
+          cd ../roll
+          flutter pub get
+          dart format -l 120 --output=none --set-exit-if-changed lib test
+          flutter analyze --fatal-infos
+          flutter test
+          flutter build macos --debug
           cd ../garden
           flutter pub get
           dart format -l 120 --output=none --set-exit-if-changed lib test tool

@@ -53,6 +53,7 @@ class Cube extends GameObject {
   | --- | --- |
   | [pocket_hole](examples/pocket_hole) | A portrait block-collecting game with touch controls, progression and mobile projects |
   | [hello](examples/hello) | One turning cube: the code above |
+  | [roll](examples/roll) | Roll a ball, take the gems: physics, a camera kept out of walls and a HUD (the website's first tutorial) |
   | [garden](examples/garden) | A character in a garden, loaded from models; an orbit camera |
   | [coins](examples/coins) | Walk about picking up coins, level after level; triggers and a Flutter HUD |
   | [arena](examples/arena) | A small top-down game: waves, health, signals, tweens, pause |
