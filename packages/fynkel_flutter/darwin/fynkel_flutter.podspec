@@ -5,7 +5,7 @@ Pod::Spec.new do |s|
   s.version          = '0.1.0'
   s.summary          = 'Shows Fynkel frames in Flutter on macOS and iOS.'
   s.homepage         = 'https://github.com/mooumari/fynkel'
-  s.license          = { :type => 'Proprietary', :text => 'See the repository root.' }
+  s.license          = { :type => 'MIT', :file => '../LICENSE' }
   s.author           = { 'Fynkel' => 'noreply@fynkel.dev' }
   s.source           = { :path => '.' }
   s.source_files     = 'fynkel_flutter/Sources/fynkel_flutter/**/*.swift'
