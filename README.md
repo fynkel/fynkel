@@ -46,7 +46,7 @@ class Cube extends GameObject {
 ## Start here
 
 - **[Writing a game](docs/writing-a-game.md)**, the guide: from a new app
-  to physics, Flutter menus and tests, with a page for Unity users (§21).
+  to physics, Flutter menus and tests, with a page for Unity users (§22).
 - **The examples**, in [`examples/`](examples), simplest first:
 
   | Example | What it is |
@@ -84,9 +84,10 @@ repository, with `path:` dependencies (guide §1).
 
 | Package | What it is |
 | --- | --- |
-| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. Plain Dart, with no window: a game runs frame by frame in `flutter test` (guide §18) |
+| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. Plain Dart, with no window: a game runs frame by frame in `flutter test` (guide §19) |
 | [`fynkel_flutter`](packages/fynkel_flutter) | `FynkelApp`, `FynkelGame` and `FynkelView`: the game in a Flutter app |
 | [`fynkel_physics`](packages/fynkel_physics) | Physics (Rapier), as Unity's: rigidbodies, colliders, triggers, joints, a character controller. Optional |
+| [`fynkel_audio`](packages/fynkel_audio) | Sound, as Unity's: clips, sources, the listener, music and groups. Optional |
 | [`fynkel_measure`](packages/fynkel_measure) | The tool that measures frame rate and memory on devices |
 
 ## For people working on Fynkel
@@ -95,3 +96,9 @@ repository, with `path:` dependencies (guide §1).
 stage (`stage-*.md`) and the decisions (`docs/decisions`). Fynkel 1, with
 the editor and the asset pipeline, is archived as tag `fynkel-1-final` and
 branch `fynkel-1`.
+
+## Licence
+
+Fynkel is under the [MIT licence](LICENSE). The art and sounds in the
+examples and tests are other people's, each under the licence in the
+`CREDITS.md` beside it (CC0, CC BY 4.0 or Apache-2.0).

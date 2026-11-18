@@ -56,6 +56,9 @@ Future<void> buildRustCrate(
     workingDirectory: workspace.toFilePath(),
     environment: {
       'PATH': '${Platform.environment['PATH'] ?? ''}:${File(cargo).parent.path}',
+      // Where the library is copied from, below; a CARGO_TARGET_DIR of the
+      // user's (which the hook runner doesn't pass on now) would move it.
+      'CARGO_TARGET_DIR': workspace.resolve('target').toFilePath(),
       ...deploymentTarget(os, _appleVersion(code)),
       if (os == OS.android)
         'CARGO_TARGET_${triple.toUpperCase().replaceAll('-', '_')}_LINKER': androidLinker(

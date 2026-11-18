@@ -64,6 +64,9 @@ can be wrong.
 | 6 | Idle game left running | Memory over an hour, background and back |
 | 7 | Mini-golf made for phones, played on one | Touch, turning the phone, safe areas, background mid-roll, 15 minutes on the Note10+ |
 | 7b | Game 7 again, to look its best on a phone | Light, sky, shadows, materials, shaders, outlines, what each costs on the Note10+; then the user's own round on the iPhone |
+| 8 | Third-person adventure in three places (Hollow), from a fresh clone and the README alone | Setup as a stranger meets it, loading between places, camera collision in a cave, saving, hot reload |
+| 9 | Kart racer (Kart), from a fresh clone | A track swept along a spline, arcade handling with drift, AI karts, laps, two-player split screen, a minimap, sound |
+| 10 | Portrait tower defence (Towers), from a fresh clone | Many enemies, path finding round towers, pooled effects, touch pan and pinch, saving |
 
 1 and 2 first, to see how useful the logs are, then the rest.
 
@@ -154,18 +157,27 @@ the count.
 | Game 7b (the user's round) | A fast ball jumped mid-roll: Rapier kicks a ball up where it crosses from one collider to the next | A floor a ball rolls fast on is one `MeshCollider` whose pieces share whole edges; walls without friction (physics test; §16) |
 | Game 7b | Sharpness is resolution over distance; AO's radius for a small scene; outlines in metres and drawn twice; `Shader(source)`; `uvScale` and the texture slots; what a sphere cast's hit says; a phone's GPU ms can't compare two looks; the look scattered through §5 | §5, §5b (new: making it look good, with costs), §14, §16, §20 |
 | Game 7b | On the Note10+: 59.9 fps with the full look; GPU work ×3 over the plain look (clock 179 → 571 MHz), mostly its own shaders and garden; the user's round 2 (no screen effects) 5 % lighter | No finding |
+| Games 1 and 7 | An orbit or follow camera went through walls, and a game couldn't move it after the rig | `CameraCollision` in fynkel_physics (Cinemachine's Deoccluder), on a new `CameraExtension` that runs after the rigs (tests; §15) |
+| Game 8 | An `onLoad` that awaited a routine (a fade) never finished in a test with `await game.loaded`, as §19 promised: a routine goes on only in a frame, and none ran | Not the engine's (routines wait for frames by design); §19 was wrong. `world.untilLoaded(game)` in package:fynkel/testing.dart runs frames until it's loaded (test; §18 fade example, §19) |
+| Game 8 | `CameraCollision` jumped metres in a frame as a pillar passed; side-on in a 2 m corridor the player filled the view | `dampingIn` and `distance` (test; §15 says to hide the model when near) |
+| Game 8 | `CARGO_TARGET_DIR` ignored: 750 MB built into the clone, unsaid | The hook runner passes it on to no one; the hook now sets it itself, and §1 says where the build goes |
+| Game 8 | README's section numbers one off; §1 without the physics and audio packages; saving with no `main`; the controller's default capsule; the toy character 2.7 m tall; the sky lights a cave; a covered Mac window gets no frames; children load alongside their parent | README, §1, §3/§6, §5, §13, §16, §18 |
+| Game 8 | From a fresh clone: first build 1 min 46 s on an Apple-silicon Mac, a 3-place game with HUD, saves, 14 tests in one sitting; camera never in a wall in 160 placements | No finding |
+| Game 10 | `emit(n)` right after moving a world-space emitter made the particles where it had been | The move hadn't reached the engine: `emit`, `play` and `simulate` send the moved transforms first (test; §13c) |
+| Game 10 | A pooled burst with `StopAction.disable` turned off but stayed "out" of its pool, so each `get` made a new one, for ever | `disable` on a pooled object releases it to its pool (test; §13c) |
+| Game 10 | A pinch's fingers also drag; §20b's `frameTime` is `time` in `profile.systems` | §11, §20b |
+| Game 10 | No path finding (§21 says so); no recipe for drag-panning a camera over the ground; doc comments read in lib/src for `Pool`, `ObjectHandle`, inline `Shader`, `TextRenderer`, camera point methods | Asked once: path finding is stage 17's decision; the API reference on the website answers the rest |
+| Game 10 | 75 enemies, 48 towers, 141 damage numbers: 0.29 ms median frame on a Mac | No finding |
+| Game 9 | A spline's up leans a level road where it climbs as it bends, and round a closed loop (9.5° in its repro) | Not a bug: up is rotation-minimising, as §12b said. A world-up mode asked once; §12b warns and gives the roll fix |
+| Game 9 | No WheelCollider or vehicle advice | Asked once (an arcade kart on a sphere body worked) |
+| Game 9 | `Follow` with `targetYaw` on a body with locked rotation never turns; whether `cullingMask` hides shadows; `HeadlessView.camera`; an old `dart` on the PATH reports false errors | §15, §19, §1 |
+| Game 9 | A minimap view over two side-by-side views: right on macOS, phones unchecked | To check on a phone |
+| Game 9 | Spline track, drift, three AI karts, laps, split screen, minimap, sound, 13 tests: no engine bug | No finding |
 
 ### Missing, until a second game asks
 
-- **Camera collision** (games 1 and 7): an orbit or follow camera goes through
-  walls, and a game can't fix it after the rig, which runs after every
-  `onLateUpdate`. Game 1 sphere-cast itself and set `orbit.distance`;
-  game 7 raised its own camera over a wall or windmill in the way.
-  *Recommendation:* the most likely to be asked for again; every
-  third-person game needs it. A rig option in fynkel_physics (the casts
-  live there), Cinemachine's Deoccluder as the model: cast from the
-  target to where the rig put the camera, and pull it in. Needs the rigs
-  to let a package adjust the place they computed. Medium.
+- ~~**Camera collision**~~ (games 1 and 7): built at the second ask,
+  above.
 - ~~**Model bounds**~~ (games 2 and 4): built at the second ask, above.
 - **`PhysicsMaterial.staticFriction`** (game 3): one friction serves both;
   a Unity user looks for two. §16 says there's one. *Recommendation:*

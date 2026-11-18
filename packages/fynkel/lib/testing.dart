@@ -12,13 +12,14 @@
 /// ```
 library;
 
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'fynkel.dart';
 import 'src/png.dart';
 
-/// [run], [tap] and [viewPoint] on a [World], for tests.
+/// [run], [untilLoaded], [tap] and [viewPoint] on a [World], for tests.
 extension WorldTesting on World {
   /// Runs [seconds] of frames, [fps] a second: `world.update(1 / fps)`
   /// that many times.
@@ -46,6 +47,41 @@ extension WorldTesting on World {
   ViewPoint viewPoint(double x, double y) {
     _sized('viewPoint');
     return ViewPoint(x, y, width: input.width, height: input.height);
+  }
+
+  /// Waits for [object] to load ([GameObject.loaded]), running a frame
+  /// each 5 ms of real time meanwhile, as the app would: for a game whose
+  /// `onLoad` awaits a routine (a fade, `wait`, a tween), which goes on
+  /// only in a frame, so a bare `await game.loaded` with no frames run
+  /// would wait for ever. Throws what the load threw, or a
+  /// [TimeoutException] after [timeout] of real time.
+  ///
+  /// ```dart
+  /// final game = world.add(MyGame());
+  /// await world.untilLoaded(game);
+  /// ```
+  Future<void> untilLoaded(GameObject object, {Duration timeout = const Duration(seconds: 30), int fps = 60}) async {
+    (Object, StackTrace)? failed;
+    var done = false;
+    unawaited(
+      object.loaded.then(
+        (_) => done = true,
+        onError: (Object error, StackTrace stack) {
+          failed = (error, stack);
+          done = true;
+        },
+      ),
+    );
+    final waited = Stopwatch()..start();
+    while (true) {
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+      if (done) break;
+      if (waited.elapsed > timeout) {
+        throw TimeoutException('$object had not loaded after ${timeout.inMilliseconds} ms', timeout);
+      }
+      update(1 / fps);
+    }
+    if (failed case (final error, final stack)) Error.throwWithStackTrace(error, stack);
   }
 
   void _sized(String what) {

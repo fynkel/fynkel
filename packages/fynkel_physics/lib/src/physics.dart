@@ -22,6 +22,7 @@ import 'bindings.g.dart';
 import 'owned_memory.dart';
 import 'raw.dart';
 
+part 'camera_collision.dart';
 part 'characters.dart';
 part 'colliders.dart';
 part 'contacts.dart';

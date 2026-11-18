@@ -548,6 +548,27 @@ void main() {
       expect(errors, isEmpty);
     });
 
+    test('a CameraExtension moves the object after its rigs, before the view goes where it is', () {
+      final view = camera();
+      final pull = _Pull();
+      final rig = world.add(
+        GameObject(components: [VirtualCamera(), pull, Orbit(target, distance: 4, yaw: 0, pitch: 0, controls: false)]),
+      );
+      frames(1);
+      // It saw where the orbit put it, and turned it as the orbit had.
+      expectVec(pull.saw!, const Vec3(1, 0, 4));
+      expect(pull.dt, 0.25);
+      expectVec(rig.position, const Vec3(1, 0, 2));
+      expectVec(view.position, const Vec3(1, 0, 2));
+      expectVec(view.forward, Vec3.forward);
+      // Each frame the orbit starts again from its own distance.
+      frames(1);
+      expectVec(pull.saw!, const Vec3(1, 0, 4));
+      pull.enabled = false;
+      frames(1);
+      expectVec(view.position, const Vec3(1, 0, 4));
+    });
+
     group('Orbit', () {
       test('circles the target at its yaw, pitch and distance, looking at it, within its limits', () {
         final orbit = Orbit(target, distance: 4, yaw: math.pi / 2, pitch: 0, controls: false);
@@ -752,4 +773,18 @@ void main() {
     camera.pixels = null;
     expect(blocky(4), isFalse);
   });
+}
+
+/// Halves how far its object is from the point (1, 0, 0), after the rigs.
+class _Pull extends CameraExtension {
+  Vec3? saw;
+  double? dt;
+
+  @override
+  void adjust(double dt) {
+    this.dt = dt;
+    saw = position;
+    const centre = Vec3(1, 0, 0);
+    position = centre + (position - centre) * 0.5;
+  }
 }

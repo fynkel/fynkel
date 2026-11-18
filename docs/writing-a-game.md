@@ -39,7 +39,20 @@ dependencies:
     path: <the repository>/packages/fynkel
   fynkel_flutter:
     path: <the repository>/packages/fynkel_flutter
+  # Add those your game uses: physics (colliders, a character controller,
+  # a camera kept out of walls) and sound are packages of their own.
+  fynkel_physics:
+    path: <the repository>/packages/fynkel_physics
+  fynkel_audio:
+    path: <the repository>/packages/fynkel_audio
 ```
+
+The engine is built into `target/` in the repository (about 750 MB after
+the first build), and every game made from that copy of it shares it.
+`CARGO_TARGET_DIR` doesn't move it. Run `flutter analyze` and `flutter
+test`, or Flutter's own `dart`: Fynkel needs Dart 3.13, and an older
+`dart` found first on the PATH (a Homebrew one) reports Fynkel's named
+parameters as errors that aren't there.
 
 Some Flutter versions' `--empty` leaves out Material's icons, so every
 `Icon` shows as a box. If the game's Flutter side uses them, check that
@@ -52,7 +65,9 @@ flutter:
 ```
 
 Then run it as any Flutter app: `flutter run -d macos`, or on a phone
-(`flutter devices` lists them). `flutter build apk`, `ipa` and `macos`
+(`flutter devices` lists them). On a Mac, a game whose window is behind
+others gets no frames while it's covered (macOS stops drawing it), so
+it stands still until you bring it to the front: it hasn't hung. `flutter build apk`, `ipa` and `macos`
 make the app to ship. On Android, Fynkel runs on 64-bit devices, which is
 nearly all since Android 11; a 32-bit one gets an error saying so.
 
@@ -797,6 +812,12 @@ Future<void> photographedSky(World world) async {
 - **What's mirrored is the sky alone**: the ground and other objects
   aren't seen in a shiny surface, nor do they hide the sky from it. A
   ball in a room still mirrors the sky outside.
+- **Nothing hides the sky's light either**: a roof or a cave's rock
+  doesn't keep it out, so under one the sky lights as it would outside.
+  For a cave or a room lit by its lamps, give it a dark sky
+  (`Sky.color(...)`) or none. `world.sky` and `world.fog` belong to the
+  world, not to a level: a game of several places sets them in each
+  place's `onLoad`.
 - **`camera.showSky = false`** keeps a camera's `clearColor` behind
   everything (a minimap looking down on the field), while the sky still
   lights what it shows. For a background of one colour with no sky light
@@ -992,7 +1013,7 @@ Each object and behaviour gets these calls, in the order they were added:
 
 | Call | When |
 |---|---|
-| `onLoad` | Once, before it appears. It may be `async` (to load assets, §12); the object appears when everything in it has loaded. |
+| `onLoad` | Once, before it appears. It may be `async` (to load assets, §12); the object appears when everything in it has loaded. Children added in it load alongside it, not before the rest of it: `await child.loaded` before reading what the child's `onLoad` sets (`await (a.loaded, b.loaded).wait` for two). |
 | `onEnable` | Each time it starts being shown: when it appears, and when it or a parent is turned back on. |
 | `onStart` | Once, at the start of its first frame. |
 | `onFixedUpdate` | Every fixed step: 50 times a second, whatever the frame rate. For forces and what physics needs. |
@@ -1391,7 +1412,10 @@ class Button3D extends GameObject {
 - **Events**: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`,
   `onTap` (a double tap is two, the second with `tapCount` 2),
   `onLongPress`, `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`,
-  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`.
+  `onPinch`, `onTwist`, `onScroll`, `onKeyDown`, `onKeyUp`. A pinch's
+  fingers drag too: `onDrag` comes for each of them, so a
+  camera that pans on a drag and zooms on a pinch skips the drags while
+  `input.fingers.length > 1`.
 - **On objects**: `onPointerDown`, `onPointerUp`, `onPointerEnter`,
   `onPointerExit`, `onClick`, `onLongPress`, `onDragStart`, `onDrag`,
   `onDragEnd`, on behaviours too. They go to the object under the finger,
@@ -1900,7 +1924,12 @@ final road = Mesh.sweep(river, Shape2D.rect(4, 0.3), segmentsPerMetre: 2);
   round.
 - **Up** turns as little as it can along the curve (a rotation-minimising
   frame), so a tube doesn't twist where it bends; it starts as +Y, and a
-  knot's `roll` turns it, clockwise seen going along: a banked turn.
+  knot's `roll` turns it, clockwise seen going along: a banked turn. It
+  keeps no world up, as Unity's knots do: where the curve climbs as it
+  bends, and round a closed loop, up comes out rolled a few degrees, so a
+  road swept along it leans. For a level road, measure each knot's lean
+  (the angle between `upAt` and world up, both square to `directionAt`)
+  and set the knots again with `roll:` minus it.
 - **Changing it**: `spline[i] = Knot(...)`, `add`, `insert`, `removeAt`,
   or `setPositions(floats)` for every knot at once; `version` goes up
   each time. `mesh.setSweep(spline, shape)` sweeps again into the same
@@ -2174,7 +2203,10 @@ as Unity gives a model its Animator, and `animator.clipNames` lists
 them (a name it hasn't got throws, listing them too). Which clip plays
 when is the game's code, not a state-machine file. The examples here
 use examples/garden's `character.glb`, whose clips are `idle`, `walk`,
-`sprint`, `pick-up`, `emote-yes` and more.
+`sprint`, `pick-up`, `emote-yes` and more. It's a blocky toy about 2.7 m
+tall, its origin at its feet: for a person-sized player in a
+`CharacterController` (§16), scale it (`localScale = Vec3.all(0.6)`) and
+its walking pace with it. `model.bounds` (§12) says how big a model is.
 
 ### Playing clips
 
@@ -2748,8 +2780,10 @@ class Fountain extends GameObject {
   clears; on again, it plays from the start.
 - **When it's done**, its last particle gone and not looping,
   `stopAction` does what Unity's does: `destroy` destroys its object (a
-  one-off explosion), `disable` turns it off (one from a pool, §7, which
-  plays again when it's turned on), `callback` calls `onStopped`.
+  one-off explosion), `disable` turns it off (and one from a pool, §7,
+  goes back to it, to play again from the start when `get` hands it
+  out), `callback` calls `onStopped`. `emit` and `play` right after a
+  move make the particles at the new place.
 - **Time.** It goes with the game's time: it holds while the game is
   paused and follows `time.scale`; one with `useUnscaledTime` goes on,
   for a pause menu's.
@@ -3289,7 +3323,9 @@ class CameraRig extends GameObject {
   the world unless `space:` says otherwise, as Cinemachine's binding
   modes: `FollowSpace.target` turns it with the target, so the camera
   stays behind a car, and `FollowSpace.targetYaw` turns it only as the
-  target turns left and right.
+  target turns left and right. They follow the target's own rotation: a
+  car whose body has its rotation locked, turning only its model, is
+  followed by the model.
 - **`Orbit`'s place is three fields**, for code to set too (a reset
   button, a turntable: `orbit.yaw += 0.5 * time.delta`): `distance` in
   metres (8); `yaw` in radians, 0 on the target's +Z side and growing to
@@ -3305,6 +3341,27 @@ class CameraRig extends GameObject {
   cameras, then drawing), so a camera with a rig is the rig's to place:
   move it in `onLateUpdate` and the rig puts it back. Change the rig's
   fields there instead; the rig reads them right after.
+- **A camera that doesn't go through walls**: add `CameraCollision()`
+  (fynkel_physics) beside the rig. Each frame, after the rig, it casts a
+  sphere from the point the camera looks at out to the camera, and
+  brings the camera in front of the first collider in the way, on the
+  same line, so it still looks at the target. It comes in at once and
+  goes back out over `damping` (0.3 s); it never stops at the target's
+  own colliders or at a trigger, and `layers:` leaves out more (glass, a
+  bush). `radius` (0.2 m) is the room it keeps; `minDistance` (0.3 m) the
+  nearest it comes; `dampingIn` (0) eases it in over seconds instead of
+  at once, smoother past a post but letting the post hide the player for
+  that moment. `isPulledIn` says whether something's in the way, and
+  `distance` how near the camera is: in a narrow passage, side-on, it
+  comes right up to the player, who then fills the view, so hide the
+  model below a metre or so. The point is the rig's: an `Orbit`'s target
+  plus its `offset`, a `LookAt`'s, or a `Follow`'s target, unless
+  `target:` and `offset:` are given. An `Orbit`'s `distance` stays what
+  the player zoomed to. There's an example after this list. It's a `CameraExtension`: a behaviour whose `adjust(dt)` runs after the
+  rigs and before the view goes where the virtual camera is. Make your
+  own for anything else a camera must keep to (above the water, inside
+  the level's bounds): change `position` and `rotation` there; the rig
+  starts again from its own place next frame.
 - `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless
   told, as an object's own `shake`), `setBlend(blend, from:, to:)`, `live`.
   A shake moves the picture, not the camera: its transform stays where
@@ -3326,8 +3383,35 @@ class CameraRig extends GameObject {
   body `interpolation: RigidbodyInterpolation.interpolate` (§16), as in
   Unity.
 
+A third-person camera that keeps out of walls, and a camera extension of
+the game's own:
+
+```dart
+// lib/follow_camera.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+GameObject followCamera(GameObject player) => GameObject(
+  components: [
+    Camera(),
+    Orbit(player, distance: 6, offset: Vec3(0, 1.5, 0)),
+    CameraCollision(layers: LayerMask.except([5])), // 5: the glass
+    AboveWater(),
+  ],
+);
+
+/// Keeps the camera above the water, at y 0.
+class AboveWater extends CameraExtension {
+  @override
+  void adjust(double dt) {
+    if (position.y < 0.2) position = Vec3(position.x, 0.2, position.z);
+  }
+}
+```
+
 **Layers** keep things apart. Each object has a `layer`, 0 to 31; a
-camera's `cullingMask` leaves layers undrawn, `world.raycast(ray,
+camera's `cullingMask` leaves layers undrawn, their shadows too in that
+camera's picture, `world.raycast(ray,
 layers:)` goes through some, and `input.layers` makes taps go through
 some (sparks and other effects):
 
@@ -3669,8 +3753,11 @@ leaves the world. Queries don't read the matrix; their `layers:` say what
 they hit.
 
 **A `CharacterController`** walks a player as Unity's does: a capsule
-(`height:`, `radius:`, `center:`) that the game moves with
-`move(motion)`, and that goes as far as the world lets it. It slides
+(`height:` 2 m, `radius:` 0.5 m, `center:` zero unless given) that the
+game moves with `move(motion)`, and that goes as far as the world lets
+it. With `center` zero the object's position is the capsule's middle,
+so the example below stands the object at 1.1 m; for a model whose
+origin is at its feet, give `center: Vec3(0, height / 2, 0)`. It slides
 along walls, walks up steps up to `stepOffset` (0.3 m) and slopes up to
 `slopeLimit` (`45.deg`), and stops at anything higher or steeper. It
 keeps `skinWidth` (8 cm, as Unity's) between itself and what it meets,
@@ -4554,6 +4641,48 @@ class Levels extends GameObject {
 }
 ```
 
+**A fade between levels** waits, and `wait` works only in a routine
+(§9): a plain `async` method that calls it throws "wait(...) works only
+inside a routine". Make `go` start one, and let the game's Flutter side
+show `fading` as a black panel over the view (§17):
+
+```dart
+// lib/fading_levels.dart
+import 'package:flutter/foundation.dart' show ValueNotifier;
+import 'package:fynkel/fynkel.dart';
+
+import 'levels.dart' show Level;
+
+/// [Levels] with a fade: dark, swap, light again.
+class FadingLevels extends GameObject {
+  final fading = ValueNotifier(false);
+  Level? _current;
+
+  @override
+  Future<void> onLoad() async {
+    await super.onLoad();
+    await go(1);
+  }
+
+  Future<void> go(int number) => startRoutine(() async {
+    if (_current != null) {
+      fading.value = true;
+      await wait(0.4); // the panel fades in meanwhile
+    }
+    final old = _current;
+    final next = _current = add(Level(number));
+    await next.loaded;
+    old?.destroy();
+    fading.value = false;
+  });
+}
+```
+
+A routine goes on only in a frame, so an `onLoad` that awaits one is
+ready only after frames have run. The app runs them; a test with a bare
+`await game.loaded` runs none and waits for ever. In a test, `await
+world.untilLoaded(game)` (§19) runs frames until it's loaded.
+
 **Saving.** What's kept between runs is plain data, never objects: the
 level reached, the best score, the settings (`Controls` has `toJson` and
 `Controls.fromJson`, §17). Write it as JSON to a file in the app's own
@@ -4599,6 +4728,31 @@ class Save {
       ..writeAsStringSync(jsonEncode(toJson()), flush: true)
       ..renameSync(file.path);
   }
+}
+```
+
+The app finds the folder before the game starts, so `main` is `async`,
+and Flutter must be ready before `path_provider` is asked
+(`WidgetsFlutterBinding.ensureInitialized()`). Add `path_provider` to
+the app's dependencies (`flutter pub add path_provider`):
+
+```dart
+// lib/main_with_save.dart
+import 'dart:io';
+
+import 'package:flutter/widgets.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+import 'package:path_provider/path_provider.dart';
+
+import 'levels.dart' show Levels;
+import 'save.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  final folder = await getApplicationSupportDirectory();
+  final file = File('${folder.path}/save.json');
+  final save = Save.read(file);
+  runApp(FynkelApp(() => Levels(first: save.level)));
 }
 ```
 
@@ -4654,7 +4808,8 @@ the world as it is now and gives it as a PNG, and
 `File('shot.png').writeAsBytesSync(view.png())` saves it to look at, which
 finds an unlit side or a camera too far fast. To check pixels in a test,
 `view.read(view.frame()).rgba` draws a frame and gives its pixels: RGBA,
-a byte each, rows from the top. Dispose of the view when done
+a byte each, rows from the top. It draws from the world's main camera
+unless `view.camera` names another (each half of a split screen). Dispose of the view when done
 (`addTearDown(view.dispose)`):
 
 ```dart
@@ -4679,7 +4834,11 @@ and the difference in `build/fynkel_failures/`.
 no app bundle. `World(source: ...)` takes a function from an asset's name
 to its bytes, the files in the game's `assets/` folder here, and a game
 whose `onLoad` is `async` is ready after `await world.add(game).loaded`,
-with no frames run:
+with no frames run. One whose `onLoad` awaits a routine (a fade, a
+`wait`, a tween) goes on only in a frame, so there that would wait for
+ever: `await world.untilLoaded(game)` (package:fynkel/testing.dart) runs
+a frame each 5 ms until it's loaded, as the app would, and throws what
+the load threw:
 
 ```dart
 // test/level_test.dart
@@ -5101,7 +5260,8 @@ void main() {
 
   Override the ones you need, and call `super`. `order` puts it before
   (lower) or after (higher) other systems. `name` is what `world.profile`
-  shows, with the time its hooks took (`frameTime`).
+  shows, with the time its hooks took: `system.frameTime` on the system,
+  and `time` in each of `world.profile.systems`' `(name:, time:)`.
 - **Its components are behaviours.** One joins its system in `onEnable`
   and leaves in `onDisable`, as a collider does. So one that's off, or
   on an object that's off, costs the system nothing. To watch components
@@ -5216,6 +5376,7 @@ yet (§21).
 | `Input.GetKeyDown(KeyCode.Space)`, `Input.GetKey` | `input.wasPressed(KeyCode.space)`, `input.isPressed` |
 | `IPointerClickHandler` | `onClick` |
 | Cinemachine | `VirtualCamera`, `Follow`, `LookAt`, `Orbit`, `world.cameras` |
+| Cinemachine's Deoccluder (a camera kept out of walls), an extension | `CameraCollision` (fynkel_physics), `CameraExtension` |
 | DOTween | `moveTo`, `tween`, `sequence`, `Ease` |
 | `new Mesh()`, `SetVertices`, `SetTriangles`, `MarkDynamic` | `Mesh()`, `setPositions`, `setTriangles`, `markDynamic()` (§12b) |
 | ProBuilder's shapes with settings | `Mesh.box`, `grid`, `sphere`, `cylinder`, `cone`, `torus`, `disc`, `capsule` with sizes and segments |
