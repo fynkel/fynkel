@@ -70,6 +70,11 @@ const LEAN: f32 = 0.05;
 
 // How far past its skin a character is lifted before it moves along.
 const SKIN_CLEARANCE: f32 = 1.0e-3;
+
+// How far a move along must rise to count as going up a slope or step:
+// more than float noise.
+const CLIMBED: f32 = 1.0e-5;
+
 // How far into its skin it may be left.
 const SKIN_SLACK: f32 = 1.0e-5;
 
@@ -181,9 +186,12 @@ impl Physics {
         at.translation += along.translation;
         at.translation.y += raise(&at, clear);
         // Not down a slope or step it has just gone up, as Rapier's own
-        // move wouldn't: it would slide back off.
+        // move wouldn't: it would slide back off. Gone up by more than a
+        // rounding's worth: pushed into a wall, the move along rises by
+        // 1e-10 m, and read as a climb that held it on the wall's face
+        // for as long as the push went on (playtest game 11).
         let fall = pose.translation.y + motion.y - at.translation.y;
-        let down = Vector::Y * if along.translation.y > 0.0 { fall.max(0.0) } else { fall };
+        let down = Vector::Y * if along.translation.y > CLIMBED { fall.max(0.0) } else { fall };
         let mut moved = controller.move_shape(dt, &queries, &*shape, &at, down, |c| collisions.push(c));
         at.translation += moved.translation;
         let sunk = raise(&at, skin - SKIN_SLACK);
