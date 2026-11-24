@@ -404,3 +404,34 @@ fn bench_moving_characters() {
         }
     });
 }
+
+/// Playtest game 11: pushed into a wall while it falls slowly (the top of
+/// a jump at a ledge too high), it hung on the wall's face for as long as
+/// the push went on. Unity's slides down.
+#[test]
+fn it_slides_down_a_wall_it_is_pushed_into_while_it_falls_slowly() {
+    for down in [0.005_f32, 0.02, 0.1] {
+        let mut physics = floor();
+        // A wall 2 m high standing on the floor, its face at z = -4.
+        block(&mut physics, 2, Vector::new(6.0, 2.0, 4.0), Vector::new(0.0, 1.0, -6.0), 0.0);
+        // The game's capsule, 1.7 m tall and 0.35 m round, its middle
+        // 0.85 m above its feet, its feet 0.75 m up, against the wall.
+        let shape = ColliderShape::Capsule { radius: 0.35, height: 1.7, direction: Axis::Y };
+        let mut object = at(0.0, 0.75 + 0.85, -3.57);
+        let id = physics.add_static_collider(1, spec(shape), object).unwrap();
+        let settings = CharacterSettings::default();
+        let mut hits = Vec::new();
+        let mut heights = Vec::new();
+        for i in 0..300 {
+            let moved = physics.move_character(id, Vector::new(0.0, -down, -0.1), DT, settings, &mut hits).unwrap();
+            object.position += moved.translation;
+            physics.follow(&[id], &[object]).unwrap();
+            physics.step(DT).unwrap();
+            if i % 30 == 0 {
+                heights.push(object.position.y - 0.85);
+            }
+        }
+        let feet = object.position.y - 0.85;
+        assert!(feet < 0.15, "{down} m down a frame: its feet stayed at {feet} ({heights:?})");
+    }
+}

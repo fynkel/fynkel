@@ -136,6 +136,12 @@ impl Physics {
         let mut world = PhysicsWorld::new();
         let settings = Settings::default();
         world.integration_parameters.num_solver_iterations = settings.solver_iterations as usize;
+        // Rapier pushes bodies apart at up to 3 m/s, then takes that push out
+        // of their speed again, in one pass by default. A heavy box dropped on
+        // a stack kept the rest and sprang 0.46 m back up (playtest game 12);
+        // three keep it on (under 3 cm), for 40 % more time a step than one
+        // in a 500-box pile landing (0.35 → 0.49 ms on a Mac).
+        world.integration_parameters.num_internal_stabilization_iterations = 3;
         Self {
             world,
             followed: Vec::new(),

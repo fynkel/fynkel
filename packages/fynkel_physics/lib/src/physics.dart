@@ -116,6 +116,8 @@ final class Physics extends WorldSystem implements Finalizable {
 
   /// How many times the solver goes over the contacts each step: more is
   /// stiffer and slower (Unity's `Physics.defaultSolverIterations`, 6).
+  /// Bodies asleep stay as they are until something wakes them
+  /// ([Rigidbody.wakeUp]).
   int get defaultSolverIterations => _settings().solver_iterations;
   set defaultSolverIterations(int value) {
     if (value < 1) throw ArgumentError.value(value, 'defaultSolverIterations', 'must be 1 or more');
