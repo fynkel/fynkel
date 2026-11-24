@@ -336,6 +336,19 @@ impl Physics {
         check_vector("an angular velocity", angular)?;
         let handle = self.rigidbody(id)?;
         let body = &mut self.world.bodies[handle];
+        // Not along a frozen axis, as in Unity: Rapier would keep it, and a
+        // body frozen along X set moving along X went on along it (playtest
+        // game 12).
+        let (mut linear, mut angular) = (linear, angular);
+        let locked = body.locked_axes();
+        for axis in 0..3 {
+            if locked.contains(LockedAxes::from_bits_truncate(1 << axis)) {
+                linear[axis] = 0.0;
+            }
+            if locked.contains(LockedAxes::from_bits_truncate(8 << axis)) {
+                angular[axis] = 0.0;
+            }
+        }
         body.set_linvel(linear, true);
         body.set_angvel(angular, true);
         Ok(())

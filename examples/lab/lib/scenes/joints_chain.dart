@@ -211,7 +211,14 @@ class JointsChainScene extends LabScene {
     Slider(
       'solver iterations',
       () => physics.defaultSolverIterations.toDouble(),
-      (v) => physics.defaultSolverIterations = v.round(),
+      (v) {
+        physics.defaultSolverIterations = v.round();
+        // A chain hanging still is asleep, and sleeps on as it is: wake it
+        // to hang by the new number.
+        for (final o in [...links, ?weight]) {
+          o.get<Rigidbody>()!.wakeUp();
+        }
+      },
       min: 1,
       max: 30,
     ),
