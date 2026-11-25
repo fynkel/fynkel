@@ -1,4 +1,4 @@
-// Films the front page's scene: frames to the folder FILM names, as PNGs.
+// Films the front page's scene: frames to folders in the one FILM names, as PNGs.
 //   FILM=/tmp/film flutter test --timeout none      (30 a second)
 //   FILM=/tmp/film EVERY=30 flutter test            (a few, to look at)
 // Without FILM, it runs the scene to its end and draws it once.
@@ -7,16 +7,22 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:fynkel/fynkel.dart';
+import 'package:showcase/looks.dart';
 import 'package:showcase/showcase.dart';
 
 void main() {
-  test('the front page', () async {
-    final out = Platform.environment['FILM'];
+  film('film', Showcase.new, length);
+  film('looks', Looks.new, looksLength);
+}
+
+void film(String name, Showcase Function() make, double length) {
+  test(name, () async {
+    final out = Platform.environment['FILM'] == null ? null : '${Platform.environment['FILM']}/$name';
+    if (out != null) Directory(out).createSync(recursive: true);
     final every = int.parse(Platform.environment['EVERY'] ?? '1');
-    final errors = <Object>[];
     final world = World(source: (name) async => File('../../examples/lab/assets/$name').readAsBytesSync());
     addTearDown(world.dispose);
-    final scene = world.add(Showcase());
+    final scene = world.add(make());
     await scene.loaded;
     final view = HeadlessView(world, width: 1920, height: 1080);
     addTearDown(view.dispose);
@@ -30,7 +36,6 @@ void main() {
         await Future<void>.delayed(Duration.zero);
       }
     }
-    expect(errors, isEmpty);
     view.png();
   }, timeout: Timeout.none);
 }

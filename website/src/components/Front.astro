@@ -40,6 +40,12 @@ const install = `dart pub global activate fynkel_cli
 fynkel create my_game
 cd my_game
 flutter run -d macos`;
+const styles = [
+  ['Lit', 'Physically based materials, a low sun, shadows'],
+  ['Cartoon', 'A toon shader and an outline on each material'],
+  ['Four colours', 'Big pixels and one effect over the picture'],
+  ['Old TV', 'Another effect: bent glass and scan lines'],
+];
 ---
 
 <div class="front">
@@ -56,20 +62,36 @@ flutter run -d macos`;
   </section>
 
   <section>
-    <h2>Looks you can make</h2>
-    <div class="looks">
-      <figure class="wide">
-        <img src="/shots/lamps.webp" width="960" height="600" loading="lazy" alt="A dark room lit by dozens of coloured lamps, with metal balls" />
-        <figcaption>Up to 64 lamps in view, with highlights on metal</figcaption>
-      </figure>
-      <figure>
-        <img src="/shots/toon.webp" width="960" height="600" loading="lazy" alt="A knight and a rogue drawn with outlines, like a cartoon" />
-        <figcaption>Outlines and whole styles with your own shaders</figcaption>
-      </figure>
-      <figure>
-        <img src="/shots/particles.webp" width="960" height="600" loading="lazy" alt="Fire, smoke, a swirl of colours, sparks and rain" />
-        <figcaption>Fire, smoke, sparks and rain from particle systems</figcaption>
-      </figure>
+    <h2>One scene, four styles</h2>
+    <div class="looks clip">
+      <video src="/film/looks.mp4" poster="/film/looks.webp" width="1280" height="720" muted loop playsinline preload="none"
+        aria-label="A knight and a rogue fighting at dusk, drawn four ways in turn: lit, as a cartoon, in four colours and on an old TV"></video>
+      <button class="hold" type="button">Pause</button>
+    </div>
+    <ol class="styles">
+      {styles.map(([name, how]) => (
+        <li><button type="button"><b>{name}</b><span>{how}</span></button></li>
+      ))}
+    </ol>
+    <p>
+      The knight, the rogue and the light's direction stay as they are; only shaders, outlines, effects and brightness
+      change. Shaders are small WGSL files of your own, and they hot reload.
+    </p>
+  </section>
+
+  <section class="pair phone">
+    <div class="clip">
+      <video src="/film/phone.mp4" poster="/film/phone.webp" width="520" height="1130" muted loop playsinline preload="none"
+        aria-label="Pocket Hole on a phone: a menu, then a hole that swallows blocks as it grows"></video>
+      <button class="hold" type="button">Pause</button>
+    </div>
+    <div>
+      <h2>The menu is Flutter. So is the score.</h2>
+      <p>
+        The game is one widget. Put it in a <code>Stack</code>, a route or half a screen, and build the menus, the score
+        and the shop around it with the widgets you already use.
+      </p>
+      <p>This is Pocket Hole, one of <a href="/start/examples/">the examples</a>, in the iPhone simulator.</p>
     </div>
   </section>
 
@@ -90,7 +112,7 @@ flutter run -d macos`;
       <div><dt>Rendering</dt><dd>wgpu on Metal and Vulkan: physically based materials, cascaded shadows, light from the sky, fog, skinned animation</dd></div>
       <div><dt>Physics</dt><dd>Rapier behind Unity's names: rigidbodies, colliders, triggers, joints, a character controller</dd></div>
       <div><dt>Sound</dt><dd>Sources, a listener, music and mixer groups</dd></div>
-      <div><dt>Flutter</dt><dd>The game is one widget. Menus and HUDs are ordinary Flutter widgets, over it or beside it</dd></div>
+      <div><dt>Flutter</dt><dd>Widgets that follow objects in the world, an on-screen stick, settings for controls, and a pause when the app is hidden</dd></div>
       <div><dt>Input</dt><dd>Keys, mouse and touch, with keys the player can rebind</dd></div>
       <div><dt>Platforms</dt><dd>macOS, iOS and Android, built on a Mac</dd></div>
     </dl>
@@ -107,6 +129,43 @@ flutter run -d macos`;
   </section>
 </div>
 
+<script>
+  const still = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  for (const clip of document.querySelectorAll<HTMLElement>('.clip')) {
+    const video = clip.querySelector('video')!;
+    const hold = clip.querySelector<HTMLButtonElement>('.hold')!;
+    let held = still;
+    let seen = false;
+    const set = () => {
+      hold.textContent = held ? 'Play' : 'Pause';
+      if (held || !seen) video.pause();
+      else video.play().catch(() => { held = true; set(); });
+    };
+    hold.addEventListener('click', () => { held = !held; set(); });
+    new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; set(); }, { threshold: 0.2 }).observe(video);
+
+    // The four styles, each as long as the others.
+    const styles = [...(clip.parentElement!.querySelectorAll<HTMLButtonElement>('.styles button'))];
+    if (styles.length === 0) continue;
+    const each = 2.5;
+    const mark = () => {
+      const now = Math.min(styles.length - 1, Math.floor(video.currentTime / each));
+      styles.forEach((b, i) => (i === now ? b.setAttribute('aria-current', 'true') : b.removeAttribute('aria-current')));
+    };
+    video.addEventListener('timeupdate', mark);
+    video.addEventListener('seeked', mark);
+    styles.forEach((b, i) =>
+      b.addEventListener('click', () => {
+        // Held there, so it can be looked at.
+        held = true;
+        set();
+        video.preload = 'auto';
+        video.currentTime = i * each + 0.6;
+      }),
+    );
+  }
+</script>
+
 <style>
   .front { display: grid; gap: clamp(4rem, 9vw, 7.5rem); padding-block: clamp(3.5rem, 7vw, 6rem) 3rem; }
   .front section { margin: 0; min-width: 0; }
@@ -122,18 +181,56 @@ flutter run -d macos`;
   .pair.turned > :first-child { order: 2; }
   .pair.turned { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
   .pair p { max-width: 32rem; }
-  .looks { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
-  figure { margin: 0; display: flex; flex-direction: column; }
-  .wide { grid-row: span 2; }
-  .looks img { width: 100%; height: auto; flex: 1; object-fit: cover; aspect-ratio: 16 / 10; margin: 0; }
-  figure figcaption { font-size: 0.85rem; margin: 0.5rem 0 0; color: var(--sl-color-gray-2); }
+  .clip { position: relative; }
+  .clip video { display: block; width: 100%; height: auto; }
+  .hold {
+    position: absolute;
+    right: 0.75rem;
+    top: 0.75rem;
+    margin: 0;
+    border: 0;
+    border-radius: 0.3rem;
+    padding: 0.4rem 0.7rem;
+    font: inherit;
+    font-size: 0.8rem;
+    background: rgb(21 17 43 / 0.75);
+    color: #fff;
+    cursor: pointer;
+  }
+  .styles { list-style: none; margin: 0 0 1.25rem; padding: 0; display: grid; grid-template-columns: repeat(4, 1fr); }
+  .styles li { margin: 0; }
+  .styles button {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.2rem;
+    padding: 0.8rem 0.9rem;
+    border: 0;
+    border-top: 3px solid var(--sl-color-gray-5);
+    background: none;
+    color: var(--sl-color-gray-2);
+    font: inherit;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    text-align: start;
+    cursor: pointer;
+  }
+  .styles b { font-size: 1rem; color: var(--sl-color-white); }
+  .styles button[aria-current] { border-top-color: var(--sl-color-accent); background: var(--sl-color-gray-6); }
+  .phone { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); }
+  .phone .clip { width: min(19rem, 100%); margin-inline: auto; padding-bottom: 3rem; }
+  .phone video { border: 0.6rem solid #15112b; border-radius: 2.6rem; }
+  .phone .hold { top: auto; bottom: 0; right: 50%; transform: translateX(50%); }
   dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 2rem 3rem; margin: 0; }
   dl div { margin: 0; }
   dt { font-weight: 700; color: var(--sl-color-white); }
   dl dd { margin: 0.25rem 0 0; padding: 0; }
   .start p { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; }
   @media (max-width: 50rem) {
-    .pair, .pair.turned, .looks { grid-template-columns: minmax(0, 1fr); }
+    .pair, .pair.turned { grid-template-columns: minmax(0, 1fr); }
     .pair.turned > :first-child { order: 0; }
+    .phone > .clip { order: 2; }
+    .styles { grid-template-columns: 1fr 1fr; }
   }
 </style>

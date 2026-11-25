@@ -27,7 +27,9 @@ class Showcase extends GameObject {
   late final Camera camera;
   late final Light light, ambient, moon;
   final _random = math.Random(7);
-  var _at = 0.0;
+
+  /// Seconds since it started.
+  var at = 0.0;
 
   @override
   Future<void> onLoad() async {
@@ -76,29 +78,29 @@ class Showcase extends GameObject {
     knight
       ..addComponent(CapsuleCollider(radius: 0.5, height: 2.4, center: Vec3(0, 1.2, 0)))
       ..rotation = Quat.axisAngle(Vec3.up, -0.25);
-    _look();
-    startRoutine(_run);
+    look();
+    startRoutine(play);
   }
 
   /// The steps, each a moment after the last.
-  Future<void> _run() async {
-    await _until(steps[1]);
-    tween(0.0, 1.0, seconds: 1.4, ease: Ease.inOutSine, onUpdate: _dusk);
-    await _until(steps[2]);
+  Future<void> play() async {
+    await until(steps[1]);
+    tween(0.0, 1.0, seconds: 1.4, ease: Ease.inOutSine, onUpdate: dusk);
+    await until(steps[2]);
     knight.animator!.crossFade('Cheer', seconds: 0.25, loop: false);
     knight.animator!.onEnd = (_) => knight.animator!.crossFade('2H_Melee_Idle', seconds: 0.3);
-    await _until(steps[3]);
+    await until(steps[3]);
     for (var i = 0; i < 72; i++) {
       _block();
-      await _until(steps[3] + i * 0.03);
+      await until(steps[3] + i * 0.03);
     }
-    await _until(steps[4]);
+    await until(steps[4]);
     tween(0.0, 1.0, seconds: 1.2, ease: Ease.inOutSine, onUpdate: _night);
     for (final (i, x) in [(0, -3.6), (1, 3.9), (2, -1.6), (3, 2.0)]) {
-      _torch(Vec3(x, 0, i < 2 ? -0.8 : -3.3));
+      torch(Vec3(x, 0, i < 2 ? -0.8 : -3.3));
       await wait(0.3);
     }
-    await _until(steps[5]);
+    await until(steps[5]);
     knight.animator!.crossFade('2H_Melee_Attack_Spin', seconds: 0.2, loop: false);
     await wait(0.45);
     time.scale = 0.3;
@@ -107,7 +109,7 @@ class Showcase extends GameObject {
     tween(0.3, 1.0, seconds: 0.5, onUpdate: (v) => time.scale = v);
   }
 
-  Future<void> _until(double at) => wait(math.max(0.001, at - _at));
+  Future<void> until(double when) => wait(math.max(0.001, when - at));
 
   void _floor() {
     final stone = Material(color: const Color(0xFF8C8577), roughness: 0.85);
@@ -167,7 +169,7 @@ class Showcase extends GameObject {
   }
 
   /// The sun up, [t] of the way: a low one, under an evening sky.
-  void _dusk(double t) {
+  void dusk(double t) {
     light.intensity = 3.2 * t;
     ambient.intensity = 0.9 * (1 - t);
     _sky(const Color(0xFF1A1E2E), const Color(0xFF1A1E2E), const Color(0xFF1F5FC4), const Color(0xFFF0A987), t);
@@ -213,7 +215,7 @@ class Showcase extends GameObject {
 
   late final _dot = _alpha(64, (d) => math.pow(math.max(0, 1 - d), 2).toDouble());
 
-  void _torch(Vec3 at) {
+  void torch(Vec3 at) {
     const warm = Color(0xFFFF9A3C);
     add(
       GameObject(
@@ -338,8 +340,8 @@ class Showcase extends GameObject {
 
   /// The camera, a slow arc round the knight, who stands right of the
   /// middle so the code has the left.
-  void _look() {
-    final t = _at / length;
+  void look() {
+    final t = at / length;
     final a = 0.42 - 0.55 * t, far = 11.5 - 1.2 * math.sin(t * math.pi);
     final from = Vec3(far * math.sin(a), 2.9 + 0.5 * t, far * math.cos(a));
     final forward = (Vec3(0, 1.25, 0) - from).normalized;
@@ -352,7 +354,7 @@ class Showcase extends GameObject {
   @override
   void onUpdate() {
     super.onUpdate();
-    _at += time.unscaledDelta;
-    _look();
+    at += time.unscaledDelta;
+    look();
   }
 }
