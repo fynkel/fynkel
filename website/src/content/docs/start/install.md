@@ -23,7 +23,7 @@ aren't supported yet.
 Fynkel isn't on pub.dev yet: you use it from a clone of the repository.
 
 ```sh
-git clone https://github.com/mooumari/fynkel.git
+git clone https://github.com/fynkel/fynkel.git
 cd fynkel/examples/hello
 flutter run -d macos
 ```

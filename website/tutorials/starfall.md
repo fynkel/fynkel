@@ -7,7 +7,7 @@ Stars and rocks fall through the night. Hold your finger on the screen and
 the basket goes to it: catch a star for a point, miss one and lose a life,
 catch a rock and lose one too. After three, the game is over, and the best
 score is kept for next time. The finished game is
-[`examples/starfall`](https://github.com/mooumari/fynkel/tree/main/examples/starfall).
+[`examples/starfall`](https://github.com/fynkel/fynkel/tree/main/examples/starfall).
 
 ![Starfall: a blue basket on dark ground under a night sky with a moon, golden stars falling](/tutorials/starfall.png)
 
