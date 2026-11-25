@@ -1,7 +1,14 @@
 name: fynkel_physics
-description: Physics for Fynkel, as Unity has it, on Rapier. Add it to a game that needs it; a game without it ships none of it.
+description: 3D physics for Fynkel games, on Rapier. Rigidbodies, colliders, triggers, joints and a character controller, as in Unity.
 version: 0.1.0
 publish_to: none
+homepage: https://fynkel.com
+repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel_physics
+issue_tracker: https://github.com/fynkel/fynkel/issues
+topics:
+  - game
+  - game-engine
+  - physics
 
 environment:
   sdk: ^3.13.0

@@ -1,7 +1,14 @@
 name: fynkel
-description: Fynkel's Dart API, over the native engine through dart:ffi. Pure Dart; package:fynkel_flutter shows it on screen.
+description: Code-first 3D games for Flutter, written the way Unity games are, in Dart, on a Rust engine. fynkel_flutter shows them on screen.
 version: 0.1.0
 publish_to: none
+homepage: https://fynkel.com
+repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel
+issue_tracker: https://github.com/fynkel/fynkel/issues
+topics:
+  - game
+  - game-engine
+  - graphics
 
 environment:
   sdk: ^3.13.0

@@ -1,7 +1,14 @@
 name: fynkel_audio
-description: Sound for Fynkel, as Unity has it. Add it to a game that needs it; a game without it ships none of it.
+description: Sound for Fynkel games. Clips, sources, a listener, music and groups, as in Unity, with 3D sound.
 version: 0.1.0
 publish_to: none
+homepage: https://fynkel.com
+repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel_audio
+issue_tracker: https://github.com/fynkel/fynkel/issues
+topics:
+  - game
+  - game-engine
+  - audio
 
 environment:
   sdk: ^3.13.0
