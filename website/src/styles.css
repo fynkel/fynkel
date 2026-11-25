@@ -1,12 +1,16 @@
-/* The front page's pictures. */
-.shots {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(min(100%, 17rem), 1fr));
-  gap: 1rem;
+/* The site's colours, from the front page's film: the torches and the
+   night sky. */
+:root {
+  --sl-color-accent-low: #2a1c4d;
+  --sl-color-accent: #7a4fd0;
+  --sl-color-accent-high: #ffc373;
 }
-.shots img {
-  width: 100%;
-  height: auto;
-  margin: 0;
-  border-radius: 0.5rem;
+:root[data-theme='light'] {
+  --sl-color-accent-low: #e9e0fa;
+  --sl-color-accent: #5b32ad;
+  --sl-color-accent-high: #2f1a63;
 }
+/* The front page's film is as wide as the window. */
+[data-has-hero] body { overflow-x: clip; }
+[data-has-hero] .main-frame .main-pane > main > .content-panel:first-of-type,
+[data-has-hero] main > .content-panel { padding-block: 0; }
