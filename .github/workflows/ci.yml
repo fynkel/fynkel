@@ -11,6 +11,11 @@
 # which installs the toolchain pinned in rust-toolchain.toml. `target/` is
 # kept between runs for speed; everything else is cleaned, so each run
 # starts from the commit alone.
+#
+# The repository variable RUNNER moves every job to GitHub's own Macs,
+# without touching this file:  gh variable set RUNNER -b '["macos-26"]'
+# It is set before the repository is public, and the Mac's runner removed:
+# a pull request from anyone runs its own code here.
 name: ci
 
 on:
@@ -31,7 +36,7 @@ env:
 
 jobs:
   rust:
-    runs-on: [self-hosted, macOS, fynkel]
+    runs-on: ${{ fromJSON(vars.RUNNER || '["self-hosted","macOS","fynkel"]') }}
     timeout-minutes: 45
     steps:
       # Two commits deep: a pull request's is its merge, whose first parent
@@ -53,6 +58,8 @@ jobs:
             if ! grep -qvE '^(docs|website)/|\.md$|^LICENSE$' <<<"$files"; then code=false; fi
           fi
           echo "code=$code" | tee -a "$GITHUB_OUTPUT"
+      - if: runner.environment == 'github-hosted'
+        uses: ./.github/actions/hosted
       - name: toolchain
         if: steps.changed.outputs.code == 'true'
         run: rustup show active-toolchain

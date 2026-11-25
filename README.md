@@ -112,8 +112,8 @@ from source:
 
 `crates/` is the Rust engine; `docs/` keeps the plans and reports of each
 stage (`stage-*.md`) and the decisions (`docs/decisions`). Fynkel 1, with
-the editor and the asset pipeline, is archived as tag `fynkel-1-final` and
-branch `fynkel-1`.
+the editor and the asset pipeline, is archived as tag `fynkel-1-final`.
+To change something or report it, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Licence
 

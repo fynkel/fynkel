@@ -181,7 +181,7 @@ PR 15 ran the step 5 checks again after the fixes. In full:
 Step 8 is done when you have read this.
 
 - [x] Read
-- [x] The review's bugs: one more PR in stage 6 ([#87](https://github.com/mooumari/fynkel/pull/87):
+- [x] The review's bugs: one more PR in stage 6 ([#87](https://github.com/fynkel/fynkel/pull/87):
   1–8, 10, finding 36, the transient targets; 9 and the extract to stage 7)
 - [x] PR 15's numbers in
 

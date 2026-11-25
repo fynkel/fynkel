@@ -1,0 +1,20 @@
+# What GitHub's own Macs lack: Flutter, at the version Fynkel is developed
+# on, and what earlier runs built (nightly.yml saves it, on main).
+name: hosted Mac
+runs:
+  using: composite
+  steps:
+    - name: Flutter
+      shell: bash
+      run: |
+        git clone -q --depth 1 -b 3.47.2 https://github.com/flutter/flutter.git "$HOME/Documents/flutter/flutter"
+        "$HOME/Documents/flutter/flutter/bin/flutter" --version
+        "$HOME/Documents/flutter/flutter/bin/flutter" config --no-analytics >/dev/null
+    - uses: actions/cache/restore@v4
+      with:
+        path: |
+          ~/.cargo/registry
+          ~/.cargo/git
+          target
+        key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
+        restore-keys: rust-${{ runner.os }}-
