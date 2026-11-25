@@ -160,11 +160,13 @@ void main() {
       view.read(view.frame());
     }
     final gpu = (view.stats - before).gpu;
-    if (Platform.isMacOS) expect(gpu.frames, greaterThanOrEqualTo(20), reason: "a Mac's GPU times its frames");
+    // GitHub's Macs have a virtual GPU, with no clocks.
+    final real = Platform.isMacOS && Platform.environment['FYNKEL_VIRTUAL_GPU'] == null;
+    if (real) expect(gpu.frames, greaterThanOrEqualTo(20), reason: "a Mac's GPU times its frames");
     if (gpu.frames > 0) {
       expect(gpu.scene + gpu.finish, greaterThan(Duration.zero), reason: '$gpu');
       expect(gpu + gpu - gpu, gpu);
-      if (Platform.isMacOS) expect(gpu.untimed, lessThan(gpu.frames), reason: "the passes' clocks are read");
+      if (real) expect(gpu.untimed, lessThan(gpu.frames), reason: "the passes' clocks are read");
       // As the measure tool reads it: key=value pairs, split on spaces.
       for (final pair in (view.stats - before).toString().split(' ')) {
         expect(pair.split('='), hasLength(2), reason: pair);

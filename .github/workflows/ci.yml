@@ -37,7 +37,7 @@ env:
 jobs:
   rust:
     runs-on: ${{ fromJSON(vars.RUNNER || '["self-hosted","macOS","fynkel"]') }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       # Two commits deep: a pull request's is its merge, whose first parent
       # is the base it's compared with below.
@@ -81,9 +81,11 @@ jobs:
       # once more when they fail, and when that fails too they say so, on
       # the run's page, without failing the run: on this one Mac a busy
       # moment (other work, a build) has put a 0.5 ms median at 5 ms and
-      # held whole PRs for hours. The warning is the cue to look.
+      # held whole PRs for hours. The warning is the cue to look. Not on
+      # GitHub's Macs: too slow and too shared to say anything, and 25
+      # minutes of building. Run them by hand before a release.
       - name: timing bars
-        if: "!cancelled() && steps.changed.outputs.code == 'true'"
+        if: "!cancelled() && steps.changed.outputs.code == 'true' && runner.environment != 'github-hosted'"
         continue-on-error: true
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"

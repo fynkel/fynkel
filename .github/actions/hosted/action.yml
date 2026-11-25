@@ -7,6 +7,9 @@ runs:
     - name: Flutter
       shell: bash
       run: |
+        # Its GPU is a virtual one: no clocks, and slow (tests that time or
+        # count the GPU's work skip on it).
+        echo FYNKEL_VIRTUAL_GPU=1 >> "$GITHUB_ENV"
         git clone -q --depth 1 -b 3.47.2 https://github.com/flutter/flutter.git "$HOME/Documents/flutter/flutter"
         "$HOME/Documents/flutter/flutter/bin/flutter" --version
         "$HOME/Documents/flutter/flutter/bin/flutter" config --no-analytics >/dev/null

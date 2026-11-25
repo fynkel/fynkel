@@ -392,7 +392,8 @@ fn ten_thousand_points_are_filled_quickly() {
     let holes: Vec<Vec<Vec2>> =
         (0..8).map(|k| circle(0.05, Vec2::from_angle(std::f32::consts::TAU * k as f32 / 8.0) * 0.3, 100)).collect();
     let refs: Vec<&[Vec2]> = holes.iter().map(Vec::as_slice).collect();
-    let bound = if cfg!(debug_assertions) { 400.0 } else { 20.0 };
+    // A debug build on a slow Mac (GitHub's) takes over 400 ms.
+    let bound = if cfg!(debug_assertions) { 1500.0 } else { 20.0 };
     for (outline, holes) in [(&big, &[][..]), (&star, &refs[..])] {
         let start = std::time::Instant::now();
         let t = fill(outline, holes).unwrap();
