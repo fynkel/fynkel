@@ -26,7 +26,7 @@ env:
 
 jobs:
   new:
-    runs-on: [self-hosted, macOS, fynkel]
+    runs-on: ${{ fromJSON(vars.RUNNER || '["self-hosted","macOS","fynkel"]') }}
     timeout-minutes: 5
     outputs:
       run: ${{ steps.new.outputs.run }}
@@ -43,7 +43,7 @@ jobs:
   long:
     needs: new
     if: needs.new.outputs.run == 'true'
-    runs-on: [self-hosted, macOS, fynkel]
+    runs-on: ${{ fromJSON(vars.RUNNER || '["self-hosted","macOS","fynkel"]') }}
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +51,8 @@ jobs:
           clean: false
       - name: clean (all but target/)
         run: git clean -ffdx -e /target/ && git reset --hard HEAD
+      - if: runner.environment == 'github-hosted'
+        uses: ./.github/actions/hosted
       - name: toolchain
         run: rustup show active-toolchain
       # ci.yml's two Rust checks on main itself, in case two pull requests
@@ -108,6 +110,9 @@ jobs:
           FYNKEL_STRESS_FRAMES=1000000 cargo test -p fynkel_present --test stress
           FYNKEL_FUZZ_ITERS=1000 cargo test --release -p fynkel_load --test damaged
           export MIRIFLAGS=-Zmiri-disable-isolation
+          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+            rustup toolchain install nightly --profile minimal -c miri -c rust-src -t x86_64-unknown-linux-gnu
+          fi
           cargo +nightly miri test -p fynkel_cabi
           cargo +nightly miri test -p fynkel_present --test stress
           cargo +nightly miri test -p fynkel_physics_ffi --target x86_64-unknown-linux-gnu --test abi -- null_pointers reading_the_moves a_step_is_as_long removed_and_unknown
@@ -118,4 +123,21 @@ jobs:
       # work, so it must never silently break.
       - name: GPU tests in the iOS Simulator and Android emulator
         if: "!cancelled()"
-        run: tools/test-mobile.sh
+        run: |
+          if [ "$RUNNER_ENVIRONMENT" = github-hosted ]; then
+            # Their Macs are virtual machines, which can't run the Android
+            # emulator: it's run by hand before a release.
+            export IOS_SIM=$(xcrun simctl list devices available | sed -nE 's/^ +(iPhone [^(]*[^( ]) \(.*/\1/p' | head -1)
+            tools/test-mobile.sh ios
+          else
+            tools/test-mobile.sh
+          fi
+      # For the pull requests' runs, which start from it.
+      - if: "!cancelled() && runner.environment == 'github-hosted'"
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml') }}
