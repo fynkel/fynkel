@@ -1,0 +1,121 @@
+# What's too long for every pull request (ci.yml), on main each night that
+# main has changed since it last passed here, and by hand before a release
+# (docs/releasing.md):  gh workflow run nightly.yml
+#
+# A step that fails doesn't hide the ones after it. The runner is the
+# developer's Mac (see ci.yml): when it sleeps at that hour, the run waits
+# for it to wake.
+name: nightly
+
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: 0
+
+jobs:
+  new:
+    runs-on: [self-hosted, macOS, fynkel]
+    timeout-minutes: 5
+    outputs:
+      run: ${{ steps.new.outputs.run }}
+    steps:
+      - id: new
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          export PATH="/opt/homebrew/bin:$PATH"
+          last=$(gh run list -R "$GITHUB_REPOSITORY" -w nightly.yml -b main -s success -L 30 --json headSha -q '.[].headSha' || true)
+          run=true
+          if [ "$GITHUB_EVENT_NAME" = schedule ] && grep -qx "$GITHUB_SHA" <<<"$last"; then run=false; fi
+          echo "run=$run" | tee -a "$GITHUB_OUTPUT"
+  long:
+    needs: new
+    if: needs.new.outputs.run == 'true'
+    runs-on: [self-hosted, macOS, fynkel]
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          clean: false
+      - name: clean (all but target/)
+        run: git clean -ffdx -e /target/ && git reset --hard HEAD
+      - name: toolchain
+        run: rustup show active-toolchain
+      # ci.yml's two Rust checks on main itself, in case two pull requests
+      # passed apart and fail together.
+      - name: clippy
+        if: "!cancelled()"
+        run: cargo clippy --workspace --all-targets -- -D warnings
+      - name: test
+        if: "!cancelled()"
+        run: cargo test --workspace
+      # Every example's tests, and its app built for macOS (compiling the
+      # plugin's Swift and bundling the engine).
+      - name: examples
+        if: "!cancelled()"
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          for app in examples/*/ packages/fynkel_physics/example; do
+            echo "== $app"
+            (
+              cd "$app"
+              flutter pub get
+              case "$app" in
+                examples/scale/) flutter test -x timing ;;
+                *) flutter test ;;
+              esac
+              flutter build macos --debug
+            )
+          done
+      # The phones' own code, compiled (stage 14's GT4): the lab uses all
+      # three packages, so building it for an iPhone and for Android
+      # compiles the plugin's Kotlin and iOS-only Swift, and every crate
+      # (sound's session code too) for the phones' targets, through the
+      # build hooks as an app does. Neither is signed or run here.
+      - name: phone builds (the lab, iOS and Android)
+        if: "!cancelled()"
+        working-directory: examples/lab
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          flutter build ios --debug --no-codesign
+          flutter build apk --debug
+      # Long runs (stage 6, PR 13), a few minutes together:
+      # - the present thread's stress test for a million frames;
+      # - the loaders given damaged copies of every sample, built for
+      #   release, as many copies as there are (tests/damaged.rs);
+      # - Miri on the unsafe code it can run: the C boundary's guard, the
+      #   present stress test (a few hundred frames), and the physics C
+      #   layer's quick tests, on x86_64 as Miri can't run Rapier's ARM
+      #   vector code (all of them pass too, but take 33 minutes);
+      # - the lab's every scene for 120 rounds in one world each, the
+      #   memory flat (examples/lab/test/soak_test.dart).
+      - name: long runs
+        if: "!cancelled()"
+        run: |
+          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          FYNKEL_STRESS_FRAMES=1000000 cargo test -p fynkel_present --test stress
+          FYNKEL_FUZZ_ITERS=1000 cargo test --release -p fynkel_load --test damaged
+          export MIRIFLAGS=-Zmiri-disable-isolation
+          cargo +nightly miri test -p fynkel_cabi
+          cargo +nightly miri test -p fynkel_present --test stress
+          cargo +nightly miri test -p fynkel_physics_ffi --target x86_64-unknown-linux-gnu --test abi -- null_pointers reading_the_moves a_step_is_as_long removed_and_unknown
+          cd examples/lab
+          FYNKEL_SOAK_ROUNDS=120 flutter test --enable-vmservice test/soak_test.dart
+      # The same GPU tests inside the iOS Simulator and the Android
+      # emulator: fast testing in simulators is how Flutter developers
+      # work, so it must never silently break.
+      - name: GPU tests in the iOS Simulator and Android emulator
+        if: "!cancelled()"
+        run: tools/test-mobile.sh

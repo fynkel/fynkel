@@ -6,8 +6,8 @@ main. A version on pub.dev can't be taken back, only followed by another.
 1. **The version.** Set it in the five packages' `pubspec.yaml`
    (`fynkel`, `fynkel_flutter`, `fynkel_physics`, `fynkel_audio`,
    `fynkel_cli`), in `fynkelVersion` (`packages/fynkel_cli/lib/fynkel_cli.dart`)
-   and in `Cargo.toml`, and write the `CHANGELOG.md`s. Merge it, and wait for
-   main's CI.
+   and in `Cargo.toml`, and write the `CHANGELOG.md`s. Merge it, run the
+   long checks on main (`gh workflow run nightly.yml`), and wait for them.
 2. **The libraries**, on a Mac with the NDK, from that commit:
    `cd packages/fynkel && dart run tool/prebuilt.dart`. They are in
    `target/prebuilt/v<version>/`.

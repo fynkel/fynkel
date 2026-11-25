@@ -1,4 +1,10 @@
-# Runs on every push to main and every pull request.
+# The check on a pull request, kept short: about ten minutes, and about one
+# when only text changed (docs, the website, READMEs). What takes long and
+# seldom breaks runs each night instead, in nightly.yml: long runs, the
+# simulators, every example's app, the phone builds.
+#
+# It doesn't run again on main after a merge: that tree was just tested as
+# the pull request's merge, and nightly.yml tests main itself.
 #
 # The runner is self-hosted on the developer's Mac (label `fynkel`,
 # ~/actions-runner as a launchd service). It uses the machine's rustup,
@@ -8,15 +14,16 @@
 name: ci
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  workflow_dispatch:
 
-# A newer push to a pull request cancels the run it replaces; on main
-# every merge's run finishes, so each one's result is known (stage 14 GT12).
+# A newer push to a pull request cancels the run it replaces.
 concurrency:
   group: ci-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -25,19 +32,38 @@ env:
 jobs:
   rust:
     runs-on: [self-hosted, macOS, fynkel]
+    timeout-minutes: 45
     steps:
+      # Two commits deep: a pull request's is its merge, whose first parent
+      # is the base it's compared with below.
       - uses: actions/checkout@v4
         with:
           clean: false
+          fetch-depth: 2
       - name: clean (all but target/)
         run: git clean -ffdx -e /target/ && git reset --hard HEAD
+      # Text alone can't break the engine's tests: only the guide's code
+      # is checked then. Anything unsure (a run by hand, a diff that
+      # fails) counts as code.
+      - name: what changed
+        id: changed
+        run: |
+          code=true
+          if [ "${{ github.event_name }}" = pull_request ] && files=$(git diff --name-only --no-renames HEAD^1 HEAD) && [ -n "$files" ]; then
+            if ! grep -qvE '^(docs|website)/|\.md$|^LICENSE$' <<<"$files"; then code=false; fi
+          fi
+          echo "code=$code" | tee -a "$GITHUB_OUTPUT"
       - name: toolchain
+        if: steps.changed.outputs.code == 'true'
         run: rustup show active-toolchain
       - name: fmt
+        if: steps.changed.outputs.code == 'true'
         run: cargo fmt --all --check
       - name: clippy
+        if: steps.changed.outputs.code == 'true'
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
+        if: steps.changed.outputs.code == 'true'
         run: cargo test --workspace
       # The benchmarks (stage 14's GT1, crates/fynkel_bench): each times
       # one thing the frame path does, in release, and fails when its
@@ -50,6 +76,7 @@ jobs:
       # moment (other work, a build) has put a 0.5 ms median at 5 ms and
       # held whole PRs for hours. The warning is the cue to look.
       - name: timing bars
+        if: steps.changed.outputs.code == 'true'
         continue-on-error: true
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -69,6 +96,7 @@ jobs:
       # count what the VM allocates, and other files' compiling would
       # slow them.
       - name: dart (package:fynkel)
+        if: steps.changed.outputs.code == 'true'
         working-directory: packages/fynkel
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -83,8 +111,10 @@ jobs:
       # fynkel_physics_ffi, its tests drive Rapier from Dart, and its
       # bindings must match the header as package:fynkel's do. Its example
       # (tumble) is analyzed, run headless (both piles fall and land) and
-      # built for macOS, with both libraries.
+      # built for macOS at night
+      # (nightly.yml).
       - name: dart (package:fynkel_physics)
+        if: steps.changed.outputs.code == 'true'
         working-directory: packages/fynkel_physics
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -99,13 +129,13 @@ jobs:
           cd example
           flutter analyze --fatal-infos
           flutter test
-          flutter build macos --debug
       # package:fynkel_audio (docs/stage-11.md): its build hook compiles
       # fynkel_audio_ffi, its tests play and time sound from Dart without a
       # device (none opens unless a world is on screen), its frames make no
       # garbage, and its bindings must match the header as package:fynkel's
       # do.
       - name: dart (package:fynkel_audio)
+        if: steps.changed.outputs.code == 'true'
         working-directory: packages/fynkel_audio
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -119,90 +149,35 @@ jobs:
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the games'
       # and the lab's tests (their real assets, drawn headless, and real
-      # physics), and macOS builds of the examples, which compile the
-      # plugin's Swift and bundle the engine.
+      # physics), and the lab built for macOS, which compiles the plugin's
+      # Swift and bundles all three packages. The others' builds are in
+      # nightly.yml.
       - name: flutter (package:fynkel_flutter, package:fynkel_measure, examples)
+        if: steps.changed.outputs.code == 'true'
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
-          cd packages/fynkel_flutter
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
-          flutter analyze --fatal-infos
-          flutter test
-          cd ../fynkel_measure
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib bin test
-          flutter analyze --fatal-infos
-          flutter test
-          cd ../../examples/hello
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../roll
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../starfall
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../garden
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../coins
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../arena
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../bowling
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../sheepdog
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../lab
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test
-          flutter build macos --debug
-          cd ../scale
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test tool
-          flutter analyze --fatal-infos
-          flutter test -x timing
-          flutter build macos --debug
-          cd ../pocket_hole
-          flutter pub get
-          dart format -l 120 --output=none --set-exit-if-changed lib test
-          flutter analyze --fatal-infos
-          flutter test
+          for app in packages/fynkel_flutter packages/fynkel_measure examples/*/; do
+            echo "== $app"
+            (
+              cd "$app"
+              flutter pub get
+              dirs=
+              for d in lib bin test tool; do [ -d $d ] && dirs="$dirs $d"; done
+              dart format -l 120 --output=none --set-exit-if-changed $dirs
+              flutter analyze --fatal-infos
+              case "$app" in
+                # Its timed tests are in the timing bars, above.
+                examples/scale/) flutter test -x timing ;;
+                *) flutter test ;;
+              esac
+            )
+          done
+          cd examples/lab
           flutter build macos --debug
       # package:fynkel_cli, the fynkel command: one of its tests makes a
       # real game on this clone, analyzes it and runs its test.
       - name: dart (package:fynkel_cli)
+        if: steps.changed.outputs.code == 'true'
         working-directory: packages/fynkel_cli
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -210,46 +185,11 @@ jobs:
           dart format -l 120 --output=none --set-exit-if-changed .
           dart analyze --fatal-infos
           dart test
-      # The phones' own code, compiled (stage 14's GT4): the lab uses all
-      # three packages, so building it for an iPhone and for Android
-      # compiles the plugin's Kotlin and iOS-only Swift, and every crate
-      # (sound's session code too) for the phones' targets, through the
-      # build hooks as an app does. Neither is signed or run here.
-      - name: phone builds (the lab, iOS and Android)
-        working-directory: examples/lab
-        run: |
-          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
-          flutter build ios --debug --no-codesign
-          flutter build apk --debug
       # docs/writing-a-game.md's code, in a throwaway app: it must compile,
-      # and its test pass, so the guide never drifts from the API.
+      # and its test pass, so the guide never drifts from the API. The
+      # reference test reads the guide too, and is in `test` otherwise.
       - name: the guide
         run: |
+          if [ "${{ steps.changed.outputs.code }}" != true ]; then cargo test -p fynkel_render --test reference; fi
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
           python3 tools/check_guide.py
-      # Long runs (stage 6, PR 13), a few minutes together:
-      # - the present thread's stress test for a million frames;
-      # - the loaders given damaged copies of every sample, built for
-      #   release, as many copies as there are (tests/damaged.rs);
-      # - Miri on the unsafe code it can run: the C boundary's guard, the
-      #   present stress test (a few hundred frames), and the physics C
-      #   layer's quick tests, on x86_64 as Miri can't run Rapier's ARM
-      #   vector code (all of them pass too, but take 33 minutes);
-      # - the lab's every scene for 120 rounds in one world each, the
-      #   memory flat (examples/lab/test/soak_test.dart).
-      - name: long runs
-        run: |
-          export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
-          FYNKEL_STRESS_FRAMES=1000000 cargo test -p fynkel_present --test stress
-          FYNKEL_FUZZ_ITERS=1000 cargo test --release -p fynkel_load --test damaged
-          export MIRIFLAGS=-Zmiri-disable-isolation
-          cargo +nightly miri test -p fynkel_cabi
-          cargo +nightly miri test -p fynkel_present --test stress
-          cargo +nightly miri test -p fynkel_physics_ffi --target x86_64-unknown-linux-gnu --test abi -- null_pointers reading_the_moves a_step_is_as_long removed_and_unknown
-          cd examples/lab
-          FYNKEL_SOAK_ROUNDS=120 flutter test --enable-vmservice test/soak_test.dart
-      # The same GPU tests inside the iOS Simulator and the Android
-      # emulator: fast testing in simulators is how Flutter developers
-      # work, so it must never silently break.
-      - name: GPU tests in the iOS Simulator and Android emulator
-        run: tools/test-mobile.sh
