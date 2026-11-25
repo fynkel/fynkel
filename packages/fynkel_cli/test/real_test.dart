@@ -17,8 +17,11 @@ class _In extends Tools {
 
 void main() {
   test('fynkel create makes a game that analyzes and passes its test', () async {
-    final dir = Directory(Directory.systemTemp.createTempSync('fynkel_real').resolveSymbolicLinksSync());
-    addTearDown(() => dir.deleteSync(recursive: true));
+    final temp = Directory(Directory.systemTemp.createTempSync('fynkel_real').resolveSymbolicLinksSync());
+    addTearDown(() => temp.deleteSync(recursive: true));
+    // Deep in folders: Flutter writes the path into the libraries, which
+    // need room for it (crates/fynkel_ffi/build.rs).
+    final dir = Directory(p.join(temp.path, 'a' * 80, 'b' * 80))..createSync(recursive: true);
     final out = StringBuffer();
     final args = ['create', 'my_game', '--physics', '--audio', '--path', p.join(Directory.current.path, '..', '..')];
     expect(

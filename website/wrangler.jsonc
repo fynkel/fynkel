@@ -1,0 +1,16 @@
+// fynkel.com: the built site (dist/) as static files on Cloudflare.
+//   npm run build && npx wrangler@4 deploy
+{
+  "name": "fynkel-website",
+  "compatibility_date": "2026-11-01",
+  "main": "worker.js",
+  "assets": {
+    "directory": "./dist",
+    "binding": "ASSETS",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/film/*.mp4"]
+  },
+  "routes": [{ "pattern": "fynkel.com", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false
+}

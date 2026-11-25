@@ -26,3 +26,4 @@ src/content/docs/tutorials/
 
 # made by scripts/api.mjs (npm run api)
 public/api/
+.wrangler/

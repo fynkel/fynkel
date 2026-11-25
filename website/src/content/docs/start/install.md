@@ -22,7 +22,7 @@ cd my_game
 flutter run -d macos
 ```
 
-A cube turns in a window. The game is in `lib/main.dart`: change the cube's
+A cube turns in a window: click it, and it hops. The game is in `lib/main.dart`: change the cube's
 colour, save, and press `R` in the terminal to see it.
 
 - **The first build** for each platform downloads the engine, about 7 MB.

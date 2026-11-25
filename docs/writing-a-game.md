@@ -27,7 +27,7 @@ cd my_game
 flutter run -d macos
 ```
 
-A cube turns in a window; the game is in `lib/main.dart`, and its test in
+A cube turns in a window, and hops when you click it; the game is in `lib/main.dart`, and its test in
 `test/game_test.dart`. If the shell doesn't find `fynkel`, add
 `$HOME/.pub-cache/bin` to your PATH. `fynkel doctor` checks the machine and
 the game, and says what to do about what's missing.
