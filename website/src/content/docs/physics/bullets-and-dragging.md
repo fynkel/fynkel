@@ -84,7 +84,7 @@ void main() {
 
 ## Dragging a body
 
-with a finger, as Unity's old `DragRigidbody`: a ray
+Dragging a body with a finger, as Unity's old `DragRigidbody`: a ray
 finds the body, a `SpringJoint` ties it to a kinematic "hand", and the
 hand follows the finger across a plane facing the camera. The spring pulls
 the body along, so it still collides, swings and stays joined:

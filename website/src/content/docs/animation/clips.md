@@ -3,14 +3,14 @@ title: "Playing clips"
 description: "Play, cross-fade and time a model's animations."
 ---
 
-The examples here use examples/garden's `character.glb`, whose clips are
+The examples here use [examples/garden](https://github.com/fynkel/fynkel/blob/main/examples/garden)'s `character.glb`, whose clips are
 `idle`, `walk`, `sprint`, `pick-up`, `emote-yes` and more. It's a blocky toy
 about 2.7 m tall, its origin at its feet: for a person-sized player in a
 `CharacterController` ([Character controllers](/physics/characters/)), scale
 it (`localScale = Vec3.all(0.6)`) and its walking pace with it. `model.bounds`
 ([Loading assets](/assets/loading/)) says how big a model is.
 
-The examples here use examples/garden's `character.glb`, whose clips are
+The examples here use [examples/garden](https://github.com/fynkel/fynkel/blob/main/examples/garden)'s `character.glb`, whose clips are
 `idle`, `walk`, `sprint`, `pick-up`, `emote-yes` and more. It's a blocky toy
 about 2.7 m tall, its origin at its feet: for a person-sized player in a
 `CharacterController` ([Character controllers](/physics/characters/)), scale
@@ -63,7 +63,7 @@ class Hero extends GameObject {
 - The clips play in the engine, once a frame after `onUpdate` and the tweens
   and before `onLateUpdate`. Each moves only the parts it moves. To turn a
   part a clip moves (a head that looks at you), set it in `onLateUpdate`,
-  after the clip; examples/garden does.
+  after the clip; [examples/garden](https://github.com/fynkel/fynkel/blob/main/examples/garden) does.
 - A clip moves the model's parts in place. Moving the character through the
   world is the game's code, so physics stays in charge of where it is; match
   the speed to the walk's pace so the feet don't slide.

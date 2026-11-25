@@ -107,13 +107,13 @@ give them again.
 
 ### markDynamic()
 
-`markDynamic()` for a mesh that changes most frames: the GPU keeps it
+Call `markDynamic()` for a mesh that changes most frames: the GPU keeps it
 where it can be written in place (Unity's `MarkDynamic`). A mesh changed now
 and then doesn't need it.
 
 ### Parts
 
-Parts: `setTriangles(indices, submeshStarts: [n])` makes two parts, the
+`setTriangles(indices, submeshStarts: [n])` makes two parts, the
 second starting at index `n`; `MeshRenderer.materials` gives each its
 material, the first part the first (Unity's submeshes and
 `Renderer.sharedMaterials`). `submeshCount` and `submesh(i)` read them.
@@ -131,7 +131,7 @@ moves every frame: that shouldn't have one.
 
 ### What it costs
 
-What it costs: the lab's water and flag, about 10,900 vertices changed
+The lab's water and flag, about 10,900 vertices changed
 every frame with their normals worked out, take the engine about 1.3 ms a
 frame on a Note10+ and 0.2 ms on a Mac, on top of the game's own work out of
 the new shape.
@@ -142,4 +142,4 @@ sending them took. Built-in shapes and models' meshes can't be changed: copy
 what you need into a `Mesh()`.
 
 The lab's "Meshes that change" has a flag, water, and ground to dig
-(examples/lab/lib/scenes/meshes_change.dart).
+([examples/lab/lib/scenes/meshes_change.dart](https://github.com/fynkel/fynkel/blob/main/examples/lab/lib/scenes/meshes_change.dart)).

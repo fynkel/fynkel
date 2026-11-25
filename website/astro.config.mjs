@@ -27,11 +27,6 @@ export default defineConfig({
         },
         { label: 'Tutorials', items: ['tutorials/roll', 'tutorials/starfall'] },
         {
-          label: 'Recipes',
-          collapsed: true,
-          items: ['recipes/moving', 'recipes/cameras', 'recipes/fighting', 'recipes/screens', 'recipes/world'],
-        },
-        {
           label: 'The basics',
           collapsed: true,
           items: [
@@ -82,6 +77,7 @@ export default defineConfig({
             'shaders/vertices-and-styles',
             'shaders/effects',
             'shaders/in-practice',
+            'reference/shader-names',
           ],
         },
         {
@@ -169,12 +165,18 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Recipes',
+          collapsed: true,
+          items: ['recipes/moving', 'recipes/cameras', 'recipes/fighting', 'recipes/screens', 'recipes/world'],
+        },
+        {
           label: 'Releasing',
           collapsed: true,
           items: [
             'release/before',
             'release/ios',
             'release/android',
+            'release/macos',
           ],
         },
         {

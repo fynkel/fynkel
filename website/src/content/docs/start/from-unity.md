@@ -3,6 +3,8 @@ title: "Coming from Unity"
 description: "Unity names and their Fynkel ones, and what stays different."
 ---
 
+Fynkel keeps Unity's ideas, and mostly its names:
+
 | Unity | Fynkel |
 |---|---|
 | `GameObject`, a prefab | `GameObject`, a subclass of it |

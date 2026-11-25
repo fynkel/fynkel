@@ -90,7 +90,7 @@ flutter:
     - assets/props/
 ```
 
-as examples/coins does. A file in a folder that isn't listed isn't in
+as [examples/coins](https://github.com/fynkel/fynkel/blob/main/examples/coins) does. A file in a folder that isn't listed isn't in
 the app, and loading it fails with its name.
 
 ## A level from Blender

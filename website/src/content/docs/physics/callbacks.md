@@ -47,7 +47,8 @@ class Thud extends Behaviour with Collisions {
 ## When they come
 
 - **Enter** comes the step two colliders start to touch.
-- **Stay** comes every step after, while either body is awake.
+- **Stay** comes every step after, while either body is awake. A character
+  controller counts as awake, standing still too.
 - **Exit** comes the step they part, or after one is disabled, removed,
   destroyed, hidden, put on a layer that doesn't meet, or switched between
   trigger and solid (Unity skips those; here the other side always hears).
@@ -77,7 +78,7 @@ object every time: read it in the callback.
 
 ## Layers that don't meet
 
-pass through each other:
+Layers that don't meet pass through each other:
 `physics.ignoreLayerCollision(ghosts, 0)` lets everything on the
 `ghosts` layer fall through layer 0, from the next step, and
 `physics.ignoreCollision(a, b)` does the same for two colliders until one

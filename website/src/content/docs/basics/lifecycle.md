@@ -25,7 +25,7 @@ tested.
 
 ## What objects cost each frame
 
-**What objects cost each frame**: only those with something of yours to call.
+Only those with something of yours to call.
 A plain `GameObject`, with only the engine's components (a renderer, a light,
 a collider, a particle system), costs the frame nothing on the game's thread
 however many there are: 32,000 still cubes add 0.002 ms on a Mac.

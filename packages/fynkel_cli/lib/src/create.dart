@@ -117,6 +117,16 @@ class Create {
           gradle,
         ),
       );
+      // Plugins' 32-bit libraries, beside which there's no engine: Google Play
+      // would offer the game to 32-bit phones (https://fynkel.com/release/android/).
+      gradle.writeAsStringSync(
+        _replace(
+          gradle.readAsStringSync(),
+          '    defaultConfig {',
+          (found) => '    packaging {\n        jniLibs { excludes += "lib/armeabi-v7a/**" }\n    }\n\n$found',
+          gradle,
+        ),
+      );
       final activity = Directory(p.join(dir.path, 'android', 'app', 'src', 'main'))
           .listSync(recursive: true)
           .whereType<File>()

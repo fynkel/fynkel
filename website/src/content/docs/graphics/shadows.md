@@ -23,9 +23,9 @@ GameObject stallLight() => GameObject(
 MeshRenderer puddle(Material water) => MeshRenderer(Mesh.cylinder(), water)..castShadows = false;
 ```
 
-- `light.shadows`, `renderer.castShadows` and `renderer.receiveShadows` can
-  change at any time. The lab's 'Look: shadows' scene shows the sun's and a
-  spotlight's, at each level.
+`light.shadows`, `renderer.castShadows` and `renderer.receiveShadows` can
+change at any time. The lab's 'Look: shadows' scene shows the sun's and a
+spotlight's, at each level.
 
 ### The sun's shadows
 

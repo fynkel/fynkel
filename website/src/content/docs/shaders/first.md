@@ -11,11 +11,11 @@ lights, shadows, fog, every quality level, skinned characters. Only
 what's different goes in the shader. Screen effects are shaders too,
 run over the camera's whole picture.
 
-`packages/fynkel/wgsl/fynkel.wgsl` lists every name the engine gives a shader,
-with what it does: read it beside your own. A surface reads `in.uv`,
+[Every shader name](/reference/shader-names/) lists what the engine gives a
+shader, with what it does: read it beside your own. A surface reads `in.uv`,
 `in.position` (in the world), `in.normal`, `in.view` (towards the camera),
 `in.screen` and `in.color` (the material's). The lab's
-`examples/lab/assets/shaders/` has a dozen to copy from (lava, water, grass in
+[examples/lab/assets/shaders/](https://github.com/fynkel/fynkel/blob/main/examples/lab/assets/shaders/) has a dozen to copy from (lava, water, grass in
 the wind, a hologram, a dissolve, a hit flash, toon light, an old TV), and
 `dart run fynkel:shader lava` writes a new one to start from,
 `assets/shaders/lava.wgsl`, and prints how to use it (`--unlit`, `--effect`,
@@ -92,7 +92,7 @@ together from parts.
 
 ## Numbers of each object's own
 
-**Each object its own numbers.** `struct PerObject` holds up to four
+`struct PerObject` holds up to four
 `f32`s each object sets for itself, so many objects share one material
 (and one draw) and still differ: a hit flash.
 

@@ -13,7 +13,7 @@ up the screen being +y, and letting go zeroes it.
 area, and appears under it: give it the area (the screen's bottom half), and a
 tap there with no drag still reaches the game. A widget of your own calls
 `input.setAxis2('move', Vec2(x, y))` (it adds to the keys, and stays until set
-again), and a button calls `input.action('jump') .press()` when it goes down
+again), and a button calls `input.action('jump').press()` when it goes down
 and `.release()` when it comes up (or both at once for a tap).
 
 With no widget, `input.stick()` reads a finger dragging alone as a stick:

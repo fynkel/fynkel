@@ -7,11 +7,15 @@ The game is a Flutter widget, so menus, HUDs and settings are plain
 Flutter. Keep what the HUD shows in `ValueNotifier`s on the game, and give
 the HUD to `FynkelApp`'s `overlay`, which gets the game's root:
 
+The game:
+
 ```dart
 class Score extends GameObject {
   final points = ValueNotifier(0);
 }
 ```
+
+and the HUD, where `game.dart` is the file `Score` is in:
 
 ```dart
 // lib/hud.dart

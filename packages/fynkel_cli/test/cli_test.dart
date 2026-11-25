@@ -117,7 +117,10 @@ void main() {
       );
       expect(file('my_game/lib/main.dart').readAsStringSync(), contains('FynkelApp(Game.new)'));
       expect(file('my_game/test/game_test.dart').readAsStringSync(), contains("'package:my_game/main.dart'"));
-      expect(file('my_game/android/app/build.gradle.kts').readAsStringSync(), contains('minSdk = 30'));
+      expect(
+        file('my_game/android/app/build.gradle.kts').readAsStringSync(),
+        allOf(contains('minSdk = 30'), contains('excludes += "lib/armeabi-v7a/**"')),
+      );
       expect(
         file('my_game/android/app/src/main/kotlin/com/example/my_game/MainActivity.kt').readAsStringSync(),
         allOf(contains('import dev.fynkel.fynkel_flutter.FynkelActivity'), contains(': FynkelActivity()')),

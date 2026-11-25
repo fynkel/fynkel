@@ -70,7 +70,7 @@ class Levels extends GameObject {
 
 ## A fade between levels
 
-waits, and `wait` works only in a routine
+A fade between levels waits, and `wait` works only in a routine
 ([Routines](/basics/routines/)): a plain `async` method that calls it throws "wait(...) works only
 inside a routine". Make `go` start one, and let the game's Flutter side
 show `fading` as a black panel over the view ([A HUD over the game](/flutter/hud/)):

@@ -51,7 +51,7 @@ minus it.
 
 ### Changing it
 
-Changing it: `spline[i] = Knot(...)`, `add`, `insert`, `removeAt`, or
+`spline[i] = Knot(...)`, `add`, `insert`, `removeAt`, or
 `setPositions(floats)` for every knot at once; `version` goes up each time.
 `mesh.setSweep(spline, shape)` sweeps again into the same mesh: a road whose
 knots are dragged, or a rope that swings each frame, which makes no garbage
@@ -61,7 +61,7 @@ shape stays the same.
 
 ### Samples
 
-Samples: `segmentsPerMetre` (2 unless given) and more where it bends, at
+`segmentsPerMetre` (2 unless given) and more where it bends, at
 most `maxSegments`. A 100 m road with a 12-point profile takes about 0.06 ms
 in Rust on a Mac.
 
@@ -99,4 +99,4 @@ List<GameObject> railway(List<Vec3> points, Mesh sleeper, Material wood, GameObj
 
 The lab's "Splines" has a road whose knots can be dragged, a rope that
 swings between two posts, a fence and a cart on a track
-(examples/lab/lib/scenes/splines.dart).
+([examples/lab/lib/scenes/splines.dart](https://github.com/fynkel/fynkel/blob/main/examples/lab/lib/scenes/splines.dart)).

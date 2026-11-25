@@ -12,7 +12,7 @@ too.
 
 Every copy bends with its own joints. So holding something is the same as for
 a model whose parts move whole (`knight.glb`, `rogue.glb` and `sword.glb` are
-in examples/lab/assets/kaykit, CC0; the knight and rogue have walk, run and
+in [examples/lab/assets/kaykit](https://github.com/fynkel/fynkel/blob/main/examples/lab/assets/kaykit), CC0; the knight and rogue have walk, run and
 jump clips, `Jump_Start`, `Jump_Idle`, `Jump_Land`):
 
 ```dart

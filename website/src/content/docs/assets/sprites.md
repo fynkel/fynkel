@@ -82,4 +82,4 @@ GameObject speechBubble(String words, Font font, Texture2D rounded) {
   a sprite shows it.
 
 The lab's "Text in the world" and "Pictures in the world" show all of
-this (examples/lab/lib/scenes/flat_text.dart and sprites.dart).
+this ([examples/lab/lib/scenes/flat_text.dart](https://github.com/fynkel/fynkel/blob/main/examples/lab/lib/scenes/flat_text.dart) and sprites.dart).

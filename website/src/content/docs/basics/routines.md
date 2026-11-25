@@ -73,7 +73,7 @@ tween) of its own.
 
 ### Waits
 
-Waits: `await nextFrame`, `await fixedStep` (right after the next fixed
+`await nextFrame`, `await fixedStep` (right after the next fixed
 step's `onFixedUpdate` calls), `await wait(seconds)` (`unscaled: true` to go
 on while paused), `await waitUntil(() => test)`, `await waitWhile(() =>
 test)`, a tween, a signal's `next`, or any `Future`.

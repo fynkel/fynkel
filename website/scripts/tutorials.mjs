@@ -23,3 +23,24 @@ for (const name of readdirSync(tutorials).filter((f) => f.endsWith('.md'))) {
   writeFileSync(join(tutorialsOut, name), expanded);
 }
 console.log(`tutorials: in ${tutorialsOut}`);
+
+// Every name the engine gives a shader: its own file, as it's shipped.
+const names = readFileSync(join(root, 'packages/fynkel/wgsl/fynkel.wgsl'), 'utf8');
+const reference = join(here, '..', 'src', 'content', 'docs', 'reference');
+mkdirSync(reference, { recursive: true });
+writeFileSync(
+  join(reference, 'shader-names.md'),
+  `---
+title: Every shader name
+description: The functions and fields the engine gives a shader.
+editUrl: false
+---
+
+What a shader can use, as the engine declares it. [A first
+shader](/shaders/first/) shows how.
+
+\`\`\`wgsl
+${names.trimEnd()}
+\`\`\`
+`,
+);

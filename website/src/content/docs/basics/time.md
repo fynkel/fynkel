@@ -19,7 +19,7 @@ description: "time.delta, pausing, slow motion, fixed steps and the frame rate."
 
 ## The frame rate
 
-is at most `world.targetFrameRate` frames a second, as
+The frame rate is at most `world.targetFrameRate` frames a second, as
 Unity's `Application.targetFrameRate`: 60 unless the game sets it, on every
 device. A game that wants more sets 120 (or 0, for every frame the display
 shows); one that wants less, 30.
@@ -49,7 +49,7 @@ less still (`pauseWhenCovered`, [Menus and pages](/flutter/menus/)).
 
 ## Fixed steps
 
-cut the game's time into equal steps of `time.fixedDelta`
+Fixed steps cut the game's time into equal steps of `time.fixedDelta`
 (1/50 s), so what runs in them goes the same at 30 fps and at 120. A frame
 runs as many as its time holds: at 120 fps most frames have none, at 30 some
 have two.

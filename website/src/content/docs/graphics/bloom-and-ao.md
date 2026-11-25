@@ -50,7 +50,7 @@ windmill's blades 6 cm off their wall showed one at 0.3.
 
 ### Colours shown as picked don't glow
 
-Colours shown as picked don't glow: the camera's `clearColor` and a
+The camera's `clearColor` and a
 `Sky.gradient`, however bright. A `Sky.image` is light, and its sun glows.
 
 ### Each camera has its own
@@ -62,7 +62,7 @@ off, at each level.
 
 ### What they cost
 
-What they cost: little on an iPhone 16 Pro Max (120 fps at every level
+Little on an iPhone 16 Pro Max (120 fps at every level
 with both) or a Mac. On an older Android phone they cost a lot: a Galaxy
 Note10+ at medium went from 58 to 40 fps with bloom. If your game runs on
 phones like it, use a quality without bloom there

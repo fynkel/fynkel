@@ -93,7 +93,7 @@ parents are on.
 
 ### Finding
 
-Finding: `parent`, `children` (or `childCount` and `childAt(i)`, Unity's
+`parent`, `children` (or `childCount` and `childAt(i)`, Unity's
 `GetChild`, which make no list), `find(name)` below this one,
 `ancestor<T>()` the nearest above of a type, and across the whole game
 `world.all<T>()`, `world.first<T>()` and `world.only<T>()` (which throws

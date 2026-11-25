@@ -18,7 +18,7 @@ module. Those 10,000, small, hold 60 fps at every quality level on all three.
 
 ## Drawing over and over
 
-is what costs most on a phone: big see-through
+Drawing over and over is what costs most on a phone: big see-through
 particles covering the screen, each pixel drawn once for every puff in front
 of it. The lab's "screen of smoke" fills the whole screen with puffs two to
 three metres across, five metres from the camera (`LAB_SMOKE=200`, or any

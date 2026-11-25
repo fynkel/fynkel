@@ -41,8 +41,8 @@ class Cube extends GameObject {
 - **An object has a transform** (where it is, relative to its parent) and
   **components**: a `Camera` to see from, a `Light`, a `MeshRenderer` to be
   drawn.
-- **A new world is a clear day**: a sky that lights what the sun misses, and
-  the sun casts shadows. The cube stands in daylight with three lines. [Making
+- **A new world is a clear day**: a sky that lights everything. `Light.sun` adds the sun, which
+  casts shadows. [Making
   it look good](/graphics/looks/) goes on from there.
 - **`onLoad`** is where an object adds what it's made of. **`onUpdate`** runs
   every frame. `time.delta` is the frame's time in seconds, so the cube turns

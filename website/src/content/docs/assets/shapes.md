@@ -91,4 +91,4 @@ GameObject town(List<(double, double)> plots, Material walls, Material roofs) {
 
 The lab's "Building meshes" has every shape with sliders for its
 settings, a letter B with its holes, a vase, and a town built and
-combined (examples/lab/lib/scenes/meshes_build.dart).
+combined ([examples/lab/lib/scenes/meshes_build.dart](https://github.com/fynkel/fynkel/blob/main/examples/lab/lib/scenes/meshes_build.dart)).

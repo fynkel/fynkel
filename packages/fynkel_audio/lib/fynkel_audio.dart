@@ -1,4 +1,4 @@
-/// Sound for Fynkel, as Unity has it (docs/stage-11.md).
+/// Sound for Fynkel, as Unity has it.
 ///
 /// Load a sound with `assets.audio('coin.ogg')` (WAV, OGG Vorbis or MP3),
 /// put an [AudioSource] on an object and [AudioSource.play] it, or play a

@@ -33,7 +33,9 @@ void main() => runApp(
 
 ## A stick and a jump button
 
-They feed the same `move` axis and `jump` action as the keys.
+They feed the same `move` axis and `jump` action as the keys. To show them on
+phones alone, test `defaultTargetPlatform` (from `flutter/foundation.dart`) for
+`TargetPlatform.iOS` and `.android`. Give it `game.world.input`.
 
 ```dart
 // lib/recipes/touch_controls.dart
@@ -95,7 +97,9 @@ class Countdown extends GameObject {
 
 ## A pause button
 
-The menu is Flutter's dialog; covering the game pauses it.
+The menu is Flutter's dialog. Covering the game's page pauses the game
+([Menus and pages](/flutter/menus/)). Put the button in `FynkelApp`'s
+`overlay`, or over a `FynkelView`.
 
 ```dart
 // lib/recipes/pause_button.dart
@@ -139,6 +143,8 @@ class RoundGame extends GameObject {
     super.onLoad();
     round = add(Round());
   }
+
+  void end() => over.value = true; // when the player loses
 
   void again() {
     round.destroy();

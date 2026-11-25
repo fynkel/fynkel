@@ -26,7 +26,7 @@ A cube turns in a window: click it, and it hops. The game is in `lib/main.dart`:
 colour, save, and press `R` in the terminal to see it.
 
 - **The first build** for each platform downloads the engine, about 7 MB.
-  Later builds need no network.
+  After that, builds for it need no network.
 - **`fynkel: command not found`?** Add `$HOME/.pub-cache/bin` to your PATH.
 - **Something missing?** `fynkel doctor` checks your Mac and the game in the
   folder you run it in, and says what to do.

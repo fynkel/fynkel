@@ -13,7 +13,7 @@ them.
 
 ### Hot reload takes a shader's new code
 
-Hot reload takes a shader's new code: change the file, press hot reload,
+Change the file, press hot reload,
 and every material using it draws with it from the next frame. Code that
 doesn't compile keeps the old and says why on `world.errors`.
 

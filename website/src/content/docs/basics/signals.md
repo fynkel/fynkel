@@ -35,7 +35,6 @@ class Scoreboard extends GameObject {
 }
 ```
 
-- A signal with nothing to tell is a `Signal<void>`, emitted with `emit()`.
 - `emit(value)` calls every listener at once, in order; a `Signal<void>` is
   emitted with `emit()`. A handler that throws goes to `world.errors`, and the
   others still hear.

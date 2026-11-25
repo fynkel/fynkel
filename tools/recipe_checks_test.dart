@@ -20,8 +20,10 @@ import 'package:my_game/recipes/pick_up.dart';
 import 'package:my_game/recipes/shoot.dart';
 import 'package:my_game/recipes/sliding_door.dart';
 import 'package:my_game/recipes/slow_motion.dart';
+import 'package:my_game/recipes/stay_near.dart';
 import 'package:my_game/recipes/tap_to_move.dart';
 import 'package:my_game/recipes/third_person.dart';
+import 'package:my_game/recipes/third_person_walk.dart';
 import 'package:my_game/recipes/top_down.dart';
 import 'package:my_game/recipes/walk.dart';
 import 'package:my_game/recipes/waves.dart';
@@ -40,6 +42,15 @@ GameObject thing(World world, [List<Component> components = const [], Vec3 at = 
 );
 
 void ground(World world) => thing(world, [BoxCollider(size: const Vec3(40, 1, 40))], const Vec3(0, -0.5, 0));
+
+class Zone extends GameObject with Triggers {
+  Zone() : super(components: [SphereCollider(isTrigger: true)]);
+
+  var stays = 0;
+
+  @override
+  void onTriggerStay(Collider other) => stays++;
+}
 
 void main() {
   test('W walks away from the camera, and faces that way', () {
@@ -216,6 +227,45 @@ void main() {
     gem.position = walker.position;
     world.run(1);
     expect((taken, gem.isDestroyed), (1, true));
+  });
+
+  test('a trigger stays with a character standing still (Triggers and collisions)', () {
+    final world = newWorld();
+    ground(world);
+    final zone = world.add(Zone());
+    zone.position = world.add(jumper()).position;
+    world.run(3);
+    final before = zone.stays;
+    world.run(1);
+    expect(zone.stays - before, inInclusiveRange(48, 52));
+  });
+
+  test('the third-person player walks, turns and jumps', () {
+    final world = newWorld();
+    ground(world);
+    final walker = world.add(thirdPersonPlayer());
+    world.add(thirdPerson(walker));
+    world.run(0.5);
+    final standing = walker.position.y;
+    world.input.simulate.keyDown(KeyCode.d);
+    world.input.simulate.keyDown(KeyCode.space);
+    var peak = 0.0;
+    for (var i = 0; i < 60; i++) {
+      world.update(1 / 60);
+      if (walker.position.y > peak) peak = walker.position.y;
+    }
+    expect(peak - standing, greaterThan(0.9));
+    expect(walker.position.x, greaterThan(2));
+    expect(walker.forward.x, greaterThan(0.9));
+  });
+
+  test('stays on the island', () {
+    final world = newWorld();
+    final one = thing(world, [StayNear(Vec3.zero, 5)]);
+    one.position = const Vec3(9, 1, 0);
+    world.run(0.1);
+    expect(one.position.x, closeTo(5, 0.01));
+    expect(one.position.y, 1);
   });
 
   test('a door opens near, and shuts', () {

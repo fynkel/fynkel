@@ -52,16 +52,16 @@ class Turret extends GameObject {
 }
 ```
 
-- `countActive` and `countInactive` say how many are out and waiting;
-  `prewarm(n)` makes them ahead, so play doesn't make (and load) them: a new
-  one `get` makes shows from the next frame, once it's loaded, where a waiting
-  one shows at once; `activeAt(i)` walks the ones out without making a list
-  (walk from the end to release as you go), and `active` gives a copy;
-  `clear()` destroys the waiting ones; with `maxSize`, a release beyond that
-  many waiting destroys.
+`countActive` and `countInactive` say how many are out and waiting;
+`prewarm(n)` makes them ahead, so play doesn't make (and load) them: a new
+one `get` makes shows from the next frame, once it's loaded, where a waiting
+one shows at once; `activeAt(i)` walks the ones out without making a list
+(walk from the end to release as you go), and `active` gives a copy;
+`clear()` destroys the waiting ones; with `maxSize`, a release beyond that
+many waiting destroys.
 
-  Hidden objects aren't in `world.all`, so a wave's "are they all gone" works
-  the same with a pool. Getting and releasing allocates nothing.
+Hidden objects aren't in `world.all`, so a wave's "are they all gone" works
+the same with a pool. Getting and releasing allocates nothing.
 
 ### Reset in get's function, or in onEnable
 
@@ -71,7 +71,7 @@ new object is made by the pool's function and added below the pool's parent.
 
 ### A released object's particles and trail go
 
-A released object's particles and trail go: hidden, its particle systems
+Hidden, its particle systems
 stop and clear, and its trail is cleared, at the next particles step; shown
 again, they start afresh. One released and got again in the same frame never
 sees that step: call `trail.clear()` (and the particles' `clear()`) in
@@ -79,7 +79,7 @@ sees that step: call `trail.clear()` (and the particles' `clear()`) in
 
 ### A released object starts clean
 
-A released object starts clean: it's hidden, the routines and motions it
+It's hidden, the routines and motions it
 and everything below it ran are stopped (a hidden object's would only pause,
 and resume stale), what they listened to with `on` while shown (from
 `onEnable` on) is cancelled, and it's back below the pool's parent. So

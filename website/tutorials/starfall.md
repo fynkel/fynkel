@@ -118,7 +118,7 @@ game's `best` changes:
 <!-- include: examples/starfall/lib/main.dart -->
 
 (For a save with more in it, a level and what was found, write a file:
-[Levels](/making/levels/) shows how.)
+[Saving](/making/saving/) shows how.)
 
 Run it on a phone or the Mac:
 

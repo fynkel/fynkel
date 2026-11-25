@@ -47,16 +47,16 @@ Keep `near` below `far`: a view drawing from a camera that isn't throws an
 `ArgumentError` naming it, each frame, rather than drawing nothing. It's
 checked only then, so setting `near` and then `far` is fine.
 
-## Shake, blends and rigs
+## Shake and blends
 
-- `world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless told, as
-  an object's own `shake`), `setBlend(blend, from:, to:)`, `live`. A shake
-  moves the picture, not the camera: its transform stays where the game or the
-  virtual camera put it, so moving it during a shake never drifts.
-  `world.cameras.shakeOf(camera)` says how far it's moved now; world widgets
-  ([Widgets in the world](/flutter/world-widgets/)) move with it.
+`world.cameras.shake(strength, seconds:, frequency:)` (0.4 s unless told, as
+an object's own `shake`), `setBlend(blend, from:, to:)`, `live`. A shake
+moves the picture, not the camera: its transform stays where the game or the
+virtual camera put it, so moving it during a shake never drifts.
+`world.cameras.shakeOf(camera)` says how far it's moved now; world widgets
+([Widgets in the world](/flutter/world-widgets/)) move with it.
 
-### Rigs
+## Rigs
 
 Rigs are behaviours: `Follow(target, offset:, space:, damping:,
 lookAhead:)`, `LookAt(target)`, and `Orbit(target)`, which the player turns
@@ -95,7 +95,7 @@ them right after.
 
 ### A camera that doesn't go through walls
 
-A camera that doesn't go through walls: add `CameraCollision()`
+Add `CameraCollision()`
 (fynkel_physics) beside the rig. Each frame, after the rig, it casts a
 sphere from the point the camera looks at out to the camera, and brings the
 camera in front of the first collider in the way, on the same line, so it
@@ -113,8 +113,7 @@ player, who then fills the view, so hide the model below a metre or so.
 
 The point is the rig's: an `Orbit`'s target plus its `offset`, a `LookAt`'s,
 or a `Follow`'s target, unless `target:` and `offset:` are given. An
-`Orbit`'s `distance` stays what the player zoomed to. There's an example
-after this list. It's a `CameraExtension`: a behaviour whose `adjust(dt)`
+`Orbit`'s `distance` stays what the player zoomed to. There's an example [below](#a-third-person-camera).  It's a `CameraExtension`: a behaviour whose `adjust(dt)`
 runs after the rigs and before the view goes where the virtual camera is.
 
 Make your own for anything else a camera must keep to (above the water,
@@ -123,7 +122,7 @@ starts again from its own place next frame.
 
 ### Between the screen and the world
 
-Between the screen and the world: on a `Camera`, such as
+On a `Camera`, such as
 `world.camera!`, `screenPointToRay(point)`, `screenPointToPlane(point,
 Plane.ground)` and `worldToScreenPoint(point)`; `world.raycast(ray)` gives
 what a ray hits first (a `RayHit`: `gameObject`, `point`, `normal`,

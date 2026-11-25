@@ -3,6 +3,8 @@ title: "Hot reload"
 description: "What a reload changes, and starting the game over."
 ---
 
+Change the code while the game runs:
+
 - **Hot reload** (`r`) changes methods at once, in objects and behaviours
   alike: the next frame runs the new `onUpdate`.
 - It doesn't run `onLoad` or `onStart` again, nor change a field that's

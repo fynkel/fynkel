@@ -69,13 +69,13 @@ A sky that lights does the ambient light's work: a scene that had a
 
 ### What's mirrored is the sky alone
 
-What's mirrored is the sky alone: the ground and other objects aren't
+The ground and other objects aren't
 seen in a shiny surface, nor do they hide the sky from it. A ball in a room
 still mirrors the sky outside.
 
 ### Nothing hides the sky's light either
 
-Nothing hides the sky's light either: a roof or a cave's rock doesn't
+A roof or a cave's rock doesn't
 keep it out, so under one the sky lights as it would outside. For a cave or
 a room lit by its lamps, give it a dark sky (`Sky.color(...)`) or none.
 `world.sky` and `world.fog` belong to the world, not to a level: a game of
@@ -90,7 +90,7 @@ null` and the camera's `clearColor`.
 
 ## Fog
 
-fades what's further than `start` metres from the camera into its
+`Fog` fades what's further than `start` metres from the camera into its
 `color`, all of it by `end`. Without a `color` it's the sky's horizon, so far
 things melt into the sky; with no sky, the camera's clear colour.
 

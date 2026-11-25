@@ -45,7 +45,7 @@ void main() => runApp(
 );
 ```
 
-[How a game is made](/basics/hello/)'s `show runApp` is too narrow for this: import all of `widgets.dart`,
+Where [the first game](/basics/hello/) imports `show runApp`, this needs more: import all of `widgets.dart`,
 and `services.dart` for the keys, as here. A pause panel shows itself
 when the game pauses, from wherever it's paused, with
 `ValueListenableBuilder(valueListenable: game.world.pausedListenable,

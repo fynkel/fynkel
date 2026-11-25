@@ -141,6 +141,9 @@ class SlowMotion extends Behaviour {
 
 ## Keep the best score
 
+Run `flutter pub add path_provider`. In an `async` `main`, call
+`WidgetsFlutterBinding.ensureInitialized()` before `BestScore.open()`.
+
 ```dart
 // lib/recipes/best_score.dart
 import 'dart:io';

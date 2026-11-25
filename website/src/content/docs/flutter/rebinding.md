@@ -62,7 +62,7 @@ class _JumpKeyState extends State<JumpKey> {
 A real game keeps its keys in a `ChangeNotifier` the settings page and
 the game share, and the game binds them again when it changes:
 `on(controls.changed, (_) => controls.bindTo(input))`
-(`examples/sheepdog/lib/game.dart`). `Controls` keeps one key for each
+([examples/sheepdog/lib/game.dart](https://github.com/fynkel/fynkel/blob/main/examples/sheepdog/lib/game.dart)). `Controls` keeps one key for each
 name, keys only, and the arrow keys always move too. `bindTo` binds every
 action again from it, so a mouse button or a second key for an action is
 bound after it, each time: `input.bindAction('fire', [controls['fire'],

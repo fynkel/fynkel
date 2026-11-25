@@ -5,7 +5,7 @@ description: "Bouncing sparks, sub emitters, trails and dust."
 
 ![Fireworks, dust and sparks that bounce](/shots/particles-world.webp)
 
-**Particles and the world**, as Unity's modules of the same names:
+These are Unity's modules of the same names.
 
 ### Emission over distance
 
@@ -14,14 +14,14 @@ its object moves: dust under feet and wheels, none standing still.
 
 ### Inherit velocity
 
-`inheritVelocity: InheritVelocity(curve:)` gives each
+InheritVelocity(curve:)` gives each
 particle that much of its object's speed when it's made
 (`InheritVelocityMode.initial`), or all through its life (`.current`); a
 negative one throws dust back from the way it goes.
 
 ### Sub emitters
 
-`subEmitters: [SubEmitter(system, type)]`, up to 4:
+[SubEmitter(system, type)]`, up to 4:
 another system, a child of this one, makes its burst (its own `emission`'s
 bursts) where a particle is born, dies or hits something
 (`SubEmitterType.birth`, `.death`, `.collision`); a birth one keeps making
@@ -34,7 +34,7 @@ with a trail on birth and a burst on death.
 
 ### Collision
 
-`collision: ParticleCollision(planes: [floor])`, up to 6
+ParticleCollision(planes: [floor])`, up to 6
 objects, each a plane through its position facing its up: the floor, a wall.
 A particle hitting one bounces (`bounce`, 0 to 1, as Unity's), loses speed
 (`dampen`) and life (`lifetimeLoss`), and dies below `minKillSpeed`;

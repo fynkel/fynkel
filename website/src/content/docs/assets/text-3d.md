@@ -37,7 +37,7 @@ void showScore(MeshRenderer score, Font font, int points) {
 
 ### Layout
 
-Layout: `size` is the font's em in metres; capitals are about 0.7 of it.
+`size` is the font's em in metres; capitals are about 0.7 of it.
 The first line's letters stand on the X axis and each `\n` starts a line
 below, `lineSpacing` times the font's line height. `align`
 (`TextAlignment.left`, `center`, `right`) puts each line's start, middle or
@@ -48,7 +48,7 @@ the widest line and the height of the lines, for a board or a button to fit.
 
 ### Letters
 
-Letters: each one has the holes its font gives it (the middle of an o,
+Each one has the holes its font gives it (the middle of an o,
 the two in a B), its curves smooth at any size. A letter the font hasn't got
 is drawn as the font's missing-letter box. Text is laid out left to right,
 one letter after another: no Arabic joining, no right-to-left, no emoji.
@@ -61,7 +61,7 @@ metre, and wraps along the sides.
 
 ### What it costs
 
-What it costs: two lines of 26 letters are about 4,000 triangles and
+Two lines of 26 letters are about 4,000 triangles and
 take 0.4 ms on a Mac. A score changing a few times a second is fine; text
 that changes every frame is better as a Flutter widget over the view, pinned
 to a place in the world ([Widgets in the world](/flutter/world-widgets/)),

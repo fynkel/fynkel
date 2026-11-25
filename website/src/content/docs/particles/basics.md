@@ -107,8 +107,7 @@ hidden, it stops and clears; on again, it plays from the start.
 
 When it's done, its last particle gone and not looping, `stopAction`
 does what Unity's does: `destroy` destroys its object (a one-off explosion),
-`disable` turns it off (and one from a pool, [Moving
-things](/basics/moving/), goes back to it, to play again from the start when
+`disable` turns it off (and one from a pool, [Pooling](/basics/pooling/), goes back to it, to play again from the start when
 `get` hands it out), `callback` calls `onStopped`. `emit` and `play` right
 after a move make the particles at the new place.
 
@@ -121,8 +120,8 @@ menu's.
 ### Changing it as it plays
 
 Every setting can change at any time, and the
-particles it has keep going: `smoke.emission = Emission(rateOverTime: speed
-* 4)` each frame, as an exhaust follows its speed. A setting is checked as
+particles it has keep going: `smoke.emission =
+Emission(rateOverTime: speed * 4)` each frame, as an exhaust follows its speed. A setting is checked as
 it's set, so a wrong one throws there and changes nothing.
 
 Setting one makes nothing, so every frame is fine, even among a thousand

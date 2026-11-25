@@ -31,7 +31,7 @@ stream wasn't ready (it should stay 0).
 
 ## Groups
 
-are a settings screen's "music" and "effects" (a group of Unity's
+Volume groups are a settings screen's "music" and "effects" (a group of Unity's
 `AudioMixer`): `audio.group('effects')` is made the first time it's asked for,
 and up to 15 can be. Each has a `volume` and `mute` under `audio.volume`, and
 `fade(to, seconds)`, all heard within a few milliseconds, without a click.
@@ -76,7 +76,7 @@ class Soundtrack extends Behaviour {
 
 ## Hot reload
 
-reads a changed sound file again: the clip sounds as the
+Hot reload reads a changed sound file again: the clip sounds as the
 file now does from the next time it's played (what plays plays on). A
 file that's no longer sound keeps the old, and the error goes to
 `world.errors`.

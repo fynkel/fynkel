@@ -155,7 +155,7 @@ system past it, so its public calls should throw a `StateError` after.
 
 ### Following objects without visiting them all
 
-Following objects without visiting them all: `world.movedReader()`
+`world.movedReader()`
 lists those whose transform was set since it last read, and
 `world.transformVersion` says whether any was.
 `readWorldTransforms` reads many in one call; `writeTransforms` sets
@@ -164,17 +164,19 @@ many from native code. `componentCount`/`componentAt` and
 
 ### Files of its own
 
-Files of its own: an `AssetKind` loads them through `assets`, shared
+An `AssetKind` loads them through `assets`, shared
 and freed as models are. `world.addAssetKind` lets `assets.preload`
 load them by their ending.
 
 ### Taps
 
-Taps: `pointerHit(ray, layers)` makes what the system holds
+`pointerHit(ray, layers)` makes what the system holds
 tappable ([Keys, mouse and touch](/input/reading/)) though it has no mesh. Physics answers with its
 colliders.
 
-**Making it a package.** Move `wind.dart` into a Dart package of its own
+## Making it a package
+
+Move `wind.dart` into a Dart package of its own
 that depends on `fynkel`, export it from the package's library, and the
 game imports that. Its tests are the same.
 

@@ -65,7 +65,7 @@ frame down so on a device: `--define 'TOUR=<title>'`.
 
 ### Each level on each phone
 
-Each level on each phone: Sheepdog's field, frames a second, a
+Sheepdog's field, frames a second, a
 sense of what the levels cost (the same report has more scenes):
 
 | | low | medium | high |
@@ -82,7 +82,7 @@ helped an A10 and cost a Mali-G76 a third of its frames.
 
 ### Where the GPU's time goes
 
-Where the GPU's time goes: `WorldView.timeGpu = true` times each part of
+`WorldView.timeGpu = true` times each part of
 every view's frames on the GPU (shadows, ambient occlusion, the scene,
 bloom, the last pass, screen effects), and `view.stats.gpu` adds them up;
 subtract an earlier one and divide by its `frames` for a frame's. It's for

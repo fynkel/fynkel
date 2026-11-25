@@ -61,7 +61,7 @@ flutter run --release -d <device>
 - Turn the phone, if it can turn.
 - Play ten minutes on the oldest phone you support, and see that it keeps
   its speed as it warms up ([Measuring](/making/measuring/)).
-- Fly in aeroplane mode: a game that doesn't need the network should start.
+- Turn on aeroplane mode: a game that doesn't need the network should start.
 
 Errors in a release build go to `world.errors`: send them to a crash
 reporter, or they're lost ([Errors](/basics/errors/)).

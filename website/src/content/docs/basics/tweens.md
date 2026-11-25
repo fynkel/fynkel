@@ -23,13 +23,13 @@ class Door extends GameObject {
 }
 ```
 
-- Each returns a **`Motion`**: `stop()`, `complete()` (to where its last loop
-  ends; one that loops for ever ends the loop it's in), and it's a future, so
-  `await open();` waits for it to end.
+Each returns a **`Motion`**: `stop()`, `complete()` (to where its last loop
+ends; one that loops for ever ends the loop it's in), and it's a future, so
+`await open();` waits for it to end.
 
 ### Helpers
 
-Helpers: `moveTo`, `moveBy`, `rotateTo`, `rotateBy`, `lookAtOver`,
+`moveTo`, `moveBy`, `rotateTo`, `rotateBy`, `lookAtOver`,
 `scaleTo`, `colorTo`, `punchScale`, `shake`. Each takes `seconds:`; all but
 `colorTo`, `punchScale` and `shake` take `speed:` instead. `moveTo`,
 `moveBy` and `rotateTo` are in the world, as `position`; `localMoveTo` and
@@ -44,12 +44,12 @@ where the first began: a recoil every shot never grows the barrel.
 
 ### tween(from, to, …, onUpdate:)
 
-`tween(from, to, …, onUpdate:)` for any value: `double`, `Vec2`, `Vec3`,
+`tween(from, to, …, onUpdate:)` moves any value: `double`, `Vec2`, `Vec3`,
 `Quat`, `Color`, or anything with a `lerp:` you give.
 
 ### Options
 
-Options: `ease:` (`Ease.outQuad` by default; any `double
+`ease:` (`Ease.outQuad` by default; any `double
 Function(double)`, so Flutter's `Curves.x.transform` too), `delay:`,
 `loops:` (-1 for ever), `yoyo:`, `unscaled:` (goes on while paused),
 `onComplete:`.

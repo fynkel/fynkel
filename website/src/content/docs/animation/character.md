@@ -6,7 +6,7 @@ description: "Legs that blend and gestures over them, put together."
 Put together, a character is a blend for its legs and a layer or two
 over it. This one walks where it's told: it runs to a place far away,
 slows to a walk near it and stands there, and nods yes from the waist up
-without stopping. examples/coins's player is the same, with a coin in
+without stopping. [examples/coins](https://github.com/fynkel/fynkel/blob/main/examples/coins)'s player is the same, with a coin in
 its hand:
 
 ```dart

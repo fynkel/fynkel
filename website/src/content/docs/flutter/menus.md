@@ -73,7 +73,7 @@ The settings page goes over the menu, and the game stays paused under
 both until the menu closes. `PopScope(canPop: false)` turns Android's
 back button into "open the menu". In a dialog, Escape is a back too: a
 menu that leaves the game on back, as the arena's does, maps Escape to
-closing itself with a `CallbackShortcuts` (`examples/arena/lib/menus.dart`,
+closing itself with a `CallbackShortcuts` ([examples/arena/lib/menus.dart](https://github.com/fynkel/fynkel/blob/main/examples/arena/lib/menus.dart),
 which has a title screen, this menu and a settings page, and tests that
 click through them).
 

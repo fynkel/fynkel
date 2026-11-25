@@ -119,7 +119,7 @@ that's expected, and there's nothing to change.
 
 ### Qualities compare by value
 
-Qualities compare by value: `world.quality` gives back what was set, and
+`world.quality` gives back what was set, and
 `Quality.medium.copyWith(bloom: false) == Quality.medium.copyWith(bloom:
 false)`. Give your own a `name` (in the constructor or `copyWith`) for a
 settings page or a log.

@@ -67,7 +67,7 @@ not a few frames.
 
 ## A game that loads files
 
-(`assets.instantiate`, a texture, a sound) reads
+A game that loads files (`assets.instantiate`, a texture, a sound) reads
 them from the app's own bundle in a widget test too, as listed in
 pubspec.yaml, with nothing to set up. It reads them in real time, which a
 widget test's frames don't move: `await tester.loaded()` waits for the game on

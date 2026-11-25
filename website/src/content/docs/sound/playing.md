@@ -96,7 +96,7 @@ Physics is the same: `world.physics` is package:fynkel_physics'
 
 ## Pausing
 
-While the game is paused (`world.paused`, [The frame and the lifecycle](/basics/lifecycle/)) its sounds
+While the game is paused (`world.paused`, [Keys and pausing](/input/pause/)) its sounds
 hold where they are, and go on with it. A source with `ignorePause`
 plays on, as a pause menu's sounds should, and so does
 `audio.playOneShot(click, ignorePause: true)`. While the app is away

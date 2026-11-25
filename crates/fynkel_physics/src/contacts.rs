@@ -401,7 +401,12 @@ impl Physics {
         }
         for k in 0..c.stays.len() {
             let pair = c.stays[k];
-            if awake(w, pair.ha) || awake(w, pair.hb) {
+            // A character controller has no body to sleep: in a trigger it
+            // counts as awake, as Unity's does.
+            let character = |h: ColliderHandle| {
+                self.followed.get(h.into_raw_parts().0 as usize).and_then(Option::as_ref).is_some_and(|f| f.character)
+            };
+            if awake(w, pair.ha) || awake(w, pair.hb) || (pair.trigger && (character(pair.ha) || character(pair.hb))) {
                 push_event(w, c, ContactKind::Stay, pair);
             }
         }

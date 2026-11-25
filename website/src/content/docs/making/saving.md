@@ -82,6 +82,6 @@ the app may be closed while it's away, not every frame: a write is a few
 milliseconds on a phone.
 
 A few settings and nothing else can go in `shared_preferences` instead, as
-examples/pocket_hole's level does: simpler, but its writes are queued, so one
+[examples/pocket_hole](https://github.com/fynkel/fynkel/blob/main/examples/pocket_hole)'s level does: simpler, but its writes are queued, so one
 the app is killed in the middle of may be lost; the file above says what
 happens then.

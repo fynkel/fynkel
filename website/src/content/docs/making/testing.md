@@ -68,11 +68,11 @@ after a change to the look that's meant, run `FYNKEL_BLESS=1 flutter test`
 to save it, and look at it before keeping it. A failure leaves the picture
 and the difference in `build/fynkel_failures/`.
 
-`examples/arena/test` tests a whole game this way.
+[examples/arena/test](https://github.com/fynkel/fynkel/blob/main/examples/arena/test) tests a whole game this way.
 
 ## A game that loads assets
 
-needs to be told where they are: a test has no
+A game that loads assets needs to be told where they are: a test has no
 app bundle. `World(source: ...)` takes a function from an asset's name to its
 bytes, the files in the game's `assets/` folder here, and a game whose
 `onLoad` is `async` is ready after `await world.add(game).loaded`, with no
@@ -157,17 +157,17 @@ floats, so after a step its position reads `0.20000000298`, not `0.2`.
 
 ## Is it fair?
 
-**Is it fair? A test can say.** Play whole rounds in a test with a
+A test can say. Play whole rounds in a test with a
 scripted player that only does the obvious thing, and one that does
 nothing: the first should win, the second lose. Move the player as the
 game would (`walk(...)`, `world.update(1 / 60)`), and loop until the round
-is over. Sheepdog's (`examples/sheepdog/test/game_test.dart`, "is fun")
+is over. Sheepdog's ([examples/sheepdog/test/game_test.dart](https://github.com/fynkel/fynkel/blob/main/examples/sheepdog/test/game_test.dart), "is fun")
 found the wolves herding the flock home better than no dog at all, which
 reading the code hadn't.
 
 ## The view's shape
 
-is `world.input.width` and `height`, in logical
+The view's shape is `world.input.width` and `height`, in logical
 pixels: a camera that frames a board to fit reads them. A `FynkelView`
 gives them, and so does a `HeadlessView` (in its pixels) when nothing
 else had; in a test with no view, `world.input.simulate.resize(390,

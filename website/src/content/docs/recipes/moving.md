@@ -69,6 +69,61 @@ GameObject jumper() => GameObject(
 );
 ```
 
+## A third-person player
+
+Both of those: it walks as the camera sees it, turns to face the way it goes,
+and falls. Its camera is in [Cameras](/recipes/cameras/#behind-the-player).
+
+```dart
+// lib/recipes/third_person_walk.dart
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_physics/fynkel_physics.dart';
+
+class ThirdPersonWalk extends Behaviour {
+  late final CharacterController controller = gameObject.get<CharacterController>()!;
+  var _fall = 0.0;
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    final camera = world.camera?.gameObject;
+    if (camera == null) return;
+    final move = input.axis2('move');
+    final way = (camera.right.flat * move.x + camera.forward.flat.normalizedOrZero * move.y).normalizedOrZero;
+    if (way != Vec3.zero) rotation = Quat.rotateTowards(rotation, Quat.lookRotation(way), 10 * time.delta);
+    if (controller.isGrounded) _fall = input.action('jump').wasPressed ? 6 : -1;
+    _fall -= 15 * time.delta;
+    controller.move((way * 4 + Vec3(0, _fall, 0)) * time.delta);
+  }
+}
+
+GameObject thirdPersonPlayer() => GameObject(
+  transform: Transform(position: Vec3(0, 1.1, 0)),
+  components: [MeshRenderer(Mesh.capsule(), Material()), CharacterController(), ThirdPersonWalk()],
+);
+```
+
+## Keep it on the island
+
+```dart
+// lib/recipes/stay_near.dart
+import 'package:fynkel/fynkel.dart';
+
+class StayNear extends Behaviour {
+  StayNear(this.centre, this.radius);
+
+  final Vec3 centre;
+  final double radius;
+
+  @override
+  void onLateUpdate() {
+    super.onLateUpdate();
+    final from = (position - centre).flat;
+    if (from.length > radius) position = (centre + from.normalized * radius).withY(position.y);
+  }
+}
+```
+
 ## Patrol between points
 
 ```dart

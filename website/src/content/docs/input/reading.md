@@ -64,8 +64,8 @@ class Button3D extends GameObject {
 
 ## In detail
 
-- A Flutter widget over the game (a HUD button) takes its own taps; they don't
-  reach the game.
+A Flutter widget over the game (a HUD button) takes its own taps; they don't
+reach the game.
 
 ### A Finger
 
@@ -82,7 +82,7 @@ the first finger down; null with neither): aiming at it is
 
 ### Events
 
-Events: `onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`, `onTap`
+`onFingerDown`, `onFingerUp`, `onFingerMove`, `onHover`, `onTap`
 (a double tap is two, the second with `tapCount` 2), `onLongPress`,
 `onDragStart`, `onDrag`, `onDragEnd`, `onSwipe`, `onPinch`, `onTwist`,
 `onScroll`, `onKeyDown`, `onKeyUp`. `onPinch` and `onTwist` are given a
@@ -98,7 +98,7 @@ that pans on a drag and zooms on a pinch skips the drags while
 
 ### On objects
 
-On objects: `onPointerDown`, `onPointerUp`, `onPointerEnter`,
+`onPointerDown`, `onPointerUp`, `onPointerEnter`,
 `onPointerExit`, `onClick`, `onLongPress`, `onDragStart`, `onDrag`,
 `onDragEnd`, on behaviours too. They go to the object under the finger, then
 up to its parents until one returns true. What takes a drag's start gets the

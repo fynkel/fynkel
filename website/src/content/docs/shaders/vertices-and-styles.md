@@ -85,6 +85,6 @@ edge.
 
 ### The pixel look
 
-The pixel look: `camera.pixels = 240` draws the game 240 pixels high and
+`camera.pixels = 240` draws the game 240 pixels high and
 enlarges it with hard edges. The camera keeps to whole pixels, so the
 picture doesn't shimmer as it moves.

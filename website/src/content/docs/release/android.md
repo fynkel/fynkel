@@ -52,7 +52,8 @@ android {
     }
     buildTypes {
         release {
-            signingConfig = signingConfigs.getByName("release") // was "debug"
+            // Without the file (another computer, CI) it signs for testing.
+            signingConfig = signingConfigs.getByName(if (keys.isEmpty) "debug" else "release")
         }
     }
 }
@@ -65,6 +66,18 @@ offer the game to phones it can't start on:
 
 ```sh
 flutter build appbundle --target-platform android-arm64,android-x64
+```
+
+Plugins can still bring 32-bit libraries of their own along, and Play then
+offers the game to 32-bit phones. `android/app/build.gradle.kts` leaves them
+out; `fynkel create` writes this:
+
+```kotlin
+android {
+    packaging {
+        jniLibs { excludes += "lib/armeabi-v7a/**" }
+    }
+}
 ```
 
 It makes `build/app/outputs/bundle/release/app-release.aab`. To try it on a

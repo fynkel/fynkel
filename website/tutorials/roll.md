@@ -95,7 +95,7 @@ Run it:
 flutter run -d macos
 ```
 
-The first run builds the engine, which takes a minute or two; later runs
+The first run downloads the engine, about 7 MB; later runs
 start in seconds. Roll the ball with W, A, S, D, drag to turn the camera,
 and roll behind a pillar to watch the camera come in front of it.
 

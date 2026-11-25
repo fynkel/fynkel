@@ -20,8 +20,9 @@ pnpm-debug.log*
 # macOS-specific files
 .DS_Store
 
-# made from tutorials/ by scripts/tutorials.mjs
+# made by scripts/tutorials.mjs
 src/content/docs/tutorials/
+src/content/docs/reference/
 
 # made by scripts/api.mjs (npm run api)
 public/api/
