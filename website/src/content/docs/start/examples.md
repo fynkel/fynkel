@@ -5,8 +5,10 @@ description: Whole games and feature scenes in the repository's examples folder,
 
 Each is a Flutter app in
 [`examples/`](https://github.com/fynkel/fynkel/tree/main/examples) of the
-repository, with its own tests. Run one with `flutter run -d macos` in its
-folder.
+repository, with its own tests. To run one, clone the repository and run
+`flutter run -d macos` in its folder. In a clone the engine is built from
+source, so you need [Rust](https://rustup.rs), and the first build takes a
+few minutes.
 
 | Example | What it is |
 | --- | --- |

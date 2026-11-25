@@ -13,35 +13,16 @@ and the code below is that game's, file by file.
 
 ## 1. A new app
 
-You need Flutter and Rust; [Install and first game](/start/install/) says
-how. Make the app beside your clone of Fynkel:
+[Install and first game](/start/install/) says what you need. Physics is a
+package of its own, and Roll needs it for the ball:
 
 ```sh
-flutter create --platforms macos,ios,android --empty roll
+fynkel create roll --physics
 cd roll
 ```
 
-Add Fynkel's packages to `pubspec.yaml`. Physics is a package of its own,
-and Roll needs it for the ball:
-
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  fynkel:
-    path: ../fynkel/packages/fynkel
-  fynkel_flutter:
-    path: ../fynkel/packages/fynkel_flutter
-  fynkel_physics:
-    path: ../fynkel/packages/fynkel_physics
-
-flutter:
-  uses-material-design: true
-```
-
-(For Android, also do the two small changes in
-[§1 of the guide](/guide/01-a-new-game/): `minSdk = 30` and a
-`FynkelActivity`.)
+Empty `lib/main.dart` and delete `test/game_test.dart`: you'll write both
+anew.
 
 ## 2. The level: objects with components
 
