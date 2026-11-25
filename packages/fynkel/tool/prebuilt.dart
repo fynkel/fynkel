@@ -1,10 +1,10 @@
-// Builds the libraries a release ships, so games need no Rust, and writes
-// each package's prebuilt.json. Run on a Mac, from a clean checkout of what
-// is to be released:
+// Builds the libraries a release ships, so games need no Rust, and each
+// package's prebuilt.json, which tool/release.dart puts in it. Run on a Mac,
+// from a clean checkout of what is to be released:
 //
 //   cd packages/fynkel && dart run tool/prebuilt.dart
 //
-// The libraries, with their SHA256SUMS, are left in target/prebuilt/v<version>/
+// They are left, with the commit they are of, in target/prebuilt/v<version>/,
 // for the GitHub release v<version>; this uploads nothing. `--allow-dirty`
 // takes uncommitted changes, to try it out.
 
@@ -15,8 +15,16 @@ import 'package:crypto/crypto.dart';
 import 'package:fynkel/src/build_plan.dart';
 import 'package:fynkel/src/prebuilt.dart';
 
+/// The packages on pub.dev, in the order they are published: each needs only
+/// those before it.
+const releasedPackages = ['fynkel', 'fynkel_flutter', 'fynkel_physics', 'fynkel_audio', 'fynkel_cli'];
+
 /// Each package that ships a library, and its crate.
-const _crates = {'fynkel': 'fynkel_ffi', 'fynkel_physics': 'fynkel_physics_ffi', 'fynkel_audio': 'fynkel_audio_ffi'};
+const libraryCrates = {
+  'fynkel': 'fynkel_ffi',
+  'fynkel_physics': 'fynkel_physics_ffi',
+  'fynkel_audio': 'fynkel_audio_ffi',
+};
 
 // The oldest systems package:fynkel_flutter runs on (its Package.swift and
 // build.gradle.kts); a library built for them runs on newer ones.
@@ -28,7 +36,7 @@ void main(List<String> args) async {
   final root = Directory.fromUri(Platform.script.resolve('../../../')).path.replaceFirst(RegExp(r'/$'), '');
   final home = Platform.environment['HOME']!;
 
-  final version = _version(root);
+  final version = packageVersion(root);
   if (!args.contains('--allow-dirty')) {
     final status = Process.runSync('git', ['status', '--porcelain'], workingDirectory: root).stdout as String;
     if (status.trim().isNotEmpty) _fail('uncommitted changes:\n$status');
@@ -48,7 +56,7 @@ void main(List<String> args) async {
   ];
 
   final sums = StringBuffer();
-  for (final MapEntry(key: package, value: crate) in _crates.entries) {
+  for (final MapEntry(key: package, value: crate) in libraryCrates.entries) {
     final files = <String, ({String sha256, int bytes})>{};
     for (final triple in prebuiltTriples) {
       final os = triple.endsWith('-darwin')
@@ -94,7 +102,7 @@ void main(List<String> args) async {
       files[triple] = (sha256: hash, bytes: bytes.length);
       sums.writeln('$hash  $name');
     }
-    File('$root/packages/$package/prebuilt.json').writeAsStringSync(
+    File('${out.path}/$package.prebuilt.json').writeAsStringSync(
       Prebuilt(
         crate: crate,
         url: 'https://github.com/fynkel/fynkel/releases/download/v$version',
@@ -102,14 +110,16 @@ void main(List<String> args) async {
       ).toJson(),
     );
   }
+  final head = Process.runSync('git', ['rev-parse', 'HEAD'], workingDirectory: root).stdout as String;
+  File('${out.path}/COMMIT').writeAsStringSync(head);
   File('${out.path}/SHA256SUMS').writeAsStringSync('$sums');
-  stdout.writeln('${out.path}: ${_crates.length * prebuiltTriples.length} libraries');
+  stdout.writeln('${out.path}: ${libraryCrates.length * prebuiltTriples.length} libraries');
 }
 
 /// The version all the packages must share.
-String _version(String root) {
+String packageVersion(String root) {
   final versions = {
-    for (final package in [..._crates.keys, 'fynkel_flutter'])
+    for (final package in releasedPackages)
       package: RegExp(
         r'^version: (\S+)$',
         multiLine: true,
