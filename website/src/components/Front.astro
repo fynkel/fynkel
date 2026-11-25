@@ -1,0 +1,139 @@
+---
+// The front page under the film.
+import { Code } from '@astrojs/starlight/components';
+const cube = `void main() => runApp(FynkelApp(Hello.new));
+
+class Hello extends GameObject {
+  @override
+  void onLoad() {
+    super.onLoad();
+    add(GameObject(
+      transform: Transform(position: Vec3(0, 0, 4)),
+      components: [Camera()],
+    ));
+    add(Cube());
+  }
+}
+
+class Cube extends GameObject {
+  Cube() : super(components: [
+    MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A))),
+  ]);
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    rotate(Vec3.up, time.delta);
+  }
+}`;
+const test = `test('D walks right', () {
+  final world = World();
+  addTearDown(world.dispose);
+  final walker = world.add(Walker());
+
+  world.input.simulate.keyDown(KeyCode.d);
+  world.run(1); // a second at 60 fps
+
+  expect(walker.position.x, closeTo(4, 0.1));
+});`;
+const install = `dart pub global activate fynkel_cli
+fynkel create my_game
+cd my_game
+flutter run -d macos`;
+---
+
+<div class="front">
+  <section class="pair">
+    <div>
+      <h2>If you know Unity, you can read this</h2>
+      <p>
+        Objects, components and <code>onUpdate</code>, as Dart classes. There is no editor and no scene file: the game
+        reads, diffs and refactors like the rest of your app, and hot reload works while it runs.
+      </p>
+      <p><a href="/guide/22-from-unity/">What each Unity name is called here</a></p>
+    </div>
+    <Code code={cube} lang="dart" />
+  </section>
+
+  <section>
+    <h2>Looks you can make</h2>
+    <div class="looks">
+      <figure class="wide">
+        <img src="/shots/lamps.webp" width="960" height="600" loading="lazy" alt="A dark room lit by dozens of coloured lamps, with metal balls" />
+        <figcaption>Up to 64 lamps in view, with highlights on metal</figcaption>
+      </figure>
+      <figure>
+        <img src="/shots/toon.webp" width="960" height="600" loading="lazy" alt="A knight and a rogue drawn with outlines, like a cartoon" />
+        <figcaption>Outlines and whole styles with your own shaders</figcaption>
+      </figure>
+      <figure>
+        <img src="/shots/particles.webp" width="960" height="600" loading="lazy" alt="Fire, smoke, a swirl of colours, sparks and rain" />
+        <figcaption>Fire, smoke, sparks and rain from particle systems</figcaption>
+      </figure>
+    </div>
+  </section>
+
+  <section class="pair turned">
+    <div>
+      <h2>Test a whole game without a window</h2>
+      <p>
+        Press keys, run seconds and check where things are, frame by frame, in <code>flutter test</code>. You can
+        compare pictures too: the film above was made by a test.
+      </p>
+    </div>
+    <Code code={test} lang="dart" />
+  </section>
+
+  <section>
+    <h2>What's in it</h2>
+    <dl>
+      <div><dt>Rendering</dt><dd>wgpu on Metal and Vulkan: physically based materials, cascaded shadows, light from the sky, fog, skinned animation</dd></div>
+      <div><dt>Physics</dt><dd>Rapier behind Unity's names: rigidbodies, colliders, triggers, joints, a character controller</dd></div>
+      <div><dt>Sound</dt><dd>Sources, a listener, music and mixer groups</dd></div>
+      <div><dt>Flutter</dt><dd>The game is one widget. Menus and HUDs are ordinary Flutter widgets, over it or beside it</dd></div>
+      <div><dt>Input</dt><dd>Keys, mouse and touch, with keys the player can rebind</dd></div>
+      <div><dt>Platforms</dt><dd>macOS, iOS and Android, built on a Mac</dd></div>
+    </dl>
+  </section>
+
+  <section class="start">
+    <h2>Start with four lines</h2>
+    <Code code={install} lang="sh" frame="none" />
+    <p>
+      <a href="/start/install/">Install guide</a>
+      <a href="/tutorials/roll/">Tutorial: roll a ball</a>
+      <a href="/start/examples/">The examples</a>
+    </p>
+  </section>
+</div>
+
+<style>
+  .front { display: grid; gap: clamp(4rem, 9vw, 7.5rem); padding-block: clamp(3.5rem, 7vw, 6rem) 3rem; }
+  .front section { margin: 0; min-width: 0; }
+  h2 {
+    font-family: 'Familjen Grotesk Variable', var(--__sl-font);
+    font-size: clamp(1.8rem, 3vw, 2.6rem);
+    line-height: 1.05;
+    letter-spacing: -0.025em;
+    margin: 0 0 1.25rem;
+    text-wrap: balance;
+  }
+  .pair { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 2rem clamp(2rem, 5vw, 5rem); align-items: center; }
+  .pair.turned > :first-child { order: 2; }
+  .pair.turned { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+  .pair p { max-width: 32rem; }
+  .looks { display: grid; grid-template-columns: 2fr 1fr; gap: 1rem; }
+  figure { margin: 0; display: flex; flex-direction: column; }
+  .wide { grid-row: span 2; }
+  .looks img { width: 100%; height: auto; flex: 1; object-fit: cover; aspect-ratio: 16 / 10; margin: 0; }
+  figure figcaption { font-size: 0.85rem; margin: 0.5rem 0 0; color: var(--sl-color-gray-2); }
+  dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 20rem), 1fr)); gap: 2rem 3rem; margin: 0; }
+  dl div { margin: 0; }
+  dt { font-weight: 700; color: var(--sl-color-white); }
+  dl dd { margin: 0.25rem 0 0; padding: 0; }
+  .start p { display: flex; flex-wrap: wrap; gap: 0.5rem 2rem; }
+  @media (max-width: 50rem) {
+    .pair, .pair.turned, .looks { grid-template-columns: minmax(0, 1fr); }
+    .pair.turned > :first-child { order: 0; }
+  }
+</style>

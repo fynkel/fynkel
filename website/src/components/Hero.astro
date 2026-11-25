@@ -1,0 +1,221 @@
+---
+// The front page's top: the film of website/showcase, and under it the six
+// steps it's built by, each lit while its part plays; pressing one plays
+// from there. The times are the film's (showcase/lib/showcase.dart).
+const steps = [
+  { at: 0, name: 'Load a model', code: `add(await assets.instantiate(\n  'knight.glb'));` },
+  { at: 2, name: 'Light it', code: `Light.sun(intensity: 3.2)\nSky.gradient(horizon: peach)` },
+  { at: 4.5, name: 'Animate', code: `knight.animator!\n  .crossFade('Cheer');` },
+  { at: 6.5, name: 'Add physics', code: `BoxCollider(),\nRigidbody(mass: size)` },
+  { at: 10, name: 'Set the mood', code: `Light.point(color: warm)\nCamera(bloom: Bloom())` },
+  { at: 13, name: 'Hit something', code: `body.addExplosionForce(…);\ntime.scale = 0.3;` },
+];
+const length = 17;
+const { data } = Astro.locals.starlightRoute.entry;
+---
+
+<section class="film" data-steps={JSON.stringify(steps.map((s) => s.at))} data-length={length}>
+  <div class="stage">
+    <video muted playsinline loop preload="metadata" poster="/film/poster.webp" aria-label="A knight on a stone floor: lit by a low sun, cheering, blocks falling round it, torches at night, and a spin that throws the blocks out">
+      <source src="/film/film-small.mp4" type="video/mp4" media="(max-width: 50rem)" />
+      <source src="/film/film.mp4" type="video/mp4" />
+    </video>
+    <div class="words">
+      <h1 id="_top" data-page-title>3D games in Flutter, written in Dart</h1>
+      <p>{data.hero?.tagline}</p>
+      <div class="actions">
+        <a class="first" href="/start/install/">Make your first game</a>
+        <a href="https://github.com/fynkel/fynkel">See it on GitHub</a>
+      </div>
+    </div>
+    <button class="pause" type="button" aria-pressed="false">Pause film</button>
+  </div>
+  <ol class="steps">
+    {
+      steps.map((step, i) => (
+        <li>
+          <button type="button" data-at={step.at}>
+            <span class="bar"><i /></span>
+            <span class="name">{step.name}</span>
+            <code>{step.code}</code>
+          </button>
+        </li>
+      ))
+    }
+  </ol>
+  <p class="made">
+    Drawn by Fynkel, not mocked up: the code is cut short to fit, and{' '}
+    <a href="https://github.com/fynkel/fynkel/blob/main/website/showcase/lib/showcase.dart">the whole scene</a>{' '}
+    is one Dart file. The knight is by Kay Lousberg (CC0).
+  </p>
+</section>
+
+<script>
+  const film = document.querySelector<HTMLElement>('.film')!;
+  const video = film.querySelector('video')!;
+  const pause = film.querySelector<HTMLButtonElement>('.pause')!;
+  const buttons = [...film.querySelectorAll<HTMLButtonElement>('.steps button')];
+  const bars = buttons.map((b) => b.querySelector<HTMLElement>('i')!);
+  const at: number[] = JSON.parse(film.dataset.steps!);
+  const ends = [...at.slice(1), Number(film.dataset.length)];
+  let held = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  let seen = true;
+  let last = -1;
+
+  // It opens just before the blow, then tells how it was made.
+  video.currentTime = 12.2;
+
+  function show() {
+    const t = video.currentTime;
+    const now = at.findLastIndex((start) => t >= start - 0.02);
+    bars.forEach((bar, i) => {
+      const part = Math.min(1, Math.max(0, (t - at[i]) / (ends[i] - at[i])));
+      bar.style.transform = `scaleX(${part})`;
+    });
+    if (now !== last) {
+      last = now;
+      buttons.forEach((b, i) => {
+        if (i === now) b.setAttribute('aria-current', 'step');
+        else b.removeAttribute('aria-current');
+      });
+      const list = buttons[0].closest('ol')!;
+      // On a phone the steps scroll sideways, with the film.
+      if (list.scrollWidth > list.clientWidth) {
+        const item = buttons[Math.max(0, now)].parentElement!;
+        list.scrollTo({ left: item.offsetLeft - list.offsetLeft - 16, behavior: 'smooth' });
+      }
+    }
+    if (!video.paused) requestAnimationFrame(show);
+  }
+  function set() {
+    pause.textContent = held ? 'Play film' : 'Pause film';
+    pause.setAttribute('aria-pressed', String(held));
+    if (held || !seen) video.pause();
+    else video.play().catch(() => { held = true; set(); });
+  }
+  pause.addEventListener('click', () => { held = !held; set(); });
+  buttons.forEach((b, i) =>
+    b.addEventListener('click', () => {
+      video.currentTime = at[i];
+      held = false;
+      set();
+    }),
+  );
+  video.addEventListener('play', () => requestAnimationFrame(show));
+  video.addEventListener('seeked', show);
+  new IntersectionObserver(([entry]) => { seen = entry.isIntersecting; set(); }).observe(video);
+</script>
+
+<style>
+  .film {
+    --night: #15112b;
+    --plum: #221a42;
+    --torch: #ffb04a;
+    --moon: #c9d8ff;
+    margin-inline: calc(50% - 50vw);
+    background: var(--night);
+    color: var(--moon);
+    padding-bottom: 1.5rem;
+  }
+  
+  .film :where(*) { margin-top: 0; }
+  .stage {
+    position: relative;
+    height: min(56.25vw, 100svh - 15rem);
+    min-height: 30rem;
+    overflow: hidden;
+  }
+  video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 68% 50%; display: block; }
+  .stage::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, rgb(21 17 43 / 0.88), rgb(21 17 43 / 0.62) 30%, transparent 56%);
+    pointer-events: none;
+  }
+  .words {
+    position: absolute;
+    z-index: 1;
+    inset: 0 auto 0 max(1.25rem, 50vw - 40rem);
+    width: min(30rem, 42vw);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 1.25rem;
+  }
+  h1 {
+    font-family: 'Familjen Grotesk Variable', var(--__sl-font);
+    font-weight: 700;
+    font-size: clamp(2.4rem, 4.6vw, 4.5rem);
+    line-height: 0.98;
+    letter-spacing: -0.035em;
+    color: #fff;
+    text-wrap: balance;
+  }
+  .words p { font-size: 1.1rem; line-height: 1.5; max-width: 27rem; }
+  .actions { display: flex; flex-wrap: wrap; gap: 0.75rem 1.5rem; align-items: center; }
+  .actions a { color: #fff; text-underline-offset: 0.25em; padding-block: 0.7rem; }
+  .actions .first {
+    background: var(--torch);
+    color: #24120a;
+    font-weight: 650;
+    text-decoration: none;
+    padding: 0.7rem 1.25rem;
+    border-radius: 0.4rem;
+  }
+  .actions .first:hover { background: #ffc373; }
+  .pause {
+    position: absolute;
+    z-index: 2;
+    right: max(1rem, 50vw - 40rem);
+    bottom: 1rem;
+    border: 0;
+    border-radius: 0.3rem;
+    padding: 0.4rem 0.7rem;
+    font: inherit;
+    font-size: 0.8rem;
+    background: rgb(21 17 43 / 0.7);
+    color: #fff;
+    cursor: pointer;
+  }
+  .steps {
+    list-style: none;
+    padding: 0;
+    margin: 0 auto;
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    max-width: 92rem;
+  }
+  .steps button {
+    width: 100%;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 0.35rem;
+    padding: 0 0.9rem 1rem;
+    border: 0;
+    background: none;
+    color: #948cb8;
+    text-align: start;
+    font: inherit;
+    cursor: pointer;
+  }
+  .bar { display: block; height: 3px; margin: 0 -0.9rem 0.6rem; background: #3b3163; }
+  .bar i { display: block; height: 100%; background: var(--torch); transform: scaleX(0); transform-origin: left; }
+  .name { font-weight: 650; font-size: 0.95rem; }
+  .steps code { font-size: 0.72rem; line-height: 1.5; white-space: pre-wrap; background: none; padding: 0; color: inherit; }
+  .steps button:hover { color: var(--moon); }
+  .steps button[aria-current] { color: #fff; background: var(--plum); }
+  .steps button[aria-current] code { color: var(--torch); }
+  .film :focus-visible { outline: 2px solid #fff; outline-offset: -2px; }
+  .film .made { max-width: 80rem; margin: 1.25rem auto 0; padding-inline: 1.25rem; font-size: 0.85rem; color: #a9a1cc; }
+  .made a { color: var(--moon); }
+  @media (max-width: 50rem) {
+    .stage { height: auto; min-height: 0; display: flex; flex-direction: column; }
+    video { position: static; height: auto; aspect-ratio: 4 / 3; object-position: 78% 50%; }
+    .stage::after { content: none; }
+    .words { position: static; width: auto; padding: 1.5rem 1.25rem 2rem; }
+    .pause { right: 0.75rem; bottom: auto; top: 0.75rem; }
+    .steps { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 62vw; overflow-x: auto; scrollbar-width: none; }
+  }
+</style>

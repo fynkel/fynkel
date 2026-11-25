@@ -1,0 +1,20 @@
+name: showcase
+description: "The scene on fynkel.com's front page, and the test that films it."
+publish_to: none
+version: 0.1.0
+
+environment:
+  sdk: ^3.13.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  fynkel:
+    path: ../../packages/fynkel
+  fynkel_physics:
+    path: ../../packages/fynkel_physics
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  lints: ^6.1.0
