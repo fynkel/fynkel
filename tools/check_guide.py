@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Checks that docs/writing-a-game.md's code compiles, and runs it.
+"""Checks that the documentation's code compiles, and runs it: every page in
+website/src/content/docs.
 
 Every ```dart block goes into a throwaway app, `my_game`, as the guide
 says: a block whose first line is a path comment (`// lib/hud.dart`) is
@@ -9,7 +10,8 @@ there: the guide's own tests, and test/guide_runs_test.dart, made here,
 which adds each game object and behaviour the guide writes (those made
 with no arguments) to a world of its own with a camera, runs it for a
 second and expects no errors, and tools/guide_checks_test.dart, which
-checks that some of them do what the guide says. Run it from anywhere:
+checks that some of them do what the guide says, as
+tools/recipe_checks_test.dart does for the recipes. Run it from anywhere:
 python3 tools/check_guide.py [--keep]
 """
 
@@ -21,7 +23,9 @@ import sys
 import tempfile
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-GUIDE = ROOT / 'docs' / 'writing-a-game.md'
+DOCS = ROOT / 'website' / 'src' / 'content' / 'docs'
+# The tutorials' code is the examples' own, which has tests of its own.
+GUIDE = '\n'.join(p.read_text() for p in sorted(DOCS.rglob('*.md*')) if p.parent.name != 'tutorials')
 
 HEADER = """import 'package:flutter/foundation.dart' show ValueNotifier;
 import 'package:fynkel/fynkel.dart';
@@ -31,7 +35,7 @@ import 'package:fynkel/fynkel.dart';
 
 def main() -> int:
     keep = '--keep' in sys.argv
-    blocks = re.findall(r'```dart\n(.*?)```', GUIDE.read_text(), re.S)
+    blocks = re.findall(r'```dart\n(.*?)```', GUIDE, re.S)
     app = pathlib.Path(tempfile.mkdtemp(prefix='my_game_'))
     files: dict[str, str] = {}
     shared = []
@@ -39,12 +43,14 @@ def main() -> int:
         first = block.split('\n', 1)[0]
         path = re.fullmatch(r'// ((?:lib|test)/[\w/]+\.dart)', first)
         if path:
+            assert path.group(1) not in files, f'two blocks are {path.group(1)}'
             files[path.group(1)] = block
         else:
             shared.append(block)
     files['lib/game.dart'] = HEADER + '\n'.join(shared)
     files['test/guide_runs_test.dart'] = runs_test(files)
-    files['test/guide_checks_test.dart'] = (ROOT / 'tools' / 'guide_checks_test.dart').read_text()
+    for name in ('guide_checks_test.dart', 'recipe_checks_test.dart'):
+        files[f'test/{name}'] = (ROOT / 'tools' / name).read_text()
     for path, text in files.items():
         (app / path).parent.mkdir(parents=True, exist_ok=True)
         (app / path).write_text(text)
@@ -92,7 +98,7 @@ def assets(files: dict[str, str], app: pathlib.Path) -> None:
     ```wgsl blocks that start with their path), and for every other name
     lib/ loads (`assets.audio('bark.ogg')`), a file of the repository's in
     its place."""
-    for block in re.findall(r'```wgsl\n(.*?)```', GUIDE.read_text(), re.S):
+    for block in re.findall(r'```wgsl\n(.*?)```', GUIDE, re.S):
         path = re.match(r'// (assets/[\w/.]+)', block)
         if path:
             (app / path.group(1)).parent.mkdir(parents=True, exist_ok=True)

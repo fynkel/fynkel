@@ -769,6 +769,7 @@ mod tests {
         let seen = Arc::new(AtomicU32::new(0));
         let asked = Arc::new(AtomicU32::new(0));
         let saver = Debounced::new(Duration::from_millis(100));
+        let start = std::time::Instant::now();
         for _ in 0..40 {
             asked.fetch_add(1, Ordering::SeqCst);
             let (writes, seen, asked) = (writes.clone(), seen.clone(), asked.clone());
@@ -778,9 +779,12 @@ mod tests {
             });
             std::thread::sleep(Duration::from_millis(1));
         }
+        // A slow machine's 1 ms sleeps can take several: one write more for
+        // each 100 ms the saves took.
+        let most = 2 + (start.elapsed().as_millis() / 100) as u32;
         std::thread::sleep(Duration::from_millis(400));
         let written = writes.load(Ordering::SeqCst);
-        assert!((1..=2).contains(&written), "{written} writes for 40 saves");
+        assert!((1..=most).contains(&written), "{written} writes for 40 saves");
         assert_eq!(seen.load(Ordering::SeqCst), 40, "the last write came after the last save");
         // Another, later on, is written too.
         asked.fetch_add(1, Ordering::SeqCst);

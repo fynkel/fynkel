@@ -20,9 +20,9 @@ pnpm-debug.log*
 # macOS-specific files
 .DS_Store
 
-# made from docs/writing-a-game.md by scripts/guide.mjs
-src/content/docs/guide/
+# made by scripts/tutorials.mjs
 src/content/docs/tutorials/
+src/content/docs/reference/
 
 # made by scripts/api.mjs (npm run api)
 public/api/

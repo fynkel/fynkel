@@ -1,6 +1,6 @@
 // What the engine gives a Fynkel shader: every name it can use, with what
 // it does. Not loaded by anything: a reference to read beside your own
-// `.wgsl` files (docs/writing-a-game.md, "Shaders"). The bodies here are
+// `.wgsl` files (https://fynkel.com/shaders/first/). The bodies here are
 // stand-ins; the engine's are in crates/fynkel_render/src (library.wgsl,
 // forward.wgsl, effect.wgsl), and a test keeps the two the same.
 //

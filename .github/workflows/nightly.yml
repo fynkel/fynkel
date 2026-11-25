@@ -62,7 +62,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         if: "!cancelled()"
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
       # Every example's tests, and its app built for macOS (compiling the
       # plugin's Swift and bundling the engine).
       - name: examples

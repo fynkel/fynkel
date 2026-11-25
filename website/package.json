@@ -3,9 +3,9 @@
   "type": "module",
   "version": "0.0.1",
   "scripts": {
-    "predev": "node scripts/guide.mjs",
+    "predev": "node scripts/tutorials.mjs",
     "dev": "astro dev",
-    "prebuild": "node scripts/guide.mjs",
+    "prebuild": "node scripts/tutorials.mjs",
     "build": "astro build",
     "preview": "astro preview",
     "astro": "astro",

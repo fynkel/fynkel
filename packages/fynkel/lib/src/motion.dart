@@ -154,7 +154,7 @@ abstract final class Ease {
 /// one is destroyed or removed, and holds still while it's hidden or
 /// disabled, as routines do. It moves from the frame after the one it was
 /// made in, in the world's routines step: after every update, before the
-/// routines' waits end (docs/writing-a-game.md, "8. Tweens").
+/// routines' waits end (https://fynkel.com/basics/tweens/).
 sealed class Motion implements Future<void> {
   Motion._(
     this._world,
@@ -422,8 +422,8 @@ sealed class Motion implements Future<void> {
 }
 
 /// Motion on objects and behaviours: tweens and their helpers, and moving
-/// things by hand (docs/writing-a-game.md, "7. Moving things" and "8.
-/// Tweens").
+/// things by hand (https://fynkel.com/basics/moving/ and
+/// https://fynkel.com/basics/tweens/).
 mixin _Moving {
   /// The object moved.
   GameObject get _self;

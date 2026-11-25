@@ -1,4 +1,4 @@
-/// Physics for Fynkel, as Unity has it, on Rapier (docs/stage-5.md).
+/// Physics for Fynkel, as Unity has it, on Rapier.
 ///
 /// Put a [BoxCollider], [SphereCollider], [CapsuleCollider] or
 /// [MeshCollider] on an object and physics knows it; ask what's where with `physics.raycast` and the

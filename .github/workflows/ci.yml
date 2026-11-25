@@ -37,7 +37,7 @@ env:
 jobs:
   rust:
     runs-on: ${{ fromJSON(vars.RUNNER || '["self-hosted","macOS","fynkel"]') }}
-    timeout-minutes: 45
+    timeout-minutes: 60
     steps:
       # Two commits deep: a pull request's is its merge, whose first parent
       # is the base it's compared with below.
@@ -67,11 +67,11 @@ jobs:
         if: steps.changed.outputs.code == 'true'
         run: cargo fmt --all --check
       - name: clippy
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
-        if: steps.changed.outputs.code == 'true'
-        run: cargo test --workspace
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
+        run: cargo test --workspace --no-fail-fast
       # The benchmarks (stage 14's GT1, crates/fynkel_bench): each times
       # one thing the frame path does, in release, and fails when its
       # median is over its bar (the Mac's time when it was set, doubled),
@@ -81,9 +81,11 @@ jobs:
       # once more when they fail, and when that fails too they say so, on
       # the run's page, without failing the run: on this one Mac a busy
       # moment (other work, a build) has put a 0.5 ms median at 5 ms and
-      # held whole PRs for hours. The warning is the cue to look.
+      # held whole PRs for hours. The warning is the cue to look. Not on
+      # GitHub's Macs: too slow and too shared to say anything, and 25
+      # minutes of building. Run them by hand before a release.
       - name: timing bars
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true' && runner.environment != 'github-hosted'"
         continue-on-error: true
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -103,7 +105,7 @@ jobs:
       # count what the VM allocates, and other files' compiling would
       # slow them.
       - name: dart (package:fynkel)
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         working-directory: packages/fynkel
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -112,8 +114,10 @@ jobs:
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
-          dart test -x alloc
-          dart test -t alloc --concurrency=1
+          failed=
+          dart test -x alloc || failed=1
+          dart test -t alloc --concurrency=1 || failed=1
+          [ -z "$failed" ]
       # package:fynkel_physics (docs/stage-5.md): its build hook compiles
       # fynkel_physics_ffi, its tests drive Rapier from Dart, and its
       # bindings must match the header as package:fynkel's do. Its example
@@ -121,7 +125,7 @@ jobs:
       # built for macOS at night
       # (nightly.yml).
       - name: dart (package:fynkel_physics)
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         working-directory: packages/fynkel_physics
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -131,8 +135,10 @@ jobs:
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
-          dart test -x alloc
-          dart test -t alloc --concurrency=1
+          failed=
+          dart test -x alloc || failed=1
+          dart test -t alloc --concurrency=1 || failed=1
+          [ -z "$failed" ]
           cd example
           flutter analyze --fatal-infos
           flutter test
@@ -142,7 +148,7 @@ jobs:
       # garbage, and its bindings must match the header as package:fynkel's
       # do.
       - name: dart (package:fynkel_audio)
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         working-directory: packages/fynkel_audio
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -151,8 +157,10 @@ jobs:
           dart analyze --fatal-infos
           dart run tool/ffigen.dart
           git diff --exit-code lib/src/bindings.g.dart
-          dart test -x alloc
-          dart test -t alloc --concurrency=1
+          failed=
+          dart test -x alloc || failed=1
+          dart test -t alloc --concurrency=1 || failed=1
+          [ -z "$failed" ]
       # package:fynkel_flutter's widget tests (a real engine view behind a
       # stand-in for the Swift plugin), package:fynkel_measure, the games'
       # and the lab's tests (their real assets, drawn headless, and real
@@ -160,12 +168,15 @@ jobs:
       # Swift and bundles all three packages. The others' builds are in
       # nightly.yml.
       - name: flutter (package:fynkel_flutter, package:fynkel_measure, examples)
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
+          failed=
           for app in packages/fynkel_flutter packages/fynkel_measure examples/*/; do
             echo "== $app"
+            set +e
             (
+              set -e
               cd "$app"
               flutter pub get
               dirs=
@@ -178,13 +189,15 @@ jobs:
                 *) flutter test ;;
               esac
             )
+            [ $? = 0 ] || failed="$failed $app"
+            set -e
           done
-          cd examples/lab
-          flutter build macos --debug
+          (cd examples/lab && flutter build macos --debug)
+          [ -z "$failed" ] || { echo "failed:$failed"; exit 1; }
       # package:fynkel_cli, the fynkel command: one of its tests makes a
       # real game on this clone, analyzes it and runs its test.
       - name: dart (package:fynkel_cli)
-        if: steps.changed.outputs.code == 'true'
+        if: "!cancelled() && steps.changed.outputs.code == 'true'"
         working-directory: packages/fynkel_cli
         run: |
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"
@@ -192,10 +205,11 @@ jobs:
           dart format -l 120 --output=none --set-exit-if-changed .
           dart analyze --fatal-infos
           dart test
-      # docs/writing-a-game.md's code, in a throwaway app: it must compile,
+      # the website's documentation's code, in a throwaway app: it must compile,
       # and its test pass, so the guide never drifts from the API. The
       # reference test reads the guide too, and is in `test` otherwise.
       - name: the guide
+        if: "!cancelled()"
         run: |
           if [ "${{ steps.changed.outputs.code }}" != true ]; then cargo test -p fynkel_render --test reference; fi
           export PATH="$HOME/Documents/flutter/flutter/bin:$PATH"

@@ -45,8 +45,7 @@ down, the floor holds it up, and it rolls when pushed. `Ball` is a
 `MonoBehaviour` would:
 
 - `onFixedUpdate` runs at physics' own steady rate, the place to push a body.
-- `input.axis2('move')` is W, A, S, D and the arrows (and a gamepad's
-  stick) as one value from −1 to 1 each way.
+- `input.axis2('move')` is W, A, S, D and the arrows as one value from −1 to 1 each way.
 - The push goes the way the **camera** looks, flattened onto the floor,
   so "up" always rolls away from you however the camera has turned.
 - `interpolation` smooths what's drawn between physics steps.
@@ -96,7 +95,7 @@ Run it:
 flutter run -d macos
 ```
 
-The first run builds the engine, which takes a minute or two; later runs
+The first run downloads the engine, about 7 MB; later runs
 start in seconds. Roll the ball with W, A, S, D, drag to turn the camera,
 and roll behind a pillar to watch the camera come in front of it.
 
@@ -118,8 +117,8 @@ flutter test
 
 - Make it yours: a timer, a second level, a jump (`body.addForce(Vec3(0, 5, 0), mode: ForceMode.impulse)`
   in `onUpdate` when `input.action('jump').wasPressed`).
-- [The guide](/guide/) goes through each part properly, from
-  [objects](/guide/03-objects/) to [physics](/guide/16-physics-colliders-rigidbodies-queries-and-callbacks/)
-  and [testing](/guide/19-testing-a-game/).
-- If you know Unity, [Coming from Unity](/guide/22-from-unity/) maps one to the
+- [The guide](/basics/hello/) goes through each part properly, from
+  [objects](/basics/objects/) to [physics](/physics/colliders/)
+  and [testing](/making/testing/).
+- If you know Unity, [Coming from Unity](/start/from-unity/) maps one to the
   other.

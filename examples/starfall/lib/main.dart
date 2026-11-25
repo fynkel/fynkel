@@ -7,7 +7,7 @@ import 'screens.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  // One number to keep: shared_preferences is enough (guide §18).
+  // One number to keep: shared_preferences is enough (https://fynkel.com/making/saving/).
   final prefs = await SharedPreferences.getInstance();
   runApp(
     FynkelApp(

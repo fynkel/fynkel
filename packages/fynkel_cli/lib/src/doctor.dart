@@ -144,7 +144,7 @@ class Doctor {
     } else {
       _note(
         'Android: ${p.relative(activities.first.path, from: tools.here.path)} is not a FynkelActivity. The game runs, '
-        'more slowly: see "A new game" in the guide.',
+        'more slowly: see https://fynkel.com/start/existing-app/',
       );
     }
   }

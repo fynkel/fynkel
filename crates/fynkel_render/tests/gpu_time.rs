@@ -43,9 +43,10 @@ fn draw(gpu: &Gpu, r: &mut Renderer, frames: u64) -> GpuTimes {
 fn each_part_of_a_frame_is_timed_on_the_gpu() {
     let gpu = gpu();
     // Every Apple GPU since the A11 and M1 times passes; the Mac CI runs
-    // on must.
+    // on must, unless it's a virtual one, as GitHub's are.
+    let virtual_gpu = gpu.adapter.get_info().name.contains("Paravirtual");
     let timed = gpu.device.features().contains(wgpu::Features::TIMESTAMP_QUERY);
-    assert!(timed || !cfg!(target_os = "macos"), "a Mac's GPU times its passes");
+    assert!(timed || virtual_gpu || !cfg!(target_os = "macos"), "a Mac's GPU times its passes");
     if !timed {
         return;
     }

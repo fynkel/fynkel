@@ -1,6 +1,5 @@
 // `dart run fynkel:shader <name>`: a new shader to start from, in
-// assets/shaders/<name>.wgsl, and how to use it (docs/writing-a-game.md,
-// "Shaders"). `--unlit`, `--effect` (a screen effect), `--moves` (a
+// assets/shaders/<name>.wgsl, and how to use it (https://fynkel.com/shaders/first/). `--unlit`, `--effect` (a screen effect), `--moves` (a
 // `vertex` too) and `--light` (its own light) choose what it has.
 
 import 'dart:io';

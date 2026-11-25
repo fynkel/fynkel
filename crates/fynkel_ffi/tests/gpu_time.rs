@@ -39,7 +39,9 @@ fn a_views_frames_are_timed_on_the_gpu_when_asked() {
     // leaves a pass's clocks unread now and then, a few in a row at times.
     let on = draw(&view, 20);
     fy_gpu_timing_set(false);
-    if cfg!(target_os = "macos") {
+    // A virtual Mac's GPU (GitHub's runners) has no clocks.
+    let gpu = fynkel_render::Gpu::headless().expect("these tests need a GPU");
+    if cfg!(target_os = "macos") && !gpu.adapter.get_info().name.contains("Paravirtual") {
         assert!(on.gpu_frames >= 20, "a Mac's GPU times its frames: {on:?}");
         assert!(on.gpu_untimed_passes < on.gpu_frames, "the passes' clocks are read: {on:?}");
     }

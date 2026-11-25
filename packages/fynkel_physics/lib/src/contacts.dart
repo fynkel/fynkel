@@ -31,10 +31,11 @@ mixin Triggers {
   void onTriggerEnter(Collider other) {}
 
   /// [other] still overlaps, at the end of a step. Not while both sides'
-  /// rigidbodies sleep, as Unity's: a kinematic body the game moves by
-  /// setting its position wakes, but one left still falls asleep after a
-  /// moment, and its stays stop until it moves or [Rigidbody.wakeUp]. To
-  /// know what's inside, keep a set from enter and exit instead.
+  /// rigidbodies sleep, as Unity's (a [CharacterController] counts as
+  /// awake): a kinematic body the game moves by setting its position wakes,
+  /// but one left still falls asleep after a moment, and its stays stop
+  /// until it moves or [Rigidbody.wakeUp]. To know what's inside, keep a set
+  /// from enter and exit instead.
   void onTriggerStay(Collider other) {}
 
   /// [other] stopped overlapping, or one of the two left.

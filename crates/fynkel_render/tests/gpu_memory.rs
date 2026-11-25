@@ -68,6 +68,11 @@ fn steady(seconds: f64, mut extra: impl FnMut()) -> f64 {
 
 #[test]
 fn steady_frames_hold_no_blit_memory() {
+    // A virtual Mac's GPU (GitHub's runners) holds no memory of the
+    // driver's for a blit, so there's nothing to compare.
+    if gpu().adapter.get_info().name.contains("Paravirtual") {
+        return;
+    }
     // Device creation blits once (wgpu zeroes a buffer of its own), and
     // the driver frees that pool a few seconds later: a second after it
     // on an idle Mac, longer on a busy one. The lowest reading of 10 s is

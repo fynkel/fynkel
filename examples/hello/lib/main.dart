@@ -1,5 +1,5 @@
 // The smallest game: a camera, a sun and a turning cube, as in
-// docs/writing-a-game.md §2. tool/measured.dart runs the same game for the
+// https://fynkel.com/basics/hello/. tool/measured.dart runs the same game for the
 // tool.
 
 import 'package:flutter/widgets.dart' show runApp;
