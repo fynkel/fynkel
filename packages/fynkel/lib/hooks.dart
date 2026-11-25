@@ -1,11 +1,12 @@
-// Builds a crate of the Fynkel Cargo workspace for a build hook's target
-// and hands it to the Dart and Flutter tools as a code asset. package:fynkel's
-// hook builds the engine with it, and package:fynkel_physics's the physics.
+// Hands a Rust library to the Dart and Flutter tools as a code asset, for a
+// build hook's target. package:fynkel's hook hands over the engine with it,
+// and package:fynkel_physics's the physics.
 //
-// It builds only from the Cargo workspace the calling package sits in
-// (packages/<name> → the repository root), always in release: a debug build
-// is many times slower. Cargo is incremental, so an unchanged crate costs a
-// second or two.
+// A package in the Fynkel repository (packages/<name>, the Cargo workspace
+// at its root) builds the library, always in release: a debug build is many
+// times slower. Cargo is incremental, so an unchanged crate costs a second
+// or two. A released package, from pub.dev, downloads the library already
+// built (lib/src/prebuilt.dart), and needs no Rust.
 
 import 'dart:io';
 
@@ -13,12 +14,23 @@ import 'package:code_assets/code_assets.dart';
 import 'package:hooks/hooks.dart';
 
 import 'src/build_plan.dart';
+import 'src/prebuilt.dart';
 
 export 'src/build_plan.dart' show HookException;
 
 /// Builds [crate] (a cdylib in the workspace's crates/) for the target in
-/// [input], and adds it to [output] as the code asset named [asset] of the
-/// package whose hook this is.
+/// [input], or downloads it built, and adds it to [output] as the code asset
+/// named [asset] of the package whose hook this is.
+///
+/// A game behind a wall can take the downloads from a mirror of its own, in
+/// its pubspec.yaml (each is still checked against the package's hash):
+///
+/// ```yaml
+/// hooks:
+///   user_defines:
+///     fynkel:
+///       mirror: https://example.com/fynkel/
+/// ```
 Future<void> buildRustCrate(
   BuildInput input,
   BuildOutputBuilder output, {
@@ -41,7 +53,7 @@ Future<void> buildRustCrate(
 
   final workspace = input.packageRoot.resolve('../../');
   if (!File.fromUri(workspace.resolve('crates/$crate/Cargo.toml')).existsSync()) {
-    throw HookException('expected the Fynkel Cargo workspace, with crates/$crate, at ${workspace.toFilePath()}.');
+    return _usePrebuilt(input, output, crate: crate, asset: asset, triple: triple);
   }
   final cargo = _findCargo();
   if (cargo == null) {
@@ -95,12 +107,45 @@ Future<void> buildRustCrate(
   // rebuild.
   output.dependencies.add(workspace.resolve('Cargo.toml'));
   output.dependencies.add(workspace.resolve('Cargo.lock'));
-  for (final entity in Directory.fromUri(workspace.resolve('crates/')).listSync(recursive: true)) {
-    final path = entity.path;
-    if (entity is File && (path.endsWith('.rs') || path.endsWith('.wgsl') || path.endsWith('Cargo.toml'))) {
-      output.dependencies.add(entity.uri);
+  // third_party/ too: the patched Rapier the physics is built with.
+  for (final folder in ['crates/', 'third_party/']) {
+    for (final entity in Directory.fromUri(workspace.resolve(folder)).listSync(recursive: true)) {
+      final path = entity.path;
+      if (entity is File && (path.endsWith('.rs') || path.endsWith('.wgsl') || path.endsWith('Cargo.toml'))) {
+        output.dependencies.add(entity.uri);
+      }
     }
   }
+}
+
+/// Adds the library the package was released with.
+Future<void> _usePrebuilt(
+  BuildInput input,
+  BuildOutputBuilder output, {
+  required String crate,
+  required String asset,
+  required String triple,
+}) async {
+  final manifest = File.fromUri(input.packageRoot.resolve('prebuilt.json'));
+  if (!manifest.existsSync()) {
+    throw HookException(
+      '${input.packageRoot.toFilePath()} has neither the Fynkel repository around it, to build $crate from, nor a '
+      'prebuilt.json, which a release on pub.dev has. Depend on the pub.dev release, or on a whole clone of the '
+      'repository.',
+    );
+  }
+  final mirror = input.userDefines['mirror'];
+  if (mirror is! String?) throw HookException("the pubspec's hooks: user_defines: mirror must be a URL.");
+  final file = await Prebuilt.parse(
+    manifest.readAsStringSync(),
+    manifest.path,
+  ).fetch(triple, cache: Directory.fromUri(input.outputDirectoryShared), mirror: mirror, onOutput: stderr.write);
+  final dest = input.outputDirectory.resolve(input.config.code.targetOS.dylibFileName(crate));
+  await file.copy(dest.toFilePath());
+  output.assets.code.add(
+    CodeAsset(package: input.packageName, name: asset, linkMode: DynamicLoadingBundled(), file: dest),
+  );
+  output.dependencies.add(manifest.uri);
 }
 
 /// The Rust target triple, or null for a target Fynkel doesn't build.
