@@ -127,7 +127,7 @@ final class Input {
   bool _resuming = false;
 
   // The keys the feed says are down, as it says so: those a pause let go
-  // of, still down when it ends, are held again (the guide's §11). Kept
+  // of, still down when it ends, are held again (https://fynkel.com/input/pause/). Kept
   // as the events come, as those while paused are dropped from the queue.
   final _keyboard = <KeyCode>{};
 

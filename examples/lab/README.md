@@ -54,7 +54,7 @@ The scenes, in the lab's order:
 
 The scenes use the lab's helpers (`LabScene`, its `shape()`,
 `floorCollider()`, `log` and `controls`), so they don't copy into a game
-as they are: the guide (`docs/writing-a-game.md`) has the code to copy.
+as they are: the guide (https://fynkel.com) has the code to copy.
 
 ## Running it
 

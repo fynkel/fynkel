@@ -1,6 +1,6 @@
 part of 'world.dart';
 
-/// A material's own look, written in WGSL (docs/writing-a-game.md, "14. Shaders"): a
+/// A material's own look, written in WGSL (https://fynkel.com/shaders/first/): a
 /// `.wgsl` file with a `surface` function, lit by the engine as the
 /// built-in material is, or an `unlit` one, which gives the colour as it
 /// is. Load it with `assets.shader('lava.wgsl')` and give it to a

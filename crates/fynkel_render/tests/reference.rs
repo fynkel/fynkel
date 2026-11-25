@@ -76,11 +76,13 @@ fn an_effect_can_use_the_helpers() {
     assert!(shader.effect);
 }
 
-/// Every ```wgsl block in docs/writing-a-game.md is a shader that compiles,
-/// as its first line's file name says.
+/// Every ```wgsl block in the documentation is a shader that compiles, as
+/// its first line's file name says.
 #[test]
 fn the_guides_shaders_compile() {
-    let guide = read("../../docs/writing-a-game.md");
+    let docs = format!("{}/../../website/src/content/docs/shaders", env!("CARGO_MANIFEST_DIR"));
+    let guide: String =
+        std::fs::read_dir(docs).unwrap().map(|page| std::fs::read_to_string(page.unwrap().path()).unwrap()).collect();
     let blocks: Vec<&str> = guide.split("```wgsl\n").skip(1).map(|b| b.split("```").next().unwrap()).collect();
     assert!(blocks.len() >= 5, "{} shaders in the guide", blocks.len());
     for block in blocks {

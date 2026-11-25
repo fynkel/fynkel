@@ -45,8 +45,8 @@ class Cube extends GameObject {
 
 ## Start here
 
-- **[Writing a game](docs/writing-a-game.md)**, the guide: from a new app
-  to physics, Flutter menus and tests, with a page for Unity users (§22).
+- **[The guide](https://fynkel.com/basics/hello/)**, the guide: from a new app
+  to physics, Flutter menus and tests, with a page for Unity users.
 - **The examples**, in [`examples/`](examples), simplest first:
 
   | Example | What it is |
@@ -101,7 +101,7 @@ from source:
 
 | Package | What it is |
 | --- | --- |
-| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. Plain Dart, with no window: a game runs frame by frame in `flutter test` (guide §19) |
+| [`fynkel`](packages/fynkel) | The framework: objects, components, the frame, input, motion, cameras. Plain Dart, with no window: a game runs frame by frame in `flutter test` |
 | [`fynkel_flutter`](packages/fynkel_flutter) | `FynkelApp`, `FynkelGame` and `FynkelView`: the game in a Flutter app |
 | [`fynkel_physics`](packages/fynkel_physics) | Physics (Rapier), as Unity's: rigidbodies, colliders, triggers, joints, a character controller. Optional |
 | [`fynkel_audio`](packages/fynkel_audio) | Sound, as Unity's: clips, sources, the listener, music and groups. Optional |

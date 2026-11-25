@@ -21,7 +21,7 @@ World newWorld() {
 Vec3 facing(GameObject object) => object.transform.rotation.rotate(const Vec3(0, 0, 1));
 
 void main() {
-  test("§13's Farmer faces the way it walks", () async {
+  test("the guide's Farmer faces the way it walks", () async {
     final world = newWorld();
     final farmer = world.add(Farmer());
     await farmer.loaded;
@@ -31,7 +31,7 @@ void main() {
     expect(facing(farmer).x, closeTo(1, 0.01), reason: 'its face is on its +Z: ${facing(farmer)}');
   });
 
-  test("§13's Farmer and Hero play clips their character has", () async {
+  test("the guide's Farmer and Hero play clips their character has", () async {
     final world = newWorld();
     final farmer = world.add(Farmer());
     final hero = world.add(Hero());
@@ -43,7 +43,7 @@ void main() {
     world.run(0.5);
   });
 
-  test("§16's Walk jumps on space", () async {
+  test("the guide's Walk jumps on space", () async {
     final world = newWorld();
     world.add(
       GameObject(

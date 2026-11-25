@@ -53,7 +53,10 @@ or later, with `flutter pub add fynkel_physics` and
 
 - [Your first game: Roll](/tutorials/roll/): a small whole game in half an
   hour.
-- [The guide](/guide/02-hello/), one idea at a time.
-- [Coming from Unity](/guide/22-from-unity/).
-- Adding Fynkel to an app you have, or working on Fynkel itself:
-  [§1 of the guide](/guide/01-a-new-game/).
+- [How a game is made](/basics/hello/), and the guide from there, one idea at
+  a time.
+- [Recipes](/recipes/moving/): short pieces of code for what most games need.
+- [Coming from Unity](/start/from-unity/).
+- [What works today](/start/what-works/), and what doesn't yet.
+- [Adding Fynkel to an app](/start/existing-app/) you have.
+- Something went wrong? [Troubleshooting](/start/troubleshooting/).

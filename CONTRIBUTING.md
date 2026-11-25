@@ -8,7 +8,7 @@ what went wrong, or what you couldn't work out from the guide.
 [Open an issue](https://github.com/fynkel/fynkel/issues) with:
 
 - what you did, as little code as shows it (a `flutter test` that fails is
-  best: guide §19 runs a game without a window);
+  best: [Testing a game](https://fynkel.com/making/testing/) runs one without a window);
 - what you expected and what happened, with the whole error;
 - what `fynkel doctor` prints, and the device if it's on one.
 

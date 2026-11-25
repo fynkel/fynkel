@@ -71,7 +71,7 @@ jobs:
         run: cargo clippy --workspace --all-targets -- -D warnings
       - name: test
         if: steps.changed.outputs.code == 'true'
-        run: cargo test --workspace
+        run: cargo test --workspace --no-fail-fast
       # The benchmarks (stage 14's GT1, crates/fynkel_bench): each times
       # one thing the frame path does, in release, and fails when its
       # median is over its bar (the Mac's time when it was set, doubled),
@@ -192,7 +192,7 @@ jobs:
           dart format -l 120 --output=none --set-exit-if-changed .
           dart analyze --fatal-infos
           dart test
-      # docs/writing-a-game.md's code, in a throwaway app: it must compile,
+      # the website's documentation's code, in a throwaway app: it must compile,
       # and its test pass, so the guide never drifts from the API. The
       # reference test reads the guide too, and is in `test` otherwise.
       - name: the guide

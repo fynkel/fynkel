@@ -1,7 +1,7 @@
 # hello
 
 The smallest game: a lit, turning cube, written in Dart, and the code of
-[the guide's §2](../../docs/writing-a-game.md#2-hello). `lib/main.dart` is a
+[How a game is made](https://fynkel.com/basics/hello/). `lib/main.dart` is a
 root object (`Hello`) with a camera, a sun and a cube that turns itself,
 shown by `runApp(FynkelApp(Hello.new))`. It began as stage 1's app
 ([docs/stage-1.md](../../docs/stage-1.md)).

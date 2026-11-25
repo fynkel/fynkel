@@ -93,7 +93,9 @@ mod tests {
             n += 1;
             std::thread::sleep(Duration::from_millis(1));
         });
-        assert!(n >= 10, "{n} runs");
+        // One that isn't counted, and more than the one asked for. How many
+        // more is the machine's: a hosted runner sleeps 1 ms in 4 or more.
+        assert!(n > 2, "{n} runs");
     }
 
     #[test]

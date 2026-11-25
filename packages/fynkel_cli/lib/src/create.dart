@@ -4,8 +4,8 @@ import 'package:path/path.dart' as p;
 
 import 'tools.dart';
 
-/// `fynkel create`: a Flutter app with Fynkel in it, set up as the guide's
-/// §1 says, and a first game.
+/// `fynkel create`: a Flutter app with Fynkel in it, set up as
+/// https://fynkel.com/start/existing-app/ says, and a first game.
 class Create {
   /// Makes the game in [folder].
   Create(
@@ -121,7 +121,7 @@ class Create {
           .listSync(recursive: true)
           .whereType<File>()
           .firstWhere((file) => p.basename(file.path) == 'MainActivity.kt');
-      // The game then draws straight to the screen (the guide's §1).
+      // The game then draws straight to the screen (https://fynkel.com/start/existing-app/).
       activity.writeAsStringSync(
         _replace(
           activity.readAsStringSync(),

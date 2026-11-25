@@ -118,7 +118,7 @@ game's `best` changes:
 <!-- include: examples/starfall/lib/main.dart -->
 
 (For a save with more in it, a level and what was found, write a file:
-[§18 of the guide](/guide/18-hot-reload-and-starting-over/) shows how.)
+[Levels](/making/levels/) shows how.)
 
 Run it on a phone or the Mac:
 
@@ -139,7 +139,7 @@ star, rock and spark came back.
 ## Where next
 
 - Make it yours: a star worth five that falls faster, a shield that saves
-  one life, a sound on each catch ([§13b](/guide/13b-sound/)).
-- [Particles](/guide/13c-particles/) has much more: trails, colour by
+  one life, a sound on each catch ([Playing sounds](/sound/playing/)).
+- [Particles](/particles/basics/) has much more: trails, colour by
   speed, collisions.
-- [Speed](/guide/20-speed/) says what to measure on a phone, and how.
+- [Measuring](/making/measuring/) says what to measure on a phone, and how.
