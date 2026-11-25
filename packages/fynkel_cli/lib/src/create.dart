@@ -164,24 +164,52 @@ import 'package:fynkel_flutter/fynkel_flutter.dart';
 
 void main() => runApp(FynkelApp(Game.new));
 
-/// The game: a camera, a sun and a turning cube.
+/// The game: a sky, a camera, a sun, a stage and a cube that hops when it's tapped.
 class Game extends GameObject {
   @override
   void onLoad() {
     super.onLoad();
-    add(GameObject(transform: Transform.lookAt(Vec3(0, 1.5, 4), Vec3.zero), components: [Camera()]));
-    add(GameObject(components: [Light.sun(direction: Vec3(-0.4, -1, -0.3))]));
+    world.sky = Sky.gradient(zenith: Color(0xFF5B8DEF), horizon: Color(0xFFFFE3C2), ground: Color(0xFF8A7CA8));
+    add(GameObject(transform: Transform.lookAt(Vec3(0, 2.8, 5.5), Vec3(0, 0.7, 0)), components: [Camera()]));
+    add(GameObject(components: [Light.sun(direction: Vec3(0.5, -1, -0.4), intensity: 1.2)]));
+    // The stage: its top is at height 0.
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, -0.15, 0), scale: Vec3(2.7, 0.15, 2.7)),
+        components: [MeshRenderer(Mesh.cylinder(segments: 64), Material(color: Color(0xFFF4EDE4)))],
+      ),
+    );
     add(Cube());
   }
 }
 
 class Cube extends GameObject {
-  Cube() : super(components: [MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A)))]);
+  Cube()
+    : super(
+        transform: Transform(position: Vec3(0, 0.5, 0)),
+        components: [MeshRenderer(Mesh.cube(), Material(color: colors.first))],
+      );
+
+  static const colors = [Color(0xFFE0613A), Color(0xFF3A8DE0), Color(0xFFE0B83A), Color(0xFF9B59D0)];
+
+  int hops = 0;
+  Motion? _hop;
 
   @override
   void onUpdate() {
     super.onUpdate();
     rotate(Vec3.up, time.delta); // A radian a second.
+  }
+
+  /// A tap or a click on the cube.
+  @override
+  bool onClick(Finger finger) {
+    if (_hop?.isRunning ?? false) return true; // Still in the air.
+    hops++;
+    _hop = moveBy(Vec3(0, 1.2, 0), seconds: 0.3, yoyo: true, loops: 2);
+    punchScale(Vec3.one * 0.15, seconds: 0.6);
+    colorTo(colors[hops % colors.length], seconds: 0.3);
+    return true;
   }
 }
 ''';
@@ -196,14 +224,24 @@ import 'package:fynkel/testing.dart';
 import 'package:$name/main.dart';
 
 void main() {
-  test('the cube turns', () {
+  test('the cube turns, and hops when it is tapped', () {
     final world = World();
     addTearDown(world.dispose);
     world.add(Game());
+    world.input.simulate.resize(400, 400);
     final cube = world.first<Cube>()!;
     final before = cube.rotation;
     world.run(1);
     expect(cube.rotation, isNot(before));
+
+    world.input.simulate.fingerDown(1, 200, 200);
+    world.run(0.1);
+    world.input.simulate.fingerUp(1, 200, 200);
+    world.run(0.3);
+    expect(cube.hops, 1);
+    expect(cube.position.y, greaterThan(1));
+    world.run(1);
+    expect(cube.position.y, closeTo(0.5, 0.01));
   });
 }
 ''';
