@@ -1,43 +1,59 @@
 ---
 title: Install and first game
-description: What you need to run Fynkel, and the first game running in a few commands.
+description: What you need to run Fynkel, and the first game running in four commands.
 ---
 
 ## What you need
 
-- **Flutter 3.47** or later.
-- **Rust**, from [rustup](https://rustup.rs). The engine is built from
-  source the first time you run a game: that first build takes a few
-  minutes (later ones only rebuild what changed; `flutter run -v` shows
-  cargo working). The repository's `rust-toolchain.toml` picks the Rust
-  version and its targets, and rustup installs them on the first build.
-  Rustup 1.28.0 doesn't: run `rustup self update` first.
-- For **iOS**, Xcode. For **Android**, the Android NDK, and Android 11
-  (API 30) or later on a 64-bit device.
+- **A Mac** with **Flutter 3.47** or later
+  ([install Flutter](https://docs.flutter.dev/get-started)).
+- **Xcode**, for macOS and iOS.
+- **Android Studio**, for Android.
 
-Fynkel runs on **macOS, iOS and Android**. Windows, Linux and the web
-aren't supported yet.
+Games run on **macOS 12, iOS 15 and Android 11 (64-bit)** or later. Windows,
+Linux and the web aren't supported yet.
 
-## Run an example
-
-Fynkel isn't on pub.dev yet: you use it from a clone of the repository.
+## Your first game
 
 ```sh
-git clone https://github.com/fynkel/fynkel.git
-cd fynkel/examples/hello
+dart pub global activate fynkel_cli
+fynkel create my_game
+cd my_game
 flutter run -d macos
 ```
 
-A cube turns in a window. The engine's build lands in `target/` in the
-clone (about 750 MB) and every game made from that clone shares it, so the
-next game starts in seconds.
+A cube turns in a window. The game is in `lib/main.dart`: change the cube's
+colour, save, and press `R` in the terminal to see it.
 
-## Your own game
+- **The first build** for each platform downloads the engine, about 7 MB.
+  Later builds need no network.
+- **`fynkel: command not found`?** Add `$HOME/.pub-cache/bin` to your PATH.
+- **Something missing?** `fynkel doctor` checks your Mac and the game in the
+  folder you run it in, and says what to do.
 
-Make a Flutter app beside the clone and point it at Fynkel's packages with
-`path:` dependencies. [§1 of the guide](/guide/01-a-new-game/) shows the
-`pubspec.yaml` and the two small changes Android needs, and
-[§2](/guide/02-hello/) the first game.
+## On a phone
 
-Or start with the tutorial, [Your first game: Roll](/tutorials/roll/),
-which makes a small whole game in half an hour.
+Connect it, find its name with `flutter devices`, and run
+`flutter run -d <name>`. An iPhone needs a signing team once: open
+`ios/Runner.xcworkspace` in Xcode, and choose yours under Signing &
+Capabilities. For real speed, run with `--profile` or `--release`.
+
+## Physics and sound
+
+They are packages of their own. Add them when you make the game:
+
+```sh
+fynkel create my_game --physics --audio
+```
+
+or later, with `flutter pub add fynkel_physics` and
+`flutter pub add fynkel_audio`.
+
+## Next
+
+- [Your first game: Roll](/tutorials/roll/): a small whole game in half an
+  hour.
+- [The guide](/guide/02-hello/), one idea at a time.
+- [Coming from Unity](/guide/22-from-unity/).
+- Adding Fynkel to an app you have, or working on Fynkel itself:
+  [§1 of the guide](/guide/01-a-new-game/).

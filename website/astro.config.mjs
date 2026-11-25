@@ -10,6 +10,7 @@ export default defineConfig({
       description: 'Code-first 3D games in Flutter: write the game in Dart, the way Unity games are written.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/fynkel/fynkel' }],
       editLink: { baseUrl: 'https://github.com/fynkel/fynkel/edit/main/website/' },
+      customCss: ['./src/styles.css'],
       sidebar: [
         {
           label: 'Start here',

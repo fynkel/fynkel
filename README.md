@@ -63,24 +63,39 @@ class Cube extends GameObject {
   | [lab](examples/lab) | One scene per feature, with buttons and sliders to try it by hand |
   | [scale](examples/scale) | Not a lesson: 10,000 objects, to measure speed |
 
-## What you need
+## Start
 
-- Flutter 3.47 or later.
-- Rust, from [rustup](https://rustup.rs). The engine is built from source:
-  the **first build takes a few minutes** (later ones only rebuild what
-  changed; `flutter run -v` shows cargo working). `rust-toolchain.toml`
-  picks the version and its targets, and rustup installs them itself on
-  the first build. Except rustup 1.28.0, which doesn't: `rustup self
-  update`, or run `rustup toolchain install` in this repository once. A
-  toolchain installed earlier without a target needs `rustup target add`
-  (the build says which). The build uses the crate versions in
-  `Cargo.lock` (`--locked`), never newer ones.
-- For Android, the Android NDK, and Android 11 (API 30) or later on a
-  64-bit device.
+```sh
+dart pub global activate fynkel_cli
+fynkel create my_game
+cd my_game
+flutter run -d macos
+```
 
-It runs on **macOS, iOS and Android**. Windows, Linux and the web aren't
-supported. Fynkel isn't on pub.dev yet: use it from a clone of this
-repository, with `path:` dependencies (guide §1).
+You need a Mac with Flutter 3.47 or later, Xcode for macOS and iOS, and
+Android Studio for Android. No Rust: the engine is downloaded, built, the
+first time. `fynkel doctor` says what is missing. The guide is at
+[fynkel.com](https://fynkel.com).
+
+Games run on **macOS 12, iOS 15 and Android 11 (64-bit)** or later. Windows,
+Linux and the web aren't supported. Fynkel is a 0.x preview: its API can
+still change between versions.
+
+### From this repository
+
+In a clone, for the examples here or to change Fynkel, the engine is built
+from source:
+
+- Rust, from [rustup](https://rustup.rs). The **first build takes a few
+  minutes** (later ones only rebuild what changed; `flutter run -v` shows
+  cargo working). `rust-toolchain.toml` picks the version and its targets,
+  and rustup installs them itself on the first build. Except rustup 1.28.0,
+  which doesn't: `rustup self update`, or run `rustup toolchain install` in
+  this repository once. A toolchain installed earlier without a target needs
+  `rustup target add` (the build says which). The build uses the crate
+  versions in `Cargo.lock` (`--locked`), never newer ones.
+- For Android, the Android NDK.
+- `fynkel create my_game --path <the clone>` makes a game on it.
 
 ## The packages
 
@@ -90,7 +105,8 @@ repository, with `path:` dependencies (guide §1).
 | [`fynkel_flutter`](packages/fynkel_flutter) | `FynkelApp`, `FynkelGame` and `FynkelView`: the game in a Flutter app |
 | [`fynkel_physics`](packages/fynkel_physics) | Physics (Rapier), as Unity's: rigidbodies, colliders, triggers, joints, a character controller. Optional |
 | [`fynkel_audio`](packages/fynkel_audio) | Sound, as Unity's: clips, sources, the listener, music and groups. Optional |
-| [`fynkel_measure`](packages/fynkel_measure) | The tool that measures frame rate and memory on devices |
+| [`fynkel_cli`](packages/fynkel_cli) | The `fynkel` command: `fynkel create` and `fynkel doctor` |
+| [`fynkel_measure`](packages/fynkel_measure) | The tool that measures frame rate and memory on devices. Not on pub.dev |
 
 ## For people working on Fynkel
 

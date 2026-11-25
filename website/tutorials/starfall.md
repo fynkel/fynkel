@@ -17,20 +17,16 @@ on what a phone game needs.
 
 ## 1. A portrait app
 
-Make the app as in Roll, with `fynkel`, `fynkel_flutter` and, to keep the
-best score, `shared_preferences`. Starfall needs no physics: things fall
-by their own code, and a catch is a distance check.
+Starfall needs no physics: things fall by their own code, and a catch is a
+distance check. `shared_preferences` keeps the best score:
 
-```yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  fynkel:
-    path: ../fynkel/packages/fynkel
-  fynkel_flutter:
-    path: ../fynkel/packages/fynkel_flutter
-  shared_preferences: ^2.5.3
+```sh
+fynkel create starfall
+cd starfall
+flutter pub add shared_preferences
 ```
+
+Empty `lib/main.dart` and delete `test/game_test.dart`, as in Roll.
 
 To keep it upright, list only `UIInterfaceOrientationPortrait` under
 `UISupportedInterfaceOrientations` in `ios/Runner/Info.plist`, and add

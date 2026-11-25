@@ -17,52 +17,30 @@ the engine copes with thousands of objects.
 
 ## 1. A new game
 
-You need Flutter 3.47 or later and Rust ([rustup](https://rustup.rs)); the
-repository's `rust-toolchain.toml` picks the version. The engine is built
-from source the first time you run a game, and again only when it changes.
-That first build takes a few minutes, the first `flutter test` too, and
-Flutter shows cargo working only with `-v` (`flutter run -v`): it isn't
-stuck. The README says what rustup needs.
-
-Make a Flutter app and add Fynkel to it:
+You need a Mac with Flutter 3.47 or later, Xcode for macOS and iOS, and
+Android Studio for Android. Install the `fynkel` command, and make a game:
 
 ```sh
-flutter create --platforms macos,ios,android --empty my_game
+dart pub global activate fynkel_cli
+fynkel create my_game
+cd my_game
+flutter run -d macos
 ```
 
-```yaml
-# my_game/pubspec.yaml
-dependencies:
-  flutter:
-    sdk: flutter
-  fynkel:
-    path: <the repository>/packages/fynkel
-  fynkel_flutter:
-    path: <the repository>/packages/fynkel_flutter
-  # Add those your game uses: physics (colliders, a character controller,
-  # a camera kept out of walls) and sound are packages of their own.
-  fynkel_physics:
-    path: <the repository>/packages/fynkel_physics
-  fynkel_audio:
-    path: <the repository>/packages/fynkel_audio
-```
+A cube turns in a window; the game is in `lib/main.dart`, and its test in
+`test/game_test.dart`. If the shell doesn't find `fynkel`, add
+`$HOME/.pub-cache/bin` to your PATH. `fynkel doctor` checks the machine and
+the game, and says what to do about what's missing.
 
-The engine is built into `target/` in the repository (about 750 MB after
-the first build), and every game made from that copy of it shares it.
-`CARGO_TARGET_DIR` doesn't move it. Run `flutter analyze` and `flutter
-test`, or Flutter's own `dart`: Fynkel needs Dart 3.13, and an older
-`dart` found first on the PATH (a Homebrew one) reports Fynkel's named
-parameters as errors that aren't there.
+The first build for each platform downloads the engine (about 7 MB), and
+checks that it's the file the package was released with; later ones need
+no network. Physics (colliders, a character controller, a camera kept out
+of walls) and sound are packages of their own: `fynkel create --physics
+--audio`, or `flutter pub add fynkel_physics` later.
 
-Some Flutter versions' `--empty` leaves out Material's icons, so every
-`Icon` shows as a box. If the game's Flutter side uses them, check that
-`pubspec.yaml` has this line, and add it if not:
-
-```yaml
-# my_game/pubspec.yaml
-flutter:
-  uses-material-design: true
-```
+Run `flutter analyze` and `flutter test`, or Flutter's own `dart`: Fynkel
+needs Dart 3.13, and an older `dart` found first on the PATH (a Homebrew
+one) reports Fynkel's named parameters as errors that aren't there.
 
 Then run it as any Flutter app: `flutter run -d macos`, or on a phone
 (`flutter devices` lists them). On a Mac, a game whose window is behind
@@ -71,11 +49,15 @@ it stands still until you bring it to the front: it hasn't hung. `flutter build 
 make the app to ship. On Android, Fynkel runs on 64-bit devices, which is
 nearly all since Android 11; a 32-bit one gets an error saying so.
 
-**Android needs Android 11 or later.** Set it in the app before its first
-Android build, or the build stops at "minSdkVersion 24 cannot be smaller
-than version 30 declared in library [:fynkel_flutter]". In
-`android/app/build.gradle.kts`, `flutter create` wrote `minSdk =
-flutter.minSdkVersion`; make it 30:
+**In an app you have already**, run `flutter pub add fynkel fynkel_flutter`,
+and for Android make the two changes below, which `fynkel create` makes
+itself. Icons show as boxes unless `pubspec.yaml` has
+`uses-material-design: true` under `flutter:`.
+
+**Android needs Android 11 or later**, or the build stops at "minSdkVersion
+24 cannot be smaller than version 30 declared in library
+[:fynkel_flutter]". In `android/app/build.gradle.kts`, `flutter create`
+wrote `minSdk = flutter.minSdkVersion`; make it 30:
 
 ```kotlin
 // my_game/android/app/build.gradle.kts
@@ -107,6 +89,25 @@ the game is in §17.
 screen, on a layer under Flutter's view, which the plugin makes
 see-through itself. Flutter then never copies the game's frames, which
 keeps an iPhone cool ([the report](ios-surface-report.md)).
+
+**Behind a wall** that keeps GitHub out, the engine can come from a mirror
+of your own (set `HTTPS_PROXY` for a proxy). Each package that has a
+library asks it, and still checks what it gets:
+
+```yaml
+# my_game/pubspec.yaml
+hooks:
+  user_defines:
+    fynkel:
+      mirror: https://example.com/fynkel/v0.1.0/
+```
+
+**With a clone of the repository**, to change Fynkel itself, `fynkel create
+my_game --path <the clone>` makes a game on it. The engine is then built
+from source, with Rust ([rustup](https://rustup.rs)), the first time and
+whenever it changes: a few minutes, with nothing shown but with `flutter
+run -v`, and about 750 MB in the clone's `target/`. The README says what
+rustup needs.
 
 ## 2. Hello
 
@@ -2460,9 +2461,8 @@ take the animators 4 µs a frame on a Mac.
 Sound is a package, `fynkel_audio`, with a mixer of its own. Add it to
 the pubspec, next to `fynkel`, and a game without it ships none of it:
 
-```yaml
-  fynkel_audio:
-    path: <the repository>/packages/fynkel_audio
+```sh
+flutter pub add fynkel_audio
 ```
 
 **A clip** is a sound file, `.wav`, `.ogg` or `.mp3`, loaded by name as
@@ -3470,9 +3470,8 @@ the planes its particles hit (§13c).
 Physics is a package, `fynkel_physics`, on Rapier. Add it to the
 pubspec, next to `fynkel`, and a game without it ships none of it:
 
-```yaml
-  fynkel_physics:
-    path: <the repository>/packages/fynkel_physics
+```sh
+flutter pub add fynkel_physics
 ```
 
 **Colliders** are behaviours, as Unity's: `BoxCollider(size:)`,
