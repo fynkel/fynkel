@@ -9,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const root = join(here, '..', '..');
-const repo = 'https://github.com/mooumari/fynkel/blob/main';
+const repo = 'https://github.com/fynkel/fynkel/blob/main';
 const out = join(here, '..', 'src', 'content', 'docs', 'guide');
 
 const text = readFileSync(join(root, 'docs', 'writing-a-game.md'), 'utf8');

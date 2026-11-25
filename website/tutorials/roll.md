@@ -6,7 +6,7 @@ description: Roll a ball around a walled floor and take five gems. Objects, comp
 You'll make **Roll**: a ball you roll with the keys, five gems to take, and
 a camera that follows the ball without going through the walls. It takes
 about half an hour, and it touches most of what a Fynkel game is made of.
-The finished game is [`examples/roll`](https://github.com/mooumari/fynkel/tree/main/examples/roll),
+The finished game is [`examples/roll`](https://github.com/fynkel/fynkel/tree/main/examples/roll),
 and the code below is that game's, file by file.
 
 ![Roll: an orange ball on a stone floor between walls and pillars, blue gems around it](/tutorials/roll-start.png)

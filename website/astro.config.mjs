@@ -8,8 +8,8 @@ export default defineConfig({
     starlight({
       title: 'Fynkel',
       description: 'Code-first 3D games in Flutter: write the game in Dart, the way Unity games are written.',
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/mooumari/fynkel' }],
-      editLink: { baseUrl: 'https://github.com/mooumari/fynkel/edit/main/website/' },
+      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/fynkel/fynkel' }],
+      editLink: { baseUrl: 'https://github.com/fynkel/fynkel/edit/main/website/' },
       sidebar: [
         {
           label: 'Start here',
