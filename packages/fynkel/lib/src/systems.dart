@@ -5,7 +5,7 @@ part of 'world.dart';
 // the package; they're in package:fynkel/extend.dart, not fynkel.dart.
 
 /// Work a package adds to a world's frame, one of each type per world:
-/// [World.system] makes it the first time it's asked for. Its hooks run in
+/// `world.system` makes it the first time it's asked for. Its hooks run in
 /// [World.update], systems by their [order], then in the order they were
 /// made; they run while the world is [World.paused] too. What a hook
 /// throws goes to [World.errors] with no object, and the frame goes on; a
@@ -13,7 +13,7 @@ part of 'world.dart';
 /// off ([isTurnedOff]), and that's reported once.
 abstract class WorldSystem {
   /// A system for [world]. Make it in the function given to
-  /// [World.system] (`world.system(Wind.new)`, for a `Wind` system of
+  /// `world.system` (`world.system(Wind.new)`, for a `Wind` system of
   /// the game's or a package's), which adds it; one made
   /// any other way is never run.
   WorldSystem(this.world);
@@ -155,7 +155,7 @@ const _camerasOrder = 1 << 40;
 
 /// What a system that follows objects reads of each.
 extension GameObjectSystems on GameObject {
-  /// The [World.transformVersion] when this object's transform or parent
+  /// The `world.transformVersion` when this object's transform or parent
   /// was last set, or 0. While it stays the same, nothing set this object's
   /// transform; its world transform also changes when an ancestor's does.
   int get transformStamp => _transformStamp;

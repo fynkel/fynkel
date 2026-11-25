@@ -1,0 +1,93 @@
+---
+title: Fynkel
+description: Code-first 3D games in Flutter. Write the game in Dart, the way Unity games are written, and a Rust engine draws it into a Flutter view.
+template: splash
+hero:
+  tagline: Code-first 3D games in Flutter. You write the game in Dart, with objects, components and onUpdate as in Unity, and a Rust engine draws it into a Flutter view.
+  actions:
+    - text: Install and first game
+      link: /start/install/
+      icon: right-arrow
+    - text: "Tutorial: roll a ball"
+      link: /tutorials/roll/
+      variant: minimal
+    - text: GitHub
+      link: https://github.com/mooumari/fynkel
+      icon: external
+      variant: minimal
+banner:
+  content: Fynkel is a 0.x preview. It runs on macOS, iOS and Android, and its API can still change between versions.
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+```dart
+// A whole game: a lit cube turning in front of a camera.
+import 'package:flutter/widgets.dart' show runApp;
+import 'package:fynkel/fynkel.dart';
+import 'package:fynkel_flutter/fynkel_flutter.dart';
+
+void main() => runApp(FynkelApp(Hello.new));
+
+class Hello extends GameObject {
+  @override
+  void onLoad() {
+    super.onLoad();
+    add(
+      GameObject(
+        transform: Transform(position: Vec3(0, 1.5, 4), rotation: Quat.lookRotation(Vec3(0, -1.5, -4))),
+        components: [Camera()],
+      ),
+    );
+    add(
+      GameObject(
+        transform: Transform(rotation: Quat.lookRotation(Vec3(-0.4, -1, -0.3))),
+        components: [Light.sun()],
+      ),
+    );
+    add(Cube());
+  }
+}
+
+class Cube extends GameObject {
+  Cube() : super(components: [MeshRenderer(Mesh.cube(), Material(color: Color(0xFFE0613A)))]);
+
+  @override
+  void onUpdate() {
+    super.onUpdate();
+    rotate(Vec3.up, time.delta);
+  }
+}
+```
+
+<CardGrid>
+  <Card title="The game is code" icon="seti:dart">
+    There are no scene files, prefabs or editor. Objects, components and
+    behaviours are Dart classes, so the game reads, diffs and refactors
+    like the rest of your app.
+  </Card>
+  <Card title="Unity's ideas, in Dart" icon="puzzle">
+    `GameObject`, `Transform`, `onUpdate`, `onFixedUpdate`, rigidbodies,
+    triggers, routines, the Animator, an `AudioSource`. If you know Unity,
+    you know where things are. [Coming from Unity](/guide/22-from-unity/)
+    maps one to the other.
+  </Card>
+  <Card title="Flutter around the game" icon="laptop">
+    Menus, HUDs and settings are ordinary Flutter widgets, drawn over the
+    game or beside it. The game is one widget, `FynkelView`, in your app.
+  </Card>
+  <Card title="Tested like the rest" icon="approve-check">
+    A game runs frame by frame in `flutter test`, with no window: press
+    keys, run seconds, check where things are, and compare pictures.
+  </Card>
+  <Card title="A real renderer" icon="star">
+    wgpu on Metal and Vulkan: physically based materials, cascaded shadows,
+    image-based light, bloom, fog, particles, skinned animation and your
+    own shaders, made for phones.
+  </Card>
+  <Card title="Physics and sound" icon="rocket">
+    Rapier physics as Unity's (rigidbodies, colliders, joints, a character
+    controller, a camera kept out of walls) and sound with sources, a
+    listener and mixer groups. Each is an optional package.
+  </Card>
+</CardGrid>

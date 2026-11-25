@@ -11,7 +11,7 @@ part of 'world.dart';
 /// it's garbage-collected; [dispose] frees it sooner.
 ///
 /// **A mesh can change** while the game runs, as Unity's: make an empty
-/// one with [Mesh()] (or change one made from code), then [setPositions],
+/// one with [Mesh.new] (or change one made from code), then [setPositions],
 /// [setTriangles] and the rest. Each call copies what it's given, so the
 /// same lists can be filled again and passed each frame without garbage.
 /// The changes of a frame go to the worlds that have the mesh together,

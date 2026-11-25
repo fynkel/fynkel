@@ -120,6 +120,10 @@ struct Mailbox {
     stop: bool,
     /// The view was asked to let go of its images ([`Worker::release_images`]).
     release_images: bool,
+    /// The images were let go with a scene still waiting: they go again once
+    /// it's drawn, unless a newer one is posted by then (the view is drawing
+    /// again).
+    release_again: bool,
     /// A test asked the worker to destroy the device ([`Worker::lose_device`]).
     lose_device: bool,
     /// A test asked the worker to panic ([`Worker::panic`]).
@@ -241,6 +245,7 @@ impl Worker {
             }
         }
         mailbox.retried = false;
+        mailbox.release_again = false;
         drop(mailbox);
         self.shared.wake.notify_one();
         Ok(())
@@ -258,7 +263,8 @@ impl Worker {
     }
 
     /// Lets go of the images the view draws through, between frames and
-    /// without waiting for one. Its next frame makes them again.
+    /// without waiting for one, and again after a scene already waiting. The
+    /// next scene posted makes them again.
     pub(crate) fn release_images(&self) {
         self.shared.lock().release_images = true;
         self.shared.wake.notify_one();
@@ -475,6 +481,7 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
                 }
                 if mailbox.release_images {
                     mailbox.release_images = false;
+                    mailbox.release_again = mailbox.pending.is_some();
                     drop(mailbox);
                     fynkel_present::autorelease_pool(|| renderer.release_images());
                     mailbox = shared.lock();
@@ -613,6 +620,9 @@ fn run<T: Target>(shared: &Arc<Shared>, world: &WorldGpu, mut renderer: Renderer
             first = false;
             mailbox.spare.push(scene);
             mailbox.stats.rendered += 1;
+            if std::mem::take(&mut mailbox.release_again) {
+                mailbox.release_images = true;
+            }
         } else if waits && mailbox.pending.is_none() {
             // Drawn when a frame frees room (unless a newer scene comes
             // meanwhile): at once if one already has.

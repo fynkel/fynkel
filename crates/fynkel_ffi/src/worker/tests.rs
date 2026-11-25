@@ -326,6 +326,42 @@ fn a_newer_scene_replaces_one_waiting_for_room_which_counts_as_skipped() {
     assert_eq!((stats.posted, stats.skipped, stats.coalesced), (2, 1, 0));
 }
 
+/// Asked to let go of its images with a scene still waiting, as when the app
+/// goes away and the system is short of memory, the view lets go of those
+/// the waiting scene makes too: no frame may come after it.
+#[test]
+fn images_let_go_of_stay_gone_after_the_scene_that_was_waiting() {
+    let gpu = gpu();
+    let (worker, frames, wake) = full(&gpu);
+    // High draws through a scene image.
+    let scene = || {
+        let mut scene = worker.scene();
+        scene.quality = Some(fynkel_render::QualityLevel::High.quality());
+        let (eye, ahead) = (fynkel_world::Vec3::ZERO, fynkel_world::Vec3::NEG_Z);
+        scene.camera = Some(fynkel_render::CameraView::looking_at(eye, ahead));
+        scene
+    };
+    worker.post(1, scene(), &mut Vec::new()).unwrap();
+    let wake = {
+        let deadline = Instant::now() + Duration::from_secs(10);
+        while !worker.shared.lock().blocked {
+            assert!(Instant::now() < deadline, "the scene never waited for room");
+            thread::sleep(Duration::from_millis(1));
+        }
+        wake.lock().unwrap().clone().expect("the worker asked to be woken")
+    };
+    worker.release_images();
+    wake();
+    assert_eq!(frames.read(1, Duration::from_secs(10), &mut vec![0; 16 * 16 * 4]), Ok(1), "still drawn");
+    wait_for(&worker, |stats| stats.rendered == 1 && stats.target_bytes == 0);
+
+    // A scene posted later makes them again, and they stay.
+    worker.post(2, scene(), &mut Vec::new()).unwrap();
+    wait_for(&worker, |stats| stats.rendered == 2);
+    thread::sleep(Duration::from_millis(50));
+    assert!(worker.stats().target_bytes > 0, "drawing again, it holds them again");
+}
+
 /// A target whose frames make a GPU error on the render thread.
 struct Faulty(Headless, wgpu::Device);
 

@@ -38,7 +38,7 @@ class Controls extends ChangeNotifier {
 
   final Map<String, KeyCode> _keys;
 
-  /// The key for [name]. Throws an [ArgumentError] for a name that isn't
+  /// The key for `name`. Throws an [ArgumentError] for a name that isn't
   /// one of [defaults]'.
   KeyCode operator [](String name) => _keys[name] ?? (throw _unknown(name));
 

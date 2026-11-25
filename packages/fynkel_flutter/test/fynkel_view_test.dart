@@ -490,11 +490,16 @@ void main() {
       }
     }
 
-    await tester.runAsync(() async {
-      while (held() == 0) {
+    // The frames are drawn on the render threads, in real time.
+    Future<void> until(bool Function() done, String what) async {
+      final clock = Stopwatch()..start();
+      while (!done()) {
+        expect(clock.elapsed, lessThan(const Duration(seconds: 20)), reason: '$what: ${held()} bytes held');
         await Future<void>.delayed(const Duration(milliseconds: 1));
       }
-    });
+    }
+
+    await tester.runAsync(() => until(() => held() != 0, 'drawing, they hold images'));
     final drawing = held();
 
     final binding = tester.binding;
@@ -508,11 +513,7 @@ void main() {
     binding.handleMemoryPressure();
     await tester.idle();
     expect(told, 2, reason: 'the next warning is a warning of its own');
-    await tester.runAsync(() async {
-      while (held() != 0) {
-        await Future<void>.delayed(const Duration(milliseconds: 1));
-      }
-    });
+    await tester.runAsync(() => until(() => held() == 0, 'away, they let go of them'));
     binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
     await tester.pumpWidget(const SizedBox());
   });
