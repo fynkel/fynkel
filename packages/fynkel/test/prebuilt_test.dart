@@ -126,30 +126,30 @@ void main() {
       check: check,
     );
 
-    // testCodeBuildHook runs in the folder it is called from, as the package.
-    void inPackage(String? manifest) {
+    // testCodeBuildHook takes the current folder as the package. It is
+    // changed for this zone only: the process's is every test file's.
+    Future<void> inPackage(String? manifest, Future<void> Function() body) {
       final package = Directory('${dir.path}/hosted/pub.dev/fynkel-0.1.0')..createSync(recursive: true);
       File('${package.path}/pubspec.yaml').writeAsStringSync('name: fynkel\n');
       if (manifest != null) File('${package.path}/prebuilt.json').writeAsStringSync(manifest);
-      final before = Directory.current;
-      Directory.current = package;
-      addTearDown(() => Directory.current = before);
+      return IOOverrides.runZoned(body, getCurrentDirectory: () => package);
     }
 
     test('hands over the downloaded library', () async {
-      inPackage(prebuilt().toJson());
-      await hook((input, output) {
-        final asset = output.assets.code.single;
-        expect(asset.id, 'package:fynkel/fynkel');
-        expect(File.fromUri(asset.file!).readAsBytesSync(), _library);
-        expect(asset.file!.pathSegments.last, 'libfynkel_ffi.so');
-        expect(output.dependencies, [input.packageRoot.resolve('prebuilt.json')]);
-      });
+      await inPackage(
+        prebuilt().toJson(),
+        () => hook((input, output) {
+          final asset = output.assets.code.single;
+          expect(asset.id, 'package:fynkel/fynkel');
+          expect(File.fromUri(asset.file!).readAsBytesSync(), _library);
+          expect(asset.file!.pathSegments.last, 'libfynkel_ffi.so');
+          expect(output.dependencies, [input.packageRoot.resolve('prebuilt.json')]);
+        }),
+      );
     });
 
     test('says what is missing without a prebuilt.json', () async {
-      inPackage(null);
-      await expectLater(hook((_, _) {}), failsWith(contains('a release on pub.dev has')));
+      await expectLater(inPackage(null, () => hook((_, _) {})), failsWith(contains('a release on pub.dev has')));
     });
   });
 }
