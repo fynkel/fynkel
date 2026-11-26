@@ -101,20 +101,29 @@ final class AudioStats {
   /// is shown on screen.
   final bool device;
 
-  /// Frames a second, and channels, of the output (48,000 in stereo
-  /// without one).
-  final int rate, channels;
+  /// Frames a second of the output (48,000 without one).
+  final int rate;
+
+  /// Channels of the output: 2 for stereo.
+  final int channels;
 
   /// The voices playing now, of [Audio.maxVoices].
   final int voices;
 
-  /// Sounds started; voices that gave way to more important sounds;
-  /// sounds not played because every voice was more important.
-  final int started, stolen, refused;
+  /// Sounds started.
+  final int started;
 
-  /// Times the output asked for sound, and times it wasn't given it in
-  /// time (a crackle).
-  final int callbacks, underruns;
+  /// Voices that gave way to more important sounds.
+  final int stolen;
+
+  /// Sounds not played because every voice was more important.
+  final int refused;
+
+  /// Times the output asked for sound.
+  final int callbacks;
+
+  /// Times the output wasn't given sound in time (a crackle).
+  final int underruns;
 
   /// Times the output was lost (unplugged, or taken by the system) and
   /// opened again: a few over a game, not one a second.

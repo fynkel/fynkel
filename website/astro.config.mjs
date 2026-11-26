@@ -3,6 +3,8 @@ import { defineConfig } from 'astro/config';
 import starlight from '@astrojs/starlight';
 
 export default defineConfig({
+  // The API reference's packages each have a page; /api/ is the first.
+  redirects: { '/api': '/api/fynkel/' },
   site: 'https://fynkel.com',
   integrations: [
     starlight({
