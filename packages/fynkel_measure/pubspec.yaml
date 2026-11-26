@@ -1,6 +1,6 @@
 name: fynkel_measure
 description: Measures a Fynkel app as the stage reports do. The stats line and memory marks inside the app, and the tool that runs it and reads them (bin/measure.dart).
-version: 0.1.0
+version: 0.1.1
 publish_to: none
 
 environment:

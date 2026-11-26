@@ -1,7 +1,6 @@
 name: fynkel_flutter
 description: Shows a Fynkel 3D game in a Flutter app. The FynkelApp, FynkelGame and FynkelView widgets, on macOS, iOS and Android.
-version: 0.1.0
-publish_to: none
+version: 0.1.1
 homepage: https://fynkel.com
 repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel_flutter
 issue_tracker: https://github.com/fynkel/fynkel/issues

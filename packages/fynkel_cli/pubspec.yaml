@@ -1,7 +1,6 @@
 name: fynkel_cli
 description: The fynkel command. Makes a new Fynkel 3D game (fynkel create), and checks that a machine and a game are set up (fynkel doctor).
-version: 0.1.0
-publish_to: none
+version: 0.1.1
 homepage: https://fynkel.com
 repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel_cli
 issue_tracker: https://github.com/fynkel/fynkel/issues

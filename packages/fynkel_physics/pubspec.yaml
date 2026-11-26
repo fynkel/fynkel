@@ -1,7 +1,6 @@
 name: fynkel_physics
 description: 3D physics for Fynkel games, on Rapier. Rigidbodies, colliders, triggers, joints and a character controller, as in Unity.
-version: 0.1.0
-publish_to: none
+version: 0.1.1
 homepage: https://fynkel.com
 repository: https://github.com/fynkel/fynkel/tree/main/packages/fynkel_physics
 issue_tracker: https://github.com/fynkel/fynkel/issues
@@ -20,7 +19,7 @@ dependencies:
     path: ../fynkel
   # hook/build.dart builds crates/fynkel_physics_ffi as a code asset.
   hooks: ^2.2.0
-  code_assets: ^2.1.0
+  code_assets: ^2.2.0
 
 dev_dependencies:
   ffigen: ^23.0.0

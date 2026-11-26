@@ -4,6 +4,11 @@ formatter:
   page_width: 120
 
 analyzer:
+  errors:
+    # fynkel by path here, without publish_to: none, so pub.dev can check
+    # the package against this repository; pub publishes nothing with a
+    # path, and tool/release.dart makes it a version.
+    invalid_dependency: ignore
   exclude:
     - build/**
     - android/**

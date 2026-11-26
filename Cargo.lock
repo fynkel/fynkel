@@ -400,7 +400,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_audio"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "block2",
  "cpal",
@@ -414,7 +414,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_audio_ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "fynkel_audio",
@@ -423,15 +423,15 @@ dependencies = [
 
 [[package]]
 name = "fynkel_bench"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "fynkel_cabi"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "fynkel_ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "fynkel_bench",
@@ -446,14 +446,14 @@ dependencies = [
 
 [[package]]
 name = "fynkel_golden"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "png",
 ]
 
 [[package]]
 name = "fynkel_load"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fynkel_mesh",
  "gltf",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_mesh"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bevy_mikktspace",
  "bytemuck",
@@ -475,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_physics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fynkel_bench",
  "rapier3d",
@@ -483,7 +483,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_physics_ffi"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "cbindgen",
  "fynkel_cabi",
@@ -492,7 +492,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_present"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "block2",
  "jni-sys 0.3.1",
@@ -507,7 +507,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_render"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bytemuck",
  "fynkel_bench",
@@ -521,7 +521,7 @@ dependencies = [
 
 [[package]]
 name = "fynkel_world"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "fynkel_bench",
  "fynkel_load",
