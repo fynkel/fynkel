@@ -68,7 +68,7 @@ library asks it, and still checks what it gets:
 hooks:
   user_defines:
     fynkel:
-      mirror: https://example.com/fynkel/v0.1.0/
+      mirror: https://example.com/fynkel/v0.1.1/
 ```
 
 ## With a clone of the repository

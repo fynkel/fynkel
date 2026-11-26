@@ -12,7 +12,7 @@ import 'src/tools.dart';
 export 'src/tools.dart' show Tools;
 
 /// The release of Fynkel this command is of, and makes games for.
-const fynkelVersion = '0.1.0';
+const fynkelVersion = '0.1.1';
 
 /// The command.
 class FynkelCli {

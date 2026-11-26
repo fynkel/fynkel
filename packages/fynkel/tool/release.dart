@@ -5,9 +5,8 @@
 //
 //   cd packages/fynkel && dart run tool/release.dart
 //
-// The packages here depend on each other by path, and say publish_to: none,
-// so none goes out by mistake; a released one depends on the others' same
-// version, and has its library's prebuilt.json and the licences of the code
+// The packages here depend on each other by path (pub publishes none of
+// them so); a released one depends on the others' same version, and has its library's prebuilt.json and the licences of the code
 // in it. `--allow-dirty` as in tool/prebuilt.dart. docs/releasing.md has the
 // whole release.
 
@@ -59,14 +58,13 @@ void main(List<String> args) {
     final crate = libraryCrates[package];
     final pubspec = File('$to/pubspec.yaml');
     var text = pubspec.readAsStringSync();
-    text = text.replaceFirst('publish_to: none\n', '');
     // No other: the packages share parts that aren't public, and a library
     // must be of the Dart that calls it.
     text = text.replaceAllMapped(
       RegExp(r'^  (fynkel\w*):\n    path: \S+$', multiLine: true),
       (m) => '  ${m[1]}: ">=$version <$next"',
     );
-    if (text.contains('path: ../')) _fail("$package's pubspec still has a path.");
+    if (text.contains('path: ../') || text.contains('publish_to')) _fail("$package's pubspec isn't for pub.dev.");
     if (crate != null) {
       text = '$text\n# For the app\'s licence page.\nflutter:\n  licenses:\n    - THIRD_PARTY_LICENSES\n';
     }
