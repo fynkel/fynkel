@@ -16,9 +16,14 @@ const dart = join(dirname(execFileSync('realpath', [flutter], { encoding: 'utf8'
 for (const name of ['fynkel', 'fynkel_flutter', 'fynkel_physics', 'fynkel_audio']) {
   const out = join(here, '..', 'public', 'api', name);
   rmSync(out, { recursive: true, force: true });
+  // Without its packages resolved, dartdoc names each library after its
+  // file's path on this machine.
+  execFileSync(dart, ['pub', 'get'], { cwd: join(root, 'packages', name), stdio: 'ignore' });
   execFileSync(dart, ['pub', 'global', 'run', 'dartdoc', '--output', out], {
     cwd: join(root, 'packages', name),
     stdio: ['ignore', 'ignore', 'inherit'],
   });
+  const leaked = execFileSync('find', [out, '-name', 'file-*'], { encoding: 'utf8' }).trim();
+  if (leaked) throw new Error(`api: ${name} has pages named after file paths:\n${leaked}`);
   console.log(`api: ${name} in ${out}`);
 }

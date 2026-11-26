@@ -25,7 +25,8 @@ flutter run -d macos
 A cube turns in a window: click it, and it hops. The game is in `lib/main.dart`: change the cube's
 colour, save, and press `R` in the terminal to see it.
 
-- **The first build** for each platform downloads the engine, about 7 MB.
+- **The first build** for each platform downloads the engine: about 6 MB on a Mac,
+  10 MB with physics and sound (an Android build gets two sets).
   After that, builds for it need no network.
 - **`fynkel: command not found`?** Add `$HOME/.pub-cache/bin` to your PATH.
 - **Something missing?** `fynkel doctor` checks your Mac and the game in the

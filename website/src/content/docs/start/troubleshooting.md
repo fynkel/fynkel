@@ -18,6 +18,13 @@ terminal:
 export PATH="$PATH:$HOME/.pub-cache/bin"
 ```
 
+### `fynkel` doesn't know `create`, or asks for `--root`
+
+Another program called `fynkel` is first on the PATH. `which fynkel` says
+which; the one from `dart pub global activate fynkel_cli` is in
+`~/.pub-cache/bin`. Put that first, or run `dart pub global run
+fynkel_cli:fynkel create my_game`.
+
 ### Errors about named parameters that look right
 
 Fynkel needs Dart 3.13, and an older `dart` found first on the PATH (a
