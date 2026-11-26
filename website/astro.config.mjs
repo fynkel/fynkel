@@ -9,6 +9,13 @@ export default defineConfig({
   integrations: [
     starlight({
       title: 'Fynkel',
+      logo: { src: './src/assets/logo.svg' },
+      // The picture a link to the site shows in chats and social posts
+      // (also GitHub's social preview): docs/brand has the logo.
+      head: [
+        { tag: 'meta', attrs: { property: 'og:image', content: 'https://fynkel.com/social.jpg' } },
+        { tag: 'meta', attrs: { name: 'twitter:card', content: 'summary_large_image' } },
+      ],
       description: 'Code-first 3D games in Flutter: write the game in Dart, the way Unity games are written.',
       social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/fynkel/fynkel' }],
       editLink: { baseUrl: 'https://github.com/fynkel/fynkel/edit/main/website/' },

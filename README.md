@@ -1,4 +1,26 @@
-# Fynkel
+<p align="center">
+  <img src="docs/brand/logo.svg" width="96" alt="">
+</p>
+
+<h1 align="center">Fynkel</h1>
+
+<p align="center">
+  <a href="https://pub.dev/packages/fynkel"><img src="https://img.shields.io/pub/v/fynkel?label=pub.dev" alt="fynkel on pub.dev"></a>
+  <a href="https://github.com/fynkel/fynkel/actions/workflows/nightly.yml"><img src="https://github.com/fynkel/fynkel/actions/workflows/nightly.yml/badge.svg" alt="Nightly tests"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/licence-MIT-blue" alt="MIT licence"></a>
+</p>
+
+<p align="center">
+  <a href="https://fynkel.com">Website</a> ·
+  <a href="https://fynkel.com/start/install/">Install</a> ·
+  <a href="https://fynkel.com/start/examples/">Examples</a> ·
+  <a href="https://fynkel.com/api/fynkel/">API</a> ·
+  <a href="https://fynkel.com/start/changelog/">Changelog</a>
+</p>
+
+<p align="center">
+  <img src="website/public/film/poster.webp" alt="A knight on a stone floor at night, torches lit, coloured blocks and balls thrown round it, drawn by Fynkel">
+</p>
 
 A code-first 3D game framework for Flutter. You write the game in Dart,
 the way Unity games are written (objects, components, behaviours,
